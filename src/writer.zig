@@ -1,0 +1,173 @@
+//! PDF Writer
+//!
+//! Handles serializing PDF structure to a byte stream:
+//! - Header with version and binary marker
+//! - Objects with tracking of byte offsets
+//! - Cross-reference table
+//! - Trailer
+
+const std = @import("std");
+const objects = @import("objects.zig");
+
+const ObjectId = objects.ObjectId;
+const Ref = objects.Ref;
+const Dict = objects.Dict;
+const Value = objects.Value;
+
+pub const PDF_VERSION = "1.4";
+
+/// Tracks byte offset for each object (for xref table)
+const ObjectOffset = struct {
+    id: ObjectId,
+    offset: u64,
+};
+
+/// PDF Writer - serializes PDF structure to output
+pub const Writer = struct {
+    output: std.ArrayListUnmanaged(u8),
+    offsets: std.ArrayListUnmanaged(ObjectOffset),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) Writer {
+        return .{
+            .output = .{},
+            .offsets = .{},
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *Writer) void {
+        self.output.deinit(self.allocator);
+        self.offsets.deinit(self.allocator);
+    }
+
+    /// Write PDF header with binary marker
+    pub fn writeHeader(self: *Writer) !void {
+        // PDF version
+        try self.output.appendSlice(self.allocator, "%PDF-" ++ PDF_VERSION ++ "\n");
+        // Binary marker (high-bit bytes to indicate binary content)
+        try self.output.appendSlice(self.allocator, "%\xE2\xE3\xCF\xD3\n");
+    }
+
+    /// Begin an object and record its offset
+    pub fn beginObject(self: *Writer, id: ObjectId) !void {
+        try self.offsets.append(self.allocator, .{ .id = id, .offset = self.output.items.len });
+        var buf: [32]u8 = undefined;
+        const header = std.fmt.bufPrint(&buf, "{d} 0 obj\n", .{id}) catch unreachable;
+        try self.output.appendSlice(self.allocator, header);
+    }
+
+    /// End an object
+    pub fn endObject(self: *Writer) !void {
+        try self.output.appendSlice(self.allocator, "endobj\n");
+    }
+
+    /// Write a dictionary as the object content
+    pub fn writeDict(self: *Writer, dict: Dict) !void {
+        try self.output.ensureUnusedCapacity(self.allocator, 4096);
+        var stream = std.io.fixedBufferStream(self.output.unusedCapacitySlice());
+        dict.format(stream.writer()) catch {
+            // Need more space, expand and retry
+            try self.output.ensureUnusedCapacity(self.allocator, 8192);
+            stream = std.io.fixedBufferStream(self.output.unusedCapacitySlice());
+            try dict.format(stream.writer());
+        };
+        self.output.items.len += stream.pos;
+        try self.output.append(self.allocator, '\n');
+    }
+
+    /// Write a stream object (dictionary + stream data)
+    pub fn writeStream(self: *Writer, dict: *Dict, data: []const u8) !void {
+        try dict.put("Length", Value.int(@intCast(data.len)));
+        try self.writeDict(dict.*);
+        try self.output.appendSlice(self.allocator, "stream\n");
+        try self.output.appendSlice(self.allocator, data);
+        try self.output.appendSlice(self.allocator, "\nendstream\n");
+    }
+
+    /// Write xref table and trailer, return the final PDF bytes
+    /// Caller owns the returned memory
+    pub fn finish(self: *Writer, catalog_ref: Ref) ![]u8 {
+        const xref_offset = self.output.items.len;
+
+        // Sort offsets by object ID
+        std.mem.sort(ObjectOffset, self.offsets.items, {}, struct {
+            fn lessThan(_: void, a: ObjectOffset, b: ObjectOffset) bool {
+                return a.id < b.id;
+            }
+        }.lessThan);
+
+        // Find max object ID
+        var max_id: ObjectId = 0;
+        for (self.offsets.items) |off| {
+            if (off.id > max_id) max_id = off.id;
+        }
+
+        // Write xref table
+        try self.output.appendSlice(self.allocator, "xref\n");
+        var buf: [64]u8 = undefined;
+        var header = std.fmt.bufPrint(&buf, "0 {d}\n", .{max_id + 1}) catch unreachable;
+        try self.output.appendSlice(self.allocator, header);
+
+        // Object 0 is always free
+        try self.output.appendSlice(self.allocator, "0000000000 65535 f \n");
+
+        // Write entries for each object
+        var offset_idx: usize = 0;
+        var obj_id: ObjectId = 1;
+        while (obj_id <= max_id) : (obj_id += 1) {
+            if (offset_idx < self.offsets.items.len and
+                self.offsets.items[offset_idx].id == obj_id)
+            {
+                const offset = self.offsets.items[offset_idx].offset;
+                const entry = std.fmt.bufPrint(&buf, "{d:0>10} 00000 n \n", .{offset}) catch unreachable;
+                try self.output.appendSlice(self.allocator, entry);
+                offset_idx += 1;
+            } else {
+                // Missing object, mark as free
+                try self.output.appendSlice(self.allocator, "0000000000 65535 f \n");
+            }
+        }
+
+        // Write trailer
+        try self.output.appendSlice(self.allocator, "trailer\n<<\n");
+        header = std.fmt.bufPrint(&buf, "/Size {d}\n", .{max_id + 1}) catch unreachable;
+        try self.output.appendSlice(self.allocator, header);
+        header = std.fmt.bufPrint(&buf, "/Root {d} 0 R\n", .{catalog_ref.id}) catch unreachable;
+        try self.output.appendSlice(self.allocator, header);
+        try self.output.appendSlice(self.allocator, ">>\n");
+
+        // Write startxref
+        try self.output.appendSlice(self.allocator, "startxref\n");
+        header = std.fmt.bufPrint(&buf, "{d}\n", .{xref_offset}) catch unreachable;
+        try self.output.appendSlice(self.allocator, header);
+        try self.output.appendSlice(self.allocator, "%%EOF\n");
+
+        return self.output.toOwnedSlice(self.allocator);
+    }
+
+    /// Get current byte position
+    pub fn pos(self: *Writer) u64 {
+        return self.output.items.len;
+    }
+};
+
+test "Writer header" {
+    var w = Writer.init(std.testing.allocator);
+    defer w.deinit();
+
+    try w.writeHeader();
+    try std.testing.expect(std.mem.startsWith(u8, w.output.items, "%PDF-1.4\n"));
+}
+
+test "Writer object" {
+    var w = Writer.init(std.testing.allocator);
+    defer w.deinit();
+
+    try w.beginObject(1);
+    try w.output.appendSlice(w.allocator, "<< /Type /Catalog >>\n");
+    try w.endObject();
+
+    try std.testing.expect(std.mem.indexOf(u8, w.output.items, "1 0 obj") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.output.items, "endobj") != null);
+}
