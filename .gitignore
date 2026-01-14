@@ -1,0 +1,10 @@
+zig-out/
+.zig-cache/
+*.o
+*.a
+*.so
+*.dylib
+
+# Tools build artifacts
+tools/*/zig-out/
+tools/*/.zig-cache/

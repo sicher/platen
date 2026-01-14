@@ -1,0 +1,6 @@
+[submodule "tools/simgrep"]
+	path = tools/simgrep
+	url = https://codeberg.org/sicher/simgrep.git
+[submodule "tools/zigmap"]
+	path = tools/zigmap
+	url = https://codeberg.org/sicher/zigmap.git
