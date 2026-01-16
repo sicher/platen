@@ -5,7 +5,7 @@ Semantic PDF comparator.
 Compares two PDFs based on visual content rather than internal structure:
 - Same text content
 - Similar positions (within tolerance)
-- Same fonts used
+- Same fonts used per page (via qpdf)
 
 Usage:
     python scripts/compare_pdfs.py expected.pdf actual.pdf [--tolerance=5.0]
@@ -17,10 +17,11 @@ Exit codes:
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -46,6 +47,7 @@ class Page:
     width: float
     height: float
     words: list[Word]
+    fonts: set[str] = field(default_factory=set)  # Font names used on this page
 
     @property
     def text(self) -> str:
@@ -61,8 +63,91 @@ class PdfContent:
         return "\n".join(p.text for p in self.pages)
 
 
+def normalize_font_name(name: str) -> str:
+    """Normalize font name for comparison."""
+    if not name:
+        return ""
+    # Remove subset prefix (e.g., "MPDFAA+" or "ABCDEF+")
+    if "+" in name:
+        name = name.split("+", 1)[1]
+    # Lowercase and remove spaces/hyphens for comparison
+    n = name.lower().replace(" ", "").replace("-", "")
+    # Remove "regular" suffix (often omitted in PDF font names)
+    if n.endswith("regular"):
+        n = n[:-7]
+    return n
+
+
+def extract_fonts_qpdf(pdf_path: str) -> list[set[str]]:
+    """Extract font names per page using qpdf JSON output."""
+    result = subprocess.run(
+        ["qpdf", "--json", pdf_path],
+        capture_output=True,
+        text=True,
+    )
+    # Exit code 0 = success, 3 = success with warnings
+    if result.returncode not in (0, 3):
+        return []  # qpdf not available or failed
+
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+
+    # Build mapping from object ref to font BaseFont name
+    font_names = {}  # "obj:X 0 R" -> normalized font name
+    objects = data.get("qpdf", [{}])
+    if len(objects) > 1:
+        objects = objects[1]  # Second element has the objects
+    else:
+        objects = {}
+
+    for key, obj in objects.items():
+        if not key.startswith("obj:"):
+            continue
+        value = obj.get("value", {})
+        if value.get("/Type") == "/Font" and "/BaseFont" in value:
+            base_font = value["/BaseFont"].lstrip("/")
+            font_names[key] = normalize_font_name(base_font)
+
+    # Get fonts per page from page resources
+    pages_fonts = []
+    for page_info in data.get("pages", []):
+        page_obj_ref = page_info.get("object", "")
+        page_key = f"obj:{page_obj_ref}"
+
+        # Get page's Resources/Font dict
+        page_fonts = set()
+        if page_key in objects:
+            page_value = objects[page_key].get("value", {})
+            resources = page_value.get("/Resources", {})
+
+            # Resources might be inline or a reference
+            if isinstance(resources, str) and resources.endswith(" R"):
+                res_key = f"obj:{resources}"
+                if res_key in objects:
+                    resources = objects[res_key].get("value", {})
+
+            font_dict = resources.get("/Font", {})
+            if isinstance(font_dict, str) and font_dict.endswith(" R"):
+                font_key = f"obj:{font_dict}"
+                if font_key in objects:
+                    font_dict = objects[font_key].get("value", {})
+
+            # font_dict maps /F1, /F2 etc. to object refs
+            for font_ref in font_dict.values():
+                if isinstance(font_ref, str) and font_ref.endswith(" R"):
+                    ref_key = f"obj:{font_ref}"
+                    if ref_key in font_names:
+                        page_fonts.add(font_names[ref_key])
+
+        pages_fonts.append(page_fonts)
+
+    return pages_fonts
+
+
 def extract_content(pdf_path: str) -> PdfContent:
-    """Extract text with positions using pdftotext -bbox."""
+    """Extract text with positions using pdftotext, fonts using qpdf."""
     result = subprocess.run(
         ["pdftotext", "-bbox", pdf_path, "-"],
         capture_output=True,
@@ -71,11 +156,14 @@ def extract_content(pdf_path: str) -> PdfContent:
     if result.returncode != 0:
         raise RuntimeError(f"pdftotext failed: {result.stderr}")
 
+    # Get font info from qpdf
+    pages_fonts = extract_fonts_qpdf(pdf_path)
+
     # Parse XML output
     root = ET.fromstring(result.stdout)
 
     pages = []
-    for page_elem in root.findall(".//{http://www.w3.org/1999/xhtml}page"):
+    for i, page_elem in enumerate(root.findall(".//{http://www.w3.org/1999/xhtml}page")):
         width = float(page_elem.get("width", 0))
         height = float(page_elem.get("height", 0))
 
@@ -89,7 +177,8 @@ def extract_content(pdf_path: str) -> PdfContent:
                 y_max=float(word_elem.get("yMax", 0)),
             ))
 
-        pages.append(Page(width=width, height=height, words=words))
+        fonts = pages_fonts[i] if i < len(pages_fonts) else set()
+        pages.append(Page(width=width, height=height, words=words, fonts=fonts))
 
     return PdfContent(pages=pages)
 
@@ -122,6 +211,15 @@ def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int)
         diffs.append(f"Page {page_num}: width differs ({expected.width} vs {actual.width})")
     if abs(expected.height - actual.height) > 0.01:
         diffs.append(f"Page {page_num}: height differs ({expected.height} vs {actual.height})")
+
+    # Compare fonts used on this page
+    if expected.fonts and actual.fonts:
+        missing = expected.fonts - actual.fonts
+        extra = actual.fonts - expected.fonts
+        if missing:
+            diffs.append(f"Page {page_num}: missing fonts: {', '.join(sorted(missing))}")
+        if extra:
+            diffs.append(f"Page {page_num}: extra fonts: {', '.join(sorted(extra))}")
 
     # Compare word count
     if len(expected.words) != len(actual.words):

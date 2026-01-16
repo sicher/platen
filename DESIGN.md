@@ -55,51 +55,94 @@ doc.setLineHeight(1.5);    // 150% line height (vs default 1.2)
 
 Character spacing uses PDF's `Tc` operator in the content stream.
 
-### TrueType Font Embedding (Planned)
+### TrueType Font Embedding
 
 Enables custom fonts beyond Base 14, including Unicode support.
 
-**TTF tables to parse:**
+**TTF tables parsed:**
 - `head` - font header (units per em, bounds)
-- `hhea` - horizontal metrics header
+- `hhea` - horizontal metrics header (ascent, descent, line gap)
 - `hmtx` - glyph widths (for text measurement)
-- `cmap` - Unicode → glyph ID mapping
-- `glyf` - glyph outlines (for subsetting)
-- `loca` - glyph locations in glyf table
+- `cmap` - Unicode → glyph ID mapping (format 4 and 12)
 - `maxp` - number of glyphs
+- `name` - font family and style names
 
-**PDF structures needed:**
+**API usage:**
+```zig
+// Load a TTF font
+const font = try doc.loadFont("MyFont.ttf");
+
+// Use it for text
+try doc.setEmbeddedFont(font, 14);
+try doc.textAt(50, 50, "Hello with custom font!");
+
+// Mix with standard fonts
+try doc.setFont(.helvetica, 12);
+try doc.textAt(50, 70, "Back to Helvetica");
 ```
-% Font dictionary
+
+**PDF structures generated:**
+
+Each embedded font creates 3 PDF objects:
+
+1. **Font dictionary** - defines the font resource
+```
 << /Type /Font
    /Subtype /TrueType
    /BaseFont /MyFont
    /FirstChar 0
    /LastChar 255
-   /Widths [...]
+   /Widths [...]         % 256 widths for WinAnsi chars
    /FontDescriptor 5 0 R
-   /Encoding /WinAnsiEncoding  % or /Identity-H for Unicode
->>
-
-% Font descriptor
-<< /Type /FontDescriptor
-   /FontName /MyFont
-   /Flags 32
-   /FontBBox [...]
-   /ItalicAngle 0
-   /Ascent 900
-   /Descent -200
-   /CapHeight 700
-   /StemV 80
-   /FontFile2 6 0 R  % embedded TTF stream
+   /Encoding /WinAnsiEncoding
 >>
 ```
 
-**Implementation phases:**
-1. TTF parser - read tables, extract metrics
-2. Full embedding - embed entire font (simple, larger files)
-3. Subsetting - include only used glyphs (complex, smaller files)
-4. Unicode support - ToUnicode CMap for copy/paste
+2. **FontDescriptor** - font metrics for PDF viewer
+```
+<< /Type /FontDescriptor
+   /FontName /MyFont
+   /Flags 32              % nonsymbolic (or 33 for fixed-pitch)
+   /FontBBox [...]        % scaled to 1000 units
+   /ItalicAngle 0
+   /Ascent 900
+   /Descent -200
+   /CapHeight 630
+   /StemV 80
+   /FontFile2 6 0 R       % ref to embedded TTF stream
+>>
+```
+
+3. **FontFile2 stream** - raw TTF data
+```
+<< /Length 85000
+   /Length1 85000         % original TTF size
+>>
+stream
+[raw TTF bytes]
+endstream
+```
+
+**WinAnsiEncoding (Windows-1252):**
+- Characters 0-127: ASCII
+- Characters 128-159: Special (Euro, smart quotes, em dash, etc.)
+- Characters 160-255: Latin-1 Supplement
+
+**Font resource naming:**
+- Standard fonts: F1-F14 (Helvetica, Times, Courier, etc.)
+- Embedded fonts: E1, E2, E3, etc.
+
+**Current limitations:**
+- No font subsetting (entire font embedded)
+- No stream compression (uncompressed TTF data)
+- No ToUnicode CMap (copy/paste may not work correctly)
+- WinAnsiEncoding only (no full Unicode support yet)
+
+**Future enhancements:**
+1. Subsetting - include only used glyphs (smaller files)
+2. FlateDecode compression for FontFile2 stream
+3. ToUnicode CMap for proper copy/paste
+4. CIDFont support for full Unicode text
 
 ### Memory Management
 Uses `ArrayListUnmanaged` throughout - allocator passed to each operation.

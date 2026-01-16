@@ -162,6 +162,16 @@ pub const Font = struct {
         return self.getNameEntry(2); // Subfamily name
     }
 
+    /// Get full font name (e.g., "Courier Prime Bold")
+    pub fn getFullName(self: *const Font) ?[]const u8 {
+        return self.getNameEntry(4); // Full name
+    }
+
+    /// Get PostScript name (e.g., "CourierPrime-Bold")
+    pub fn getPostScriptName(self: *const Font) ?[]const u8 {
+        return self.getNameEntry(6); // PostScript name
+    }
+
     /// Get name table entry
     fn getNameEntry(self: *const Font, name_id: u16) ?[]const u8 {
         const name_data = self.getTable("name".*) orelse return null;

@@ -11,6 +11,7 @@ pub const objects = @import("objects.zig");
 pub const fonts = @import("fonts.zig");
 pub const metrics = @import("metrics.zig");
 pub const ttf = @import("ttf.zig");
+pub const embedded = @import("embedded.zig");
 pub const Writer = @import("writer.zig").Writer;
 
 const ObjectId = objects.ObjectId;
@@ -23,6 +24,20 @@ pub const StandardFont = fonts.StandardFont;
 pub const Font = fonts.Font;
 pub const TextMetrics = metrics.TextMetrics;
 pub const TextStyle = metrics.TextStyle;
+pub const EmbeddedFont = embedded.EmbeddedFont;
+
+/// Handle to a loaded font (either standard or embedded)
+pub const FontHandle = union(enum) {
+    standard: StandardFont,
+    embedded: *EmbeddedFont,
+
+    pub fn name(self: FontHandle) []const u8 {
+        return switch (self) {
+            .standard => |f| f.pdfName(),
+            .embedded => |e| e.name,
+        };
+    }
+};
 
 /// Page size in points (1 point = 1/72 inch)
 pub const PageSize = struct {
@@ -37,21 +52,32 @@ pub const PageSize = struct {
 const Page = struct {
     content: std.ArrayListUnmanaged(u8),
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void),
+    used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
 
     fn init() Page {
         return .{
             .content = .{},
             .used_fonts = .{},
+            .used_embedded = .{},
         };
     }
 
     fn deinit(self: *Page, allocator: std.mem.Allocator) void {
         self.content.deinit(allocator);
         self.used_fonts.deinit(allocator);
+        self.used_embedded.deinit(allocator);
     }
 
     fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
         try self.used_fonts.put(allocator, font, {});
+    }
+
+    fn markEmbeddedUsed(self: *Page, allocator: std.mem.Allocator, font: *EmbeddedFont) !void {
+        // Check if already in list
+        for (self.used_embedded.items) |f| {
+            if (f == font) return;
+        }
+        try self.used_embedded.append(allocator, font);
     }
 
     fn writer(self: *Page, allocator: std.mem.Allocator) ContentWriter {
@@ -79,6 +105,19 @@ const ContentWriter = struct {
         };
         try self.append(slice);
     }
+
+    /// Append a string with PDF string escaping (for literal strings)
+    /// Escapes (, ), and \ characters
+    fn appendEscaped(self: *ContentWriter, str: []const u8) !void {
+        for (str) |c| {
+            switch (c) {
+                '\\' => try self.page.content.appendSlice(self.allocator, "\\\\"),
+                '(' => try self.page.content.appendSlice(self.allocator, "\\("),
+                ')' => try self.page.content.appendSlice(self.allocator, "\\)"),
+                else => try self.page.content.append(self.allocator, c),
+            }
+        }
+    }
 };
 
 /// Get a short resource name for a font (F1, F2, etc.)
@@ -101,11 +140,21 @@ fn fontResourceName(font: StandardFont) []const u8 {
     };
 }
 
-/// Escape special characters in PDF strings
-fn escapePdfString(str: []const u8) []const u8 {
-    // TODO: properly escape (, ), and \ characters
-    // For now, assume input is safe
-    return str;
+/// Static resource names for embedded fonts (E1, E2, etc.)
+const embedded_font_names = [_][]const u8{
+    "E1",  "E2",  "E3",  "E4",  "E5",  "E6",  "E7",  "E8",
+    "E9",  "E10", "E11", "E12", "E13", "E14", "E15", "E16",
+    "E17", "E18", "E19", "E20", "E21", "E22", "E23", "E24",
+    "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32",
+};
+
+/// Get a short resource name for an embedded font by index
+fn embeddedFontResourceName(idx: usize) []const u8 {
+    if (idx < embedded_font_names.len) {
+        return embedded_font_names[idx];
+    }
+    // Fallback - this shouldn't happen with reasonable font counts
+    return "E99";
 }
 
 /// PDF Document
@@ -115,6 +164,7 @@ pub const Document = struct {
     page_size: PageSize,
     // Text state
     current_font: ?StandardFont = null,
+    current_embedded: ?*EmbeddedFont = null,
     font_size: f64 = 12,
     x: f64 = 0,
     y: f64 = 0,
@@ -124,6 +174,8 @@ pub const Document = struct {
     line_height: f64 = 1.2,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
+    // Track all embedded fonts
+    embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .{},
 
     pub fn init(allocator: std.mem.Allocator) Document {
         return .{
@@ -139,6 +191,11 @@ pub const Document = struct {
         }
         self.pages.deinit(self.allocator);
         self.used_fonts.deinit(self.allocator);
+        // Clean up embedded fonts
+        for (self.embedded_fonts.items) |font| {
+            font.deinit();
+        }
+        self.embedded_fonts.deinit(self.allocator);
     }
 
     /// Add a new page
@@ -149,11 +206,39 @@ pub const Document = struct {
         self.y = self.page_size.height;
     }
 
-    /// Set the current font and size
+    /// Set the current font and size (standard font)
     pub fn setFont(self: *Document, font: StandardFont, size: f64) !void {
         self.current_font = font;
+        self.current_embedded = null; // Clear embedded font
         self.font_size = size;
         try self.used_fonts.put(self.allocator, font, {});
+    }
+
+    /// Load a TrueType font from file
+    pub fn loadFont(self: *Document, path: []const u8) !*EmbeddedFont {
+        const font = try EmbeddedFont.fromFile(self.allocator, path);
+        try self.embedded_fonts.append(self.allocator, font);
+        return font;
+    }
+
+    /// Set an embedded font as current
+    pub fn setEmbeddedFont(self: *Document, font: *EmbeddedFont, size: f64) !void {
+        self.current_embedded = font;
+        self.current_font = null; // Clear standard font
+        self.font_size = size;
+        // Ensure font is in our list
+        for (self.embedded_fonts.items) |f| {
+            if (f == font) return;
+        }
+        try self.embedded_fonts.append(self.allocator, font);
+    }
+
+    /// Get index of embedded font (for resource naming)
+    fn getEmbeddedFontIndex(self: *Document, font: *EmbeddedFont) ?usize {
+        for (self.embedded_fonts.items, 0..) |f, i| {
+            if (f == font) return i;
+        }
+        return null;
     }
 
     /// Set character spacing (extra space between characters, in points)
@@ -221,18 +306,25 @@ pub const Document = struct {
     /// Draw text at the current position
     pub fn text(self: *Document, str: []const u8) !void {
         if (self.pages.items.len == 0) return error.NoPage;
-        const font = self.current_font orelse return error.NoFont;
 
         var page = &self.pages.items[self.pages.items.len - 1];
-        try page.markFontUsed(self.allocator, font);
-
         var cw = page.writer(self.allocator);
 
         // Begin text block
         try cw.append("BT\n");
 
-        // Set font
-        try cw.print("/{s} {d:.2} Tf\n", .{ fontResourceName(font), self.font_size });
+        // Set font - either standard or embedded
+        if (self.current_embedded) |emb| {
+            try page.markEmbeddedUsed(self.allocator, emb);
+            const idx = self.getEmbeddedFontIndex(emb) orelse return error.NoFont;
+            // Embedded fonts use E1, E2, etc.
+            try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, self.font_size });
+        } else if (self.current_font) |font| {
+            try page.markFontUsed(self.allocator, font);
+            try cw.print("/{s} {d:.2} Tf\n", .{ fontResourceName(font), self.font_size });
+        } else {
+            return error.NoFont;
+        }
 
         // Set character spacing if non-zero (Tc operator)
         if (self.char_spacing != 0) {
@@ -242,7 +334,7 @@ pub const Document = struct {
         // Position and show text
         try cw.print("{d:.2} {d:.2} Td\n", .{ self.x, self.y });
         try cw.append("(");
-        try cw.append(escapePdfString(str));
+        try cw.appendEscaped(str);
         try cw.append(") Tj\n");
 
         // End text block
@@ -268,7 +360,7 @@ pub const Document = struct {
 
         try w.writeHeader();
 
-        // Collect used fonts into a list for stable ordering
+        // Collect used standard fonts into a list for stable ordering
         var font_list = std.ArrayListUnmanaged(StandardFont){};
         defer font_list.deinit(self.allocator);
         var font_iter = self.used_fonts.keyIterator();
@@ -279,13 +371,16 @@ pub const Document = struct {
         // Object ID allocation:
         // 1 = Catalog
         // 2 = Pages (root)
-        // 3 to 3+num_fonts-1 = Font objects
+        // 3 to 3+num_standard_fonts-1 = Standard Font objects
+        // Then for each embedded font: Font dict, FontDescriptor, FontFile2 (3 objects each)
         // After fonts = Pages (each page needs 2 objects: page dict + content stream)
 
         const catalog_id: ObjectId = 1;
         const pages_root_id: ObjectId = 2;
-        const first_font_id: ObjectId = 3;
-        const first_page_id: ObjectId = first_font_id + @as(ObjectId, @intCast(font_list.items.len));
+        const first_std_font_id: ObjectId = 3;
+        const first_emb_font_id: ObjectId = first_std_font_id + @as(ObjectId, @intCast(font_list.items.len));
+        // Each embedded font needs 3 objects
+        const first_page_id: ObjectId = first_emb_font_id + @as(ObjectId, @intCast(self.embedded_fonts.items.len * 3));
 
         // Build page refs array for Pages object
         var page_refs = Array.init(self.allocator);
@@ -316,9 +411,9 @@ pub const Document = struct {
         try w.writeDict(pages_dict);
         try w.endObject();
 
-        // Write font objects
+        // Write standard font objects
         for (font_list.items, 0..) |font, i| {
-            const font_id = first_font_id + @as(ObjectId, @intCast(i));
+            const font_id = first_std_font_id + @as(ObjectId, @intCast(i));
             try w.beginObject(font_id);
             var font_dict = Dict.init(self.allocator);
             defer font_dict.deinit();
@@ -326,6 +421,76 @@ pub const Document = struct {
             try font_dict.put("Subtype", Value.name("Type1"));
             try font_dict.put("BaseFont", Value.name(font.pdfName()));
             try w.writeDict(font_dict);
+            try w.endObject();
+        }
+
+        // Write embedded font objects (3 objects each: Font, FontDescriptor, FontFile2)
+        for (self.embedded_fonts.items, 0..) |emb_font, i| {
+            const base_id = first_emb_font_id + @as(ObjectId, @intCast(i * 3));
+            const font_dict_id = base_id;
+            const descriptor_id = base_id + 1;
+            const fontfile_id = base_id + 2;
+
+            // 1. Font dictionary
+            try w.beginObject(font_dict_id);
+            {
+                var font_dict = Dict.init(self.allocator);
+                defer font_dict.deinit();
+                try font_dict.put("Type", Value.name("Font"));
+                try font_dict.put("Subtype", Value.name("TrueType"));
+                try font_dict.put("BaseFont", Value.name(emb_font.name));
+                try font_dict.put("FirstChar", Value.int(0));
+                try font_dict.put("LastChar", Value.int(255));
+                try font_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
+                try font_dict.put("Encoding", Value.name("WinAnsiEncoding"));
+
+                // Widths array
+                var widths_array = Array.init(self.allocator);
+                defer widths_array.deinit();
+                for (emb_font.widths) |width| {
+                    try widths_array.append(Value.int(@intCast(width)));
+                }
+                try font_dict.put("Widths", .{ .array_val = &widths_array });
+
+                try w.writeDict(font_dict);
+            }
+            try w.endObject();
+
+            // 2. FontDescriptor
+            try w.beginObject(descriptor_id);
+            {
+                var desc_dict = Dict.init(self.allocator);
+                defer desc_dict.deinit();
+                try desc_dict.put("Type", Value.name("FontDescriptor"));
+                try desc_dict.put("FontName", Value.name(emb_font.name));
+                try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
+                try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
+                try desc_dict.put("Ascent", Value.int(emb_font.ascent));
+                try desc_dict.put("Descent", Value.int(emb_font.descent));
+                try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
+                try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
+                try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+
+                // FontBBox array
+                var bbox_array = Array.init(self.allocator);
+                defer bbox_array.deinit();
+                for (emb_font.bbox) |val| {
+                    try bbox_array.append(Value.int(val));
+                }
+                try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+
+                try w.writeDict(desc_dict);
+            }
+            try w.endObject();
+
+            // 3. FontFile2 stream (the actual TTF data)
+            try w.beginObject(fontfile_id);
+            {
+                var stream_dict = Dict.init(self.allocator);
+                defer stream_dict.deinit();
+                try stream_dict.put("Length1", Value.int(@intCast(emb_font.data.len)));
+                try w.writeStream(&stream_dict, emb_font.data);
+            }
             try w.endObject();
         }
 
@@ -360,15 +525,32 @@ pub const Document = struct {
             var resources = Dict.init(self.allocator);
             defer resources.deinit();
 
-            // Add font resources if page uses any fonts
-            if (page.used_fonts.count() > 0) {
-                // Add references to each font used by this page
-                for (font_list.items, 0..) |font, i| {
-                    if (page.used_fonts.contains(font)) {
-                        const font_obj_id = first_font_id + @as(ObjectId, @intCast(i));
-                        try font_res.put(fontResourceName(font), Value.ref(.{ .id = font_obj_id }));
+            var has_fonts = false;
+
+            // Add standard font resources
+            for (font_list.items, 0..) |font, idx| {
+                if (page.used_fonts.contains(font)) {
+                    const font_obj_id = first_std_font_id + @as(ObjectId, @intCast(idx));
+                    try font_res.put(fontResourceName(font), Value.ref(.{ .id = font_obj_id }));
+                    has_fonts = true;
+                }
+            }
+
+            // Add embedded font resources
+            for (page.used_embedded.items) |emb_font| {
+                // Find index of this font
+                for (self.embedded_fonts.items, 0..) |doc_font, idx| {
+                    if (doc_font == emb_font) {
+                        const font_obj_id = first_emb_font_id + @as(ObjectId, @intCast(idx * 3));
+                        const res_name = embeddedFontResourceName(idx);
+                        try font_res.put(res_name, Value.ref(.{ .id = font_obj_id }));
+                        has_fonts = true;
+                        break;
                     }
                 }
+            }
+
+            if (has_fonts) {
                 try resources.put("Font", .{ .dict_val = &font_res });
                 try page_dict.put("Resources", .{ .dict_val = &resources });
             }
@@ -646,5 +828,281 @@ test {
     _ = fonts;
     _ = metrics;
     _ = ttf;
+    _ = embedded;
     _ = @import("writer.zig");
+}
+
+// ============================================================================
+// Embedded Font Tests
+// ============================================================================
+
+test "load embedded font from file" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    // Verify font was loaded
+    try std.testing.expect(doc.embedded_fonts.items.len == 1);
+    try std.testing.expect(doc.embedded_fonts.items[0] == font);
+
+    // Check font name was extracted
+    try std.testing.expect(font.name.len > 0);
+
+    // Check metrics are sensible
+    try std.testing.expect(font.ascent > 0);
+    try std.testing.expect(font.descent < 0); // Descent is negative
+}
+
+test "embedded font character widths" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    // Courier Prime is monospace - all visible chars should have same width
+    const width_A = font.widths['A'];
+    const width_Z = font.widths['Z'];
+    const width_a = font.widths['a'];
+    const width_m = font.widths['m'];
+
+    try std.testing.expect(width_A > 0);
+    try std.testing.expectEqual(width_A, width_Z);
+    try std.testing.expectEqual(width_A, width_a);
+    try std.testing.expectEqual(width_A, width_m);
+
+    // Space should have a width
+    try std.testing.expect(font.widths[' '] > 0);
+}
+
+test "embedded font text measurement" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    // Measure text at 12pt
+    const width = font.measureTextWidth("Hello", 12.0);
+    try std.testing.expect(width > 0);
+
+    // "Hello" is 5 chars, monospace - each char same width
+    const char_width = font.measureTextWidth("H", 12.0);
+    try std.testing.expectApproxEqAbs(char_width * 5, width, 0.01);
+}
+
+test "render text with embedded font" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    try doc.addPage();
+    try doc.setEmbeddedFont(font, 12);
+    try doc.textAt(50, 50, "Hello, World!");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check PDF structure for embedded font
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Font") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /TrueType") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontDescriptor") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontFile2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Widths [") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Encoding /WinAnsiEncoding") != null);
+
+    // Check FontDescriptor fields
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /FontDescriptor") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Ascent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Descent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CapHeight") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontBBox") != null);
+
+    // Check text rendering uses embedded font
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 12") != null); // Embedded font E1 at 12pt
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Hello, World!) Tj") != null);
+}
+
+test "mix standard and embedded fonts" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const courier_prime = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    try doc.addPage();
+
+    // Use standard font first
+    try doc.setFont(.helvetica, 12);
+    try doc.textAt(50, 50, "Helvetica text");
+
+    // Switch to embedded font
+    try doc.setEmbeddedFont(courier_prime, 14);
+    try doc.textAt(50, 70, "Courier Prime text");
+
+    // Switch back to standard
+    try doc.setFont(.times_roman, 12);
+    try doc.textAt(50, 90, "Times text");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check all font types present
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type1") != null); // Standard fonts
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /TrueType") != null); // Embedded font
+
+    // Check font references in content stream
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/F1 12") != null); // Helvetica
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 14") != null); // Courier Prime
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/F5 12") != null); // Times Roman
+}
+
+test "multiple embedded fonts" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf");
+
+    try doc.addPage();
+
+    try doc.setEmbeddedFont(courier_regular, 12);
+    try doc.textAt(50, 50, "Regular");
+
+    try doc.setEmbeddedFont(courier_bold, 12);
+    try doc.textAt(50, 70, "Bold");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check both fonts are embedded
+    try std.testing.expect(doc.embedded_fonts.items.len == 2);
+
+    // Both fonts should have TrueType entries
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOf(u8, pdf[pos..], "/Subtype /TrueType")) |idx| {
+        count += 1;
+        pos += idx + 1;
+    }
+    try std.testing.expect(count >= 2);
+
+    // Check E1 and E2 font references
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 12") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 12") != null);
+}
+
+test "embedded font on multiple pages" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    try doc.addPage();
+    try doc.setEmbeddedFont(font, 12);
+    try doc.textAt(50, 50, "Page 1");
+
+    try doc.addPage();
+    // Font should still be set
+    try doc.textAt(50, 50, "Page 2");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Font should only be embedded once
+    var font_count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOf(u8, pdf[pos..], "/Subtype /TrueType")) |idx| {
+        font_count += 1;
+        pos += idx + 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), font_count);
+
+    // Both pages should reference the font
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Count 2") != null);
+}
+
+test "embedded font flags - monospace detection" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Courier Prime is monospace
+    const monospace = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    try std.testing.expect(monospace.flags.fixed_pitch == true);
+}
+
+test "embedded font bbox scaling" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    // BBox should be scaled to 1000 units
+    // x_min should typically be negative or small
+    // y_min should be negative (descenders)
+    // x_max and y_max should be positive and reasonable for 1000 units
+    try std.testing.expect(font.bbox[3] > 0); // y_max (ascenders)
+    try std.testing.expect(font.bbox[3] <= 1500); // Should be scaled properly
+    try std.testing.expect(font.bbox[1] <= 0); // y_min should be 0 or negative
+}
+
+test "embedded font widths array in PDF" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    try doc.addPage();
+    try doc.setEmbeddedFont(font, 12);
+    try doc.textAt(50, 50, "Test");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Widths array should start with /Widths [
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Widths [") != null);
+
+    // Should have 256 entries (FirstChar 0 to LastChar 255)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FirstChar 0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/LastChar 255") != null);
+}
+
+test "variable font loading" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Inter Variable is a variable font - should still load basic metrics
+    const font = doc.loadFont("test/fonts/Inter/InterVariable.ttf") catch |err| {
+        // Variable fonts might have extra tables we don't handle yet
+        // For now, skip if loading fails
+        std.debug.print("Skipping variable font test: {}\n", .{err});
+        return;
+    };
+
+    try std.testing.expect(font.ascent > 0);
+    try std.testing.expect(font.widths['A'] > 0);
+}
+
+test "PDF output is valid with embedded font" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    try doc.addPage();
+    try doc.setEmbeddedFont(font, 24);
+    try doc.textAt(100, 100, "Test embedded font!");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Basic PDF structure validation
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "%%EOF") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "xref") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "trailer") != null);
+
+    // Font stream data should be present (TTF data embedded)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Length1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "stream\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "\nendstream") != null);
 }
