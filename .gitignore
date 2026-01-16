@@ -8,3 +8,5 @@ zig-out/
 # Tools build artifacts
 tools/*/zig-out/
 tools/*/.zig-cache/
+test/output/
+.venv/
