@@ -120,6 +120,10 @@ pub const EmbeddedFont = struct {
     cid_used_glyphs: std.AutoArrayHashMapUnmanaged(u21, u16) = .{},
     cid_glyph_widths: std.AutoArrayHashMapUnmanaged(u16, u16) = .{}, // GID → width in 1/1000 em
 
+    // Glyph ID remapping for compact CFF subsets (original GID → new compact GID)
+    // Only populated for CFF fonts with subsetting enabled
+    gid_remap: std.AutoArrayHashMapUnmanaged(u16, u16) = .{},
+
     /// Load and parse a TTF font from file
     pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
         const result = try ttf.Font.fromFile(allocator, path);
@@ -223,6 +227,7 @@ pub const EmbeddedFont = struct {
         // Free CID mode hash maps
         self.cid_used_glyphs.deinit(self.allocator);
         self.cid_glyph_widths.deinit(self.allocator);
+        self.gid_remap.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -281,9 +286,15 @@ pub const EmbeddedFont = struct {
     }
 
     /// Get glyph ID for a Unicode codepoint (CID mode)
+    /// Returns remapped GID if subsetting with remapping is enabled, otherwise original GID
     /// Returns 0 (notdef) if codepoint not found
     pub fn getGlyphIdForCodepoint(self: *const EmbeddedFont, codepoint: u21) u16 {
-        return self.cid_used_glyphs.get(codepoint) orelse 0;
+        const orig_gid = self.cid_used_glyphs.get(codepoint) orelse return 0;
+        // If remapping is active, return the new compact GID
+        if (self.gid_remap.count() > 0) {
+            return self.gid_remap.get(orig_gid) orelse 0;
+        }
+        return orig_gid;
     }
 
     /// Get width for a glyph ID (CID mode), in 1/1000 em
@@ -326,18 +337,19 @@ pub const EmbeddedFont = struct {
         const has_cid_chars = self.countUsedGlyphs() > 0;
         if (!has_winansi_chars and !has_cid_chars) return;
 
-        // CFF fonts: use CID-aware CFF subsetting
+        // CFF fonts: use compact CFF subsetting with glyph ID remapping
+        // Content is now rendered after subsetting (lazy generation) so remapping works
         if (self.font.isCFF()) {
             if (self.encoding == .identity) {
-                self.subset_data = try createSubsetCFF(self.allocator, self);
+                self.subset_data = try createSubsetCFF_Compact(self.allocator, self);
             }
             return;
         }
 
-        // CID mode (Identity-H encoding): use CID-aware subsetting
-        // Preserves glyph IDs (no remapping) for Identity CID-to-GID mapping
+        // CID mode (Identity-H encoding): use compact TTF subsetting with glyph ID remapping
+        // Lazy content generation ensures content is rendered after subsetting populates gid_remap
         if (self.encoding == .identity) {
-            self.subset_data = try createSubsetTTF_CID(self.allocator, self);
+            self.subset_data = try createSubsetTTF_Compact(self.allocator, self);
             return;
         }
 
@@ -449,10 +461,13 @@ pub const EmbeddedFont = struct {
             try cmap.appendSlice(self.allocator, count_str);
 
             // Iterate over codepoint→glyph mappings
+            const has_remap = self.gid_remap.count() > 0;
             var iter = self.cid_used_glyphs.iterator();
             while (iter.next()) |entry| {
                 const codepoint = entry.key_ptr.*;
-                const gid = entry.value_ptr.*;
+                const orig_gid = entry.value_ptr.*;
+                // Use remapped GID if available
+                const gid = if (has_remap) self.gid_remap.get(orig_gid) orelse 0 else orig_gid;
                 var entry_buf: [48]u8 = undefined;
 
                 // Handle surrogate pairs for codepoints > 0xFFFF
@@ -491,23 +506,33 @@ pub const EmbeddedFont = struct {
 
         try buf.appendSlice(self.allocator, "[");
 
+        const has_remap = self.gid_remap.count() > 0;
+
         // Get sorted glyph IDs for consistent output
-        var gids = std.ArrayListUnmanaged(u16){};
-        defer gids.deinit(self.allocator);
+        // If remapping, we need to collect the NEW glyph IDs
+        const GidWidthPair = struct { gid: u16, width: u16 };
+        var gid_width_pairs = std.ArrayListUnmanaged(GidWidthPair){};
+        defer gid_width_pairs.deinit(self.allocator);
 
         var iter = self.cid_glyph_widths.iterator();
         while (iter.next()) |entry| {
-            try gids.append(self.allocator, entry.key_ptr.*);
+            const orig_gid = entry.key_ptr.*;
+            const width = entry.value_ptr.*;
+            const gid = if (has_remap) self.gid_remap.get(orig_gid) orelse 0 else orig_gid;
+            try gid_width_pairs.append(self.allocator, .{ .gid = gid, .width = width });
         }
 
-        // Sort glyph IDs
-        std.mem.sort(u16, gids.items, {}, std.sort.asc(u16));
+        // Sort by glyph ID
+        std.mem.sort(GidWidthPair, gid_width_pairs.items, {}, struct {
+            fn lessThan(_: void, a: GidWidthPair, b: GidWidthPair) bool {
+                return a.gid < b.gid;
+            }
+        }.lessThan);
 
         // Output as individual entries: gid [width]
-        for (gids.items) |gid| {
-            const width = self.cid_glyph_widths.get(gid) orelse 0;
+        for (gid_width_pairs.items) |pair| {
             var entry_buf: [32]u8 = undefined;
-            const entry = std.fmt.bufPrint(&entry_buf, "{d} [{d}]", .{ gid, width }) catch unreachable;
+            const entry = std.fmt.bufPrint(&entry_buf, "{d} [{d}]", .{ pair.gid, pair.width }) catch unreachable;
             try buf.appendSlice(self.allocator, entry);
         }
 
@@ -1209,6 +1234,318 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     return output;
 }
 
+/// Create a compact TTF subset with glyph ID remapping
+/// Unlike createSubsetTTF_CID, this creates minimal tables with only used glyphs
+/// and remaps glyph IDs for maximum size reduction
+fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]const u8 {
+    const font = &emb.font;
+    const head = font.head orelse return error.MissingTable;
+    const hhea = font.hhea orelse return error.MissingTable;
+    const orig_maxp = font.maxp orelse return error.MissingTable;
+
+    const orig_glyf = font.getTable("glyf".*) orelse return error.MissingTable;
+    const orig_loca = font.getTable("loca".*) orelse return error.MissingTable;
+    const orig_hmtx = font.getTable("hmtx".*) orelse return error.MissingTable;
+    const loca_format = head.index_to_loc_format;
+
+    // Collect used glyph IDs
+    var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
+    defer glyph_set.deinit(allocator);
+
+    try glyph_set.put(allocator, 0, {}); // .notdef
+
+    var cid_iter = emb.cid_used_glyphs.iterator();
+    while (cid_iter.next()) |entry| {
+        try glyph_set.put(allocator, entry.value_ptr.*, {});
+    }
+
+    // Recursively add composite glyph components
+    var changed = true;
+    while (changed) {
+        changed = false;
+        var glyphs_to_check = std.ArrayListUnmanaged(u16){};
+        defer glyphs_to_check.deinit(allocator);
+
+        var check_iter = glyph_set.keyIterator();
+        while (check_iter.next()) |gid| {
+            try glyphs_to_check.append(allocator, gid.*);
+        }
+
+        for (glyphs_to_check.items) |gid| {
+            const components = getCompositeComponents(orig_glyf, orig_loca, loca_format, gid);
+            for (components) |comp_gid| {
+                if (comp_gid < orig_maxp.num_glyphs and !glyph_set.contains(comp_gid)) {
+                    try glyph_set.put(allocator, comp_gid, {});
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    // Build sorted glyph list (0 first, then ascending order)
+    var glyph_list = std.ArrayListUnmanaged(u16){};
+    defer glyph_list.deinit(allocator);
+
+    try glyph_list.append(allocator, 0); // .notdef always first
+
+    var key_iter = glyph_set.keyIterator();
+    while (key_iter.next()) |gid| {
+        if (gid.* != 0) {
+            try glyph_list.append(allocator, gid.*);
+        }
+    }
+
+    // Sort (keeping 0 at front)
+    std.mem.sort(u16, glyph_list.items[1..], {}, std.sort.asc(u16));
+
+    // Build glyph ID remap: original GID → new compact GID
+    emb.gid_remap.clearRetainingCapacity();
+    for (glyph_list.items, 0..) |orig_gid, new_gid| {
+        try emb.gid_remap.put(emb.allocator, orig_gid, @intCast(new_gid));
+    }
+
+    const num_glyphs: u16 = @intCast(glyph_list.items.len);
+
+    // Build compact glyf and loca tables
+    var new_glyf = std.ArrayListUnmanaged(u8){};
+    defer new_glyf.deinit(allocator);
+
+    var new_loca = std.ArrayListUnmanaged(u8){};
+    defer new_loca.deinit(allocator);
+
+    // Process glyphs in new order
+    for (glyph_list.items) |orig_gid| {
+        // Record offset
+        const offset: u32 = @intCast(new_glyf.items.len);
+        if (loca_format == 0) {
+            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(offset / 2))));
+        } else {
+            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, offset)));
+        }
+
+        // Get original glyph data
+        if (orig_gid < orig_maxp.num_glyphs) {
+            const glyph_start = getLocaOffset(orig_loca, orig_gid, loca_format);
+            const glyph_end = getLocaOffset(orig_loca, orig_gid + 1, loca_format);
+
+            if (glyph_end > glyph_start and glyph_end <= orig_glyf.len) {
+                var glyph_data = try allocator.alloc(u8, glyph_end - glyph_start);
+                defer allocator.free(glyph_data);
+                @memcpy(glyph_data, orig_glyf[glyph_start..glyph_end]);
+
+                // Check if composite and rewrite component references
+                if (glyph_data.len >= 2) {
+                    const num_contours = @as(i16, @bitCast(std.mem.readInt(u16, glyph_data[0..2], .big)));
+                    if (num_contours < 0) {
+                        // Composite glyph - rewrite component glyph IDs
+                        try rewriteCompositeGlyphIDs(glyph_data, &emb.gid_remap);
+                    }
+                }
+
+                try new_glyf.appendSlice(allocator, glyph_data);
+            }
+        }
+    }
+
+    // Final loca entry
+    const final_offset: u32 = @intCast(new_glyf.items.len);
+    if (loca_format == 0) {
+        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(final_offset / 2))));
+    } else {
+        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, final_offset)));
+    }
+
+    // Build compact hmtx
+    var new_hmtx = std.ArrayListUnmanaged(u8){};
+    defer new_hmtx.deinit(allocator);
+
+    for (glyph_list.items) |orig_gid| {
+        var advance: u16 = 0;
+        var lsb: i16 = 0;
+
+        if (orig_gid < hhea.num_of_long_hor_metrics) {
+            const off = @as(usize, orig_gid) * 4;
+            if (off + 4 <= orig_hmtx.len) {
+                advance = readU16(orig_hmtx, off);
+                lsb = readI16(orig_hmtx, off + 2);
+            }
+        } else {
+            if (hhea.num_of_long_hor_metrics > 0) {
+                const off = (@as(usize, hhea.num_of_long_hor_metrics) - 1) * 4;
+                if (off + 2 <= orig_hmtx.len) {
+                    advance = readU16(orig_hmtx, off);
+                }
+            }
+            const lsb_idx = orig_gid - hhea.num_of_long_hor_metrics;
+            const lsb_off = @as(usize, hhea.num_of_long_hor_metrics) * 4 + @as(usize, lsb_idx) * 2;
+            if (lsb_off + 2 <= orig_hmtx.len) {
+                lsb = readI16(orig_hmtx, lsb_off);
+            }
+        }
+
+        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, advance)));
+        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, lsb)));
+    }
+
+    // Build minimal cmap (same as CID version)
+    var new_cmap = std.ArrayListUnmanaged(u8){};
+    defer new_cmap.deinit(allocator);
+
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // version
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // numTables
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 3))); // platformID
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // encodingID
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, 12))); // offset
+
+    // Minimal Format 4
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 4))); // format
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 32))); // length
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 2))); // segCountX2
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 2))); // searchRange
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // entrySelector
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // rangeShift
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // endCode
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // reservedPad
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // startCode
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, 1))); // idDelta
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // idRangeOffset
+
+    // Assemble TTF
+    const table_count: u16 = 9;
+    const header_size: usize = 12 + @as(usize, table_count) * 16;
+
+    const orig_head = font.getTable("head".*) orelse return error.MissingTable;
+    const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
+    const orig_name = font.getTable("name".*);
+    const orig_post = font.getTable("post".*);
+
+    const new_head = try allocator.alloc(u8, orig_head.len);
+    defer allocator.free(new_head);
+    @memcpy(new_head, orig_head);
+
+    const new_hhea = try allocator.alloc(u8, orig_hhea.len);
+    defer allocator.free(new_hhea);
+    @memcpy(new_hhea, orig_hhea);
+    std.mem.writeInt(u16, new_hhea[34..36], num_glyphs, .big);
+
+    var new_maxp: [6]u8 = undefined;
+    std.mem.writeInt(u32, new_maxp[0..4], 0x00005000, .big);
+    std.mem.writeInt(u16, new_maxp[4..6], num_glyphs, .big);
+
+    const head_padded = padTo4(new_head.len);
+    const hhea_padded = padTo4(new_hhea.len);
+    const maxp_padded = padTo4(new_maxp.len);
+    const hmtx_padded = padTo4(new_hmtx.items.len);
+    const cmap_padded = padTo4(new_cmap.items.len);
+    const loca_padded = padTo4(new_loca.items.len);
+    const glyf_padded = padTo4(new_glyf.items.len);
+    const name_len = if (orig_name) |n| n.len else 0;
+    const name_padded = padTo4(name_len);
+    const post_len = if (orig_post) |p| @min(p.len, 32) else 32;
+    const post_padded = padTo4(post_len);
+
+    var offset: u32 = @intCast(header_size);
+    const head_offset = offset;
+    offset += @intCast(head_padded);
+    const hhea_offset = offset;
+    offset += @intCast(hhea_padded);
+    const maxp_offset = offset;
+    offset += @intCast(maxp_padded);
+    const hmtx_offset = offset;
+    offset += @intCast(hmtx_padded);
+    const cmap_offset = offset;
+    offset += @intCast(cmap_padded);
+    const loca_offset = offset;
+    offset += @intCast(loca_padded);
+    const glyf_offset = offset;
+    offset += @intCast(glyf_padded);
+    const name_offset = offset;
+    offset += @intCast(name_padded);
+    const post_offset = offset;
+    offset += @intCast(post_padded);
+
+    const total_size = offset;
+
+    var output = try allocator.alloc(u8, total_size);
+    @memset(output, 0);
+
+    std.mem.writeInt(u32, output[0..4], 0x00010000, .big);
+    std.mem.writeInt(u16, output[4..6], table_count, .big);
+    std.mem.writeInt(u16, output[6..8], 128, .big); // searchRange
+    std.mem.writeInt(u16, output[8..10], 3, .big); // entrySelector
+    std.mem.writeInt(u16, output[10..12], table_count * 16 - 128, .big); // rangeShift
+
+    var dir_offset: usize = 12;
+    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.items.len));
+    writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
+    writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
+    writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
+    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.items.len));
+    writeTableEntry(output, &dir_offset, "loca", loca_offset, @intCast(new_loca.items.len));
+    writeTableEntry(output, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
+    writeTableEntry(output, &dir_offset, "name", name_offset, @intCast(name_len));
+    writeTableEntry(output, &dir_offset, "post", post_offset, @intCast(post_len));
+
+    @memcpy(output[head_offset..][0..new_head.len], new_head);
+    @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
+    @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
+    @memcpy(output[hmtx_offset..][0..new_hmtx.items.len], new_hmtx.items);
+    @memcpy(output[cmap_offset..][0..new_cmap.items.len], new_cmap.items);
+    @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
+    @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
+    if (orig_name) |name_data| {
+        @memcpy(output[name_offset..][0..name_data.len], name_data);
+    }
+    if (orig_post) |post_data| {
+        @memcpy(output[post_offset..][0..post_len], post_data[0..post_len]);
+    } else {
+        std.mem.writeInt(u32, output[post_offset..][0..4], 0x00030000, .big);
+    }
+
+    return output;
+}
+
+/// Rewrite composite glyph component IDs using the remap table
+fn rewriteCompositeGlyphIDs(glyph_data: []u8, remap: *const std.AutoArrayHashMapUnmanaged(u16, u16)) !void {
+    if (glyph_data.len < 10) return;
+
+    // Skip header (numberOfContours, xMin, yMin, xMax, yMax)
+    var pos: usize = 10;
+
+    while (pos + 4 <= glyph_data.len) {
+        const flags = std.mem.readInt(u16, glyph_data[pos..][0..2], .big);
+        const old_gid = std.mem.readInt(u16, glyph_data[pos + 2 ..][0..2], .big);
+
+        // Remap the glyph ID
+        const new_gid = remap.get(old_gid) orelse old_gid;
+        std.mem.writeInt(u16, glyph_data[pos + 2 ..][0..2], new_gid, .big);
+
+        pos += 4;
+
+        // Skip arguments based on flags
+        if (flags & 0x0001 != 0) { // ARG_1_AND_2_ARE_WORDS
+            pos += 4;
+        } else {
+            pos += 2;
+        }
+
+        // Skip transformation based on flags
+        if (flags & 0x0008 != 0) { // WE_HAVE_A_SCALE
+            pos += 2;
+        } else if (flags & 0x0040 != 0) { // WE_HAVE_AN_X_AND_Y_SCALE
+            pos += 4;
+        } else if (flags & 0x0080 != 0) { // WE_HAVE_A_TWO_BY_TWO
+            pos += 8;
+        }
+
+        // Check if more components
+        if (flags & 0x0020 == 0) { // MORE_COMPONENTS
+            break;
+        }
+    }
+}
+
 /// Create a subset CFF for CID mode (preserves glyph IDs)
 fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]const u8 {
     const cff_data = emb.font.getTable("CFF ".*) orelse
@@ -1499,6 +1836,330 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     return output;
 }
 
+/// Create a compact subset CFF with glyph ID remapping
+/// This achieves better compression than createSubsetCFF by only including used glyphs
+/// and remapping glyph IDs to 0, 1, 2, ...
+fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]const u8 {
+    const cff_data = emb.font.getTable("CFF ".*) orelse
+        emb.font.getTable("CFF2".*) orelse
+        return error.MissingTable;
+
+    // Collect used glyph IDs into sorted list
+    var glyph_list = std.ArrayListUnmanaged(u16){};
+    defer glyph_list.deinit(allocator);
+
+    try glyph_list.append(allocator, 0); // .notdef always first
+
+    var cid_iter = emb.cid_used_glyphs.iterator();
+    while (cid_iter.next()) |entry| {
+        const gid = entry.value_ptr.*;
+        if (gid != 0) { // Don't duplicate .notdef
+            try glyph_list.append(allocator, gid);
+        }
+    }
+
+    // Sort glyph IDs (keeps .notdef at 0, others in ascending order)
+    std.mem.sort(u16, glyph_list.items[1..], {}, std.sort.asc(u16));
+
+    // Build glyph ID remap: original GID → new compact GID
+    emb.gid_remap.clearRetainingCapacity();
+    for (glyph_list.items, 0..) |orig_gid, new_gid| {
+        try emb.gid_remap.put(emb.allocator, orig_gid, @intCast(new_gid));
+    }
+
+    const num_glyphs: u16 = @intCast(glyph_list.items.len);
+
+    // Parse CFF structure
+    const hdr_size = cff_data[2];
+    const name_end = skipCFFIndex(cff_data, hdr_size);
+    const topdict_start = name_end;
+    const topdict_end = skipCFFIndex(cff_data, topdict_start);
+    const string_start = topdict_end;
+    const string_end = skipCFFIndex(cff_data, string_start);
+    const gsubr_start = string_end;
+
+    // Parse Global Subrs INDEX
+    const global_subrs = parseCFFIndex(cff_data, gsubr_start);
+
+    // Parse CharStrings INDEX location
+    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, topdict_start) orelse
+        return error.InvalidCFF;
+
+    const cs_count = readU16(cff_data, charstrings_offset);
+    if (cs_count == 0) return error.InvalidCFF;
+
+    const cs_off_size = cff_data[charstrings_offset + 2];
+    const cs_offsets_start = charstrings_offset + 3;
+    const cs_data_start = cs_offsets_start + (@as(usize, cs_count) + 1) * cs_off_size;
+
+    // Get Private DICT info to find Local Subrs
+    const private_info = parseCFFTopDictForPrivate(cff_data, topdict_start);
+    var local_subrs: ?CFFIndex = null;
+    if (private_info.size > 0 and private_info.offset + private_info.size <= cff_data.len) {
+        const private_dict_data = cff_data[private_info.offset..][0..private_info.size];
+        if (parseCFFDictForOperator(private_dict_data, 19)) |rel_off| {
+            const local_subrs_offset = private_info.offset + rel_off;
+            local_subrs = parseCFFIndex(cff_data, local_subrs_offset);
+        }
+    }
+
+    // Build compact CharStrings INDEX with desubroutinized glyphs
+    var cs_data_buf = std.ArrayListUnmanaged(u8){};
+    defer cs_data_buf.deinit(allocator);
+
+    var cs_offsets = std.ArrayListUnmanaged(u32){};
+    defer cs_offsets.deinit(allocator);
+
+    // Track desubroutinized charstrings for later cleanup
+    var desubr_charstrings = std.ArrayListUnmanaged([]const u8){};
+    defer {
+        for (desubr_charstrings.items) |cs| allocator.free(cs);
+        desubr_charstrings.deinit(allocator);
+    }
+
+    try cs_offsets.append(allocator, 1); // First offset is always 1
+
+    const use_desubroutinization = true; // Set to true to enable desubroutinization
+    for (glyph_list.items) |orig_gid| {
+        if (orig_gid < cs_count) {
+            const orig_start = readCFFOffset(cff_data, cs_offsets_start, orig_gid, cs_off_size);
+            const orig_end = readCFFOffset(cff_data, cs_offsets_start, orig_gid + 1, cs_off_size);
+            if (orig_end > orig_start) {
+                const orig_charstring = cff_data[cs_data_start + orig_start - 1 .. cs_data_start + orig_end - 1];
+                if (use_desubroutinization) {
+                    // Desubroutinize the charstring
+                    const desubr_cs = try desubroutinizeCharString(allocator, orig_charstring, global_subrs, local_subrs, 0);
+                    try desubr_charstrings.append(allocator, desubr_cs);
+                    try cs_data_buf.appendSlice(allocator, desubr_cs);
+                } else {
+                    // Keep original charstring (requires keeping Subrs)
+                    try cs_data_buf.appendSlice(allocator, orig_charstring);
+                }
+            }
+        }
+        try cs_offsets.append(allocator, @intCast(cs_data_buf.items.len + 1));
+    }
+
+    // Determine offset size for compact CharStrings
+    const new_cs_off_size: u8 = if (cs_data_buf.items.len < 256) 1 else if (cs_data_buf.items.len < 65536) 2 else 3;
+
+    // Build CharStrings INDEX
+    var new_charstrings = std.ArrayListUnmanaged(u8){};
+    defer new_charstrings.deinit(allocator);
+
+    try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, num_glyphs)));
+    try new_charstrings.append(allocator, new_cs_off_size);
+
+    for (cs_offsets.items) |off| {
+        if (new_cs_off_size == 1) {
+            try new_charstrings.append(allocator, @intCast(off));
+        } else if (new_cs_off_size == 2) {
+            try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off))));
+        } else {
+            const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, off));
+            try new_charstrings.appendSlice(allocator, off_bytes[1..4]);
+        }
+    }
+    try new_charstrings.appendSlice(allocator, cs_data_buf.items);
+
+    // Build format 0 charset preserving original SIDs for each glyph
+    // This is required for macOS/CoreGraphics which uses SIDs for glyph lookup
+    var new_charset = std.ArrayListUnmanaged(u8){};
+    defer new_charset.deinit(allocator);
+
+    // Get original charset offset
+    const orig_charset_offset = parseCFFDictForOperator(
+        cff_data[topdict_start + 3 + 2 * cff_data[topdict_start + 2] ..][0 .. readCFFOffset(cff_data, topdict_start + 3, 1, cff_data[topdict_start + 2]) - 1],
+        15,
+    ) orelse return error.InvalidCFF;
+
+    // Build format 0 charset preserving original SIDs for each glyph
+    // This is required for macOS/CoreGraphics which uses SIDs for glyph lookup
+    try new_charset.append(allocator, 0); // Format 0
+    // For each glyph (except .notdef at index 0), get its original SID
+    for (glyph_list.items[1..]) |orig_gid| {
+        const sid = getCharsetSID(cff_data, orig_charset_offset, orig_gid) orelse 1;
+        try new_charset.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, sid)));
+    }
+
+    // Keep full String INDEX (no subsetting for now)
+    const string_index_data = cff_data[string_start..string_end];
+
+    // Private DICT handling
+    const orig_private_size = private_info.size;
+    const orig_private_offset = private_info.offset;
+
+    var new_private = std.ArrayListUnmanaged(u8){};
+    defer new_private.deinit(allocator);
+
+    // Get Local Subrs size if present
+    var local_subrs_size: usize = 0;
+    if (orig_private_size > 0 and orig_private_offset + orig_private_size <= cff_data.len) {
+        const private_dict_data = cff_data[orig_private_offset..][0..orig_private_size];
+        if (use_desubroutinization) {
+            // Strip Subrs operator when desubroutinizing
+            try buildPrivateDictWithoutSubrs(allocator, private_dict_data, &new_private);
+        } else {
+            // Keep original Private DICT with Subrs reference
+            try new_private.appendSlice(allocator, private_dict_data);
+            // Also get Local Subrs size
+            if (parseCFFDictForOperator(private_dict_data, 19)) |rel_off| {
+                const local_subrs_offset = orig_private_offset + rel_off;
+                const local_subrs_end = skipCFFIndex(cff_data, local_subrs_offset);
+                local_subrs_size = local_subrs_end - local_subrs_offset;
+            }
+        }
+    }
+
+    // Get original Name INDEX (keep as-is)
+    const name_index_data = cff_data[hdr_size..name_end];
+
+    // Global Subrs INDEX - empty if desubroutinizing, keep original otherwise
+    const gsubr_end = skipCFFIndex(cff_data, gsubr_start);
+    const orig_gsubr_index_data = cff_data[gsubr_start..gsubr_end];
+    const empty_gsubr_index = [_]u8{ 0, 0 };
+
+    // Calculate final offsets (we need to do this twice due to Top DICT size changes)
+    var final_offset: usize = hdr_size + name_index_data.len;
+
+    // Estimate Top DICT INDEX size for first pass
+    var new_topdict = std.ArrayListUnmanaged(u8){};
+    defer new_topdict.deinit(allocator);
+
+    // First pass: build Top DICT with estimated offsets
+    const est_topdict_index_size: usize = 10 + 32; // header + dict estimate
+    final_offset += est_topdict_index_size;
+    final_offset += string_index_data.len;
+    final_offset += if (use_desubroutinization) empty_gsubr_index.len else orig_gsubr_index_data.len;
+
+    const est_charset_offset = final_offset;
+    final_offset += new_charset.items.len;
+
+    const est_charstrings_offset = final_offset;
+    final_offset += new_charstrings.items.len;
+
+    const est_private_offset = final_offset;
+
+    // Private size includes Local Subrs when not desubroutinizing
+    const total_private_size = new_private.items.len + local_subrs_size;
+
+    try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+        .charset = @intCast(est_charset_offset),
+        .charstrings = @intCast(est_charstrings_offset),
+        .private_size = total_private_size,
+        .private_offset = @intCast(est_private_offset),
+    });
+
+    // Build Top DICT INDEX
+    var new_topdict_index = std.ArrayListUnmanaged(u8){};
+    defer new_topdict_index.deinit(allocator);
+
+    try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+    const td_off_size: u8 = if (new_topdict.items.len < 256) 1 else 2;
+    try new_topdict_index.append(allocator, td_off_size);
+    if (td_off_size == 1) {
+        try new_topdict_index.append(allocator, 1);
+        try new_topdict_index.append(allocator, @intCast(new_topdict.items.len + 1));
+    } else {
+        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_topdict.items.len + 1))));
+    }
+    try new_topdict_index.appendSlice(allocator, new_topdict.items);
+
+    // Recalculate with actual Top DICT INDEX size
+    final_offset = hdr_size + name_index_data.len + new_topdict_index.items.len;
+    final_offset += string_index_data.len;
+    final_offset += if (use_desubroutinization) empty_gsubr_index.len else orig_gsubr_index_data.len;
+
+    const final_charset_offset = final_offset;
+    final_offset += new_charset.items.len;
+
+    const final_charstrings_offset = final_offset;
+    final_offset += new_charstrings.items.len;
+
+    const final_private_offset = final_offset;
+
+    // Rebuild Top DICT with correct offsets
+    new_topdict.clearRetainingCapacity();
+    try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+        .charset = @intCast(final_charset_offset),
+        .charstrings = @intCast(final_charstrings_offset),
+        .private_size = total_private_size,
+        .private_offset = @intCast(final_private_offset),
+    });
+
+    // Rebuild Top DICT INDEX
+    new_topdict_index.clearRetainingCapacity();
+    try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+    const td_off_size2: u8 = if (new_topdict.items.len < 256) 1 else 2;
+    try new_topdict_index.append(allocator, td_off_size2);
+    if (td_off_size2 == 1) {
+        try new_topdict_index.append(allocator, 1);
+        try new_topdict_index.append(allocator, @intCast(new_topdict.items.len + 1));
+    } else {
+        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_topdict.items.len + 1))));
+    }
+    try new_topdict_index.appendSlice(allocator, new_topdict.items);
+
+    // Assemble final CFF
+    const gsubr_len = if (use_desubroutinization) empty_gsubr_index.len else orig_gsubr_index_data.len;
+    const total_size = hdr_size + name_index_data.len + new_topdict_index.items.len +
+        string_index_data.len + gsubr_len +
+        new_charset.items.len + new_charstrings.items.len + total_private_size;
+
+    var output = try allocator.alloc(u8, total_size);
+    @memset(output, 0);
+
+    var pos: usize = 0;
+
+    // Header
+    @memcpy(output[0..hdr_size], cff_data[0..hdr_size]);
+    pos = hdr_size;
+
+    // Name INDEX
+    @memcpy(output[pos..][0..name_index_data.len], name_index_data);
+    pos += name_index_data.len;
+
+    // Top DICT INDEX
+    @memcpy(output[pos..][0..new_topdict_index.items.len], new_topdict_index.items);
+    pos += new_topdict_index.items.len;
+
+    // String INDEX (full, for now)
+    @memcpy(output[pos..][0..string_index_data.len], string_index_data);
+    pos += string_index_data.len;
+
+    // Global Subr INDEX
+    if (use_desubroutinization) {
+        @memcpy(output[pos..][0..empty_gsubr_index.len], &empty_gsubr_index);
+        pos += empty_gsubr_index.len;
+    } else {
+        @memcpy(output[pos..][0..orig_gsubr_index_data.len], orig_gsubr_index_data);
+        pos += orig_gsubr_index_data.len;
+    }
+
+    // Charset
+    @memcpy(output[pos..][0..new_charset.items.len], new_charset.items);
+    pos += new_charset.items.len;
+
+    // CharStrings INDEX
+    @memcpy(output[pos..][0..new_charstrings.items.len], new_charstrings.items);
+    pos += new_charstrings.items.len;
+
+    // Private DICT + Local Subrs (if not desubroutinizing)
+    if (new_private.items.len > 0) {
+        @memcpy(output[pos..][0..new_private.items.len], new_private.items);
+        pos += new_private.items.len;
+    }
+    if (!use_desubroutinization and local_subrs_size > 0) {
+        // Copy Local Subrs from original location
+        const local_subrs_data = cff_data[orig_private_offset + orig_private_size ..][0..local_subrs_size];
+        @memcpy(output[pos..][0..local_subrs_size], local_subrs_data);
+    }
+
+    return output;
+}
+
 fn skipCFFIndex(data: []const u8, offset: usize) usize {
     if (offset + 2 > data.len) return offset;
     const count = readU16(data, offset);
@@ -1640,6 +2301,53 @@ fn parseCFFDictForOperator(dict_data: []const u8, target_op: u8) ?usize {
     return null;
 }
 
+/// Get the SID (String ID) for a glyph index from a CFF charset
+/// Returns null if glyph_idx is out of range
+fn getCharsetSID(cff_data: []const u8, charset_offset: usize, glyph_idx: u16) ?u16 {
+    if (glyph_idx == 0) return 0; // .notdef always has SID 0
+
+    const format = cff_data[charset_offset];
+
+    if (format == 0) {
+        // Format 0: array of 2-byte SIDs
+        const sid_offset = charset_offset + 1 + (@as(usize, glyph_idx) - 1) * 2;
+        if (sid_offset + 1 >= cff_data.len) return null;
+        return readU16(cff_data, sid_offset);
+    } else if (format == 1) {
+        // Format 1: ranges with 1-byte nLeft
+        var pos = charset_offset + 1;
+        var current_gid: u16 = 1;
+        while (pos + 2 < cff_data.len) {
+            const first_sid = readU16(cff_data, pos);
+            const nleft = cff_data[pos + 2];
+            const range_end = current_gid + nleft;
+            if (glyph_idx <= range_end) {
+                // glyph_idx is in this range
+                return first_sid + (glyph_idx - current_gid);
+            }
+            current_gid = range_end + 1;
+            pos += 3;
+        }
+        return null;
+    } else if (format == 2) {
+        // Format 2: ranges with 2-byte nLeft
+        var pos = charset_offset + 1;
+        var current_gid: u16 = 1;
+        while (pos + 3 < cff_data.len) {
+            const first_sid = readU16(cff_data, pos);
+            const nleft = readU16(cff_data, pos + 2);
+            const range_end = current_gid + nleft;
+            if (glyph_idx <= range_end) {
+                return first_sid + (glyph_idx - current_gid);
+            }
+            current_gid = range_end + 1;
+            pos += 4;
+        }
+        return null;
+    }
+    return null;
+}
+
 const TopDictOffsets = struct {
     charset: u32,
     charstrings: u32,
@@ -1665,7 +2373,7 @@ fn buildUpdatedTopDict(
     const second_off = readCFFOffset(cff_data, offsets_start, 1, off_size);
     const dict_data = cff_data[data_start + first_off - 1 .. data_start + second_off - 1];
 
-    // Parse and rebuild, replacing operators 15, 17, 18
+    // Parse and rebuild, replacing operators 15, 17, 18 and removing 16
     var i: usize = 0;
     var operand_start: usize = 0;
 
@@ -1676,6 +2384,11 @@ fn buildUpdatedTopDict(
             // charset - replace with new offset
             try encodeCFFInt(allocator, output, @intCast(offsets.charset));
             try output.append(allocator, 15);
+            i += 1;
+            operand_start = i;
+        } else if (b0 == 16) {
+            // Encoding - skip/remove (use default Standard Encoding)
+            // For CID fonts embedded in PDF, encoding is handled by PDF itself
             i += 1;
             operand_start = i;
         } else if (b0 == 17) {
@@ -1708,6 +2421,52 @@ fn buildUpdatedTopDict(
         } else if (b0 == 30) {
             i += 1;
             while (i < dict_data.len and (dict_data[i] & 0xf) != 0xf and (dict_data[i] >> 4) != 0xf) : (i += 1) {}
+            i += 1;
+        } else if (b0 >= 32 and b0 <= 246) {
+            i += 1;
+        } else if (b0 >= 247 and b0 <= 254) {
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Build Private DICT without the Subrs operator (19)
+/// This allows us to embed desubroutinized CharStrings without Local Subrs
+fn buildPrivateDictWithoutSubrs(
+    allocator: std.mem.Allocator,
+    private_dict_data: []const u8,
+    output: *std.ArrayListUnmanaged(u8),
+) !void {
+    var i: usize = 0;
+    var operand_start: usize = 0;
+
+    while (i < private_dict_data.len) {
+        const b0 = private_dict_data[i];
+
+        if (b0 == 19) {
+            // Subrs - skip this operator and its operand
+            // Don't copy anything for this operator
+            i += 1;
+            operand_start = i;
+        } else if (b0 == 12) {
+            // Two-byte operator - copy operands and operator
+            try output.appendSlice(allocator, private_dict_data[operand_start .. i + 2]);
+            i += 2;
+            operand_start = i;
+        } else if (b0 <= 21) {
+            // Other operator - copy operands and operator
+            try output.appendSlice(allocator, private_dict_data[operand_start .. i + 1]);
+            i += 1;
+            operand_start = i;
+        } else if (b0 == 28) {
+            i += 3;
+        } else if (b0 == 29) {
+            i += 5;
+        } else if (b0 == 30) {
+            i += 1;
+            while (i < private_dict_data.len and (private_dict_data[i] & 0xf) != 0xf and (private_dict_data[i] >> 4) != 0xf) : (i += 1) {}
             i += 1;
         } else if (b0 >= 32 and b0 <= 246) {
             i += 1;
@@ -1841,6 +2600,207 @@ fn readI16(data: []const u8, offset: usize) i16 {
 fn readU32(data: []const u8, offset: usize) u32 {
     if (offset + 4 > data.len) return 0;
     return std.mem.readInt(u32, data[offset..][0..4], .big);
+}
+
+/// Get subroutine bias based on count (CFF spec)
+fn getSubrBias(count: u16) i32 {
+    if (count < 1240) return 107;
+    if (count < 33900) return 1131;
+    return 32768;
+}
+
+/// Parse CFF INDEX and return entries as slices
+const CFFIndex = struct {
+    count: u16,
+    off_size: u8,
+    offsets_start: usize,
+    data_start: usize,
+    data: []const u8,
+
+    fn getEntry(self: *const CFFIndex, index: u16) ?[]const u8 {
+        if (index >= self.count) return null;
+        const start = readCFFOffset(self.data, self.offsets_start, index, self.off_size);
+        const end = readCFFOffset(self.data, self.offsets_start, index + 1, self.off_size);
+        if (start == 0 or end <= start) return null;
+        const abs_start = self.data_start + start - 1;
+        const abs_end = self.data_start + end - 1;
+        if (abs_end > self.data.len) return null;
+        return self.data[abs_start..abs_end];
+    }
+};
+
+fn parseCFFIndex(data: []const u8, offset: usize) ?CFFIndex {
+    if (offset + 2 > data.len) return null;
+    const count = readU16(data, offset);
+    if (count == 0) return CFFIndex{ .count = 0, .off_size = 0, .offsets_start = 0, .data_start = 0, .data = data };
+
+    const off_size = data[offset + 2];
+    const offsets_start = offset + 3;
+    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
+    return CFFIndex{ .count = count, .off_size = off_size, .offsets_start = offsets_start, .data_start = data_start, .data = data };
+}
+
+/// Desubroutinize a single CharString, inlining all subr calls
+/// Returns new CharString data with all subrs expanded inline
+fn desubroutinizeCharString(
+    allocator: std.mem.Allocator,
+    charstring: []const u8,
+    global_subrs: ?CFFIndex,
+    local_subrs: ?CFFIndex,
+    depth: u8,
+) ![]const u8 {
+    // Prevent infinite recursion
+    if (depth > 10) return allocator.dupe(u8, charstring);
+
+    var result = std.ArrayListUnmanaged(u8){};
+    errdefer result.deinit(allocator);
+
+    const gsubr_bias: i32 = if (global_subrs) |gs| getSubrBias(gs.count) else 0;
+    const lsubr_bias: i32 = if (local_subrs) |ls| getSubrBias(ls.count) else 0;
+
+    // Track operand stack for subr index calculation
+    var stack: [48]i32 = undefined;
+    var stack_top: usize = 0;
+
+    // Track hint count for hintmask/cntrmask
+    var stem_count: usize = 0;
+    var seen_endchar = false;
+
+    var i: usize = 0;
+    while (i < charstring.len) {
+        const b0 = charstring[i];
+
+        // Check for operators that consume stems (for hintmask byte count)
+        if (b0 == 1 or b0 == 3 or b0 == 18 or b0 == 23) {
+            // hstem, vstem, hstemhm, vstemhm - each pair of operands is one stem
+            stem_count += stack_top / 2;
+            stack_top = 0;
+            try result.append(allocator, b0);
+            i += 1;
+        } else if (b0 == 19 or b0 == 20) {
+            // hintmask/cntrmask - operator followed by mask bytes
+            stem_count += stack_top / 2; // Any remaining operands are stems
+            stack_top = 0;
+            try result.append(allocator, b0);
+            i += 1;
+            // Copy mask bytes: (stem_count + 7) / 8 bytes
+            const mask_bytes = (stem_count + 7) / 8;
+            if (i + mask_bytes <= charstring.len) {
+                try result.appendSlice(allocator, charstring[i..][0..mask_bytes]);
+                i += mask_bytes;
+            }
+        } else if (b0 == 10) {
+            // callsubr - inline local subroutine
+            if (stack_top > 0 and local_subrs != null) {
+                stack_top -= 1;
+                const subr_idx = stack[stack_top] + lsubr_bias;
+                if (subr_idx >= 0) {
+                    if (local_subrs.?.getEntry(@intCast(subr_idx))) |subr_data| {
+                        // Recursively desubroutinize and inline (without final 'return')
+                        const expanded = try desubroutinizeCharString(allocator, subr_data, global_subrs, local_subrs, depth + 1);
+                        defer allocator.free(expanded);
+                        // Remove trailing 'return' (opcode 11) if present
+                        const inline_len = if (expanded.len > 0 and expanded[expanded.len - 1] == 11)
+                            expanded.len - 1
+                        else
+                            expanded.len;
+                        try result.appendSlice(allocator, expanded[0..inline_len]);
+                    }
+                }
+            }
+            i += 1;
+        } else if (b0 == 29) {
+            // callgsubr - inline global subroutine
+            if (stack_top > 0 and global_subrs != null) {
+                stack_top -= 1;
+                const subr_idx = stack[stack_top] + gsubr_bias;
+                if (subr_idx >= 0) {
+                    if (global_subrs.?.getEntry(@intCast(subr_idx))) |subr_data| {
+                        const expanded = try desubroutinizeCharString(allocator, subr_data, global_subrs, local_subrs, depth + 1);
+                        defer allocator.free(expanded);
+                        const inline_len = if (expanded.len > 0 and expanded[expanded.len - 1] == 11)
+                            expanded.len - 1
+                        else
+                            expanded.len;
+                        try result.appendSlice(allocator, expanded[0..inline_len]);
+                    }
+                }
+            }
+            i += 1;
+        } else if (b0 == 11) {
+            // return - skip (will be added back at end if needed)
+            i += 1;
+        } else if (b0 == 14) {
+            // endchar - copy and mark end
+            try result.append(allocator, b0);
+            seen_endchar = true;
+            i += 1;
+        } else if (b0 == 12) {
+            // Two-byte operator
+            if (i + 1 < charstring.len) {
+                try result.appendSlice(allocator, charstring[i..][0..2]);
+                stack_top = 0; // Operators consume stack
+            }
+            i += 2;
+        } else if (b0 == 28) {
+            // shortint: 2 bytes follow
+            if (i + 2 < charstring.len and stack_top < 48) {
+                const val = @as(i32, @as(i16, @bitCast(readU16(charstring, i + 1))));
+                stack[stack_top] = val;
+                stack_top += 1;
+                try result.appendSlice(allocator, charstring[i..][0..3]);
+            }
+            i += 3;
+        } else if (b0 >= 32 and b0 <= 246) {
+            // Single-byte integer
+            if (stack_top < 48) {
+                stack[stack_top] = @as(i32, b0) - 139;
+                stack_top += 1;
+            }
+            try result.append(allocator, b0);
+            i += 1;
+        } else if (b0 >= 247 and b0 <= 250) {
+            // Two-byte positive integer
+            if (i + 1 < charstring.len and stack_top < 48) {
+                const val = (@as(i32, b0) - 247) * 256 + charstring[i + 1] + 108;
+                stack[stack_top] = val;
+                stack_top += 1;
+                try result.appendSlice(allocator, charstring[i..][0..2]);
+            }
+            i += 2;
+        } else if (b0 >= 251 and b0 <= 254) {
+            // Two-byte negative integer
+            if (i + 1 < charstring.len and stack_top < 48) {
+                const val = -(@as(i32, b0) - 251) * 256 - charstring[i + 1] - 108;
+                stack[stack_top] = val;
+                stack_top += 1;
+                try result.appendSlice(allocator, charstring[i..][0..2]);
+            }
+            i += 2;
+        } else if (b0 == 255) {
+            // 4-byte fixed point (rarely used in Type 2)
+            if (i + 4 < charstring.len) {
+                try result.appendSlice(allocator, charstring[i..][0..5]);
+            }
+            i += 5;
+        } else if (b0 <= 27) {
+            // Other single-byte operators
+            try result.append(allocator, b0);
+            stack_top = 0;
+            i += 1;
+        } else {
+            // Unknown/reserved - copy as-is
+            try result.append(allocator, b0);
+            i += 1;
+        }
+    }
+
+    // Ensure we end with endchar if we don't have one
+    if (!seen_endchar and result.items.len > 0) {
+        try result.append(allocator, 14); // endchar
+    }
+
+    return result.toOwnedSlice(allocator);
 }
 
 test "win ansi encoding" {

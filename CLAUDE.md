@@ -31,6 +31,8 @@ If doing refactoring, start by running "zigmap" and "simgrep" to get good overvi
 ## Testing
 - Bring in as many of the fpdf2 tests as possible.
 
+- Generate REFERENCE pdf:s with fpdf2, then integration tests that generate the same with zpdf and compares them.
+
 - Make sure to keep a command line tool up to date, allowing access to all library innards so they can be tested!
 
 - Make sure to add proper tests, both unit tests and integration tests. If you have to manually test something, it should likely be part of the test suite.

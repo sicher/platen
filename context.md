@@ -1,10 +1,51 @@
 # zpdf Context
 
 ## Current Focus
-CID fonts, OTF support, TTF and CFF subsetting working. Next: OpenType feature activation.
+Compact subsetting working for both TTF and CFF. CFF still needs String INDEX/Subrs subsetting for smaller files.
 
 ## TODO
+- [ ] CFF String INDEX and Global Subrs subsetting (further size reduction)
 - [ ] OpenType feature support (GSUB/GPOS parsing, feature activation API, glyph substitution)
+
+## What We Did (Session 2026-01-17 #8)
+- Implemented compact TTF subsetting with glyph ID remapping
+  - Added `createSubsetTTF_Compact` function in embedded.zig
+  - Builds sorted glyph_list and gid_remap (same pattern as CFF compact)
+  - Creates compact glyf/loca/hmtx tables with only used glyphs
+  - Added `rewriteCompositeGlyphIDs()` to update component references in composite glyphs
+- Updated `generateSubset` to use compact TTF for CID (identity) mode
+- Implemented CFF desubroutinization
+  - Added `desubroutinizeCharString()` to inline callsubr/callgsubr operators
+  - Parses CharString Type 2 bytecode, tracks operand stack for subr indices
+  - Handles subroutine biasing (107/1131/32768 depending on count)
+  - Removes Global/Local Subrs from output CFF
+  - Added `buildPrivateDictWithoutSubrs()` to strip Subrs operator
+- CFF font size reduced: ~60KB → ~33KB per font (with full String INDEX)
+- File sizes:
+  - inter_fonts: 446KB → 241KB (46% reduction)
+  - TTF fonts: ~9-11KB each (compact, remapped)
+  - CFF fonts: ~33KB each (desubroutinized, still full String INDEX)
+  - fpdf2 reference: 95KB total (~4-8KB per font)
+- Attempted String INDEX subsetting but had rendering issues
+  - SID remapping logic appeared correct but caused macOS rendering failures
+  - Deferred for now; full String INDEX works correctly
+- All 8 integration tests pass
+
+## What We Did (Session 2026-01-17 #7)
+- Implemented compact CFF subsetting with glyph ID remapping
+  - Lazy content generation: store commands during text(), render after subsetting
+  - Added `gid_remap` hash map for original GID → new compact GID mapping
+  - CharStrings INDEX contains only used glyphs (not sparse)
+  - 87% size reduction (460KB → 58KB for Inter OTF)
+- Fixed macOS Preview/CoreGraphics rendering issues
+  - Must preserve original charset SIDs (macOS uses SIDs for glyph lookup)
+  - Added `getCharsetSID()` to extract original SID for each glyph
+  - Must remove Encoding operator from Top DICT (old offset becomes invalid)
+- Analyzed subsetting size differences vs fpdf2
+  - fpdf2 inter_fonts: 95KB, zpdf: 446KB (4.7x larger)
+  - CFF: fpdf2 ~6-7KB each, zpdf ~60-70KB (String INDEX + Global Subrs not subsetted)
+  - TTF: fpdf2 ~12-41KB, zpdf ~30-60KB (sparse tables due to preserved glyph IDs)
+  - To match fpdf2: need TTF glyph ID remapping + CFF String/Subrs subsetting
 
 ## What We Did (Session 2026-01-17 #6)
 - Implemented CFF subsetting for OTF fonts

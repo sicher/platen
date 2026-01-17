@@ -50,21 +50,55 @@ pub const PageSize = struct {
     pub const Letter = PageSize{ .width = 612, .height = 792 };
 };
 
+/// Font reference for deferred text commands
+const FontRef = union(enum) {
+    standard: StandardFont,
+    embedded: *EmbeddedFont,
+};
+
+/// Text command parameters for deferred rendering
+const TextCommand = struct {
+    x: f64,
+    y: f64,
+    font_size: f64,
+    char_spacing: f64,
+    text_data: []const u8, // Owned copy of text
+    font: FontRef,
+};
+
+/// Content command for deferred rendering (enables glyph ID remapping)
+const ContentCommand = union(enum) {
+    /// Text command with all rendering parameters
+    text: TextCommand,
+    /// Raw content (for non-text operations that don't need deferred processing)
+    raw: []const u8, // Owned copy
+};
+
 /// Internal page representation
 const Page = struct {
-    content: std.ArrayListUnmanaged(u8),
+    content: std.ArrayListUnmanaged(u8), // Legacy: direct content bytes
+    commands: std.ArrayListUnmanaged(ContentCommand), // Deferred commands
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void),
     used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
 
     fn init() Page {
         return .{
             .content = .{},
+            .commands = .{},
             .used_fonts = .{},
             .used_embedded = .{},
         };
     }
 
     fn deinit(self: *Page, allocator: std.mem.Allocator) void {
+        // Free owned text data in commands
+        for (self.commands.items) |cmd| {
+            switch (cmd) {
+                .text => |t| allocator.free(t.text_data),
+                .raw => |r| allocator.free(r),
+            }
+        }
+        self.commands.deinit(allocator);
         self.content.deinit(allocator);
         self.used_fonts.deinit(allocator);
         self.used_embedded.deinit(allocator);
@@ -306,65 +340,44 @@ pub const Document = struct {
     }
 
     /// Draw text at the current position
+    /// Text is stored as a deferred command and rendered later (after font subsetting)
     pub fn text(self: *Document, str: []const u8) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
-        var cw = page.writer(self.allocator);
 
-        // Begin text block
-        try cw.append("BT\n");
-
-        // Set font - either standard or embedded
-        if (self.current_embedded) |emb| {
+        // Determine font reference and mark as used
+        const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
             try page.markEmbeddedUsed(self.allocator, emb);
-
-            const idx = self.getEmbeddedFontIndex(emb) orelse return error.NoFont;
-            // Embedded fonts use E1, E2, etc.
-            try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, self.font_size });
-
-            // Set character spacing if non-zero (Tc operator)
-            if (self.char_spacing != 0) {
-                try cw.print("{d:.2} Tc\n", .{self.char_spacing});
-            }
-
-            // Position text
-            try cw.print("{d:.2} {d:.2} Td\n", .{ self.x, self.y });
-
-            // Output text based on encoding mode
+            // Mark chars/glyphs as used for subsetting
             if (emb.encoding == .identity) {
-                // CID mode: track Unicode chars and output hex string with glyph IDs
                 try emb.markUnicodeCharsUsed(str);
-                try cw.append("<");
-                try self.appendCIDHexString(&cw, emb, str);
-                try cw.append("> Tj\n");
             } else {
-                // WinAnsi mode: standard parenthesized string
                 emb.markCharsUsed(str);
-                try cw.append("(");
-                try cw.appendEscaped(str);
-                try cw.append(") Tj\n");
             }
-        } else if (self.current_font) |font| {
+            break :blk .{ .embedded = emb };
+        } else if (self.current_font) |font| blk: {
             try page.markFontUsed(self.allocator, font);
-            try cw.print("/{s} {d:.2} Tf\n", .{ fontResourceName(font), self.font_size });
-
-            // Set character spacing if non-zero (Tc operator)
-            if (self.char_spacing != 0) {
-                try cw.print("{d:.2} Tc\n", .{self.char_spacing});
-            }
-
-            // Position and show text (standard fonts always use WinAnsi)
-            try cw.print("{d:.2} {d:.2} Td\n", .{ self.x, self.y });
-            try cw.append("(");
-            try cw.appendEscaped(str);
-            try cw.append(") Tj\n");
+            break :blk .{ .standard = font };
         } else {
             return error.NoFont;
-        }
+        };
 
-        // End text block
-        try cw.append("ET\n");
+        // Create owned copy of text
+        const text_copy = try self.allocator.dupe(u8, str);
+        errdefer self.allocator.free(text_copy);
+
+        // Store deferred command
+        try page.commands.append(self.allocator, .{
+            .text = .{
+                .x = self.x,
+                .y = self.y,
+                .font_size = self.font_size,
+                .char_spacing = self.char_spacing,
+                .text_data = text_copy,
+                .font = font_ref,
+            },
+        });
     }
 
     /// Append hex string with 2-byte glyph IDs for CID mode
@@ -395,6 +408,63 @@ pub const Document = struct {
     pub fn textAt(self: *Document, x: f64, y: f64, str: []const u8) !void {
         self.setXY(x, y);
         try self.text(str);
+    }
+
+    /// Render deferred commands to page content bytes
+    /// Called after subsetting so glyph IDs are properly remapped
+    fn renderPageCommands(self: *Document, page: *Page) !void {
+        var cw = page.writer(self.allocator);
+
+        for (page.commands.items) |cmd| {
+            switch (cmd) {
+                .text => |t| {
+                    // Begin text block
+                    try cw.append("BT\n");
+
+                    switch (t.font) {
+                        .embedded => |emb| {
+                            const idx = self.getEmbeddedFontIndex(emb) orelse continue;
+                            try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
+
+                            if (t.char_spacing != 0) {
+                                try cw.print("{d:.2} Tc\n", .{t.char_spacing});
+                            }
+
+                            try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
+
+                            if (emb.encoding == .identity) {
+                                // CID mode: output hex string with (remapped) glyph IDs
+                                try cw.append("<");
+                                try self.appendCIDHexString(&cw, emb, t.text_data);
+                                try cw.append("> Tj\n");
+                            } else {
+                                // WinAnsi mode
+                                try cw.append("(");
+                                try cw.appendEscaped(t.text_data);
+                                try cw.append(") Tj\n");
+                            }
+                        },
+                        .standard => |font| {
+                            try cw.print("/{s} {d:.2} Tf\n", .{ fontResourceName(font), t.font_size });
+
+                            if (t.char_spacing != 0) {
+                                try cw.print("{d:.2} Tc\n", .{t.char_spacing});
+                            }
+
+                            try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
+                            try cw.append("(");
+                            try cw.appendEscaped(t.text_data);
+                            try cw.append(") Tj\n");
+                        },
+                    }
+
+                    try cw.append("ET\n");
+                },
+                .raw => |data| {
+                    try cw.append(data);
+                },
+            }
+        }
     }
 
     /// Output the PDF document as bytes
@@ -487,8 +557,14 @@ pub const Document = struct {
         }
 
         // Generate font subsets (only include used glyphs)
+        // This also populates gid_remap for compact CFF subsetting
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font.generateSubset();
+        }
+
+        // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
+        for (self.pages.items) |*page| {
+            try self.renderPageCommands(page);
         }
 
         // Write embedded font objects
