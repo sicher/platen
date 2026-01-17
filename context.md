@@ -1,7 +1,26 @@
 # zpdf Context
 
 ## Current Focus
-Font embedding reference tests pass. Next: font subsetting or graphics import.
+Font subsetting implemented. Next: stream compression (deferred due to Zig 0.15 std lib issues), Unicode support, or graphics import.
+
+## What We Did (Session 2026-01-17)
+- Implemented TrueType font subsetting
+  - Added `used_chars` tracking in EmbeddedFont
+  - `markCharsUsed()` called when text is written with embedded fonts
+  - `generateSubset()` creates minimal TTF with only used glyphs
+  - `getFontData()` returns subset if available, else original
+- Subset TTF generation:
+  - Builds new glyf/loca tables with only needed glyphs
+  - Creates format 0 cmap (256-byte lookup for WinAnsi)
+  - Generates new hmtx, maxp, hhea tables
+  - Copies head, name, post tables
+- Results: ~48% file size reduction (51KB vs 99KB for test case)
+- All 6 reference tests still pass
+- Added unit tests for subsetting
+- Investigated stream compression (std.compress.flate)
+  - Zig 0.15.2's Compress struct has incomplete implementation (@panic("TODO"))
+  - Simple/HuffmanEncoder available but has internal bugs
+  - Deferred compression until std lib stabilizes or use C zlib
 
 ## What We Did (Session 2026-01-16 #6)
 - Fixed dangling pointer bug in embedded font resource names
@@ -106,18 +125,12 @@ Font embedding reference tests pass. Next: font subsetting or graphics import.
 - `test/fonts/` - Test fonts (Courier Prime, Charter, Satoshi, Inter)
 
 ## Open Issues
-- Font embedding uses uncompressed streams (could add FlateDecode for smaller files)
-- No font subsetting yet (entire font embedded even if only few glyphs used)
+- Font embedding uses uncompressed streams (FlateDecode blocked by Zig 0.15 std lib bugs)
+- WinAnsiEncoding only (no full Unicode support yet) - needs CID fonts + ToUnicode CMap
 
 ## Next Steps
 
-### Priority 1: Font Subsetting (Optional)
-1. Parse glyf/loca tables to extract glyph outlines
-2. Track used glyphs during text rendering
-3. Rebuild minimal TTF with only used glyphs
-4. Add ToUnicode CMap for copy/paste support
-
-### Priority 2: Graphics Import
+### Priority 1: Graphics Import
 5. **JPEG embedding** - trivial, embed raw bytes with DCTDecode
 6. **PNG embedding** - decode, handle alpha as soft mask
 7. **PDF embedding** - parse external PDF, embed as Form XObject

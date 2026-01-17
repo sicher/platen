@@ -316,6 +316,7 @@ pub const Document = struct {
         // Set font - either standard or embedded
         if (self.current_embedded) |emb| {
             try page.markEmbeddedUsed(self.allocator, emb);
+            emb.markCharsUsed(str); // Track chars for subsetting
             const idx = self.getEmbeddedFontIndex(emb) orelse return error.NoFont;
             // Embedded fonts use E1, E2, etc.
             try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, self.font_size });
@@ -424,6 +425,11 @@ pub const Document = struct {
             try w.endObject();
         }
 
+        // Generate font subsets (only include used glyphs)
+        for (self.embedded_fonts.items) |emb_font| {
+            try emb_font.generateSubset();
+        }
+
         // Write embedded font objects (3 objects each: Font, FontDescriptor, FontFile2)
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
             const base_id = first_emb_font_id + @as(ObjectId, @intCast(i * 3));
@@ -483,13 +489,14 @@ pub const Document = struct {
             }
             try w.endObject();
 
-            // 3. FontFile2 stream (the actual TTF data)
+            // 3. FontFile2 stream (the actual TTF data, possibly subset)
             try w.beginObject(fontfile_id);
             {
+                const font_data = emb_font.getFontData();
                 var stream_dict = Dict.init(self.allocator);
                 defer stream_dict.deinit();
-                try stream_dict.put("Length1", Value.int(@intCast(emb_font.data.len)));
-                try w.writeStream(&stream_dict, emb_font.data);
+                try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
+                try w.writeStream(&stream_dict, font_data);
             }
             try w.endObject();
         }

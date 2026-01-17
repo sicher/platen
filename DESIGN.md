@@ -132,17 +132,26 @@ endstream
 - Standard fonts: F1-F14 (Helvetica, Times, Courier, etc.)
 - Embedded fonts: E1, E2, E3, etc.
 
+**Current features:**
+- Font subsetting: only used glyphs embedded (~50% file size reduction)
+- WinAnsiEncoding for single-byte text mapping
+
 **Current limitations:**
-- No font subsetting (entire font embedded)
-- No stream compression (uncompressed TTF data)
-- No ToUnicode CMap (copy/paste may not work correctly)
+- No stream compression (Zig 0.15 std.compress.flate has incomplete implementation)
+- No ToUnicode CMap (copy/paste may not work correctly for non-ASCII)
 - WinAnsiEncoding only (no full Unicode support yet)
 
+**Subsetting implementation** (`createSubsetTTF` in embedded.zig):
+- Tracks used chars via `used_chars[256]` bitmap
+- Collects unique glyph IDs from original font's cmap
+- Rebuilds: glyf, loca, hmtx, cmap (format 0), maxp, hhea
+- Copies: head, name, post tables
+- Generates valid TrueType that parses correctly
+
 **Future enhancements:**
-1. Subsetting - include only used glyphs (smaller files)
-2. FlateDecode compression for FontFile2 stream
-3. ToUnicode CMap for proper copy/paste
-4. CIDFont support for full Unicode text
+1. FlateDecode compression for FontFile2 stream (when Zig std lib ready or via C zlib)
+2. ToUnicode CMap for proper copy/paste
+3. CIDFont support for full Unicode text
 
 ### Memory Management
 Uses `ArrayListUnmanaged` throughout - allocator passed to each operation.
