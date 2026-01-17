@@ -1,7 +1,23 @@
 # zpdf Context
 
 ## Current Focus
-ToUnicode CMap implemented. Next: full Unicode support (CID fonts/Type0), OpenType CFF fonts, or stream compression.
+Unicode rendering fixed. Integration test suite in place. Next: visual/pixel comparison for rendering tests, CID fonts for full Unicode, or graphics import.
+
+## What We Did (Session 2026-01-17 #3)
+- Fixed extended Latin character rendering in subset fonts
+  - Root cause: subset cmap only had Format 0 (MacRoman), but PDF viewers with WinAnsiEncoding need Format 4 (Windows Unicode BMP)
+  - Added Format 4 cmap generation to `createSubsetTTF()` in embedded.zig
+  - Now generates both Format 0 and Format 4 cmap tables
+- Added comprehensive Unicode symbol coverage to embedded fonts test
+  - More Latin: Ññ Øø ß Ææ Ðð Þþ ¿¡
+  - Currency/Math: £ ¥ ¢ ƒ ± × ÷ ° ² ³ ¹ ¼ ½ ¾ µ
+  - Symbols: § ¶ † ‡ • ¦ ¬ · ª º
+- Fixed font metric rounding to match fpdf2
+  - Was using truncation (`@intFromFloat`), now uses rounding (`@round`)
+  - Fixes 1-unit width difference in monospace fonts (599 vs 600)
+- Investigated VeraPDF for PDF validation
+  - Useful for PDF/A conformance but wouldn't catch cmap format issues
+  - Visual/pixel comparison would be needed for rendering correctness
 
 ## What We Did (Session 2026-01-17 #2)
 - Implemented ToUnicode CMap for embedded fonts
