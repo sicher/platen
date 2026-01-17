@@ -35,10 +35,6 @@ pub fn main() !void {
         const output_path = if (args.len > 2) args[2] else "text.pdf";
         try generateTextPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
-    } else if (std.mem.eql(u8, cmd, "gen-refs")) {
-        // Generate all reference PDFs
-        try generateAllReferences(allocator);
-        try print("Generated all reference PDFs in test/reference/\n", .{});
     } else if (std.mem.eql(u8, cmd, "check-refs")) {
         // Compare against reference PDFs
         // Parse mode: --structural, --semantic, or default (auto)
@@ -85,8 +81,7 @@ fn printUsage() !void {
         \\  version              Print version
         \\  test [output]        Generate a minimal test PDF (default: test.pdf)
         \\  text [output]        Generate a PDF with text (default: text.pdf)
-        \\  gen-refs             Generate reference PDFs in test/reference/
-        \\  check-refs [opts]    Compare output against reference PDFs
+        \\  check-refs [opts]    Compare output against reference PDFs (from fpdf2)
         \\                         --structural  Use qpdf structural comparison
         \\                         --semantic    Use pdftotext semantic comparison
         \\                         (default: auto - structural first, then semantic)
@@ -302,22 +297,6 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
 // Use shared test infrastructure from zpdf module
 const testing = zpdf.testing;
 const test_cases = zpdf.integration_tests.cases;
-
-fn generateAllReferences(allocator: std.mem.Allocator) !void {
-    for (test_cases) |tc| {
-        const pdf = try tc.generate(allocator);
-        defer allocator.free(pdf);
-
-        var path_buf: [256]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "test/reference/{s}.pdf", .{tc.name}) catch unreachable;
-
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
-        try file.writeAll(pdf);
-
-        try print("  {s}.pdf\n", .{tc.name});
-    }
-}
 
 const TestResult = struct {
     name: []const u8,

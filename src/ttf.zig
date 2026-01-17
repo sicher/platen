@@ -72,6 +72,17 @@ pub const Font = struct {
         return font;
     }
 
+    /// Check if this is a CFF-based font (OTF with PostScript outlines)
+    pub fn isCFF(self: *const Font) bool {
+        // CFF fonts have "CFF " or "CFF2" table, no "glyf" table
+        return self.getTable("CFF ".*) != null or self.getTable("CFF2".*) != null;
+    }
+
+    /// Check if this is a TrueType font (has glyf outlines)
+    pub fn isTrueType(self: *const Font) bool {
+        return self.getTable("glyf".*) != null;
+    }
+
     /// Get table data by tag
     pub fn getTable(self: *const Font, tag: [4]u8) ?[]const u8 {
         const entry = self.tables.find(tag) orelse return null;

@@ -318,30 +318,77 @@ pub const Document = struct {
         // Set font - either standard or embedded
         if (self.current_embedded) |emb| {
             try page.markEmbeddedUsed(self.allocator, emb);
-            emb.markCharsUsed(str); // Track chars for subsetting
+
             const idx = self.getEmbeddedFontIndex(emb) orelse return error.NoFont;
             // Embedded fonts use E1, E2, etc.
             try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, self.font_size });
+
+            // Set character spacing if non-zero (Tc operator)
+            if (self.char_spacing != 0) {
+                try cw.print("{d:.2} Tc\n", .{self.char_spacing});
+            }
+
+            // Position text
+            try cw.print("{d:.2} {d:.2} Td\n", .{ self.x, self.y });
+
+            // Output text based on encoding mode
+            if (emb.encoding == .identity) {
+                // CID mode: track Unicode chars and output hex string with glyph IDs
+                try emb.markUnicodeCharsUsed(str);
+                try cw.append("<");
+                try self.appendCIDHexString(&cw, emb, str);
+                try cw.append("> Tj\n");
+            } else {
+                // WinAnsi mode: standard parenthesized string
+                emb.markCharsUsed(str);
+                try cw.append("(");
+                try cw.appendEscaped(str);
+                try cw.append(") Tj\n");
+            }
         } else if (self.current_font) |font| {
             try page.markFontUsed(self.allocator, font);
             try cw.print("/{s} {d:.2} Tf\n", .{ fontResourceName(font), self.font_size });
+
+            // Set character spacing if non-zero (Tc operator)
+            if (self.char_spacing != 0) {
+                try cw.print("{d:.2} Tc\n", .{self.char_spacing});
+            }
+
+            // Position and show text (standard fonts always use WinAnsi)
+            try cw.print("{d:.2} {d:.2} Td\n", .{ self.x, self.y });
+            try cw.append("(");
+            try cw.appendEscaped(str);
+            try cw.append(") Tj\n");
         } else {
             return error.NoFont;
         }
 
-        // Set character spacing if non-zero (Tc operator)
-        if (self.char_spacing != 0) {
-            try cw.print("{d:.2} Tc\n", .{self.char_spacing});
-        }
-
-        // Position and show text
-        try cw.print("{d:.2} {d:.2} Td\n", .{ self.x, self.y });
-        try cw.append("(");
-        try cw.appendEscaped(str);
-        try cw.append(") Tj\n");
-
         // End text block
         try cw.append("ET\n");
+    }
+
+    /// Append hex string with 2-byte glyph IDs for CID mode
+    fn appendCIDHexString(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8) !void {
+        _ = self;
+        var i: usize = 0;
+        while (i < str.len) {
+            const len = std.unicode.utf8ByteSequenceLength(str[i]) catch 1;
+            if (i + len > str.len) break;
+
+            const codepoint = std.unicode.utf8Decode(str[i..][0..len]) catch {
+                // Invalid UTF-8, output notdef glyph
+                try cw.append("0000");
+                i += 1;
+                continue;
+            };
+
+            const gid = emb.getGlyphIdForCodepoint(codepoint);
+            var hex_buf: [4]u8 = undefined;
+            _ = std.fmt.bufPrint(&hex_buf, "{X:0>4}", .{gid}) catch unreachable;
+            try cw.append(&hex_buf);
+
+            i += len;
+        }
     }
 
     /// Draw text at a specific position
@@ -375,15 +422,27 @@ pub const Document = struct {
         // 1 = Catalog
         // 2 = Pages (root)
         // 3 to 3+num_standard_fonts-1 = Standard Font objects
-        // Then for each embedded font: Font dict, FontDescriptor, FontFile2, ToUnicode (4 objects each)
+        // Then for each embedded font:
+        //   WinAnsi: Font, FontDescriptor, FontFile2, ToUnicode (4 objects)
+        //   Identity/CID: Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode (5 objects)
         // After fonts = Pages (each page needs 2 objects: page dict + content stream)
 
         const catalog_id: ObjectId = 1;
         const pages_root_id: ObjectId = 2;
         const first_std_font_id: ObjectId = 3;
         const first_emb_font_id: ObjectId = first_std_font_id + @as(ObjectId, @intCast(font_list.items.len));
-        // Each embedded font needs 4 objects (Font, FontDescriptor, FontFile2, ToUnicode)
-        const first_page_id: ObjectId = first_emb_font_id + @as(ObjectId, @intCast(self.embedded_fonts.items.len * 4));
+
+        // Calculate total objects needed for embedded fonts and track base IDs
+        var emb_font_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        defer emb_font_base_ids.deinit(self.allocator);
+
+        var next_emb_id = first_emb_font_id;
+        for (self.embedded_fonts.items) |emb_font| {
+            try emb_font_base_ids.append(self.allocator, next_emb_id);
+            const obj_count: ObjectId = if (emb_font.encoding == .identity) 5 else 4;
+            next_emb_id += obj_count;
+        }
+        const first_page_id: ObjectId = next_emb_id;
 
         // Build page refs array for Pages object
         var page_refs = Array.init(self.allocator);
@@ -432,90 +491,234 @@ pub const Document = struct {
             try emb_font.generateSubset();
         }
 
-        // Write embedded font objects (4 objects each: Font, FontDescriptor, FontFile2, ToUnicode)
+        // Write embedded font objects
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
-            const base_id = first_emb_font_id + @as(ObjectId, @intCast(i * 4));
-            const font_dict_id = base_id;
-            const descriptor_id = base_id + 1;
-            const fontfile_id = base_id + 2;
-            const tounicode_id = base_id + 3;
+            const base_id = emb_font_base_ids.items[i];
 
-            // Generate ToUnicode CMap
-            const tounicode_cmap = try emb_font.generateToUnicodeCMap();
-            defer self.allocator.free(tounicode_cmap);
+            if (emb_font.encoding == .identity) {
+                // CID font: Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode (5 objects)
+                const type0_id = base_id;
+                const cidfont_id = base_id + 1;
+                const descriptor_id = base_id + 2;
+                const fontfile_id = base_id + 3;
+                const tounicode_id = base_id + 4;
 
-            // 1. Font dictionary
-            try w.beginObject(font_dict_id);
-            {
-                var font_dict = Dict.init(self.allocator);
-                defer font_dict.deinit();
-                try font_dict.put("Type", Value.name("Font"));
-                try font_dict.put("Subtype", Value.name("TrueType"));
-                try font_dict.put("BaseFont", Value.name(emb_font.name));
-                try font_dict.put("FirstChar", Value.int(0));
-                try font_dict.put("LastChar", Value.int(255));
-                try font_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
-                try font_dict.put("Encoding", Value.name("WinAnsiEncoding"));
-                try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
+                // Generate ToUnicode CMap for CID
+                const tounicode_cmap = try emb_font.generateCIDToUnicodeCMap();
+                defer self.allocator.free(tounicode_cmap);
 
-                // Widths array
-                var widths_array = Array.init(self.allocator);
-                defer widths_array.deinit();
-                for (emb_font.widths) |width| {
-                    try widths_array.append(Value.int(@intCast(width)));
+                // Generate /W width array
+                const w_array = try emb_font.generateWidthArray();
+                defer self.allocator.free(w_array);
+
+                // 1. Type0 (composite) font
+                try w.beginObject(type0_id);
+                {
+                    var font_dict = Dict.init(self.allocator);
+                    defer font_dict.deinit();
+                    try font_dict.put("Type", Value.name("Font"));
+                    try font_dict.put("Subtype", Value.name("Type0"));
+                    try font_dict.put("BaseFont", Value.name(emb_font.name));
+                    try font_dict.put("Encoding", Value.name("Identity-H"));
+                    try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
+
+                    // DescendantFonts array with single CIDFont reference
+                    var descendants = Array.init(self.allocator);
+                    defer descendants.deinit();
+                    try descendants.append(Value.ref(.{ .id = cidfont_id }));
+                    try font_dict.put("DescendantFonts", .{ .array_val = &descendants });
+
+                    try w.writeDict(font_dict);
                 }
-                try font_dict.put("Widths", .{ .array_val = &widths_array });
+                try w.endObject();
 
-                try w.writeDict(font_dict);
-            }
-            try w.endObject();
+                // 2. CIDFont (CIDFontType2 for TrueType, CIDFontType0 for CFF)
+                const is_cff = emb_font.font.isCFF();
+                try w.beginObject(cidfont_id);
+                {
+                    var cid_dict = Dict.init(self.allocator);
+                    defer cid_dict.deinit();
+                    try cid_dict.put("Type", Value.name("Font"));
+                    if (is_cff) {
+                        try cid_dict.put("Subtype", Value.name("CIDFontType0"));
+                    } else {
+                        try cid_dict.put("Subtype", Value.name("CIDFontType2"));
+                    }
+                    try cid_dict.put("BaseFont", Value.name(emb_font.name));
+                    try cid_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
+                    try cid_dict.put("DW", Value.int(emb_font.getDefaultWidth()));
 
-            // 2. FontDescriptor
-            try w.beginObject(descriptor_id);
-            {
-                var desc_dict = Dict.init(self.allocator);
-                defer desc_dict.deinit();
-                try desc_dict.put("Type", Value.name("FontDescriptor"));
-                try desc_dict.put("FontName", Value.name(emb_font.name));
-                try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
-                try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
-                try desc_dict.put("Ascent", Value.int(emb_font.ascent));
-                try desc_dict.put("Descent", Value.int(emb_font.descent));
-                try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
-                try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
-                try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+                    // CIDSystemInfo dictionary
+                    var cidsysinfo = Dict.init(self.allocator);
+                    defer cidsysinfo.deinit();
+                    try cidsysinfo.put("Registry", Value.string("Adobe"));
+                    try cidsysinfo.put("Ordering", Value.string("Identity"));
+                    try cidsysinfo.put("Supplement", Value.int(0));
+                    try cid_dict.put("CIDSystemInfo", .{ .dict_val = &cidsysinfo });
 
-                // FontBBox array
-                var bbox_array = Array.init(self.allocator);
-                defer bbox_array.deinit();
-                for (emb_font.bbox) |val| {
-                    try bbox_array.append(Value.int(val));
+                    // /W array as raw literal (already formatted)
+                    try cid_dict.put("W", Value.literal(w_array));
+
+                    // CIDToGIDMap - Identity mapping (only for TrueType, not CFF)
+                    if (!is_cff) {
+                        try cid_dict.put("CIDToGIDMap", Value.name("Identity"));
+                    }
+
+                    try w.writeDict(cid_dict);
                 }
-                try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+                try w.endObject();
 
-                try w.writeDict(desc_dict);
-            }
-            try w.endObject();
+                // 3. FontDescriptor
+                try w.beginObject(descriptor_id);
+                {
+                    var desc_dict = Dict.init(self.allocator);
+                    defer desc_dict.deinit();
+                    try desc_dict.put("Type", Value.name("FontDescriptor"));
+                    try desc_dict.put("FontName", Value.name(emb_font.name));
+                    try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
+                    try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
+                    try desc_dict.put("Ascent", Value.int(emb_font.ascent));
+                    try desc_dict.put("Descent", Value.int(emb_font.descent));
+                    try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
+                    try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
 
-            // 3. FontFile2 stream (the actual TTF data, possibly subset)
-            try w.beginObject(fontfile_id);
-            {
-                const font_data = emb_font.getFontData();
-                var stream_dict = Dict.init(self.allocator);
-                defer stream_dict.deinit();
-                try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
-                try w.writeStream(&stream_dict, font_data);
-            }
-            try w.endObject();
+                    // CFF fonts use FontFile3, TrueType uses FontFile2
+                    if (is_cff) {
+                        try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
+                    } else {
+                        try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+                    }
 
-            // 4. ToUnicode CMap stream (enables copy/paste)
-            try w.beginObject(tounicode_id);
-            {
-                var tounicode_dict = Dict.init(self.allocator);
-                defer tounicode_dict.deinit();
-                try w.writeStream(&tounicode_dict, tounicode_cmap);
+                    var bbox_array = Array.init(self.allocator);
+                    defer bbox_array.deinit();
+                    for (emb_font.bbox) |val| {
+                        try bbox_array.append(Value.int(val));
+                    }
+                    try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+
+                    try w.writeDict(desc_dict);
+                }
+                try w.endObject();
+
+                // 4. FontFile stream (FontFile2 for TTF, FontFile3 for CFF)
+                try w.beginObject(fontfile_id);
+                {
+                    const font_data = emb_font.getFontData();
+                    var stream_dict = Dict.init(self.allocator);
+                    defer stream_dict.deinit();
+
+                    if (is_cff) {
+                        // CFF requires Subtype
+                        try stream_dict.put("Subtype", Value.name("CIDFontType0C"));
+                    } else {
+                        try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
+                    }
+                    try w.writeStream(&stream_dict, font_data);
+                }
+                try w.endObject();
+
+                // 5. ToUnicode CMap stream
+                try w.beginObject(tounicode_id);
+                {
+                    var tounicode_dict = Dict.init(self.allocator);
+                    defer tounicode_dict.deinit();
+                    try w.writeStream(&tounicode_dict, tounicode_cmap);
+                }
+                try w.endObject();
+            } else {
+                // WinAnsi font: Font, FontDescriptor, FontFile2, ToUnicode (4 objects)
+                const font_dict_id = base_id;
+                const descriptor_id = base_id + 1;
+                const fontfile_id = base_id + 2;
+                const tounicode_id = base_id + 3;
+
+                // Generate ToUnicode CMap
+                const tounicode_cmap = try emb_font.generateToUnicodeCMap();
+                defer self.allocator.free(tounicode_cmap);
+
+                // 1. Font dictionary
+                try w.beginObject(font_dict_id);
+                {
+                    var font_dict = Dict.init(self.allocator);
+                    defer font_dict.deinit();
+                    try font_dict.put("Type", Value.name("Font"));
+                    try font_dict.put("Subtype", Value.name("TrueType"));
+                    try font_dict.put("BaseFont", Value.name(emb_font.name));
+                    try font_dict.put("FirstChar", Value.int(0));
+                    try font_dict.put("LastChar", Value.int(255));
+                    try font_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
+                    try font_dict.put("Encoding", Value.name("WinAnsiEncoding"));
+                    try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
+
+                    // Widths array
+                    var widths_array = Array.init(self.allocator);
+                    defer widths_array.deinit();
+                    for (emb_font.widths) |width| {
+                        try widths_array.append(Value.int(@intCast(width)));
+                    }
+                    try font_dict.put("Widths", .{ .array_val = &widths_array });
+
+                    try w.writeDict(font_dict);
+                }
+                try w.endObject();
+
+                // 2. FontDescriptor
+                const is_cff_wa = emb_font.font.isCFF();
+                try w.beginObject(descriptor_id);
+                {
+                    var desc_dict = Dict.init(self.allocator);
+                    defer desc_dict.deinit();
+                    try desc_dict.put("Type", Value.name("FontDescriptor"));
+                    try desc_dict.put("FontName", Value.name(emb_font.name));
+                    try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
+                    try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
+                    try desc_dict.put("Ascent", Value.int(emb_font.ascent));
+                    try desc_dict.put("Descent", Value.int(emb_font.descent));
+                    try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
+                    try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
+
+                    if (is_cff_wa) {
+                        try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
+                    } else {
+                        try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+                    }
+
+                    var bbox_array = Array.init(self.allocator);
+                    defer bbox_array.deinit();
+                    for (emb_font.bbox) |val| {
+                        try bbox_array.append(Value.int(val));
+                    }
+                    try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+
+                    try w.writeDict(desc_dict);
+                }
+                try w.endObject();
+
+                // 3. FontFile stream
+                try w.beginObject(fontfile_id);
+                {
+                    const font_data = emb_font.getFontData();
+                    var stream_dict = Dict.init(self.allocator);
+                    defer stream_dict.deinit();
+
+                    if (is_cff_wa) {
+                        try stream_dict.put("Subtype", Value.name("Type1C"));
+                    } else {
+                        try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
+                    }
+                    try w.writeStream(&stream_dict, font_data);
+                }
+                try w.endObject();
+
+                // 4. ToUnicode CMap stream
+                try w.beginObject(tounicode_id);
+                {
+                    var tounicode_dict = Dict.init(self.allocator);
+                    defer tounicode_dict.deinit();
+                    try w.writeStream(&tounicode_dict, tounicode_cmap);
+                }
+                try w.endObject();
             }
-            try w.endObject();
         }
 
         // Write each page
@@ -565,8 +768,8 @@ pub const Document = struct {
                 // Find index of this font
                 for (self.embedded_fonts.items, 0..) |doc_font, idx| {
                     if (doc_font == emb_font) {
-                        // Each embedded font uses 4 objects: Font, FontDescriptor, FontFile2, ToUnicode
-                        const font_obj_id = first_emb_font_id + @as(ObjectId, @intCast(idx * 4));
+                        // Use pre-calculated base ID for this font
+                        const font_obj_id = emb_font_base_ids.items[idx];
                         const res_name = embeddedFontResourceName(idx);
                         try font_res.put(res_name, Value.ref(.{ .id = font_obj_id }));
                         has_fonts = true;

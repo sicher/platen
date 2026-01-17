@@ -118,6 +118,7 @@ pub const Value = union(enum) {
     array_val: *Array,
     dict_val: *Dict,
     ref_val: Ref,
+    literal_val: []const u8, // Raw output (no escaping/wrapping)
 
     pub fn format(self: Value, writer: anytype) @TypeOf(writer).Error!void {
         switch (self) {
@@ -134,6 +135,7 @@ pub const Value = union(enum) {
             .array_val => |a| try a.format(writer),
             .dict_val => |d| try d.format(writer),
             .ref_val => |r| try r.format(writer),
+            .literal_val => |l| try writer.writeAll(l),
         }
     }
 
@@ -156,6 +158,10 @@ pub const Value = union(enum) {
 
     pub fn string(s: []const u8) Value {
         return .{ .string_val = s };
+    }
+
+    pub fn literal(s: []const u8) Value {
+        return .{ .literal_val = s };
     }
 };
 

@@ -1,7 +1,48 @@
 # zpdf Context
 
 ## Current Focus
-Unicode rendering fixed. Integration test suite in place. Next: visual/pixel comparison for rendering tests, CID fonts for full Unicode, or graphics import.
+CID fonts, OTF support, TTF subsetting working. CFF subsetting deferred. Next: OpenType feature activation.
+
+## TODO
+- [ ] OpenType feature support (GSUB/GPOS parsing, feature activation API, glyph substitution)
+- [ ] CFF subsetting (complex due to subroutine dependencies)
+
+## What We Did (Session 2026-01-17 #5)
+- Fixed composite glyph handling in CID-aware TTF subsetting
+  - Composite glyphs (like 'i', 'j') reference other glyphs (e.g., glyph 2705 for dot)
+  - Added `getCompositeComponents()` to recursively find all referenced glyphs
+  - Fixes missing characters that were cut off by max_gid
+- Attempted CFF subsetting but reverted
+  - CharStrings copy correctly, Global/Local Subrs included
+  - Rendering still fails - likely due to subroutine biasing or other CFF complexity
+  - Disabled for now; OTF fonts embed full CFF table (~600KB each)
+- All 8 integration tests pass
+
+## What We Did (Session 2026-01-17 #4 continued)
+- Implemented CID-aware TTF subsetting (`createSubsetTTF_CID`)
+  - Preserves original glyph IDs (no remapping) for Identity CID-to-GID mapping
+  - Creates sparse loca/hmtx tables with entries for all glyphs 0..max_gid
+  - Only includes actual glyph data for used glyphs
+  - File size reduced from 3.5MB to 1.9MB for Inter fonts test
+
+## What We Did (Session 2026-01-17 #4)
+- Implemented CID fonts (Type0/CIDFontType2) for full Unicode support
+  - Added `FontEncoding` enum (`.win_ansi`, `.identity`)
+  - Added CID tracking: `cid_used_glyphs`, `cid_glyph_widths` hash maps
+  - Added `markUnicodeCharsUsed()`, `generateCIDToUnicodeCMap()`, `generateWidthArray()`
+  - Type0 font structure with Identity-H encoding, CIDSystemInfo
+  - Hex string output `<XXXX>` for glyph IDs in CID mode
+- Implemented OTF (CFF) font support
+  - Added `isCFF()` and `isTrueType()` methods to ttf.zig
+  - CFF fonts use CIDFontType0 + FontFile3 with Subtype CIDFontType0C
+  - Extract CFF table data (not full OTF wrapper) for embedding
+- Fixed font name decoding (UTF-16BE)
+  - `decodeFontName()` was returning dangling pointer to stack array
+  - Fixed with static buffer
+- Fixed searchRange overflow in cmap generation for small segment counts
+- Added Inter font integration test (TTF and OTF variants)
+- Skip subsetting for CID mode (glyph ID remapping breaks Identity mapping)
+- 8 integration tests now pass
 
 ## What We Did (Session 2026-01-17 #3)
 - Fixed extended Latin character rendering in subset fonts
@@ -159,7 +200,6 @@ Unicode rendering fixed. Integration test suite in place. Next: visual/pixel com
 
 ## Open Issues
 - Font embedding uses uncompressed streams (FlateDecode blocked by Zig 0.15 std lib bugs)
-- WinAnsiEncoding only (no full Unicode support yet) - needs CID fonts + ToUnicode CMap
 
 ## Next Steps
 
