@@ -326,8 +326,11 @@ pub const EmbeddedFont = struct {
         const has_cid_chars = self.countUsedGlyphs() > 0;
         if (!has_winansi_chars and !has_cid_chars) return;
 
-        // CFF fonts: skip subsetting (complex structure, not worth the size savings)
+        // CFF fonts: use CID-aware CFF subsetting
         if (self.font.isCFF()) {
+            if (self.encoding == .identity) {
+                self.subset_data = try createSubsetCFF(self.allocator, self);
+            }
             return;
         }
 
@@ -1266,52 +1269,42 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     }
     const num_glyphs: u16 = max_gid + 1;
 
-    // Build new CharStrings INDEX with sparse data
+    // Build new CharStrings INDEX - copy ALL charstrings up to num_glyphs (no sparse data)
+    // This preserves glyph ID mapping and avoids issues with empty placeholder charstrings
     var new_charstrings = std.ArrayListUnmanaged(u8){};
     defer new_charstrings.deinit(allocator);
 
-    // We'll build offsets and data separately, then combine
-    var cs_data_buf = std.ArrayListUnmanaged(u8){};
-    defer cs_data_buf.deinit(allocator);
-
-    var new_offsets = std.ArrayListUnmanaged(u32){};
-    defer new_offsets.deinit(allocator);
-
-    try new_offsets.append(allocator, 1); // First offset is always 1
-
-    var gid: u16 = 0;
-    while (gid < num_glyphs) : (gid += 1) {
-        if (glyph_set.contains(gid) and gid < cs_count) {
-            // Get original charstring
-            const orig_start = readCFFOffset(cff_data, cs_offsets_start, gid, cs_off_size);
-            const orig_end = readCFFOffset(cff_data, cs_offsets_start, gid + 1, cs_off_size);
-            const charstring = cff_data[cs_data_start + orig_start - 1 .. cs_data_start + orig_end - 1];
-            try cs_data_buf.appendSlice(allocator, charstring);
-        } else {
-            // Empty charstring (just endchar = 14)
-            try cs_data_buf.append(allocator, 14);
-        }
-        try new_offsets.append(allocator, @intCast(cs_data_buf.items.len + 1));
-    }
+    // Calculate size of original CharStrings data we need (glyphs 0 to num_glyphs-1)
+    const orig_first_offset = readCFFOffset(cff_data, cs_offsets_start, 0, cs_off_size);
+    const orig_last_offset = readCFFOffset(cff_data, cs_offsets_start, num_glyphs, cs_off_size);
+    const charstrings_data_size = orig_last_offset - orig_first_offset;
 
     // Determine offset size needed for new CharStrings
-    const new_cs_off_size: u8 = if (cs_data_buf.items.len < 256) 1 else if (cs_data_buf.items.len < 65536) 2 else 3;
+    const new_cs_off_size: u8 = if (charstrings_data_size < 256) 1 else if (charstrings_data_size < 65536) 2 else 3;
 
-    // Build new CharStrings INDEX
+    // Build CharStrings INDEX header
     try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, num_glyphs)));
     try new_charstrings.append(allocator, new_cs_off_size);
 
-    for (new_offsets.items) |off| {
+    // Copy and convert offsets (may need to change offset size)
+    var gid: u16 = 0;
+    while (gid <= num_glyphs) : (gid += 1) {
+        const orig_off = readCFFOffset(cff_data, cs_offsets_start, gid, cs_off_size);
+        // Rebase offset relative to first glyph
+        const new_off: u32 = @intCast(orig_off - orig_first_offset + 1);
         if (new_cs_off_size == 1) {
-            try new_charstrings.append(allocator, @intCast(off));
+            try new_charstrings.append(allocator, @intCast(new_off));
         } else if (new_cs_off_size == 2) {
-            try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off))));
+            try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_off))));
         } else {
-            const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, off));
+            const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, new_off));
             try new_charstrings.appendSlice(allocator, off_bytes[1..4]);
         }
     }
-    try new_charstrings.appendSlice(allocator, cs_data_buf.items);
+
+    // Copy CharStrings data for glyphs 0 to num_glyphs-1
+    const cs_data = cff_data[cs_data_start + orig_first_offset - 1 ..][0..charstrings_data_size];
+    try new_charstrings.appendSlice(allocator, cs_data);
 
     // Build new CFF: header + name + topdict + strings + gsubrs + charset + charstrings + private
     // For simplicity, keep everything before CharStrings, replace CharStrings, keep Private
@@ -1325,36 +1318,48 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         15,
     ) orelse return error.InvalidCFF;
 
-    // Calculate original charset size based on format
-    var orig_charset_size: usize = 1; // format byte
+    // Calculate charset size for our subset (use num_glyphs, not original cs_count)
+    var subset_charset_size: usize = 1; // format byte
     const charset_format = cff_data[orig_charset_offset];
     if (charset_format == 0) {
         // Format 0: 2 bytes per glyph (except .notdef)
-        orig_charset_size = 1 + (@as(usize, cs_count) - 1) * 2;
+        subset_charset_size = 1 + (@as(usize, num_glyphs) - 1) * 2;
     } else if (charset_format == 1) {
-        // Format 1: ranges with 1-byte nLeft
+        // Format 1: ranges with 1-byte nLeft - parse until we cover num_glyphs-1 glyphs
         var pos = orig_charset_offset + 1;
-        var covered: usize = 1;
-        while (covered < cs_count) {
+        var covered: usize = 1; // .notdef is glyph 0
+        while (covered < num_glyphs and pos + 3 <= cff_data.len) {
             const nleft = cff_data[pos + 2];
-            covered += @as(usize, nleft) + 1;
+            const range_covers = @as(usize, nleft) + 1;
+            if (covered + range_covers > num_glyphs) {
+                // This range extends past our subset - truncate it
+                // We need to include a partial range
+                pos += 3;
+                break;
+            }
+            covered += range_covers;
             pos += 3;
         }
-        orig_charset_size = pos - orig_charset_offset;
+        subset_charset_size = pos - orig_charset_offset;
     } else if (charset_format == 2) {
         // Format 2: ranges with 2-byte nLeft
         var pos = orig_charset_offset + 1;
         var covered: usize = 1;
-        while (covered < cs_count) {
+        while (covered < num_glyphs and pos + 4 <= cff_data.len) {
             const nleft = readU16(cff_data, pos + 2);
-            covered += @as(usize, nleft) + 1;
+            const range_covers = @as(usize, nleft) + 1;
+            if (covered + range_covers > num_glyphs) {
+                pos += 4;
+                break;
+            }
+            covered += range_covers;
             pos += 4;
         }
-        orig_charset_size = pos - orig_charset_offset;
+        subset_charset_size = pos - orig_charset_offset;
     }
 
     // Charset goes right after Global Subrs, CharStrings after that
-    const new_charstrings_actual_offset = new_charstrings_offset + orig_charset_size;
+    const new_charstrings_actual_offset = new_charstrings_offset + subset_charset_size;
 
     // Get original Private DICT info
     const private_info = parseCFFTopDictForPrivate(cff_data, topdict_start);
@@ -1418,7 +1423,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     final_offset += gsubr_index_data.len;
 
     const final_charset_offset = final_offset;
-    final_offset += orig_charset_size;
+    final_offset += subset_charset_size;
 
     const final_charstrings_offset = final_offset;
     final_offset += new_charstrings.items.len;
@@ -1451,7 +1456,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // Assemble final CFF
     const total_size = hdr_size + name_index_data.len + new_topdict_index.items.len +
         string_index_data.len + gsubr_index_data.len +
-        orig_charset_size + new_charstrings.items.len + total_private_size;
+        subset_charset_size + new_charstrings.items.len + total_private_size;
 
     var output = try allocator.alloc(u8, total_size);
     @memset(output, 0);
@@ -1479,8 +1484,8 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     pos += gsubr_index_data.len;
 
     // Charset (copy from original)
-    @memcpy(output[pos..][0..orig_charset_size], cff_data[orig_charset_offset..][0..orig_charset_size]);
-    pos += orig_charset_size;
+    @memcpy(output[pos..][0..subset_charset_size], cff_data[orig_charset_offset..][0..subset_charset_size]);
+    pos += subset_charset_size;
 
     // CharStrings INDEX
     @memcpy(output[pos..][0..new_charstrings.items.len], new_charstrings.items);

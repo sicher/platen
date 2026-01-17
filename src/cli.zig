@@ -60,6 +60,11 @@ pub fn main() !void {
         const output_path = if (args.len > 3) args[3] else "embed_test.pdf";
         try generateEmbedTestPdf(allocator, font_path, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "cff-test")) {
+        // Test CFF subsetting
+        const font_path = if (args.len > 2) args[2] else "test/fonts/Inter/Inter-Regular.otf";
+        const output_path = if (args.len > 3) args[3] else "cff_test.pdf";
+        try generateCffTestPdf(allocator, font_path, output_path);
     } else {
         try printUsage();
     }
@@ -292,6 +297,54 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     const file = try std.fs.cwd().createFile(output_path, .{});
     defer file.close();
     try file.writeAll(pdf);
+}
+
+fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Load font with identity encoding (CID mode for full Unicode)
+    const font = doc.loadFont(font_path) catch |err| {
+        try print("Error loading font '{s}': {}\n", .{ font_path, err });
+        return;
+    };
+    font.encoding = .identity; // Enable CID mode
+
+    try doc.addPage();
+
+    // Just a few characters to test subsetting
+    try doc.setEmbeddedFont(font, 24);
+    try doc.textAt(50, 50, "Hello CFF!");
+
+    try doc.setEmbeddedFont(font, 18);
+    try doc.textAt(50, 100, "ABCDEFGHIJ");
+    try doc.textAt(50, 130, "0123456789");
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+
+    // Show stats
+    const cff_data = font.font.getTable("CFF ".*) orelse font.font.getTable("CFF2".*);
+    const orig_size = if (cff_data) |d| d.len else 0;
+    const subset_size = if (font.subset_data) |s| s.len else orig_size;
+    const used_glyphs = font.cid_used_glyphs.count();
+
+    // Find max glyph ID
+    var max_gid: u16 = 0;
+    for (font.cid_used_glyphs.values()) |gid| {
+        if (gid > max_gid) max_gid = gid;
+    }
+
+    try print("Generated: {s}\n", .{output_path});
+    try print("  PDF size: {} bytes\n", .{pdf.len});
+    try print("  Original CFF: {} bytes\n", .{orig_size});
+    try print("  Subset CFF: {} bytes\n", .{subset_size});
+    try print("  Glyphs used: {} (max gid: {})\n", .{ used_glyphs, max_gid });
+    try print("  Reduction: {d:.1}%\n", .{100.0 - @as(f64, @floatFromInt(subset_size)) / @as(f64, @floatFromInt(orig_size)) * 100.0});
 }
 
 // Use shared test infrastructure from zpdf module

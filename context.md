@@ -1,11 +1,26 @@
 # zpdf Context
 
 ## Current Focus
-CID fonts, OTF support, TTF subsetting working. CFF subsetting deferred. Next: OpenType feature activation.
+CID fonts, OTF support, TTF and CFF subsetting working. Next: OpenType feature activation.
 
 ## TODO
 - [ ] OpenType feature support (GSUB/GPOS parsing, feature activation API, glyph substitution)
-- [ ] CFF subsetting (complex due to subroutine dependencies)
+
+## What We Did (Session 2026-01-17 #6)
+- Implemented CFF subsetting for OTF fonts
+  - Previous attempt failed due to sparse CharStrings with empty `endchar` placeholders
+  - Root cause: empty charstrings caused garbled rendering
+  - Solution: copy ALL original CharStrings up to max_gid (no sparse data)
+  - Also fixed charset size calculation to match new glyph count
+- CFF subsetting now preserves glyph IDs for Identity CID-to-GID mapping
+  - Includes all charstrings from 0 to max_gid
+  - Truncates charset to match new glyph count
+  - Preserves Global/Local Subrs unchanged
+- Size reduction: ~31% for typical text (460KB → 317KB for Inter OTF)
+  - Less optimal than TTF subsetting due to preserved glyph ID range
+  - For better reduction, would need glyph ID remapping (complex)
+- Added `cff-test` CLI command for testing CFF subsetting
+- All integration tests pass
 
 ## What We Did (Session 2026-01-17 #5)
 - Fixed composite glyph handling in CID-aware TTF subsetting
