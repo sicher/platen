@@ -1,7 +1,24 @@
 # zpdf Context
 
 ## Current Focus
-Font subsetting implemented. Next: stream compression (deferred due to Zig 0.15 std lib issues), Unicode support, or graphics import.
+ToUnicode CMap implemented. Next: full Unicode support (CID fonts/Type0), OpenType CFF fonts, or stream compression.
+
+## What We Did (Session 2026-01-17 #2)
+- Implemented ToUnicode CMap for embedded fonts
+  - Added `generateToUnicodeCMap()` in embedded.zig
+  - Creates CMap stream mapping WinAnsi bytes → Unicode codepoints
+  - Format: single-byte codespace `<00> <FF>`, bfchar entries `<XX> <XXXX>`
+- Updated embedded font structure: now 4 objects per font (was 3)
+  - Font dict, FontDescriptor, FontFile2, ToUnicode stream
+  - Fixed resource dict object ID calculation (`idx * 4`)
+- Result: copy/paste and text extraction now work correctly
+- Created integration test suite
+  - New `src/integration_tests.zig` with shared test cases
+  - 6 integration tests: minimal, hello_world, multi_font, all_fonts, multi_page, embedded_fonts
+  - Tests generate PDFs and compare against reference files
+  - CLI now imports shared test cases (removed code duplication)
+  - Tests run automatically with `zig build test`
+- All 56 tests pass (46 unit + 6 integration + 4 testing utilities)
 
 ## What We Did (Session 2026-01-17)
 - Implemented TrueType font subsetting

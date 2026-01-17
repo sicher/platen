@@ -13,6 +13,8 @@ pub const metrics = @import("metrics.zig");
 pub const ttf = @import("ttf.zig");
 pub const embedded = @import("embedded.zig");
 pub const Writer = @import("writer.zig").Writer;
+pub const testing = @import("testing.zig");
+pub const integration_tests = @import("integration_tests.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -373,15 +375,15 @@ pub const Document = struct {
         // 1 = Catalog
         // 2 = Pages (root)
         // 3 to 3+num_standard_fonts-1 = Standard Font objects
-        // Then for each embedded font: Font dict, FontDescriptor, FontFile2 (3 objects each)
+        // Then for each embedded font: Font dict, FontDescriptor, FontFile2, ToUnicode (4 objects each)
         // After fonts = Pages (each page needs 2 objects: page dict + content stream)
 
         const catalog_id: ObjectId = 1;
         const pages_root_id: ObjectId = 2;
         const first_std_font_id: ObjectId = 3;
         const first_emb_font_id: ObjectId = first_std_font_id + @as(ObjectId, @intCast(font_list.items.len));
-        // Each embedded font needs 3 objects
-        const first_page_id: ObjectId = first_emb_font_id + @as(ObjectId, @intCast(self.embedded_fonts.items.len * 3));
+        // Each embedded font needs 4 objects (Font, FontDescriptor, FontFile2, ToUnicode)
+        const first_page_id: ObjectId = first_emb_font_id + @as(ObjectId, @intCast(self.embedded_fonts.items.len * 4));
 
         // Build page refs array for Pages object
         var page_refs = Array.init(self.allocator);
@@ -430,12 +432,17 @@ pub const Document = struct {
             try emb_font.generateSubset();
         }
 
-        // Write embedded font objects (3 objects each: Font, FontDescriptor, FontFile2)
+        // Write embedded font objects (4 objects each: Font, FontDescriptor, FontFile2, ToUnicode)
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
-            const base_id = first_emb_font_id + @as(ObjectId, @intCast(i * 3));
+            const base_id = first_emb_font_id + @as(ObjectId, @intCast(i * 4));
             const font_dict_id = base_id;
             const descriptor_id = base_id + 1;
             const fontfile_id = base_id + 2;
+            const tounicode_id = base_id + 3;
+
+            // Generate ToUnicode CMap
+            const tounicode_cmap = try emb_font.generateToUnicodeCMap();
+            defer self.allocator.free(tounicode_cmap);
 
             // 1. Font dictionary
             try w.beginObject(font_dict_id);
@@ -449,6 +456,7 @@ pub const Document = struct {
                 try font_dict.put("LastChar", Value.int(255));
                 try font_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
                 try font_dict.put("Encoding", Value.name("WinAnsiEncoding"));
+                try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
 
                 // Widths array
                 var widths_array = Array.init(self.allocator);
@@ -497,6 +505,15 @@ pub const Document = struct {
                 defer stream_dict.deinit();
                 try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
                 try w.writeStream(&stream_dict, font_data);
+            }
+            try w.endObject();
+
+            // 4. ToUnicode CMap stream (enables copy/paste)
+            try w.beginObject(tounicode_id);
+            {
+                var tounicode_dict = Dict.init(self.allocator);
+                defer tounicode_dict.deinit();
+                try w.writeStream(&tounicode_dict, tounicode_cmap);
             }
             try w.endObject();
         }
@@ -548,7 +565,8 @@ pub const Document = struct {
                 // Find index of this font
                 for (self.embedded_fonts.items, 0..) |doc_font, idx| {
                     if (doc_font == emb_font) {
-                        const font_obj_id = first_emb_font_id + @as(ObjectId, @intCast(idx * 3));
+                        // Each embedded font uses 4 objects: Font, FontDescriptor, FontFile2, ToUnicode
+                        const font_obj_id = first_emb_font_id + @as(ObjectId, @intCast(idx * 4));
                         const res_name = embeddedFontResourceName(idx);
                         try font_res.put(res_name, Value.ref(.{ .id = font_obj_id }));
                         has_fonts = true;
@@ -837,6 +855,8 @@ test {
     _ = ttf;
     _ = embedded;
     _ = @import("writer.zig");
+    _ = @import("testing.zig");
+    _ = @import("integration_tests.zig");
 }
 
 // ============================================================================
@@ -917,6 +937,7 @@ test "render text with embedded font" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontFile2") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Widths [") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Encoding /WinAnsiEncoding") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ToUnicode") != null);
 
     // Check FontDescriptor fields
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /FontDescriptor") != null);

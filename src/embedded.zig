@@ -129,27 +129,28 @@ pub const EmbeddedFont = struct {
         for (0..256) |i| {
             const unicode = win_ansi_to_unicode[i];
             if (font.getCharWidth(unicode)) |w| {
-                widths[i] = @intFromFloat(@as(f64, @floatFromInt(w)) * scale);
+                // Round to nearest integer (matches fpdf2 behavior)
+                widths[i] = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
             } else {
                 // Use zero width for missing glyphs
                 widths[i] = 0;
             }
         }
 
-        // Scale metrics
-        const ascent: i16 = @intFromFloat(@as(f64, @floatFromInt(hhea.ascent)) * scale);
-        const descent: i16 = @intFromFloat(@as(f64, @floatFromInt(hhea.descent)) * scale);
+        // Scale metrics (round to nearest integer)
+        const ascent: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(hhea.ascent)) * scale));
+        const descent: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(hhea.descent)) * scale));
 
         // Estimate CapHeight as 70% of ascent if not available
         // (Would need OS/2 table for accurate value)
-        const cap_height: i16 = @intFromFloat(@as(f64, @floatFromInt(ascent)) * 0.7);
+        const cap_height: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(ascent)) * 0.7));
 
         // Scale bounding box
         const bbox: [4]i16 = .{
-            @intFromFloat(@as(f64, @floatFromInt(head.x_min)) * scale),
-            @intFromFloat(@as(f64, @floatFromInt(head.y_min)) * scale),
-            @intFromFloat(@as(f64, @floatFromInt(head.x_max)) * scale),
-            @intFromFloat(@as(f64, @floatFromInt(head.y_max)) * scale),
+            @intFromFloat(@round(@as(f64, @floatFromInt(head.x_min)) * scale)),
+            @intFromFloat(@round(@as(f64, @floatFromInt(head.y_min)) * scale)),
+            @intFromFloat(@round(@as(f64, @floatFromInt(head.x_max)) * scale)),
+            @intFromFloat(@round(@as(f64, @floatFromInt(head.y_max)) * scale)),
         };
 
         // Estimate StemV (vertical stem width) - typically 80 for normal, higher for bold
@@ -246,6 +247,64 @@ pub const EmbeddedFont = struct {
             total += self.widths[c];
         }
         return @as(f64, @floatFromInt(total)) * size / 1000.0;
+    }
+
+    /// Generate ToUnicode CMap for PDF text extraction/copy-paste
+    /// Maps WinAnsi byte values to Unicode codepoints
+    pub fn generateToUnicodeCMap(self: *const EmbeddedFont) ![]const u8 {
+        var cmap = std.ArrayListUnmanaged(u8){};
+        errdefer cmap.deinit(self.allocator);
+
+        // CMap header
+        try cmap.appendSlice(self.allocator,
+            \\/CIDInit /ProcSet findresource begin
+            \\12 dict begin
+            \\begincmap
+            \\/CIDSystemInfo
+            \\<</Registry (Adobe)
+            \\/Ordering (UCS)
+            \\/Supplement 0
+            \\>> def
+            \\/CMapName /Adobe-Identity-UCS def
+            \\/CMapType 2 def
+            \\1 begincodespacerange
+            \\<00> <FF>
+            \\endcodespacerange
+            \\
+        );
+
+        // Count used characters (excluding undefined ones mapping to U+FFFD)
+        var count: usize = 0;
+        for (0..256) |i| {
+            if (self.used_chars[i] and win_ansi_to_unicode[i] != 0xFFFD) {
+                count += 1;
+            }
+        }
+
+        // Write bfchar entries
+        var count_buf: [16]u8 = undefined;
+        const count_str = std.fmt.bufPrint(&count_buf, "{d} beginbfchar\n", .{count}) catch unreachable;
+        try cmap.appendSlice(self.allocator, count_str);
+
+        for (0..256) |i| {
+            if (self.used_chars[i] and win_ansi_to_unicode[i] != 0xFFFD) {
+                const unicode = win_ansi_to_unicode[i];
+                var entry_buf: [32]u8 = undefined;
+                const entry = std.fmt.bufPrint(&entry_buf, "<{X:0>2}> <{X:0>4}>\n", .{ i, unicode }) catch unreachable;
+                try cmap.appendSlice(self.allocator, entry);
+            }
+        }
+
+        // CMap footer
+        try cmap.appendSlice(self.allocator,
+            \\endbfchar
+            \\endcmap
+            \\CMapName currentdict /CMap defineresource pop
+            \\end
+            \\end
+        );
+
+        return cmap.toOwnedSlice(self.allocator);
     }
 };
 
@@ -403,26 +462,132 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, lsb)));
     }
 
-    // Build cmap (format 0 - simple byte mapping)
+    // Build cmap with both Format 0 (MacRoman) and Format 4 (Windows Unicode BMP)
+    // PDF viewers with WinAnsiEncoding use Platform 3, Encoding 1 (Format 4)
     var new_cmap = std.ArrayListUnmanaged(u8){};
     defer new_cmap.deinit(allocator);
 
-    // cmap header: version 0, 1 encoding table
-    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 0, 0, 1 });
-    // Encoding record: platform 1 (Mac), encoding 0 (Roman), offset 12
-    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 1, 0, 0, 0, 0, 0, 12 });
-    // Format 0 subtable
-    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 0 }); // format
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 262))); // length
-    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 0 }); // language
+    // First, build the Format 4 subtable for Windows Unicode BMP
+    // This maps Unicode codepoints to glyph IDs
+    var format4 = std.ArrayListUnmanaged(u8){};
+    defer format4.deinit(allocator);
 
-    // Glyph index array (256 bytes)
+    // Collect Unicode -> new glyph ID mappings for used characters
+    const UnicodeMapping = struct { unicode: u16, glyph_id: u16 };
+    var unicode_mappings = std.ArrayListUnmanaged(UnicodeMapping){};
+    defer unicode_mappings.deinit(allocator);
+
+    for (0..256) |i| {
+        if (emb.used_chars[i]) {
+            const unicode = win_ansi_to_unicode[i];
+            if (unicode != 0xFFFD and unicode <= 0xFFFF) { // Valid BMP codepoint
+                const orig_gid = font.getGlyphId(unicode) orelse 0;
+                const new_gid = gid_map.get(orig_gid) orelse 0;
+                try unicode_mappings.append(allocator, .{
+                    .unicode = @intCast(unicode),
+                    .glyph_id = new_gid,
+                });
+            }
+        }
+    }
+
+    // Sort by Unicode codepoint
+    std.mem.sort(UnicodeMapping, unicode_mappings.items, {}, struct {
+        fn lessThan(_: void, a: UnicodeMapping, b: UnicodeMapping) bool {
+            return a.unicode < b.unicode;
+        }
+    }.lessThan);
+
+    // Build segments - for simplicity, one segment per character
+    // Plus the required final segment (0xFFFF -> 0xFFFF)
+    const seg_count: u16 = @intCast(unicode_mappings.items.len + 1);
+    const seg_count_x2: u16 = seg_count * 2;
+
+    // Calculate searchRange, entrySelector, rangeShift
+    var search_range: u16 = 2;
+    var entry_selector: u16 = 0;
+    while (search_range * 2 <= seg_count) {
+        search_range *= 2;
+        entry_selector += 1;
+    }
+    search_range *= 2; // searchRange = 2 * (2^floor(log2(segCount)))
+    const range_shift = seg_count_x2 - search_range;
+
+    // Format 4 header
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 4))); // format
+    // Length will be filled in later
+    const format4_length_pos = format4.items.len;
+    try format4.appendSlice(allocator, &[_]u8{ 0, 0 }); // length placeholder
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, seg_count_x2)));
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, search_range)));
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, entry_selector)));
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, range_shift)));
+
+    // endCode array
+    for (unicode_mappings.items) |m| {
+        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, m.unicode)));
+    }
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // final segment
+
+    // reservedPad
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+
+    // startCode array (same as endCode for single-char segments)
+    for (unicode_mappings.items) |m| {
+        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, m.unicode)));
+    }
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // final segment
+
+    // idDelta array - we'll use idRangeOffset instead, so delta is 0
+    // Actually, for single-char segments, we can use: delta = glyphId - charCode
+    for (unicode_mappings.items) |m| {
+        const delta: i16 = @as(i16, @intCast(m.glyph_id)) - @as(i16, @intCast(m.unicode));
+        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, delta)));
+    }
+    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, 1))); // final segment delta
+
+    // idRangeOffset array (all zeros since we use idDelta)
+    for (0..seg_count) |_| {
+        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+    }
+
+    // No glyphIdArray needed since we use idDelta
+
+    // Update format4 length
+    std.mem.writeInt(u16, format4.items[format4_length_pos..][0..2], @intCast(format4.items.len), .big);
+
+    // Now build the complete cmap table with 2 encoding records
+    // cmap header: version 0, 2 encoding tables
+    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 0, 0, 2 });
+
+    // Encoding record 1: Platform 1 (Mac), Encoding 0 (Roman)
+    // Offset = 4 (header) + 16 (2 records) = 20
+    const format0_offset: u32 = 20;
+    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 1, 0, 0 }); // platform 1, encoding 0
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, format0_offset)));
+
+    // Encoding record 2: Platform 3 (Windows), Encoding 1 (Unicode BMP)
+    // Offset = 20 + 262 (format0 size) = 282
+    const format4_offset: u32 = 20 + 262;
+    try new_cmap.appendSlice(allocator, &[_]u8{ 0, 3, 0, 1 }); // platform 3, encoding 1
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, format4_offset)));
+
+    // Format 0 subtable (for MacRoman compatibility)
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // format
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 262))); // length
+    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
+
+    // Format 0 glyph index array (256 bytes) - maps byte value to glyph
     for (0..256) |i| {
         const unicode = win_ansi_to_unicode[i];
         const orig_gid = font.getGlyphId(unicode) orelse 0;
         const new_gid = gid_map.get(orig_gid) orelse 0;
         try new_cmap.append(allocator, @intCast(new_gid));
     }
+
+    // Append Format 4 subtable
+    try new_cmap.appendSlice(allocator, format4.items);
 
     // Now assemble the final TTF
     // Tables needed: head, hhea, maxp, hmtx, cmap, loca, glyf, name, post
@@ -495,13 +660,13 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // Write TTF header
     std.mem.writeInt(u32, output[0..4], 0x00010000, .big); // sfnt version
     std.mem.writeInt(u16, output[4..6], table_count, .big);
-    // searchRange, entrySelector, rangeShift
-    const search_range: u16 = 128; // 8 * 16
-    const entry_selector: u16 = 3; // log2(8)
-    const range_shift: u16 = table_count * 16 - search_range;
-    std.mem.writeInt(u16, output[6..8], search_range, .big);
-    std.mem.writeInt(u16, output[8..10], entry_selector, .big);
-    std.mem.writeInt(u16, output[10..12], range_shift, .big);
+    // searchRange, entrySelector, rangeShift for table directory
+    const ttf_search_range: u16 = 128; // 8 * 16
+    const ttf_entry_selector: u16 = 3; // log2(8)
+    const ttf_range_shift: u16 = table_count * 16 - ttf_search_range;
+    std.mem.writeInt(u16, output[6..8], ttf_search_range, .big);
+    std.mem.writeInt(u16, output[8..10], ttf_entry_selector, .big);
+    std.mem.writeInt(u16, output[10..12], ttf_range_shift, .big);
 
     // Write table directory
     var dir_offset: usize = 12;
@@ -657,4 +822,28 @@ test "subset is valid TTF" {
     const orig_glyphs = emb.font.maxp.?.num_glyphs;
     const subset_glyphs = parsed.maxp.?.num_glyphs;
     try std.testing.expect(subset_glyphs < orig_glyphs);
+}
+
+test "ToUnicode CMap generation" {
+    const allocator = std.testing.allocator;
+
+    const emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    defer emb.deinit();
+
+    // Mark a few characters including ASCII and special WinAnsi chars
+    emb.markCharsUsed("Hi!");
+
+    const cmap = try emb.generateToUnicodeCMap();
+    defer allocator.free(cmap);
+
+    // Check CMap structure
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "begincodespacerange") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "<00> <FF>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "beginbfchar") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "endbfchar") != null);
+
+    // Check specific mappings: H=0x48→U+0048, i=0x69→U+0069, !=0x21→U+0021
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "<48> <0048>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "<69> <0069>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "<21> <0021>") != null);
 }

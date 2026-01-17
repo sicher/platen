@@ -135,11 +135,11 @@ endstream
 **Current features:**
 - Font subsetting: only used glyphs embedded (~50% file size reduction)
 - WinAnsiEncoding for single-byte text mapping
+- ToUnicode CMap: enables copy/paste and text extraction
 
 **Current limitations:**
 - No stream compression (Zig 0.15 std.compress.flate has incomplete implementation)
-- No ToUnicode CMap (copy/paste may not work correctly for non-ASCII)
-- WinAnsiEncoding only (no full Unicode support yet)
+- WinAnsiEncoding only (no full Unicode/CJK support yet)
 
 **Subsetting implementation** (`createSubsetTTF` in embedded.zig):
 - Tracks used chars via `used_chars[256]` bitmap
@@ -148,10 +148,16 @@ endstream
 - Copies: head, name, post tables
 - Generates valid TrueType that parses correctly
 
+**ToUnicode CMap** (`generateToUnicodeCMap` in embedded.zig):
+- Maps WinAnsi byte values (0x00-0xFF) to Unicode codepoints
+- Enables text extraction and copy/paste in PDF viewers
+- Only includes mappings for used characters
+- Format: single-byte codespace, bfchar entries
+
 **Future enhancements:**
 1. FlateDecode compression for FontFile2 stream (when Zig std lib ready or via C zlib)
-2. ToUnicode CMap for proper copy/paste
-3. CIDFont support for full Unicode text
+2. CIDFont (Type0) support for full Unicode text (CJK, emoji, etc.)
+3. OpenType CFF font support
 
 ### Memory Management
 Uses `ArrayListUnmanaged` throughout - allocator passed to each operation.
@@ -167,7 +173,7 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 
 **Semantic comparison** compares:
 - Text content (exact match)
-- Text positions (within 5pt tolerance)
+- Text positions (within 1.0pt tolerance)
 - Page dimensions
 
 **Does NOT compare:**

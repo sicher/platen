@@ -305,7 +305,7 @@ fn comparePdfsSemantic(allocator: std.mem.Allocator, actual: []const u8, expecte
 
     // Run semantic comparator
     var child = std.process.Child.init(
-        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=5.0" },
+        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" },
         allocator,
     );
     child.stdout_behavior = .Pipe;
