@@ -1,11 +1,59 @@
 # zpdf Context
 
 ## Current Focus
-Compact subsetting working for both TTF and CFF with comprehensive test coverage. CFF desubroutinization complete; String INDEX subsetting deferred due to macOS rendering issues.
+FlateDecode (zlib) compression implemented! PDFs are now smaller than fpdf2 reference in most cases.
 
 ## TODO
-- [ ] CFF String INDEX and Global Subrs subsetting (further size reduction)
 - [ ] OpenType feature support (GSUB/GPOS parsing, feature activation API, glyph substitution)
+
+## What We Did (Session 2026-01-18 #12) [COMPLETE]
+- Implemented PDF stream compression using zlib (FlateDecode filter)
+  - Created `zlib.zig` module with `compress()`, `compressLevel()`, `decompress()` functions
+  - Uses C zlib via @cImport (reliable, well-tested implementation)
+  - zlib dependency bundled via `build.zig.zon` (allyourcodebase/zlib) - no system deps needed
+- Updated `writer.zig`:
+  - Added `writeStreamCompressed()` function
+  - Automatically adds `/Filter /FlateDecode` when compression saves space
+  - Falls back to uncompressed if compression doesn't help
+- Updated `zpdf.zig` to use compression for:
+  - Font streams (CFF and TTF data)
+  - ToUnicode CMap streams
+  - Page content streams
+- Size comparison results (zpdf vs fpdf2):
+  - inter_fonts: 77KB vs 95KB (**-18.8%**)
+  - cid_fonts: 28KB vs 32KB (**-10.6%**)
+  - all_fonts: 2.2KB vs 2.8KB (**-22.7%**)
+  - hello_world: 614B vs 977B (**-37.2%**)
+- All 96 tests pass, all 8 integration tests pass
+- PDFs validated with qpdf, text extraction works correctly
+
+## What We Did (Session 2026-01-18 #11) [COMPLETE]
+- Implemented CFF String INDEX subsetting with SID remapping
+  - New functions in `cff_subset.zig`:
+    - `collectTopDictSIDs()`: extracts SIDs from Top DICT (operators 0-4, 12 0/21/22/30)
+    - `buildSubsetStringIndex()`: builds subset String INDEX with SID remapping
+    - `buildUpdatedTopDictWithSIDRemap()`: Top DICT builder with SID remapping
+    - `remapSID()`: remaps custom SIDs (>= 391), standard SIDs pass through
+    - `STANDARD_STRING_COUNT = 391`: CFF spec constant
+- Fixed critical bug: FontMatrix real numbers were being corrupted
+  - Root cause: `buildUpdatedTopDictWithSIDRemap` used `-1` sentinel for real numbers, then incorrectly encoded it as an integer
+  - Real numbers use special CFF encoding (byte 30 + nibble-encoded digits)
+  - Fix: track operand byte ranges and copy verbatim for non-SID operators
+- Size improvements:
+  - CFF subset: **33KB → 3.3KB** (10x improvement!)
+  - Test font: 99.3% reduction from original 460KB
+  - String INDEX: 29KB → 112 bytes (only font name, copyright, version)
+- Key insight: Inter font charset uses only standard SIDs (< 391) for glyph names
+  - Standard glyph names (space, A, B, etc.) are built into CFF spec
+  - Only Top DICT strings (font name, copyright, version) use custom SIDs
+  - No charset SID remapping needed for this font
+- Added unit tests:
+  - `remapSID standard SIDs unchanged`
+  - `buildSubsetStringIndex basic`
+  - `buildSubsetStringIndex empty when only standard SIDs`
+  - `collectTopDictSIDs basic`
+- All 93 tests pass, all 8 integration tests pass
+- PDFs render correctly in Poppler/Preview
 
 ## What We Did (Session 2026-01-17 #10) [COMPLETE]
 - Refactored embedded.zig to reduce code duplication and improve organization

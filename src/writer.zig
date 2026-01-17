@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const objects = @import("objects.zig");
+const zlib = @import("zlib.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -83,6 +84,31 @@ pub const Writer = struct {
         try self.output.appendSlice(self.allocator, "stream\n");
         try self.output.appendSlice(self.allocator, data);
         try self.output.appendSlice(self.allocator, "\nendstream\n");
+    }
+
+    /// Write a compressed stream object using FlateDecode (zlib)
+    /// Compresses the data and adds appropriate Filter entry to dict
+    pub fn writeStreamCompressed(self: *Writer, dict: *Dict, data: []const u8) !void {
+        // Compress the data
+        const compressed = try zlib.compress(self.allocator, data);
+        defer self.allocator.free(compressed);
+
+        // Only use compression if it actually saves space
+        if (compressed.len < data.len) {
+            try dict.put("Filter", Value.name("FlateDecode"));
+            try dict.put("Length", Value.int(@intCast(compressed.len)));
+            try self.writeDict(dict.*);
+            try self.output.appendSlice(self.allocator, "stream\n");
+            try self.output.appendSlice(self.allocator, compressed);
+            try self.output.appendSlice(self.allocator, "\nendstream\n");
+        } else {
+            // Fall back to uncompressed if compression doesn't help
+            try dict.put("Length", Value.int(@intCast(data.len)));
+            try self.writeDict(dict.*);
+            try self.output.appendSlice(self.allocator, "stream\n");
+            try self.output.appendSlice(self.allocator, data);
+            try self.output.appendSlice(self.allocator, "\nendstream\n");
+        }
     }
 
     /// Write xref table and trailer, return the final PDF bytes

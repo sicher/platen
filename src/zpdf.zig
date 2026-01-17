@@ -13,6 +13,7 @@ pub const metrics = @import("metrics.zig");
 pub const ttf = @import("ttf.zig");
 pub const embedded = @import("embedded.zig");
 pub const Writer = @import("writer.zig").Writer;
+pub const zlib = @import("zlib.zig");
 pub const testing = @import("testing.zig");
 pub const integration_tests = @import("integration_tests.zig");
 
@@ -689,7 +690,7 @@ pub const Document = struct {
                     } else {
                         try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
                     }
-                    try w.writeStream(&stream_dict, font_data);
+                    try w.writeStreamCompressed(&stream_dict, font_data);
                 }
                 try w.endObject();
 
@@ -698,7 +699,7 @@ pub const Document = struct {
                 {
                     var tounicode_dict = Dict.init(self.allocator);
                     defer tounicode_dict.deinit();
-                    try w.writeStream(&tounicode_dict, tounicode_cmap);
+                    try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
                 }
                 try w.endObject();
             } else {
@@ -782,7 +783,7 @@ pub const Document = struct {
                     } else {
                         try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
                     }
-                    try w.writeStream(&stream_dict, font_data);
+                    try w.writeStreamCompressed(&stream_dict, font_data);
                 }
                 try w.endObject();
 
@@ -791,7 +792,7 @@ pub const Document = struct {
                 {
                     var tounicode_dict = Dict.init(self.allocator);
                     defer tounicode_dict.deinit();
-                    try w.writeStream(&tounicode_dict, tounicode_cmap);
+                    try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
                 }
                 try w.endObject();
             }
@@ -862,11 +863,11 @@ pub const Document = struct {
             try w.writeDict(page_dict);
             try w.endObject();
 
-            // Content stream
+            // Content stream (compressed)
             try w.beginObject(content_id);
             var content_dict = Dict.init(self.allocator);
             defer content_dict.deinit();
-            try w.writeStream(&content_dict, page.content.items);
+            try w.writeStreamCompressed(&content_dict, page.content.items);
             try w.endObject();
         }
 
@@ -1253,14 +1254,13 @@ test "mix standard and embedded fonts" {
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
 
-    // Check all font types present
+    // Check all font types present (these are in dict, not compressed content stream)
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type1") != null); // Standard fonts
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /TrueType") != null); // Embedded font
 
-    // Check font references in content stream
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/F1 12") != null); // Helvetica
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 14") != null); // Courier Prime
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/F5 12") != null); // Times Roman
+    // Check fonts are referenced in page Resources (uncompressed)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/F1 ") != null); // Helvetica ref
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null); // Embedded font ref
 }
 
 test "multiple embedded fonts" {
@@ -1293,9 +1293,9 @@ test "multiple embedded fonts" {
     }
     try std.testing.expect(count >= 2);
 
-    // Check E1 and E2 font references
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 12") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 12") != null);
+    // Check E1 and E2 font references in Resources (uncompressed)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 ") != null);
 }
 
 test "embedded font on multiple pages" {

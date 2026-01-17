@@ -68,6 +68,230 @@ pub fn readCFFOffset(data: []const u8, base: usize, index: u16, off_size: u8) us
 }
 
 // =============================================================================
+// SID Remapping for String INDEX Subsetting
+// =============================================================================
+
+/// Standard CFF string count (SIDs 0-390 are predefined)
+pub const STANDARD_STRING_COUNT: u16 = 391;
+
+/// Collect all SIDs used in Top DICT
+/// Top DICT operators that take SID operands:
+/// - 0: version, 1: Notice, 2: FullName, 3: FamilyName, 4: Weight
+/// - 12 0: Copyright, 12 21: PostScript, 12 22: BaseFontName
+/// - 12 30: ROS (first two operands are SIDs)
+pub fn collectTopDictSIDs(
+    allocator: std.mem.Allocator,
+    cff_data: []const u8,
+    topdict_index_start: usize,
+) !std.ArrayListUnmanaged(u16) {
+    var sids = std.ArrayListUnmanaged(u16){};
+    errdefer sids.deinit(allocator);
+
+    const count = readU16(cff_data, topdict_index_start);
+    if (count == 0) return sids;
+
+    const off_size = cff_data[topdict_index_start + 2];
+    const offsets_start = topdict_index_start + 3;
+    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
+
+    const first_off = readCFFOffset(cff_data, offsets_start, 0, off_size);
+    const second_off = readCFFOffset(cff_data, offsets_start, 1, off_size);
+    const dict_data = cff_data[data_start + first_off - 1 .. data_start + second_off - 1];
+
+    // Parse dict, tracking operands
+    var operands: [48]i32 = undefined;
+    var op_count: usize = 0;
+    var i: usize = 0;
+
+    while (i < dict_data.len) {
+        const b0 = dict_data[i];
+
+        if (b0 == 12) {
+            // Two-byte operator
+            if (i + 1 < dict_data.len) {
+                const b1 = dict_data[i + 1];
+                if (b1 == 0 or b1 == 21 or b1 == 22) {
+                    // Copyright, PostScript, BaseFontName - single SID operand
+                    if (op_count >= 1 and operands[op_count - 1] >= 0) {
+                        try sids.append(allocator, @intCast(operands[op_count - 1]));
+                    }
+                } else if (b1 == 30) {
+                    // ROS - first two operands are SIDs (Registry, Ordering)
+                    if (op_count >= 2) {
+                        if (operands[op_count - 3] >= 0) try sids.append(allocator, @intCast(operands[op_count - 3]));
+                        if (operands[op_count - 2] >= 0) try sids.append(allocator, @intCast(operands[op_count - 2]));
+                    }
+                }
+            }
+            i += 2;
+            op_count = 0;
+        } else if (b0 <= 4) {
+            // version, Notice, FullName, FamilyName, Weight - single SID operand
+            if (op_count >= 1 and operands[op_count - 1] >= 0) {
+                try sids.append(allocator, @intCast(operands[op_count - 1]));
+            }
+            i += 1;
+            op_count = 0;
+        } else if (b0 <= 21) {
+            // Other single-byte operator
+            i += 1;
+            op_count = 0;
+        } else if (b0 == 28) {
+            if (op_count < 48) {
+                operands[op_count] = @as(i32, @as(i16, @bitCast(readU16(dict_data, i + 1))));
+                op_count += 1;
+            }
+            i += 3;
+        } else if (b0 == 29) {
+            if (op_count < 48) {
+                operands[op_count] = @as(i32, @bitCast(readU32(dict_data, i + 1)));
+                op_count += 1;
+            }
+            i += 5;
+        } else if (b0 == 30) {
+            // Real number - skip
+            i += 1;
+            while (i < dict_data.len and (dict_data[i] & 0xf) != 0xf and (dict_data[i] >> 4) != 0xf) : (i += 1) {}
+            i += 1;
+            op_count += 1;
+        } else if (b0 >= 32 and b0 <= 246) {
+            if (op_count < 48) {
+                operands[op_count] = @as(i32, b0) - 139;
+                op_count += 1;
+            }
+            i += 1;
+        } else if (b0 >= 247 and b0 <= 250) {
+            if (op_count < 48 and i + 1 < dict_data.len) {
+                operands[op_count] = (@as(i32, b0) - 247) * 256 + dict_data[i + 1] + 108;
+                op_count += 1;
+            }
+            i += 2;
+        } else if (b0 >= 251 and b0 <= 254) {
+            if (op_count < 48 and i + 1 < dict_data.len) {
+                operands[op_count] = -(@as(i32, b0) - 251) * 256 - dict_data[i + 1] - 108;
+                op_count += 1;
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    return sids;
+}
+
+/// Build a subset String INDEX containing only the strings referenced by used_sids.
+/// Returns the new String INDEX data and a remap from old SID to new SID.
+pub fn buildSubsetStringIndex(
+    allocator: std.mem.Allocator,
+    cff_data: []const u8,
+    string_index_start: usize,
+    used_sids: []const u16,
+) !struct { data: []const u8, remap: std.AutoHashMapUnmanaged(u16, u16) } {
+    const orig_index = parseCFFIndex(cff_data, string_index_start) orelse
+        return .{ .data = &[_]u8{ 0, 0 }, .remap = .{} };
+
+    // Collect unique custom SIDs (>= 391) and sort them
+    var custom_sids = std.ArrayListUnmanaged(u16){};
+    defer custom_sids.deinit(allocator);
+
+    for (used_sids) |sid| {
+        if (sid >= STANDARD_STRING_COUNT) {
+            // Check if already in list
+            var found = false;
+            for (custom_sids.items) |existing| {
+                if (existing == sid) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                try custom_sids.append(allocator, sid);
+            }
+        }
+    }
+
+    // Sort for consistent ordering
+    std.mem.sort(u16, custom_sids.items, {}, std.sort.asc(u16));
+
+    // Build remap: old SID -> new SID
+    var remap = std.AutoHashMapUnmanaged(u16, u16){};
+    errdefer remap.deinit(allocator);
+
+    for (custom_sids.items, 0..) |old_sid, idx| {
+        const new_sid: u16 = STANDARD_STRING_COUNT + @as(u16, @intCast(idx));
+        try remap.put(allocator, old_sid, new_sid);
+    }
+
+    // Build new String INDEX with only needed strings
+    var string_data = std.ArrayListUnmanaged(u8){};
+    defer string_data.deinit(allocator);
+
+    for (custom_sids.items) |old_sid| {
+        const string_idx = old_sid - STANDARD_STRING_COUNT;
+        if (orig_index.getEntry(string_idx)) |str| {
+            try string_data.appendSlice(allocator, str);
+        }
+    }
+
+    // Build INDEX structure
+    var output = std.ArrayListUnmanaged(u8){};
+    errdefer output.deinit(allocator);
+
+    const new_count: u16 = @intCast(custom_sids.items.len);
+    if (new_count == 0) {
+        try output.appendSlice(allocator, &[_]u8{ 0, 0 });
+        return .{ .data = try output.toOwnedSlice(allocator), .remap = remap };
+    }
+
+    // Determine offset size needed
+    var offsets = std.ArrayListUnmanaged(u32){};
+    defer offsets.deinit(allocator);
+
+    var current_offset: u32 = 1;
+    try offsets.append(allocator, current_offset);
+
+    for (custom_sids.items) |old_sid| {
+        const string_idx = old_sid - STANDARD_STRING_COUNT;
+        if (orig_index.getEntry(string_idx)) |str| {
+            current_offset += @intCast(str.len);
+        }
+        try offsets.append(allocator, current_offset);
+    }
+
+    const off_size: u8 = if (current_offset < 256) 1 else if (current_offset < 65536) 2 else if (current_offset < 16777216) 3 else 4;
+
+    // Write count
+    try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, new_count)));
+    // Write offSize
+    try output.append(allocator, off_size);
+    // Write offsets
+    for (offsets.items) |off| {
+        switch (off_size) {
+            1 => try output.append(allocator, @intCast(off)),
+            2 => try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off)))),
+            3 => {
+                try output.append(allocator, @intCast((off >> 16) & 0xff));
+                try output.append(allocator, @intCast((off >> 8) & 0xff));
+                try output.append(allocator, @intCast(off & 0xff));
+            },
+            4 => try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, off))),
+            else => {},
+        }
+    }
+    // Write string data
+    try output.appendSlice(allocator, string_data.items);
+
+    return .{ .data = try output.toOwnedSlice(allocator), .remap = remap };
+}
+
+/// Remap an SID using the provided mapping. Standard SIDs (< 391) pass through unchanged.
+pub fn remapSID(sid: u16, remap: *const std.AutoHashMapUnmanaged(u16, u16)) u16 {
+    if (sid < STANDARD_STRING_COUNT) return sid;
+    return remap.get(sid) orelse sid;
+}
+
+// =============================================================================
 // CFF DICT Parsing
 // =============================================================================
 
@@ -312,6 +536,176 @@ pub fn buildUpdatedTopDict(
         } else if (b0 >= 32 and b0 <= 246) {
             i += 1;
         } else if (b0 >= 247 and b0 <= 254) {
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Build updated Top DICT with SID remapping for String INDEX subsetting.
+/// This version remaps SIDs in operators 0-4 and 12 0/21/22/30.
+/// It preserves real numbers and other operands verbatim.
+pub fn buildUpdatedTopDictWithSIDRemap(
+    allocator: std.mem.Allocator,
+    cff_data: []const u8,
+    topdict_index_start: usize,
+    output: *std.ArrayListUnmanaged(u8),
+    offsets: TopDictOffsets,
+    sid_remap: *const std.AutoHashMapUnmanaged(u16, u16),
+) !void {
+    const count = readU16(cff_data, topdict_index_start);
+    if (count == 0) return;
+
+    const off_size = cff_data[topdict_index_start + 2];
+    const offsets_start = topdict_index_start + 3;
+    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
+
+    const first_off = readCFFOffset(cff_data, offsets_start, 0, off_size);
+    const second_off = readCFFOffset(cff_data, offsets_start, 1, off_size);
+    const dict_data = cff_data[data_start + first_off - 1 .. data_start + second_off - 1];
+
+    // Track operand values (for SID remapping) and byte ranges (for verbatim copy)
+    var operand_values: [48]i32 = undefined;
+    var operand_starts: [48]usize = undefined;
+    var operand_ends: [48]usize = undefined;
+    var operand_is_int: [48]bool = undefined;
+    var op_count: usize = 0;
+    var i: usize = 0;
+
+    while (i < dict_data.len) {
+        const b0 = dict_data[i];
+
+        if (b0 == 15) {
+            // charset - replace with new offset
+            try encodeCFFInt(allocator, output, @intCast(offsets.charset));
+            try output.append(allocator, 15);
+            i += 1;
+            op_count = 0;
+        } else if (b0 == 16) {
+            // Encoding - skip/remove
+            i += 1;
+            op_count = 0;
+        } else if (b0 == 17) {
+            // CharStrings - replace with new offset
+            try encodeCFFInt(allocator, output, @intCast(offsets.charstrings));
+            try output.append(allocator, 17);
+            i += 1;
+            op_count = 0;
+        } else if (b0 == 18) {
+            // Private - replace with new size and offset
+            try encodeCFFInt(allocator, output, @intCast(offsets.private_size));
+            try encodeCFFInt(allocator, output, @intCast(offsets.private_offset));
+            try output.append(allocator, 18);
+            i += 1;
+            op_count = 0;
+        } else if (b0 <= 4) {
+            // version, Notice, FullName, FamilyName, Weight - remap SID
+            if (op_count >= 1 and operand_is_int[op_count - 1] and operand_values[op_count - 1] >= 0) {
+                const old_sid: u16 = @intCast(operand_values[op_count - 1]);
+                const new_sid = remapSID(old_sid, sid_remap);
+                try encodeCFFInt(allocator, output, @intCast(new_sid));
+            }
+            try output.append(allocator, b0);
+            i += 1;
+            op_count = 0;
+        } else if (b0 == 12) {
+            if (i + 1 < dict_data.len) {
+                const b1 = dict_data[i + 1];
+                if (b1 == 0 or b1 == 21 or b1 == 22) {
+                    // Copyright, PostScript, BaseFontName - remap SID
+                    if (op_count >= 1 and operand_is_int[op_count - 1] and operand_values[op_count - 1] >= 0) {
+                        const old_sid: u16 = @intCast(operand_values[op_count - 1]);
+                        const new_sid = remapSID(old_sid, sid_remap);
+                        try encodeCFFInt(allocator, output, @intCast(new_sid));
+                    }
+                    try output.appendSlice(allocator, &[_]u8{ 12, b1 });
+                } else if (b1 == 30) {
+                    // ROS - remap first two SIDs (Registry, Ordering), keep Supplement
+                    if (op_count >= 3 and operand_is_int[op_count - 3] and operand_is_int[op_count - 2]) {
+                        const reg_sid: u16 = if (operand_values[op_count - 3] >= 0) @intCast(operand_values[op_count - 3]) else 0;
+                        const ord_sid: u16 = if (operand_values[op_count - 2] >= 0) @intCast(operand_values[op_count - 2]) else 0;
+                        try encodeCFFInt(allocator, output, @intCast(remapSID(reg_sid, sid_remap)));
+                        try encodeCFFInt(allocator, output, @intCast(remapSID(ord_sid, sid_remap)));
+                        // Copy supplement verbatim
+                        try output.appendSlice(allocator, dict_data[operand_starts[op_count - 1]..operand_ends[op_count - 1]]);
+                    }
+                    try output.appendSlice(allocator, &[_]u8{ 12, 30 });
+                } else {
+                    // Other two-byte operators - copy operands verbatim to preserve reals
+                    if (op_count > 0) {
+                        try output.appendSlice(allocator, dict_data[operand_starts[0]..operand_ends[op_count - 1]]);
+                    }
+                    try output.appendSlice(allocator, &[_]u8{ 12, b1 });
+                }
+            }
+            i += 2;
+            op_count = 0;
+        } else if (b0 <= 21) {
+            // Other single-byte operators - copy operands verbatim to preserve reals
+            if (op_count > 0) {
+                try output.appendSlice(allocator, dict_data[operand_starts[0]..operand_ends[op_count - 1]]);
+            }
+            try output.append(allocator, b0);
+            i += 1;
+            op_count = 0;
+        } else if (b0 == 28) {
+            if (op_count < 48) {
+                operand_starts[op_count] = i;
+                operand_values[op_count] = @as(i32, @as(i16, @bitCast(readU16(dict_data, i + 1))));
+                operand_is_int[op_count] = true;
+                operand_ends[op_count] = i + 3;
+                op_count += 1;
+            }
+            i += 3;
+        } else if (b0 == 29) {
+            if (op_count < 48) {
+                operand_starts[op_count] = i;
+                operand_values[op_count] = @as(i32, @bitCast(readU32(dict_data, i + 1)));
+                operand_is_int[op_count] = true;
+                operand_ends[op_count] = i + 5;
+                op_count += 1;
+            }
+            i += 5;
+        } else if (b0 == 30) {
+            // Real number - track byte range for verbatim copy
+            const start = i;
+            i += 1;
+            while (i < dict_data.len and (dict_data[i] & 0xf) != 0xf and (dict_data[i] >> 4) != 0xf) : (i += 1) {}
+            i += 1;
+            if (op_count < 48) {
+                operand_starts[op_count] = start;
+                operand_values[op_count] = 0; // Not used for reals
+                operand_is_int[op_count] = false;
+                operand_ends[op_count] = i;
+                op_count += 1;
+            }
+        } else if (b0 >= 32 and b0 <= 246) {
+            if (op_count < 48) {
+                operand_starts[op_count] = i;
+                operand_values[op_count] = @as(i32, b0) - 139;
+                operand_is_int[op_count] = true;
+                operand_ends[op_count] = i + 1;
+                op_count += 1;
+            }
+            i += 1;
+        } else if (b0 >= 247 and b0 <= 250) {
+            if (op_count < 48 and i + 1 < dict_data.len) {
+                operand_starts[op_count] = i;
+                operand_values[op_count] = (@as(i32, b0) - 247) * 256 + dict_data[i + 1] + 108;
+                operand_is_int[op_count] = true;
+                operand_ends[op_count] = i + 2;
+                op_count += 1;
+            }
+            i += 2;
+        } else if (b0 >= 251 and b0 <= 254) {
+            if (op_count < 48 and i + 1 < dict_data.len) {
+                operand_starts[op_count] = i;
+                operand_values[op_count] = -(@as(i32, b0) - 251) * 256 - dict_data[i + 1] - 108;
+                operand_is_int[op_count] = true;
+                operand_ends[op_count] = i + 2;
+                op_count += 1;
+            }
             i += 2;
         } else {
             i += 1;
@@ -619,4 +1013,118 @@ test "buildPrivateDictWithoutSubrs" {
     for (output.items) |b| {
         try std.testing.expect(b != 19);
     }
+}
+
+test "remapSID standard SIDs unchanged" {
+    // Standard SIDs (< 391) should pass through unchanged
+    var remap = std.AutoHashMapUnmanaged(u16, u16){};
+    defer remap.deinit(std.testing.allocator);
+
+    try remap.put(std.testing.allocator, 500, 391); // Custom SID mapping
+
+    // Standard SIDs unchanged
+    try std.testing.expectEqual(@as(u16, 0), remapSID(0, &remap));
+    try std.testing.expectEqual(@as(u16, 34), remapSID(34, &remap)); // 'space'
+    try std.testing.expectEqual(@as(u16, 390), remapSID(390, &remap));
+
+    // Custom SID gets remapped
+    try std.testing.expectEqual(@as(u16, 391), remapSID(500, &remap));
+
+    // Unknown custom SID returns unchanged
+    try std.testing.expectEqual(@as(u16, 999), remapSID(999, &remap));
+}
+
+test "buildSubsetStringIndex basic" {
+    const allocator = std.testing.allocator;
+
+    // Build a String INDEX with 3 strings
+    const string_index = [_]u8{
+        0, 3, // count = 3
+        1, // offSize = 1
+        1, 4, 8, 14, // offsets: entry 0 at 1-3, entry 1 at 4-7, entry 2 at 8-13
+        'F', 'o', 'o', // entry 0: "Foo" (SID 391)
+        'B', 'a', 'r', '!', // entry 1: "Bar!" (SID 392)
+        'H', 'e', 'l', 'l', 'o', '!', // entry 2: "Hello!" (SID 393)
+    };
+
+    // Request only SIDs 391 and 393 (skip 392)
+    const used_sids = [_]u16{ 0, 34, 391, 393 }; // Include standard SIDs too
+
+    const result = try buildSubsetStringIndex(allocator, &string_index, 0, &used_sids);
+    defer allocator.free(result.data);
+    defer {
+        var remap = result.remap;
+        remap.deinit(allocator);
+    }
+
+    // Should have remapped custom SIDs
+    try std.testing.expectEqual(@as(u16, 391), result.remap.get(391).?);
+    try std.testing.expectEqual(@as(u16, 392), result.remap.get(393).?);
+
+    // Parse the result String INDEX
+    const new_idx = parseCFFIndex(result.data, 0);
+    try std.testing.expect(new_idx != null);
+    try std.testing.expectEqual(@as(u16, 2), new_idx.?.count); // Only 2 custom strings
+
+    // Verify content
+    const entry0 = new_idx.?.getEntry(0);
+    try std.testing.expect(entry0 != null);
+    try std.testing.expectEqualSlices(u8, "Foo", entry0.?);
+
+    const entry1 = new_idx.?.getEntry(1);
+    try std.testing.expect(entry1 != null);
+    try std.testing.expectEqualSlices(u8, "Hello!", entry1.?);
+}
+
+test "buildSubsetStringIndex empty when only standard SIDs" {
+    const allocator = std.testing.allocator;
+
+    // String INDEX with 2 strings
+    const string_index = [_]u8{
+        0, 2, // count = 2
+        1, // offSize = 1
+        1, 4, 8, // offsets
+        'F', 'o', 'o', // entry 0
+        'B', 'a', 'r', '!', // entry 1
+    };
+
+    // Request only standard SIDs
+    const used_sids = [_]u16{ 0, 34, 35, 36 };
+
+    const result = try buildSubsetStringIndex(allocator, &string_index, 0, &used_sids);
+    defer allocator.free(result.data);
+    defer {
+        var remap = result.remap;
+        remap.deinit(allocator);
+    }
+
+    // Should have empty String INDEX (count = 0)
+    try std.testing.expectEqual(@as(u16, 0), readU16(result.data, 0));
+    try std.testing.expectEqual(@as(usize, 0), result.remap.count());
+}
+
+test "collectTopDictSIDs basic" {
+    const allocator = std.testing.allocator;
+
+    // Build a minimal Top DICT INDEX with version SID and FamilyName SID
+    // version (op 0) = SID 500, FamilyName (op 3) = SID 501
+    // CFF integer encoding for 500: 500-108=392, 392/256=1 r136, so (248, 136) = (0xF8, 0x88)
+    // CFF integer encoding for 501: 501-108=393, 393/256=1 r137, so (248, 137) = (0xF8, 0x89)
+    const topdict_index = [_]u8{
+        0, 1, // count = 1
+        1, // offSize = 1
+        1, 7, // offsets: 1 to 7 (6 bytes of dict data)
+        // Dict data (6 bytes total):
+        0xF8, 0x88, // SID 500 encoded
+        0, // version operator
+        0xF8, 0x89, // SID 501 encoded
+        3, // FamilyName operator
+    };
+
+    var sids = try collectTopDictSIDs(allocator, &topdict_index, 0);
+    defer sids.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 2), sids.items.len);
+    try std.testing.expectEqual(@as(u16, 500), sids.items[0]);
+    try std.testing.expectEqual(@as(u16, 501), sids.items[1]);
 }

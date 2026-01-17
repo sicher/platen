@@ -39,6 +39,11 @@ const getSubrBias = cff_subset.getSubrBias;
 const desubroutinizeCharString = cff_subset.desubroutinizeCharString;
 const PrivateInfo = cff_subset.PrivateInfo;
 const TopDictOffsets = cff_subset.TopDictOffsets;
+const collectTopDictSIDs = cff_subset.collectTopDictSIDs;
+const buildSubsetStringIndex = cff_subset.buildSubsetStringIndex;
+const buildUpdatedTopDictWithSIDRemap = cff_subset.buildUpdatedTopDictWithSIDRemap;
+const remapSID = cff_subset.remapSID;
+const STANDARD_STRING_COUNT = cff_subset.STANDARD_STRING_COUNT;
 
 /// Font encoding mode for PDF embedding
 pub const FontEncoding = enum {
@@ -1965,17 +1970,42 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
         15,
     ) orelse return error.InvalidCFF;
 
-    // Build format 0 charset preserving original SIDs for each glyph
-    // This is required for macOS/CoreGraphics which uses SIDs for glyph lookup
-    try new_charset.append(allocator, 0); // Format 0
-    // For each glyph (except .notdef at index 0), get its original SID
+    // Collect all SIDs used in the new charset
+    var charset_sids = std.ArrayListUnmanaged(u16){};
+    defer charset_sids.deinit(allocator);
+    try charset_sids.append(allocator, 0); // .notdef always has SID 0
     for (glyph_list.items[1..]) |orig_gid| {
         const sid = getCharsetSID(cff_data, orig_charset_offset, orig_gid) orelse 1;
-        try new_charset.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, sid)));
+        try charset_sids.append(allocator, sid);
     }
 
-    // Keep full String INDEX (no subsetting for now)
-    const string_index_data = cff_data[string_start..string_end];
+    // Collect SIDs used in Top DICT
+    var topdict_sids = try collectTopDictSIDs(allocator, cff_data, topdict_start);
+    defer topdict_sids.deinit(allocator);
+
+    // Combine all used SIDs
+    var all_used_sids = std.ArrayListUnmanaged(u16){};
+    defer all_used_sids.deinit(allocator);
+    try all_used_sids.appendSlice(allocator, charset_sids.items);
+    try all_used_sids.appendSlice(allocator, topdict_sids.items);
+
+    // Build subset String INDEX with SID remapping
+    const string_subset = try buildSubsetStringIndex(allocator, cff_data, string_start, all_used_sids.items);
+    defer allocator.free(string_subset.data);
+    var sid_remap = string_subset.remap;
+    defer sid_remap.deinit(allocator);
+
+    // String INDEX subsetting removes unused strings and remaps SIDs in Top DICT.
+    // Charset SIDs are preserved (standard SIDs < 391 don't need remapping).
+    const use_string_subsetting = true;
+    const string_index_data = if (use_string_subsetting) string_subset.data else cff_data[string_start..string_end];
+
+    // Build format 0 charset with original SIDs (standard SIDs don't need remapping)
+    try new_charset.append(allocator, 0); // Format 0
+    for (charset_sids.items[1..]) |orig_sid| {
+        // Don't remap SIDs - macOS needs original SIDs for glyph lookup
+        try new_charset.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, orig_sid)));
+    }
 
     // Private DICT handling
     const orig_private_size = private_info.size;
@@ -2035,12 +2065,21 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     // Private size includes Local Subrs when not desubroutinizing
     const total_private_size = new_private.items.len + local_subrs_size;
 
-    try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
-        .charset = @intCast(est_charset_offset),
-        .charstrings = @intCast(est_charstrings_offset),
-        .private_size = total_private_size,
-        .private_offset = @intCast(est_private_offset),
-    });
+    if (use_string_subsetting) {
+        try buildUpdatedTopDictWithSIDRemap(allocator, cff_data, topdict_start, &new_topdict, .{
+            .charset = @intCast(est_charset_offset),
+            .charstrings = @intCast(est_charstrings_offset),
+            .private_size = total_private_size,
+            .private_offset = @intCast(est_private_offset),
+        }, &sid_remap);
+    } else {
+        try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+            .charset = @intCast(est_charset_offset),
+            .charstrings = @intCast(est_charstrings_offset),
+            .private_size = total_private_size,
+            .private_offset = @intCast(est_private_offset),
+        });
+    }
 
     // Build Top DICT INDEX
     var new_topdict_index = std.ArrayListUnmanaged(u8){};
@@ -2073,12 +2112,21 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Rebuild Top DICT with correct offsets
     new_topdict.clearRetainingCapacity();
-    try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
-        .charset = @intCast(final_charset_offset),
-        .charstrings = @intCast(final_charstrings_offset),
-        .private_size = total_private_size,
-        .private_offset = @intCast(final_private_offset),
-    });
+    if (use_string_subsetting) {
+        try buildUpdatedTopDictWithSIDRemap(allocator, cff_data, topdict_start, &new_topdict, .{
+            .charset = @intCast(final_charset_offset),
+            .charstrings = @intCast(final_charstrings_offset),
+            .private_size = total_private_size,
+            .private_offset = @intCast(final_private_offset),
+        }, &sid_remap);
+    } else {
+        try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+            .charset = @intCast(final_charset_offset),
+            .charstrings = @intCast(final_charstrings_offset),
+            .private_size = total_private_size,
+            .private_offset = @intCast(final_private_offset),
+        });
+    }
 
     // Rebuild Top DICT INDEX
     new_topdict_index.clearRetainingCapacity();
