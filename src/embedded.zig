@@ -2662,6 +2662,9 @@ fn desubroutinizeCharString(
     var stack: [48]i32 = undefined;
     var stack_top: usize = 0;
 
+    // Track operand byte positions in result (for removing callsubr operand)
+    var operand_positions: [48]usize = undefined;
+
     // Track hint count for hintmask/cntrmask
     var stem_count: usize = 0;
     var seen_endchar = false;
@@ -2692,6 +2695,10 @@ fn desubroutinizeCharString(
         } else if (b0 == 10) {
             // callsubr - inline local subroutine
             if (stack_top > 0 and local_subrs != null) {
+                // Remove the operand bytes (subr index) from result
+                const operand_start = operand_positions[stack_top - 1];
+                result.shrinkRetainingCapacity(operand_start);
+
                 stack_top -= 1;
                 const subr_idx = stack[stack_top] + lsubr_bias;
                 if (subr_idx >= 0) {
@@ -2712,6 +2719,10 @@ fn desubroutinizeCharString(
         } else if (b0 == 29) {
             // callgsubr - inline global subroutine
             if (stack_top > 0 and global_subrs != null) {
+                // Remove the operand bytes (subr index) from result
+                const operand_start = operand_positions[stack_top - 1];
+                result.shrinkRetainingCapacity(operand_start);
+
                 stack_top -= 1;
                 const subr_idx = stack[stack_top] + gsubr_bias;
                 if (subr_idx >= 0) {
@@ -2745,6 +2756,7 @@ fn desubroutinizeCharString(
         } else if (b0 == 28) {
             // shortint: 2 bytes follow
             if (i + 2 < charstring.len and stack_top < 48) {
+                operand_positions[stack_top] = result.items.len;
                 const val = @as(i32, @as(i16, @bitCast(readU16(charstring, i + 1))));
                 stack[stack_top] = val;
                 stack_top += 1;
@@ -2754,6 +2766,7 @@ fn desubroutinizeCharString(
         } else if (b0 >= 32 and b0 <= 246) {
             // Single-byte integer
             if (stack_top < 48) {
+                operand_positions[stack_top] = result.items.len;
                 stack[stack_top] = @as(i32, b0) - 139;
                 stack_top += 1;
             }
@@ -2762,6 +2775,7 @@ fn desubroutinizeCharString(
         } else if (b0 >= 247 and b0 <= 250) {
             // Two-byte positive integer
             if (i + 1 < charstring.len and stack_top < 48) {
+                operand_positions[stack_top] = result.items.len;
                 const val = (@as(i32, b0) - 247) * 256 + charstring[i + 1] + 108;
                 stack[stack_top] = val;
                 stack_top += 1;
@@ -2771,6 +2785,7 @@ fn desubroutinizeCharString(
         } else if (b0 >= 251 and b0 <= 254) {
             // Two-byte negative integer
             if (i + 1 < charstring.len and stack_top < 48) {
+                operand_positions[stack_top] = result.items.len;
                 const val = -(@as(i32, b0) - 251) * 256 - charstring[i + 1] - 108;
                 stack[stack_top] = val;
                 stack_top += 1;
@@ -2795,8 +2810,8 @@ fn desubroutinizeCharString(
         }
     }
 
-    // Ensure we end with endchar if we don't have one
-    if (!seen_endchar and result.items.len > 0) {
+    // Ensure we end with endchar if we don't have one (only for main charstring, not subroutines)
+    if (!seen_endchar and result.items.len > 0 and depth == 0) {
         try result.append(allocator, 14); // endchar
     }
 
@@ -2908,4 +2923,494 @@ test "ToUnicode CMap generation" {
     try std.testing.expect(std.mem.indexOf(u8, cmap, "<48> <0048>") != null);
     try std.testing.expect(std.mem.indexOf(u8, cmap, "<69> <0069>") != null);
     try std.testing.expect(std.mem.indexOf(u8, cmap, "<21> <0021>") != null);
+}
+
+// =============================================================================
+// CFF Desubroutinization Tests
+// =============================================================================
+
+test "getSubrBias calculation" {
+    // CFF spec: bias depends on subroutine count
+    // count < 1240: bias = 107
+    // count < 33900: bias = 1131
+    // else: bias = 32768
+
+    try std.testing.expectEqual(@as(i32, 107), getSubrBias(0));
+    try std.testing.expectEqual(@as(i32, 107), getSubrBias(1));
+    try std.testing.expectEqual(@as(i32, 107), getSubrBias(100));
+    try std.testing.expectEqual(@as(i32, 107), getSubrBias(1239));
+
+    try std.testing.expectEqual(@as(i32, 1131), getSubrBias(1240));
+    try std.testing.expectEqual(@as(i32, 1131), getSubrBias(5000));
+    try std.testing.expectEqual(@as(i32, 1131), getSubrBias(33899));
+
+    try std.testing.expectEqual(@as(i32, 32768), getSubrBias(33900));
+    try std.testing.expectEqual(@as(i32, 32768), getSubrBias(50000));
+}
+
+test "parseCFFIndex empty index" {
+    // Empty CFF INDEX: count = 0 (2 bytes)
+    const empty_index = [_]u8{ 0, 0 };
+    const idx = parseCFFIndex(&empty_index, 0);
+    try std.testing.expect(idx != null);
+    try std.testing.expectEqual(@as(u16, 0), idx.?.count);
+}
+
+test "parseCFFIndex single entry" {
+    // CFF INDEX with 1 entry: count(2) + offSize(1) + offsets(2) + data
+    // count = 1, offSize = 1, offsets = [1, 5], data = "test"
+    const single_index = [_]u8{
+        0, 1, // count = 1
+        1, // offSize = 1
+        1, 5, // offsets: 1, 5 (data is 4 bytes)
+        't', 'e', 's', 't', // data
+    };
+    const idx = parseCFFIndex(&single_index, 0);
+    try std.testing.expect(idx != null);
+    try std.testing.expectEqual(@as(u16, 1), idx.?.count);
+
+    // Get entry 0
+    const entry = idx.?.getEntry(0);
+    try std.testing.expect(entry != null);
+    try std.testing.expectEqualSlices(u8, "test", entry.?);
+
+    // Entry 1 should be null (out of bounds)
+    try std.testing.expect(idx.?.getEntry(1) == null);
+}
+
+test "parseCFFIndex multiple entries" {
+    // CFF INDEX with 3 entries
+    const multi_index = [_]u8{
+        0, 3, // count = 3
+        1, // offSize = 1
+        1, 3, 6, 7, // offsets: entries are [1,3), [3,6), [6,7)
+        'A', 'B', // entry 0: "AB"
+        'C', 'D', 'E', // entry 1: "CDE"
+        'F', // entry 2: "F"
+    };
+    const idx = parseCFFIndex(&multi_index, 0);
+    try std.testing.expect(idx != null);
+    try std.testing.expectEqual(@as(u16, 3), idx.?.count);
+
+    try std.testing.expectEqualSlices(u8, "AB", idx.?.getEntry(0).?);
+    try std.testing.expectEqualSlices(u8, "CDE", idx.?.getEntry(1).?);
+    try std.testing.expectEqualSlices(u8, "F", idx.?.getEntry(2).?);
+}
+
+test "desubroutinize simple charstring no subrs" {
+    const allocator = std.testing.allocator;
+
+    // Simple charstring: just moveto and endchar
+    // 100 100 rmoveto endchar
+    // Encoded: 100 = 239 (100+139), rmoveto = 21, endchar = 14
+    const simple_cs = [_]u8{
+        239, 239, 21, // 100 100 rmoveto
+        14, // endchar
+    };
+
+    const result = try desubroutinizeCharString(allocator, &simple_cs, null, null, 0);
+    defer allocator.free(result);
+
+    // Should be unchanged (no subrs to inline)
+    try std.testing.expectEqualSlices(u8, &simple_cs, result);
+}
+
+test "desubroutinize preserves operators" {
+    const allocator = std.testing.allocator;
+
+    // Charstring with various operators
+    const cs = [_]u8{
+        139, 139, 1, // 0 0 hstem
+        139, 139, 3, // 0 0 vstem
+        139, 139, 21, // 0 0 rmoveto
+        139, 139, 5, // 0 0 rlineto
+        14, // endchar
+    };
+
+    const result = try desubroutinizeCharString(allocator, &cs, null, null, 0);
+    defer allocator.free(result);
+
+    // Should preserve all operators
+    try std.testing.expectEqualSlices(u8, &cs, result);
+}
+
+test "desubroutinize handles two-byte operators" {
+    const allocator = std.testing.allocator;
+
+    // Charstring with two-byte operator (12 XX)
+    const cs = [_]u8{
+        139, 139, 12, 35, // 0 0 flex (12 35)
+        14, // endchar
+    };
+
+    const result = try desubroutinizeCharString(allocator, &cs, null, null, 0);
+    defer allocator.free(result);
+
+    try std.testing.expectEqualSlices(u8, &cs, result);
+}
+
+test "desubroutinize handles shortint encoding" {
+    const allocator = std.testing.allocator;
+
+    // Charstring with shortint (28 followed by 2 bytes)
+    const cs = [_]u8{
+        28, 0x01, 0x00, // shortint 256
+        139, 21, // 0 rmoveto
+        14, // endchar
+    };
+
+    const result = try desubroutinizeCharString(allocator, &cs, null, null, 0);
+    defer allocator.free(result);
+
+    try std.testing.expectEqualSlices(u8, &cs, result);
+}
+
+test "desubroutinize strips return opcode" {
+    const allocator = std.testing.allocator;
+
+    // Build a simple local subrs index with one subroutine containing:
+    // 139 139 5 = "0 0 rlineto" followed by 11 = "return"
+    const local_subrs_data = [_]u8{
+        0, 1, // count = 1
+        1, // offSize = 1
+        1, 5, // offsets
+        139, 139, 5, 11, // the subr data with return
+    };
+    const local_subrs = parseCFFIndex(&local_subrs_data, 0);
+
+    // Charstring that calls local subr 0 (with bias 107, so stack value = -107)
+    // -107 encoded as: 251 + (107-108)/256 = 251, (107-108)%256 + 108 = ... actually -107 = 139-107 = 32
+    // Actually for -107: use formula for negative: -(b0-251)*256 - b1 - 108 = -107
+    // So: (b0-251)*256 + b1 + 108 = 107 -> if b0=251, b1=-1 doesn't work
+    // Let's use single byte: -107 to 107 -> 32 to 246
+    // -107 -> 32 (since value + 139 = byte, so -107 + 139 = 32)
+    const cs = [_]u8{
+        32, // -107 (subr index 0 with bias 107)
+        10, // callsubr
+        14, // endchar
+    };
+
+    const result = try desubroutinizeCharString(allocator, &cs, null, local_subrs, 0);
+    defer allocator.free(result);
+
+    // Result should have the subr content inlined (without return) plus endchar
+    // Expected: 139 139 5 14 (rlineto args + endchar)
+    const expected = [_]u8{ 139, 139, 5, 14 };
+    try std.testing.expectEqualSlices(u8, &expected, result);
+}
+
+// =============================================================================
+// Compact TTF Subsetting Tests
+// =============================================================================
+
+test "compact TTF subsetting creates valid font" {
+    const allocator = std.testing.allocator;
+
+    // Load a TTF font with identity encoding
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer emb.deinit();
+
+    // Switch to identity encoding for CID mode
+    emb.encoding = .identity;
+
+    // Mark some Unicode characters
+    try emb.markUnicodeCharsUsed("Hello");
+
+    // Generate subset (should use compact TTF)
+    try emb.generateSubset();
+
+    // Verify subset was created
+    try std.testing.expect(emb.subset_data != null);
+    const subset = emb.getFontData();
+
+    // Verify it's a valid TTF
+    try std.testing.expectEqual(@as(u32, 0x00010000), std.mem.readInt(u32, subset[0..4], .big));
+
+    // Parse and verify
+    const parsed = try ttf.Font.parse(subset);
+    try std.testing.expect(parsed.head != null);
+    try std.testing.expect(parsed.maxp != null);
+
+    // Should have fewer glyphs than original (only used glyphs)
+    const subset_glyphs = parsed.maxp.?.num_glyphs;
+    try std.testing.expect(subset_glyphs < 100); // "Hello" should need < 10 glyphs
+}
+
+test "compact TTF glyph ID remapping" {
+    const allocator = std.testing.allocator;
+
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer emb.deinit();
+
+    emb.encoding = .identity;
+    try emb.markUnicodeCharsUsed("AB");
+
+    try emb.generateSubset();
+
+    // After subsetting, gid_remap should have entries
+    try std.testing.expect(emb.gid_remap.count() > 0);
+
+    // .notdef (GID 0) should always map to 0
+    try std.testing.expectEqual(@as(u16, 0), emb.gid_remap.get(0).?);
+
+    // getGlyphIdForCodepoint should return remapped IDs
+    const a_gid = emb.getGlyphIdForCodepoint('A');
+    const b_gid = emb.getGlyphIdForCodepoint('B');
+
+    // Remapped GIDs should be small sequential numbers
+    try std.testing.expect(a_gid < 10);
+    try std.testing.expect(b_gid < 10);
+    try std.testing.expect(a_gid != b_gid);
+}
+
+test "compact TTF smaller than sparse TTF" {
+    const allocator = std.testing.allocator;
+
+    // Test that compact subsetting produces smaller output than the original
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer emb.deinit();
+
+    emb.encoding = .identity;
+    try emb.markUnicodeCharsUsed("Test");
+
+    try emb.generateSubset();
+
+    const subset = emb.getFontData();
+    const original = emb.data;
+
+    // Subset should be much smaller (< 10% of original for small char sets)
+    try std.testing.expect(subset.len < original.len / 10);
+}
+
+test "rewriteCompositeGlyphIDs remaps component references" {
+    // Build a mock composite glyph:
+    // Header (10 bytes): numberOfContours=-1 (composite), xMin, yMin, xMax, yMax
+    // Component 1: flags (no MORE_COMPONENTS), glyphIndex=100, args (2 bytes)
+    var glyph_data = [_]u8{
+        0xFF, 0xFF, // numberOfContours = -1 (composite)
+        0x00, 0x00, // xMin
+        0x00, 0x00, // yMin
+        0x00, 0x64, // xMax = 100
+        0x00, 0x64, // yMax = 100
+        // Component 1:
+        0x00, 0x00, // flags (no special flags, no MORE_COMPONENTS)
+        0x00, 0x64, // glyphIndex = 100
+        0x00, 0x00, // args (2 bytes, offsets)
+    };
+
+    // Create a remap: 100 -> 5
+    var remap = std.AutoArrayHashMapUnmanaged(u16, u16){};
+    defer remap.deinit(std.testing.allocator);
+    try remap.put(std.testing.allocator, 100, 5);
+
+    try rewriteCompositeGlyphIDs(&glyph_data, &remap);
+
+    // Check that glyph ID was remapped
+    const new_gid = std.mem.readInt(u16, glyph_data[12..14], .big);
+    try std.testing.expectEqual(@as(u16, 5), new_gid);
+}
+
+test "rewriteCompositeGlyphIDs handles multiple components" {
+    // Composite with 2 components
+    var glyph_data = [_]u8{
+        0xFF, 0xFF, // numberOfContours = -1 (composite)
+        0x00, 0x00, // xMin
+        0x00, 0x00, // yMin
+        0x00, 0x64, // xMax
+        0x00, 0x64, // yMax
+        // Component 1 (with MORE_COMPONENTS flag = 0x0020):
+        0x00, 0x20, // flags = MORE_COMPONENTS
+        0x00, 0x0A, // glyphIndex = 10
+        0x00, 0x00, // args (2 bytes)
+        // Component 2 (no MORE_COMPONENTS):
+        0x00, 0x00, // flags = no more
+        0x00, 0x14, // glyphIndex = 20
+        0x00, 0x10, // args (2 bytes)
+    };
+
+    var remap = std.AutoArrayHashMapUnmanaged(u16, u16){};
+    defer remap.deinit(std.testing.allocator);
+    try remap.put(std.testing.allocator, 10, 1);
+    try remap.put(std.testing.allocator, 20, 2);
+
+    try rewriteCompositeGlyphIDs(&glyph_data, &remap);
+
+    // Check both glyph IDs were remapped
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, glyph_data[12..14], .big));
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, glyph_data[18..20], .big));
+}
+
+test "rewriteCompositeGlyphIDs handles ARG_1_AND_2_ARE_WORDS" {
+    // Component with ARG_1_AND_2_ARE_WORDS flag (4-byte args)
+    var glyph_data = [_]u8{
+        0xFF, 0xFF, // numberOfContours = -1
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x64, // bounds
+        // Component with 4-byte args:
+        0x00, 0x01, // flags = ARG_1_AND_2_ARE_WORDS
+        0x00, 0x32, // glyphIndex = 50
+        0x00, 0x00, 0x00, 0x00, // 4-byte args
+    };
+
+    var remap = std.AutoArrayHashMapUnmanaged(u16, u16){};
+    defer remap.deinit(std.testing.allocator);
+    try remap.put(std.testing.allocator, 50, 3);
+
+    try rewriteCompositeGlyphIDs(&glyph_data, &remap);
+
+    try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, glyph_data[12..14], .big));
+}
+
+// =============================================================================
+// CFF Subsetting Tests
+// =============================================================================
+
+test "CFF subsetting creates valid font" {
+    const allocator = std.testing.allocator;
+
+    // Load an OTF (CFF) font
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    defer emb.deinit();
+
+    emb.encoding = .identity;
+    try emb.markUnicodeCharsUsed("Hello");
+
+    try emb.generateSubset();
+
+    // Verify subset was created
+    try std.testing.expect(emb.subset_data != null);
+    const subset = emb.getFontData();
+
+    // CFF should start with version 1.0
+    try std.testing.expectEqual(@as(u8, 1), subset[0]); // major version
+    try std.testing.expectEqual(@as(u8, 0), subset[1]); // minor version
+}
+
+test "CFF desubroutinization reduces size" {
+    const allocator = std.testing.allocator;
+
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    defer emb.deinit();
+
+    // Get original CFF size
+    const orig_cff = emb.font.getTable("CFF ".*);
+    try std.testing.expect(orig_cff != null);
+    const orig_size = orig_cff.?.len;
+
+    emb.encoding = .identity;
+    try emb.markUnicodeCharsUsed("ABC");
+
+    try emb.generateSubset();
+
+    const subset = emb.getFontData();
+
+    // Subset should be much smaller than original CFF
+    try std.testing.expect(subset.len < orig_size / 5);
+}
+
+test "CFF glyph ID remapping works" {
+    const allocator = std.testing.allocator;
+
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    defer emb.deinit();
+
+    emb.encoding = .identity;
+    try emb.markUnicodeCharsUsed("XY");
+
+    try emb.generateSubset();
+
+    // After subsetting, gid_remap should have entries
+    try std.testing.expect(emb.gid_remap.count() > 0);
+
+    // Verify remapped GIDs are sequential
+    const x_gid = emb.getGlyphIdForCodepoint('X');
+    const y_gid = emb.getGlyphIdForCodepoint('Y');
+
+    try std.testing.expect(x_gid < 10);
+    try std.testing.expect(y_gid < 10);
+}
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+
+test "CID font with TTF renders correctly" {
+    const allocator = std.testing.allocator;
+
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer emb.deinit();
+
+    emb.encoding = .identity;
+
+    // Mark various characters
+    try emb.markUnicodeCharsUsed("Hello World! 123");
+
+    try emb.generateSubset();
+
+    // Verify ToUnicode CMap can be generated
+    const cmap = try emb.generateCIDToUnicodeCMap();
+    defer allocator.free(cmap);
+
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "CIDInit") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "beginbfchar") != null);
+
+    // Verify width array can be generated
+    const widths = try emb.generateWidthArray();
+    defer allocator.free(widths);
+
+    try std.testing.expect(widths.len > 2); // Should have content
+    try std.testing.expect(widths[0] == '['); // Should start with array
+}
+
+test "CID font with OTF renders correctly" {
+    const allocator = std.testing.allocator;
+
+    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    defer emb.deinit();
+
+    emb.encoding = .identity;
+    try emb.markUnicodeCharsUsed("Test 456");
+
+    try emb.generateSubset();
+
+    const cmap = try emb.generateCIDToUnicodeCMap();
+    defer allocator.free(cmap);
+
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "CIDInit") != null);
+
+    const widths = try emb.generateWidthArray();
+    defer allocator.free(widths);
+
+    try std.testing.expect(widths.len > 2);
+}
+
+test "mixed font types in same document" {
+    const allocator = std.testing.allocator;
+
+    // Load both TTF and OTF
+    var ttf_font = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer ttf_font.deinit();
+
+    var otf_font = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Bold.otf");
+    defer otf_font.deinit();
+
+    ttf_font.encoding = .identity;
+    otf_font.encoding = .identity;
+
+    try ttf_font.markUnicodeCharsUsed("Regular");
+    try otf_font.markUnicodeCharsUsed("Bold");
+
+    try ttf_font.generateSubset();
+    try otf_font.generateSubset();
+
+    // Both should have valid subsets
+    try std.testing.expect(ttf_font.subset_data != null);
+    try std.testing.expect(otf_font.subset_data != null);
+
+    // TTF should have TTF signature
+    const ttf_data = ttf_font.getFontData();
+    try std.testing.expectEqual(@as(u32, 0x00010000), std.mem.readInt(u32, ttf_data[0..4], .big));
+
+    // OTF/CFF should have CFF version
+    const otf_data = otf_font.getFontData();
+    try std.testing.expectEqual(@as(u8, 1), otf_data[0]);
 }

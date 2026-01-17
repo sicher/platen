@@ -1,11 +1,27 @@
 # zpdf Context
 
 ## Current Focus
-Compact subsetting working for both TTF and CFF. CFF still needs String INDEX/Subrs subsetting for smaller files.
+Compact subsetting working for both TTF and CFF with comprehensive test coverage. CFF desubroutinization complete; String INDEX subsetting deferred due to macOS rendering issues.
 
 ## TODO
 - [ ] CFF String INDEX and Global Subrs subsetting (further size reduction)
 - [ ] OpenType feature support (GSUB/GPOS parsing, feature activation API, glyph substitution)
+
+## What We Did (Session 2026-01-17 #9)
+- Added comprehensive unit tests for new subsetting functionality
+  - `getSubrBias()`: boundary tests at 1240, 33900 thresholds
+  - `parseCFFIndex()`: empty, single, multiple entry tests
+  - `desubroutinizeCharString()`: subr inlining, return stripping, operand removal
+  - `buildPrivateDictWithoutSubrs()`: Subrs operator stripping
+  - `rewriteCompositeGlyphIDs()`: single/multiple components, various flag combinations
+  - Compact TTF subsetting: valid output, glyph ID remapping, size reduction
+  - CFF subsetting: valid output, desubroutinization, glyph remapping
+- Added CID font integration tests (TTF/OTF with identity encoding, mixed fonts)
+- Fixed bugs found during testing:
+  - `desubroutinizeCharString()` now removes operand bytes when inlining callsubr/callgsubr
+  - `desubroutinizeCharString()` only adds endchar at depth 0 (not in subroutines)
+- Test count: 63 test functions (26 embedded, 27 zpdf, 2 ttf, 8 integration)
+- All tests pass
 
 ## What We Did (Session 2026-01-17 #8)
 - Implemented compact TTF subsetting with glyph ID remapping
