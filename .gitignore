@@ -21,9 +21,3 @@ test_flate
 # macOS
 .DS_Store
 
-# Large test assets (not needed for CI)
-test/images/
-
-# Font formats not used by tests
-*.woff2
-*.ttc
