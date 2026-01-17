@@ -7,6 +7,28 @@ Compact subsetting working for both TTF and CFF with comprehensive test coverage
 - [ ] CFF String INDEX and Global Subrs subsetting (further size reduction)
 - [ ] OpenType feature support (GSUB/GPOS parsing, feature activation API, glyph substitution)
 
+## What We Did (Session 2026-01-17 #10) [COMPLETE]
+- Refactored embedded.zig to reduce code duplication and improve organization
+  - Created `ttf_subset.zig` (397 lines): TTF subsetting helpers
+    - `buildHmtxForGlyphs()`: builds hmtx table for glyph list
+    - `buildMinimalCmap()`: minimal cmap for CID mode
+    - `assembleTTF()`: assembles final TTF from tables
+    - `getCompositeComponents()`, `rewriteCompositeGlyphIDs()`
+    - Common utilities: `readU16`, `readI16`, `readU32`, `padTo4`, `writeTableEntry`
+  - Created `cff_subset.zig` (622 lines): CFF subsetting helpers
+    - `CFFIndex` struct and `parseCFFIndex()`
+    - DICT parsing: `parseCFFTopDictForCharStrings()`, `parseCFFTopDictForPrivate()`
+    - `getCharsetSID()`, `buildUpdatedTopDict()`, `buildPrivateDictWithoutSubrs()`
+    - `desubroutinizeCharString()`, `getSubrBias()`, `encodeCFFInt()`
+  - Updated `embedded.zig`: 3416 → 2749 lines (20% reduction)
+    - Imports helper functions from new modules
+    - Removed ~660 lines of duplicate code
+- All tests pass (including new tests in subsetting modules)
+- File organization:
+  - `embedded.zig`: EmbeddedFont struct and public API
+  - `ttf_subset.zig`: TTF subsetting utilities
+  - `cff_subset.zig`: CFF subsetting utilities
+
 ## What We Did (Session 2026-01-17 #9)
 - Added comprehensive unit tests for new subsetting functionality
   - `getSubrBias()`: boundary tests at 1240, 33900 thresholds
@@ -258,6 +280,8 @@ Compact subsetting working for both TTF and CFF with comprehensive test coverage
 ## Files of Interest
 - `src/zpdf.zig` - Main library, Document struct, text rendering, font embedding
 - `src/embedded.zig` - EmbeddedFont type, WinAnsiEncoding, font embedding logic
+- `src/ttf_subset.zig` - TTF subsetting helpers (hmtx, cmap, assembly, composite glyphs)
+- `src/cff_subset.zig` - CFF subsetting helpers (INDEX parsing, DICT building, desubroutinization)
 - `src/fonts.zig` - Standard PDF fonts (Base 14)
 - `src/metrics.zig` - Font metrics, TextMetrics, TextStyle, measureText
 - `src/ttf.zig` - TrueType/OpenType font parser
