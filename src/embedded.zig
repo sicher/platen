@@ -581,7 +581,16 @@ pub const EmbeddedFont = struct {
 
     /// Get width for a glyph ID (CID mode), in 1/1000 em
     pub fn getGlyphWidth(self: *const EmbeddedFont, gid: u16) u16 {
-        return self.cid_glyph_widths.get(gid) orelse 0;
+        // First check cached widths (already scaled to 1/1000 em)
+        if (self.cid_glyph_widths.get(gid)) |w| return w;
+
+        // Fall back to getting width directly from font and scaling
+        if (self.font.getGlyphWidth(gid)) |w| {
+            const units_per_em = self.font.head.?.units_per_em;
+            const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(units_per_em));
+            return @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+        }
+        return 0;
     }
 
     /// Count used glyphs in CID mode
