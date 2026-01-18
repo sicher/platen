@@ -1,7 +1,106 @@
 # zpdf Context
 
 ## Current Focus
-OpenType feature support complete. All 110 tests pass with 1pt tolerance.
+Text Flow API complete with all wrapping modes. All 140 tests pass.
+
+## What We Did (Session 2026-01-18 #19) [COMPLETE]
+- **Fixed soft-hyphen recursive breaking**: Column width was 24pt but "com-" is 24.4pt
+  - Changed soft-hyphen demo from 24pt to 26pt column
+  - Changed regular hyphen demo from 35pt to 100pt (fpdf2 was doing char-level wrap at 35pt)
+- **Added character-level wrapping**: Last resort for long words without break points
+  - New `findCharacterBreak()` function respects UTF-8 boundaries
+  - Integrated as fallback after hyphen and soft-hyphen breaks fail
+  - Added "Character Wrap (50pt column)" demo showing "supercalifragilisticexpialidocious"
+- **Fixed overflow test**: Changed from 451pt to 150pt width so text actually overflows
+  - Now shows 2 lines fit, overflow content displayed separately
+- **Fixed rect border/fill covering text**: Graphics state not isolated
+  - Added `q` (save) and `Q` (restore) operators around fill/border drawing
+  - Fill color no longer affects subsequent text rendering
+- **Fixed border thickness**: PDF default 1pt vs fpdf2 default 0.567pt (0.2mm)
+  - Added `0.567 w` line width command before border drawing
+- **Fixed Y position differences**: Sections using default valign=.top vs fpdf2's middle positioning
+  - Added explicit `valign = .middle` to character wrap and overflow sections
+- Added unit test for character-level wrapping
+- All 140 tests pass
+
+## What We Did (Session 2026-01-18 #18) [COMPLETE]
+- **Fixed soft-hyphen rendering**: Soft-hyphens were being rendered as visible characters
+  - Added `stripSoftHyphens()` helper to remove U+00AD from text
+  - Updated `write()` to strip soft-hyphens before storing (they're invisible)
+  - Updated `getTextWidth()` to exclude soft-hyphens from width measurements
+  - Added `containsSoftHyphens()` for fast path optimization
+- Soft-hyphens now behave correctly:
+  - Invisible in normal text (stripped before output)
+  - Excluded from width calculations
+  - Only appear as visible hyphens when used as break points
+- **Added `break_on_hyphens` option to `ParagraphOptions`**:
+  - Default `true`: Break after regular hyphens in compound words (e.g., "state-" / "of-the-art")
+  - Set `false` for fpdf2 compatibility (only soft-hyphens break)
+  - Added `findHyphenBreak()` helper to find break points at regular hyphens
+  - Hyphen breaks tried before soft-hyphen breaks as fallback
+- Updated integration test to use `break_on_hyphens: false` for fpdf2 matching
+- **Added comprehensive unit tests** (18 new tests, 138 total):
+  - `findHyphenBreak` and `findSoftHyphenBreak` function tests
+  - Soft-hyphen stripping from output and width calculations
+  - `writeParagraph` hyphen breaking (enabled/disabled)
+  - First line indent, overflow handling, newline line breaks
+  - `writeLine` overflow behavior
+  - Region padding effects on content area
+  - `writeFlow` empty text and margin handling
+  - VAlign positioning tests (top, middle, bottom)
+- Fixed `writeLineInternal` to check remaining height and return overflow
+- All 138 tests pass
+
+## What We Did (Session 2026-01-18 #17) [COMPLETE]
+- **Added VAlign (vertical alignment)**:
+  - New `VAlign` enum: `.top`, `.middle`, `.bottom`
+  - `.top` (default): baseline = content_y + cursor_y + font_size (simple)
+  - `.middle`: baseline = content_y + cursor_y + font_size - leading/2 (fpdf2 compatible)
+  - `.bottom`: baseline = content_y + cursor_y + line_height
+  - Added `valign` field to `LineOptions`, `ParagraphOptions`, `FlowOptions`
+- **Added Region padding support**:
+  - New `Padding` struct with zero defaults (left, right, top, bottom)
+  - Region now has `padding` field for content inset
+  - `remainingHeight()` accounts for vertical padding
+  - New `contentWidth()` method returns width inside padding
+- **Word wrapping behavior (matches fpdf2)**:
+  - Regular hyphens (`-`): words stay together (no breaking)
+  - Soft-hyphens (`U+00AD`): break points, replaced with visible hyphen
+  - Added `findSoftHyphenBreak()` helper for soft-hyphen detection
+- **Enhanced text_flow integration test**:
+  - Uses `valign: .middle` for fpdf2 compatibility
+  - Tests that hyphenated words like "state-of-the-art" stay together
+  - Added overflow test with small region
+- All 120 tests pass with 1.0pt tolerance
+
+## What We Did (Session 2026-01-18 #16) [COMPLETE]
+- Implemented Text Flow API (regions, margins, word wrapping)
+  - **New types** in `zpdf.zig`:
+    - `Color` - RGB color (black, white, red, green, blue presets)
+    - `Border` - Per-side border control (`.none`, `.all` presets)
+    - `Align` - Text alignment (left, center, right, justify)
+    - `Margins` - Document margins (default 72pt = 1 inch)
+    - `Region` - Rectangular area with cursor tracking and styling
+    - `WriteResult` - Result with lines_written and overflow
+    - `LineOptions`, `ParagraphOptions`, `FlowOptions` - Options structs
+  - **Unit conversion helpers**:
+    - Constants: `pt_per_inch` (72), `pt_per_mm`, `pt_per_cm`
+    - Functions: `inches(n)`, `mm(n)`, `cm(n)`
+  - **New Document methods**:
+    - `setMargins(Margins)` - Set document margins
+    - `getPageRegion()` - Get region respecting margins
+    - `getTextWidth(str)` - Measure with current font (standard or embedded)
+    - `writeLine(&region, text, opts)` - Single line into region
+    - `writeParagraph(&region, text, opts)` - Word-wrapped text with overflow
+    - `writeFlow(text, opts)` - Auto-pagination convenience
+    - `drawRegion(&region)` - Draw region border/fill
+  - **Renamed** for consistency:
+    - `text()` → `write()`
+    - `textAt()` → `writeAt()`
+- Updated DESIGN.md with full Text API documentation
+- Added 9 new unit tests (unit conversions, regions, wrapping, overflow, pagination)
+- Added text_flow integration test (compares against fpdf2 reference)
+- All 120 tests pass with 1.0pt tolerance (10 integration tests)
 
 ## What We Did (Session 2026-01-18 #15) [COMPLETE]
 - Fixed integration test consistency for opentype_features test
@@ -69,6 +168,7 @@ OpenType feature support complete. All 110 tests pass with 1pt tolerance.
 ## TODO
 - [ ] Support additional GSUB features (dlig, calt for fonts like Inter)
 - [ ] GPOS mark positioning (mark, mkmk features)
+- [ ] Justify alignment (word spacing adjustments in writeParagraph)
 
 ## What We Did (Session 2026-01-18 #12) [COMPLETE]
 - Implemented PDF stream compression using zlib (FlateDecode filter)
@@ -414,18 +514,15 @@ OpenType feature support complete. All 110 tests pass with 1pt tolerance.
 ## Next Steps
 
 ### Priority 1: Graphics Import
-5. **JPEG embedding** - trivial, embed raw bytes with DCTDecode
-6. **PNG embedding** - decode, handle alpha as soft mask
-7. **PDF embedding** - parse external PDF, embed as Form XObject
+1. **JPEG embedding** - trivial, embed raw bytes with DCTDecode
+2. **PNG embedding** - decode, handle alpha as soft mask
+3. **PDF embedding** - parse external PDF, embed as Form XObject
 
-### Priority 3: Flow/Region API
-8. Implement Region type and writeFitting
-9. Implement measureWrappedText (word wrap measurement)
+### Priority 2: Drawing Primitives
+4. Basic shapes: line, rect, circle, ellipse, polygon
+5. Path API: moveTo, lineTo, curveTo, closePath, stroke, fill
+6. Styling: stroke/fill color, line width, dash patterns
 
-### Priority 4: Drawing Primitives
-10. Basic shapes: line, rect, circle, ellipse, polygon
-11. Path API: moveTo, lineTo, curveTo, closePath, stroke, fill
-12. Styling: stroke/fill color, line width, dash patterns
-
-### Priority 5: Housekeeping
-13. Stream compression (FlateDecode) for smaller PDFs
+### Priority 3: Text Flow Enhancements
+7. Justify alignment (word spacing in writeParagraph)
+8. measureWrappedText (measure without rendering)
