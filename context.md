@@ -1,7 +1,41 @@
 # zpdf Context
 
 ## Current Focus
-Justify alignment complete. All 141 tests pass. Ready for Phase 2: Knuth-Plass optimization (optional).
+Knuth-Plass optimal line breaking complete with paragraph break support. All 144 tests pass.
+
+## What We Did (Session 2026-01-18 #22) [COMPLETE]
+- **Fixed optimal algorithm not respecting paragraph breaks**:
+  - Bug: `writeParagraphOptimal` checked `str[break_pos] == '\n'` but break_pos points to end of word, not the newline
+  - Fix: Scan forward past spaces/tabs from break_pos to find newlines
+  - Result: Both greedy and optimal columns now show same paragraph structure
+- All 144 tests pass
+
+## What We Did (Session 2026-01-18 #21) [COMPLETE]
+- **Implemented Knuth-Plass optimal line breaking** for `writeParagraph`:
+  - Added `LineBreaking` enum (`.greedy`, `.optimal`)
+  - Added `line_breaking` field to `ParagraphOptions` (default `.greedy`)
+  - New `computeOptimalBreaks()` function: DP algorithm minimizing total slack squared
+  - New `writeParagraphOptimal()` function: renders using pre-computed break points
+  - Fixed floating-point tolerance in greedy algorithm (79.2 + 21.6 was > 100.8)
+- **Algorithm details**:
+  - Parses text into words with widths
+  - DP recurrence: `dp[j] = min(dp[i] + badness(i,j))` for all valid line spans
+  - Badness = `(line_width - text_width)^2`, last line has zero badness
+  - Forced breaks (newlines) tracked in WordInfo, zero badness, must be at line end
+  - Backtracks to find optimal break positions
+  - O(n*w) complexity where n=words, w=avg words per line
+- **Classic test case** ("The lazy yellow dog..." at 14 monospace chars):
+  - Greedy: "yellow dog was" (14 chars) - fills line completely
+  - Optimal: "yellow dog" (10 chars) - leaves space for better overall balance
+  - Result: Optimal produces more even line lengths throughout
+- **Integration test**: Side-by-side comparison with:
+  - Monospace example showing exact character counts
+  - Two Lorem Ipsum columns (justified) - greedy vs optimal
+- **Fixed justify alignment for paragraph breaks**:
+  - Lines ending with explicit newlines (paragraph ends) now left-aligned, not stretched
+  - Added `forced_break` flag to detect newlines in greedy algorithm
+  - Added same check in optimal algorithm for break positions followed by newlines
+- All 144 tests pass (3 new tests)
 
 ## What We Did (Session 2026-01-18 #20) [COMPLETE]
 - **Implemented justify alignment** for `writeParagraph`:
@@ -548,5 +582,5 @@ Justify alignment complete. All 141 tests pass. Ready for Phase 2: Knuth-Plass o
 6. Styling: stroke/fill color, line width, dash patterns
 
 ### Priority 3: Text Flow Enhancements
-7. Justify alignment (word spacing in writeParagraph)
-8. measureWrappedText (measure without rendering)
+7. measureWrappedText (measure without rendering)
+8. Hyphenation dictionary support for optimal line breaking

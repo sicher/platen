@@ -119,6 +119,16 @@ pub const VAlign = enum {
     bottom,
 };
 
+/// Line breaking algorithm for paragraph layout.
+pub const LineBreaking = enum {
+    /// Greedy algorithm: fill each line as much as possible before moving to next.
+    /// Fast but can produce uneven line lengths.
+    greedy,
+    /// Knuth-Plass optimal algorithm: minimize total "badness" across all lines.
+    /// Considers entire paragraph to produce more balanced line lengths.
+    optimal,
+};
+
 /// Document margins in points.
 pub const Margins = struct {
     left: f64 = 72,
@@ -197,6 +207,8 @@ pub const ParagraphOptions = struct {
     /// Allow breaking after regular hyphens in compound words (e.g., "state-of-the-art").
     /// Default true. Set false for fpdf2 compatibility (only soft-hyphens break).
     break_on_hyphens: bool = true,
+    /// Line breaking algorithm. Greedy is fast, optimal (Knuth-Plass) produces better results.
+    line_breaking: LineBreaking = .greedy,
 };
 
 /// Options for writeFlow (auto-pagination).
@@ -923,6 +935,230 @@ pub const Document = struct {
         return false;
     }
 
+    /// Word info for optimal line breaking.
+    const WordInfo = struct {
+        start: usize, // Byte offset in original text
+        end: usize, // Byte offset (exclusive)
+        width: f64, // Width in points
+        force_break: bool, // Must break after this word (newline follows)
+    };
+
+    /// Compute optimal line breaks using Knuth-Plass algorithm.
+    /// Returns slice of byte positions where lines should end (caller must free).
+    fn computeOptimalBreaks(
+        self: *Document,
+        text: []const u8,
+        line_width: f64,
+        first_line_width: f64,
+    ) ![]usize {
+        const allocator = self.allocator;
+        const space_width = self.getTextWidth(" ");
+
+        // Parse text into words, tracking forced breaks (newlines)
+        var words = std.ArrayListUnmanaged(WordInfo){};
+        defer words.deinit(allocator);
+
+        var i: usize = 0;
+        while (i < text.len) {
+            // Skip whitespace (but track if we see a newline)
+            while (i < text.len and (text[i] == ' ' or text[i] == '\t' or text[i] == '\n')) {
+                i += 1;
+            }
+            if (i >= text.len) break;
+
+            // Find word end
+            const word_start = i;
+            while (i < text.len and text[i] != ' ' and text[i] != '\t' and text[i] != '\n') {
+                i += 1;
+            }
+            const word_end = i;
+
+            // Check if a newline follows this word (forced break)
+            var force_break = false;
+            var j = i;
+            while (j < text.len and (text[j] == ' ' or text[j] == '\t')) {
+                j += 1;
+            }
+            if (j < text.len and text[j] == '\n') {
+                force_break = true;
+            }
+
+            try words.append(allocator, .{
+                .start = word_start,
+                .end = word_end,
+                .width = self.getTextWidth(text[word_start..word_end]),
+                .force_break = force_break,
+            });
+        }
+
+        if (words.items.len == 0) {
+            return allocator.alloc(usize, 0);
+        }
+
+        const n = words.items.len;
+        const INFINITY: f64 = 1e18;
+
+        // dp[i] = minimum total badness to typeset words 0..i-1 (i words)
+        // prev[i] = which word index starts the line ending at word i-1
+        var dp = try allocator.alloc(f64, n + 1);
+        defer allocator.free(dp);
+        var prev = try allocator.alloc(usize, n + 1);
+        defer allocator.free(prev);
+
+        dp[0] = 0;
+        prev[0] = 0;
+
+        // For each ending position
+        for (1..n + 1) |j| {
+            dp[j] = INFINITY;
+            prev[j] = 0;
+
+            // Try each starting position for this line
+            var line_w: f64 = 0;
+            var start_i = j;
+            while (start_i > 0) {
+                start_i -= 1;
+                const word = words.items[start_i];
+
+                // If this word has force_break but isn't the last word of the line,
+                // this configuration is invalid (word must be at line end)
+                if (word.force_break and start_i + 1 < j) {
+                    break;
+                }
+
+                // Add word width (and space if not first word on line)
+                if (start_i + 1 < j) {
+                    line_w += space_width;
+                }
+                line_w += word.width;
+
+                // Get the line width for this line (first line may be different)
+                const this_line_width = if (start_i == 0) first_line_width else line_width;
+
+                // Line too wide - no point trying earlier start positions
+                if (line_w > this_line_width + 0.01) break;
+
+                // Compute badness for this line configuration
+                const slack = this_line_width - line_w;
+                const is_last_line = (j == n);
+
+                // Lines ending with forced break: no penalty (will be left-aligned)
+                // Last line: no penalty for short lines (left-aligned)
+                // Other lines: penalize based on slack squared
+                const is_forced = words.items[j - 1].force_break;
+                const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
+
+                const total = dp[start_i] + badness;
+                if (total < dp[j]) {
+                    dp[j] = total;
+                    prev[j] = start_i;
+                }
+            }
+        }
+
+        // Backtrack to find break points
+        var breaks = std.ArrayListUnmanaged(usize){};
+        errdefer breaks.deinit(allocator);
+
+        var pos = n;
+        while (pos > 0) {
+            const line_start = prev[pos];
+            // Line contains words[line_start..pos], ends at word pos-1
+            const last_word = words.items[pos - 1];
+            try breaks.append(allocator, last_word.end);
+            pos = line_start;
+        }
+
+        // Reverse to get breaks in order
+        std.mem.reverse(usize, breaks.items);
+
+        return breaks.toOwnedSlice(allocator);
+    }
+
+    /// Write paragraph using pre-computed optimal line breaks.
+    fn writeParagraphOptimal(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
+        const line_height = self.getLineHeightPts();
+        const line_width = region.contentWidth() - opts.first_indent;
+        const first_line_width = region.contentWidth() - opts.first_indent;
+
+        // Compute optimal break points
+        const breaks = try self.computeOptimalBreaks(str, line_width, first_line_width);
+        defer self.allocator.free(breaks);
+
+        if (breaks.len == 0) {
+            return .{ .lines_written = 0, .overflow = null };
+        }
+
+        var lines_written: usize = 0;
+        var line_start: usize = 0;
+
+        for (breaks, 0..) |break_pos, line_idx| {
+            // Check if we have room for another line
+            if (region.remainingHeight() < line_height) {
+                // Find the byte position of overflow (skip leading whitespace)
+                var overflow_start = line_start;
+                while (overflow_start < str.len and
+                    (str[overflow_start] == ' ' or str[overflow_start] == '\t' or str[overflow_start] == '\n'))
+                {
+                    overflow_start += 1;
+                }
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = if (overflow_start < str.len) str[overflow_start..] else null,
+                };
+            }
+
+            // Get line text and trim whitespace
+            var line = str[line_start..break_pos];
+            // Trim leading whitespace
+            while (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
+                line = line[1..];
+            }
+            // Trim trailing whitespace
+            while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t')) {
+                line = line[0 .. line.len - 1];
+            }
+
+            // Determine if this is the last line or ends at a paragraph break
+            const is_last_line = (line_idx == breaks.len - 1);
+            // Check if this line ends at a newline (forced paragraph break)
+            // Need to scan past spaces to find if there's a newline
+            var forced_break = false;
+            {
+                var scan = break_pos;
+                while (scan < str.len and (str[scan] == ' ' or str[scan] == '\t')) {
+                    scan += 1;
+                }
+                if (scan < str.len and str[scan] == '\n') {
+                    forced_break = true;
+                }
+            }
+
+            // For justify alignment, use left alignment on last line or forced breaks
+            const line_alignment = if (opts.alignment == .justify and (is_last_line or forced_break))
+                Align.left
+            else
+                opts.alignment;
+
+            // Calculate indent (only first line)
+            const indent = if (line_idx == 0) opts.first_indent else 0;
+
+            // Render the line
+            _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+            lines_written += 1;
+
+            // Move past break point and any whitespace
+            line_start = break_pos;
+            while (line_start < str.len and
+                (str[line_start] == ' ' or str[line_start] == '\t' or str[line_start] == '\n'))
+            {
+                line_start += 1;
+            }
+        }
+
+        return .{ .lines_written = lines_written, .overflow = null };
+    }
+
     /// Writes wrapped text into a region.
     /// Returns overflow text if it doesn't fit in the remaining region height.
     pub fn writeParagraph(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
@@ -931,7 +1167,12 @@ pub const Document = struct {
         var lines_written: usize = 0;
         var is_first_line = true;
 
-        // Process text word by word
+        // Use optimal (Knuth-Plass) line breaking if requested
+        if (opts.line_breaking == .optimal) {
+            return self.writeParagraphOptimal(region, str, opts);
+        }
+
+        // Greedy algorithm: process text word by word
         var remaining = str;
         while (remaining.len > 0) {
             // Check if we have room for another line
@@ -952,16 +1193,17 @@ pub const Document = struct {
             var word_start: usize = 0;
             var in_word = false;
             var soft_hyphen_break = false;
+            var forced_break = false; // Line ended due to explicit newline
 
             for (remaining, 0..) |c, i| {
                 const is_space = c == ' ' or c == '\t' or c == '\n';
 
                 if (is_space and in_word) {
-                    // End of word - check if it fits
+                    // End of word - check if it fits (with small tolerance for floating point)
                     const word = remaining[word_start..i];
                     const word_width = self.getTextWidth(word);
 
-                    if (current_width + word_width <= line_width) {
+                    if (current_width + word_width <= line_width + 0.01) {
                         // Word fits
                         current_width += word_width + space_width;
                         line_end = i;
@@ -994,6 +1236,7 @@ pub const Document = struct {
                     // Handle newline as line break
                     if (c == '\n') {
                         line_end = i;
+                        forced_break = true;
                         break;
                     }
                 } else if (!is_space and !in_word) {
@@ -1008,7 +1251,7 @@ pub const Document = struct {
                 const word = remaining[word_start..];
                 const word_width = self.getTextWidth(word);
 
-                if (current_width + word_width <= line_width) {
+                if (current_width + word_width <= line_width + 0.01) {
                     line_end = remaining.len;
                 } else if (line_end == 0) {
                     // First word doesn't fit - try breaking at hyphens
@@ -1058,8 +1301,8 @@ pub const Document = struct {
                 break :blk next_remaining.len == 0;
             };
 
-            // For justify alignment, use left alignment on the last line (standard typography)
-            const line_alignment = if (opts.alignment == .justify and is_last_line)
+            // For justify alignment, use left alignment on last line or forced breaks (standard typography)
+            const line_alignment = if (opts.alignment == .justify and (is_last_line or forced_break))
                 Align.left
             else
                 opts.alignment;
@@ -2749,4 +2992,90 @@ test "valign bottom puts baseline at cursor + line_height" {
             try std.testing.expectApproxEqAbs(@as(f64, 727.49), cmd.text.y, 0.1);
         }
     }
+}
+
+test "writeParagraph optimal line breaking" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    // Courier is monospace: 600 units per char, at 12pt = 7.2pt per char
+    try doc.setFont(.courier, 12);
+
+    // 14 chars width = 14 * 7.2 = 100.8pt
+    const char_width = 7.2;
+    const region_width = 14 * char_width;
+
+    const text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
+
+    // Test greedy mode
+    var region_greedy = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    const greedy_result = try doc.writeParagraph(&region_greedy, text, .{ .line_breaking = .greedy });
+
+    // Test optimal mode
+    try doc.addPage();
+    var region_optimal = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    const optimal_result = try doc.writeParagraph(&region_optimal, text, .{ .line_breaking = .optimal });
+
+    // Both should produce 7 lines for this text
+    try std.testing.expectEqual(@as(usize, 7), greedy_result.lines_written);
+    try std.testing.expectEqual(@as(usize, 7), optimal_result.lines_written);
+
+    // No overflow
+    try std.testing.expect(greedy_result.overflow == null);
+    try std.testing.expect(optimal_result.overflow == null);
+}
+
+test "writeParagraph optimal vs greedy produces different breaks" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.courier, 12);
+
+    // Verify char width: Courier is monospace at 600 units/1000 * 12pt = 7.2pt/char
+    const char_width = doc.getTextWidth("X");
+    try std.testing.expectApproxEqAbs(@as(f64, 7.2), char_width, 0.01);
+
+    // Use slightly larger width to ensure "yellow dog was" (14 chars + spaces = 14*7.2 = 100.8)
+    // Actually need to account for actual width including trailing space behavior
+    // "yellow dog was" = 14 chars exactly = 100.8pt
+    const region_width = 101.0; // Just over 14 chars to ensure fit
+    const text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
+
+    var region = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    _ = try doc.writeParagraph(&region, text, .{ .line_breaking = .greedy });
+
+    // Get greedy text commands
+    var greedy_lines = std.ArrayListUnmanaged([]const u8){};
+    defer greedy_lines.deinit(std.testing.allocator);
+    const page1 = &doc.pages.items[0];
+    for (page1.commands.items) |cmd| {
+        if (cmd == .text) {
+            try greedy_lines.append(std.testing.allocator, cmd.text.text_data);
+        }
+    }
+
+    // Now optimal
+    try doc.addPage();
+    var region2 = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    _ = try doc.writeParagraph(&region2, text, .{ .line_breaking = .optimal });
+
+    var optimal_lines = std.ArrayListUnmanaged([]const u8){};
+    defer optimal_lines.deinit(std.testing.allocator);
+    const page2 = &doc.pages.items[1];
+    for (page2.commands.items) |cmd| {
+        if (cmd == .text) {
+            try optimal_lines.append(std.testing.allocator, cmd.text.text_data);
+        }
+    }
+
+    // Both algorithms should have the same number of lines
+    try std.testing.expectEqual(greedy_lines.items.len, optimal_lines.items.len);
+
+    // But line 2 should be different:
+    // Greedy fills greedily: "yellow dog was" (takes "was" because it fits)
+    // Optimal leaves space: "yellow dog" (saving "was" for next line gives better balance)
+    // Note: If both produce same output, the text/width combination isn't triggering different behavior
+    try std.testing.expect(!std.mem.eql(u8, greedy_lines.items[1], optimal_lines.items[1]));
 }

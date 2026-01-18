@@ -192,14 +192,66 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - `all_fonts.pdf` - All 14 standard fonts
 - `multi_page.pdf` - Multi-page document
 
-## Flow & Region API (Planned)
+## Text API
 
-A measure-first approach for layout control. Users can query dimensions before rendering,
-avoiding backtracking loops.
+Naming convention: `write*` for text, `draw*` for graphics (future).
+
+### Functions
+
+| Function | Purpose |
+|----------|---------|
+| `write(str)` | Write at cursor position |
+| `writeAt(x, y, str)` | Write at specific position |
+| `writeLine(&region, opts)` | Single line in region, no wrap, advances cursor |
+| `writeParagraph(&region, opts)` | Wrapped text in region, returns overflow |
+| `writeFlow(str, opts)` | Convenience: auto-adds pages on overflow |
+
+### Margins and Page Regions
+
+```zig
+// Set document margins (optional - defaults to 72pt / 1 inch)
+doc.setMargins(.{ .left = 72, .right = 72, .top = 72, .bottom = 72 });
+
+// Get region for current page (respects margins)
+var region = doc.getPageRegion();
+// → Region{ .x = 72, .y = 72, .width = 468, .height = 648, ... }
+```
+
+Margins don't magically affect `writeAt()` - they only define what `getPageRegion()` returns.
 
 ### Core Types
 
 ```zig
+/// Color (RGB for now, color spaces TBD)
+const Color = struct {
+    r: f64,  // 0.0 - 1.0
+    g: f64,
+    b: f64,
+
+    pub const black = Color{ .r = 0, .g = 0, .b = 0 };
+    pub const white = Color{ .r = 1, .g = 1, .b = 1 };
+    // TODO: CMYK, grayscale, spot colors
+};
+
+/// Border specification
+const Border = struct {
+    top: bool = false,
+    bottom: bool = false,
+    left: bool = false,
+    right: bool = false,
+
+    pub const none = Border{};
+    pub const all = Border{ .top = true, .bottom = true, .left = true, .right = true };
+};
+
+/// Padding (inner content inset)
+const Padding = struct {
+    left: f64 = 0,
+    right: f64 = 0,
+    top: f64 = 0,
+    bottom: f64 = 0,
+};
+
 /// Measured dimensions of text
 const TextMetrics = struct {
     width: f64,      // in points
@@ -209,88 +261,171 @@ const TextMetrics = struct {
 
 /// A rectangular area for content placement
 const Region = struct {
+    // Geometry
     x: f64,
     y: f64,
     width: f64,
     height: f64,
-    cursor_y: f64,   // current vertical position within region
 
-    /// Space remaining before region is full
-    fn remainingHeight(self: Region) f64;
+    // Cursor state
+    cursor_y: f64 = 0,   // current vertical position within content area
+
+    // Content inset
+    padding: Padding = .{},
+
+    // Visual styling (separate from text content)
+    border: Border = .{},
+    fill: ?Color = null,
+
+    /// Space remaining in content area
+    pub fn remainingHeight(self: Region) f64;
+
+    /// Usable width inside padding
+    pub fn contentWidth(self: Region) f64;
 
     /// Check if text metrics fit in remaining space
-    fn fits(self: Region, metrics: TextMetrics) bool;
+    pub fn fits(self: Region, m: TextMetrics) bool;
 };
 
-/// Result of writeFitting - what was written and what overflowed
+/// Result of writeLine/writeParagraph
 const WriteResult = struct {
-    written: []const u8,    // text that was rendered
-    overflow: ?[]const u8,  // text that didn't fit (null if all fit)
+    lines_written: usize,       // number of lines rendered
+    overflow: ?[]const u8,      // text that didn't fit (null if all fit)
+};
+
+/// Horizontal text alignment
+const Align = enum { left, center, right, justify };
+
+/// Vertical text alignment within line height
+const VAlign = enum {
+    top,     // baseline at content_y + font_size (simple)
+    middle,  // baseline centered, fpdf2 compatible
+    bottom,  // baseline at content_y + line_height
+};
+
+/// Options for writeLine (single line, no wrap)
+const LineOptions = struct {
+    alignment: Align = .left,
+    valign: VAlign = .top,
+};
+
+/// Line breaking algorithm
+const LineBreaking = enum {
+    greedy,   // Fill each line as much as possible (fast, default)
+    optimal,  // Knuth-Plass: minimize total badness across all lines
+};
+
+/// Options for writeParagraph (wrapped text)
+const ParagraphOptions = struct {
+    alignment: Align = .left,
+    valign: VAlign = .top,
+    first_indent: f64 = 0,
+    break_on_hyphens: bool = true,    // Break at regular hyphens (false for fpdf2 compat)
+    line_breaking: LineBreaking = .greedy,  // Algorithm for line breaks
+};
+
+/// Options for writeFlow (convenience auto-page)
+const FlowOptions = struct {
+    alignment: Align = .left,
+    first_indent: f64 = 0,
 };
 ```
 
-### Core Primitives
+### Function Signatures
 
 ```zig
-/// Measure text without rendering (cheap - font metric lookup)
-fn measureText(doc: *Document, text: []const u8) TextMetrics;
+fn write(self: *Document, text: []const u8) !void
+fn writeAt(self: *Document, x: f64, y: f64, text: []const u8) !void
+fn writeLine(self: *Document, region: *Region, text: []const u8, opts: LineOptions) !WriteResult
+fn writeParagraph(self: *Document, region: *Region, text: []const u8, opts: ParagraphOptions) !WriteResult
+fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 
-/// Measure wrapped text within a width constraint
-fn measureWrappedText(doc: *Document, text: []const u8, max_width: f64) TextMetrics;
-
-/// Write text that fits, return overflow
-fn writeFitting(doc: *Document, region: *Region, text: []const u8) WriteResult;
+/// Draw region's border/fill (without text)
+fn drawRegion(self: *Document, region: *const Region) !void
 ```
 
 ### Usage Patterns
 
-**Simple flow (single pass):**
+**Simplest case - dump text into PDF:**
 ```zig
-var region = Region{ .x = 50, .y = 50, .width = 500, .height = 700 };
-var text = content;
-while (text.len > 0) {
-    const result = doc.writeFitting(&region, text);
-    text = result.overflow orelse break;
-    // Start new page/column
-    doc.addPage();
-    region = Region{ ... };
-}
+var doc = try zpdf.Document.init(allocator);
+try doc.setFont(.helvetica, 12);
+try doc.addPage(.a4);
+
+// Auto-adds pages as needed
+try doc.writeFlow(long_body_text, .{});
+
+try doc.save("output.pdf");
 ```
 
-**Balanced columns (two pass):**
+**With options:**
 ```zig
-// Pass 1: measure total
-const metrics = doc.measureWrappedText(content, column_width);
-const per_column = metrics.height / num_columns;
-
-// Pass 2: render with split points
-// ...
+try doc.writeFlow(long_body_text, .{
+    .alignment = .justify,
+    .first_indent = 20,  // paragraph indent
+});
 ```
 
-**Screenplay with sentence breaks:**
+**Manual region control:**
 ```zig
-while (remaining.len > 0) {
-    const sentence = extractNextSentence(remaining);
-    const metrics = doc.measureText(sentence);
+var region = doc.getPageRegion();
+var remaining: ?[]const u8 = text;
 
-    if (region.fits(metrics)) {
-        doc.write(&region, sentence);
-        remaining = remaining[sentence.len..];
-    } else {
-        // New page with CONT'D header
-        doc.addPage();
-        region = newDialogRegion();
-        doc.write(&region, character ++ " (CONT'D)");
+while (remaining) |txt| {
+    const result = try doc.writeParagraph(&region, .{ .text = txt });
+    remaining = result.overflow;
+    if (remaining != null) {
+        try doc.addPage(.a4);
+        region = doc.getPageRegion();
     }
 }
+```
+
+**Multi-column layout:**
+```zig
+var left = Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
+var right = Region{ .x = 310, .y = 50, .width = 230, .height = 700 };
+
+var remaining: ?[]const u8 = text;
+for ([_]*Region{ &left, &right }) |region| {
+    if (remaining) |txt| {
+        const result = try doc.writeParagraph(region, .{ .text = txt });
+        remaining = result.overflow;
+    }
+}
+// remaining still has text? Add page, repeat...
+```
+
+### Baseline Positioning (VAlign)
+
+Vertical alignment controls where text sits within each line cell:
+
+```zig
+// valign: .top (default) - simple formula, baseline at content_y + font_size
+baseline = content_y + cursor_y + font_size
+
+// valign: .middle - fpdf2 compatible, text centered in line height
+baseline = content_y + cursor_y + font_size - leading/2
+
+// valign: .bottom - baseline at bottom of line height
+baseline = content_y + cursor_y + line_height
+```
+
+**fpdf2 compatibility**: Use `.valign = .middle` to match fpdf2's `cell()` and `multi_cell()`:
+
+```zig
+_ = try doc.writeParagraph(&region, text, .{ .valign = .middle });
 ```
 
 ### Design Principles
 
 1. **Measure is cheap** - Font metric lookups, no PDF writing
 2. **No backtracking** - Measure → decide → render (never undo)
-3. **User controls flow** - Library provides primitives, user code handles breaks
-4. **Single source of truth** - Positions come from regions, not separate state
+3. **User controls flow** - Library provides primitives, user handles page/column breaks
+4. **Explicit regions** - Margins don't magically affect positioning; ask for `getPageRegion()`
+5. **Single source of truth** - When using regions, the region's cursor is authoritative; don't mix with `setXY()`
+6. **Layered API** - Simple (`writeFlow`) to powerful (`writeParagraph` + manual regions)
+7. **Explicit over magic** - VAlign provides control; no hidden adjustments
 
 ## Graphics Support (Planned)
 

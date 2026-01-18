@@ -27,6 +27,7 @@ const test_cases = [_]TestCase{
     .{ .name = "opentype_features", .generate = generateOpenTypeFeaturessPdf },
     .{ .name = "text_flow", .generate = generateTextFlowPdf },
     .{ .name = "justify", .generate = generateJustifyPdf },
+    .{ .name = "optimal_breaks", .generate = generateOptimalBreaksPdf },
 };
 
 // ============================================================================
@@ -813,6 +814,88 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    var y: f64 = 40;
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, y, "Knuth-Plass Optimal Line Breaking");
+    y += 22;
+
+    // Explanation
+    try doc.setFont(.helvetica, 9);
+    const explanation =
+        \\The greedy algorithm fills each line as much as possible. Knuth-Plass minimizes total
+        \\"badness" (slack squared) across all lines, often leaving space on one line to improve others.
+    ;
+    var exp_region = zpdf.Region{ .x = 50, .y = y, .width = 495, .height = 30 };
+    _ = try doc.writeParagraph(&exp_region, explanation, .{});
+    y += 38;
+
+    // Monospace example with the classic test case
+    try doc.setFont(.helvetica_bold, 10);
+    try doc.writeAt(50, y, "Monospace Example (14 chars wide):");
+    y += 14;
+
+    const mono_text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
+    const char_width = 7.2; // Courier 12pt
+    const mono_width = 14 * char_width;
+
+    // Two small boxes side by side for monospace
+    try doc.setFont(.courier, 12);
+    var mono_greedy = zpdf.Region{ .x = 50, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
+    var mono_optimal = zpdf.Region{ .x = 180, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
+    _ = try doc.writeParagraph(&mono_greedy, mono_text, .{ .line_breaking = .greedy });
+    _ = try doc.writeParagraph(&mono_optimal, mono_text, .{ .line_breaking = .optimal });
+    try doc.drawRegion(&mono_greedy);
+    try doc.drawRegion(&mono_optimal);
+
+    // Labels
+    try doc.setFont(.helvetica, 8);
+    try doc.writeAt(50, y + 118, "Greedy: line 2 = \"yellow dog was\"");
+    try doc.writeAt(180, y + 118, "Optimal: line 2 = \"yellow dog\"");
+    y += 136;
+
+    // Lorem Ipsum columns
+    try doc.setFont(.helvetica_bold, 10);
+    try doc.writeAt(50, y, "Dense Text Comparison:");
+    y += 14;
+
+    const lorem =
+        \\Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Curabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis sollicitudin mauris. Integer in mauris eu nibh euismod gravida. Duis ac tellus et risus vulputate vehicula. Donec lobortis risus a elit. Etiam tempor ultrices. Suspendisse in justo eu magna luctus suscipit.
+        \\
+        \\Sed lectus. Integer euismod lacus luctus magna. Quisque cursus, metus vitae pharetra auctor, sem massa mattis sem, at interdum magna augue eget diam. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Morbi lacinia molestie dui. Praesent blandit dolor. Sed non quam. In vel mi sit amet augue congue elementum. Morbi in ipsum sit amet pede facilisis laoreet. Donec lacus nunc, viverra nec, blandit vel, egestas et, augue. Vestibulum tincidunt malesuada tellus. Ut ultrices ultrices enim. Curabitur sit amet mauris. Morbi in dui quis est pulvinar ullamcorper. Nulla facilisi. Integer lacinia sollicitudin massa. Cras metus. Sed aliquet risus a tortor. Integer id quam. Morbi mi. Quisque nisl felis, venenatis tristique, dignissim in, ultrices sit amet, augue.
+    ;
+
+    const col_width: f64 = 230;
+    const col_height: f64 = 480;
+    const left_x: f64 = 50;
+    const right_x: f64 = 310;
+
+    // Column headers
+    try doc.setFont(.helvetica_bold, 9);
+    try doc.writeAt(left_x, y, "GREEDY");
+    try doc.writeAt(right_x, y, "OPTIMAL (Knuth-Plass)");
+    y += 12;
+
+    // Left column - Greedy
+    try doc.setFont(.times_roman, 10);
+    var left_col = zpdf.Region{ .x = left_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
+    _ = try doc.writeParagraph(&left_col, lorem, .{ .line_breaking = .greedy, .alignment = .justify });
+    try doc.drawRegion(&left_col);
+
+    // Right column - Optimal
+    var right_col = zpdf.Region{ .x = right_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
+    _ = try doc.writeParagraph(&right_col, lorem, .{ .line_breaking = .optimal, .alignment = .justify });
+    try doc.drawRegion(&right_col);
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -864,6 +947,11 @@ test "integration: text_flow PDF" {
 test "integration: justify PDF" {
     // Tests justified text alignment with word spacing
     try runIntegrationTest("justify", generateJustifyPdf);
+}
+
+test "integration: optimal_breaks PDF" {
+    // Tests Knuth-Plass optimal line breaking vs greedy algorithm
+    try runIntegrationTest("optimal_breaks", generateOptimalBreaksPdf);
 }
 
 fn runIntegrationTest(
