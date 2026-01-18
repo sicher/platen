@@ -1,7 +1,31 @@
 # zpdf Context
 
 ## Current Focus
-Text Flow API complete with all wrapping modes. All 140 tests pass.
+Justify alignment implemented. All 141 tests pass.
+
+## What We Did (Session 2026-01-18 #20) [COMPLETE]
+- **Implemented justify alignment** for `writeParagraph`:
+  - Added `word_spacing` field to `TextCommand` struct
+  - Created `writeWithWordSpacing()` internal function for justified text
+  - Modified `writeLineInternal()` to calculate word spacing: `(available_width - text_width) / space_count`
+  - Emit PDF `Tw` (word spacing) operator in `renderPageCommands()`
+  - Always emit `Tw` to reset state between text blocks (PDF state persists)
+  - Last line of paragraph uses left-alignment (standard typography)
+- **Added justify integration test** with longer paragraphs:
+  - Long paragraph (451pt) - 7 justified lines + 1 left-aligned last line
+  - Narrow column (200pt) - demonstrates visible word spacing
+  - Comparison section showing left vs justified with same text
+- Updated `gen_references.py` with matching fpdf2 justify test
+- All 141 tests pass
+
+## Tools
+- **Zig tools** (in `tools/`): `simgrep`, `zigmap`
+- **Python venv** (`.venv/bin/`):
+  - `fpdf2` 2.8.5 - reference implementation for generating test PDFs
+  - `fonttools`/`ttx`/`pyftsubset` - font inspection and subsetting
+  - `PyMuPDF` - PDF parsing and validation
+  - `uharfbuzz` - text shaping reference
+  - `pillow` - image handling
 
 ## What We Did (Session 2026-01-18 #19) [COMPLETE]
 - **Fixed soft-hyphen recursive breaking**: Column width was 24pt but "com-" is 24.4pt

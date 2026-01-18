@@ -230,6 +230,7 @@ const TextCommand = struct {
     y: f64,
     font_size: f64,
     char_spacing: f64,
+    word_spacing: f64, // Extra space added between words for justification
     text_data: []const u8, // Owned copy of text
     font: FontRef,
 };
@@ -573,6 +574,48 @@ pub const Document = struct {
                 .y = self.y,
                 .font_size = self.font_size,
                 .char_spacing = self.char_spacing,
+                .word_spacing = 0,
+                .text_data = text_copy,
+                .font = font_ref,
+            },
+        });
+    }
+
+    /// Internal: Write text at position with specified word spacing (for justification).
+    fn writeWithWordSpacing(self: *Document, x: f64, y: f64, str: []const u8, word_spacing: f64) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+
+        // Determine font reference and mark as used
+        const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
+            try page.markEmbeddedUsed(self.allocator, emb);
+            if (emb.encoding == .identity) {
+                try emb.markUnicodeCharsUsed(str);
+            } else {
+                emb.markCharsUsed(str);
+            }
+            break :blk .{ .embedded = emb };
+        } else if (self.current_font) |font| blk: {
+            try page.markFontUsed(self.allocator, font);
+            break :blk .{ .standard = font };
+        } else {
+            return error.NoFont;
+        };
+
+        // Create owned copy of text, stripping soft-hyphens
+        const text_copy = try stripSoftHyphens(self.allocator, str);
+        errdefer self.allocator.free(text_copy);
+
+        // Store deferred command with word spacing
+        // Convert Y from top-left to PDF coordinates (bottom-left origin)
+        try page.commands.append(self.allocator, .{
+            .text = .{
+                .x = x,
+                .y = self.page_size.height - y,
+                .font_size = self.font_size,
+                .char_spacing = self.char_spacing,
+                .word_spacing = word_spacing,
                 .text_data = text_copy,
                 .font = font_ref,
             },
@@ -702,13 +745,27 @@ pub const Document = struct {
         const content_width = region.contentWidth();
         const available_width = content_width - indent;
 
+        // Count spaces for justification calculation
+        var space_count: usize = 0;
+        for (str) |c| {
+            if (c == ' ') space_count += 1;
+        }
+
+        // Calculate word spacing for justified text
+        // Only justify if there are spaces and text doesn't fill line
+        const extra_space = available_width - text_width;
+        const word_spacing: f64 = if (alignment == .justify and space_count > 0 and extra_space > 0)
+            extra_space / @as(f64, @floatFromInt(space_count))
+        else
+            0;
+
         // Calculate x position based on alignment (content starts at x + padding.left)
         const content_x = region.x + region.padding.left;
         const x = switch (alignment) {
             .left => content_x + indent,
             .center => content_x + indent + (available_width - text_width) / 2,
             .right => content_x + content_width - text_width,
-            .justify => content_x + indent, // justify handled separately for multi-word lines
+            .justify => content_x + indent,
         };
 
         // Calculate y position based on vertical alignment
@@ -723,8 +780,12 @@ pub const Document = struct {
             .bottom => content_y + region.cursor_y + line_height,
         };
 
-        // Render text
-        try self.writeAt(x, y, str);
+        // Render text (with word spacing if justified)
+        if (word_spacing > 0) {
+            try self.writeWithWordSpacing(x, y, str, word_spacing);
+        } else {
+            try self.writeAt(x, y, str);
+        }
 
         // Advance cursor
         region.cursor_y += line_height;
@@ -983,6 +1044,26 @@ pub const Document = struct {
                 line = line[0 .. line.len - 1];
             }
 
+            // Determine if this is the last line (for justify: don't justify last line)
+            const is_last_line = blk: {
+                // Calculate what remaining would be after this line
+                var next_remaining = if (soft_hyphen_break)
+                    remaining[line_end + 2 ..]
+                else
+                    remaining[line_end..];
+                // Skip whitespace
+                while (next_remaining.len > 0 and (next_remaining[0] == ' ' or next_remaining[0] == '\t' or next_remaining[0] == '\n')) {
+                    next_remaining = next_remaining[1..];
+                }
+                break :blk next_remaining.len == 0;
+            };
+
+            // For justify alignment, use left alignment on the last line (standard typography)
+            const line_alignment = if (opts.alignment == .justify and is_last_line)
+                Align.left
+            else
+                opts.alignment;
+
             // Render the line (with visible hyphen if breaking at soft-hyphen)
             if (soft_hyphen_break) {
                 // Append visible hyphen for soft-hyphen break
@@ -990,13 +1071,13 @@ pub const Document = struct {
                 if (line.len < buf.len - 1) {
                     @memcpy(buf[0..line.len], line);
                     buf[line.len] = '-';
-                    _ = try self.writeLineInternal(region, buf[0 .. line.len + 1], opts.alignment, opts.valign, indent);
+                    _ = try self.writeLineInternal(region, buf[0 .. line.len + 1], line_alignment, opts.valign, indent);
                 } else {
                     // Line too long for buffer, render without hyphen (fallback)
-                    _ = try self.writeLineInternal(region, line, opts.alignment, opts.valign, indent);
+                    _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
                 }
             } else {
-                _ = try self.writeLineInternal(region, line, opts.alignment, opts.valign, indent);
+                _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
             }
             lines_written += 1;
             is_first_line = false;
@@ -1114,6 +1195,8 @@ pub const Document = struct {
                             if (t.char_spacing != 0) {
                                 try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                             }
+                            // Always emit Tw to ensure correct word spacing (state persists across text blocks)
+                            try cw.print("{d:.2} Tw\n", .{t.word_spacing});
 
                             try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
 
@@ -1133,6 +1216,8 @@ pub const Document = struct {
                             if (t.char_spacing != 0) {
                                 try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                             }
+                            // Always emit Tw to ensure correct word spacing (state persists across text blocks)
+                            try cw.print("{d:.2} Tw\n", .{t.word_spacing});
 
                             try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                             try cw.append("(");

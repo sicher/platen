@@ -26,6 +26,7 @@ const test_cases = [_]TestCase{
     .{ .name = "inter_fonts", .generate = generateInterFontsPdf },
     .{ .name = "opentype_features", .generate = generateOpenTypeFeaturessPdf },
     .{ .name = "text_flow", .generate = generateTextFlowPdf },
+    .{ .name = "justify", .generate = generateJustifyPdf },
 };
 
 // ============================================================================
@@ -741,6 +742,77 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    var y: f64 = 50;
+
+    // Title
+    try doc.setFont(.helvetica_bold, 14);
+    try doc.writeAt(50, y, "Justified Text Alignment");
+    y += 24;
+
+    // Standard paragraph width (451 pts = page width - 72pt margins each side)
+    const region_width = 451;
+
+    // Test 1: Long justified paragraph (multiple lines)
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Long Justified Paragraph:");
+    y += 14.4;
+
+    try doc.setFont(.helvetica, 11);
+    var region = zpdf.Region{ .x = 50, .y = y, .width = region_width, .height = 200 };
+    const text1 = "Typography is the art and technique of arranging type to make written " ++
+        "language legible, readable, and appealing when displayed. The arrangement " ++
+        "of type involves selecting typefaces, point sizes, line lengths, line spacing, " ++
+        "and letter spacing, as well as adjusting the space between pairs of letters. " ++
+        "Justified text creates clean edges on both sides of a text block, which many " ++
+        "readers find visually appealing. However, it can create uneven spacing between " ++
+        "words, especially in narrow columns. The last line is typically left-aligned.";
+    _ = try doc.writeParagraph(&region, text1, .{ .alignment = .justify, .valign = .middle, .break_on_hyphens = false });
+    y = region.y + region.cursor_y + 16;
+
+    // Test 2: Narrow column justified (more lines)
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Narrow Column (200pt):");
+    y += 14.4;
+
+    try doc.setFont(.helvetica, 11);
+    region = zpdf.Region{ .x = 50, .y = y, .width = 200, .height = 150 };
+    const text2 = "In narrow columns, justified text requires more word spacing adjustment. " ++
+        "Each line must stretch to fill the available width, which can create " ++
+        "noticeable gaps between words. Good typography balances readability with " ++
+        "visual appeal. The spacing should be even across the paragraph.";
+    _ = try doc.writeParagraph(&region, text2, .{ .alignment = .justify, .valign = .middle, .break_on_hyphens = false });
+    y = region.y + region.cursor_y + 16;
+
+    // Test 3: Compare left vs justify with same long text
+    const compare_text = "The quick brown fox jumps over the lazy dog. Pack my box with five " ++
+        "dozen liquor jugs. How vexingly quick daft zebras jump. The five boxing " ++
+        "wizards jump quickly. Sphinx of black quartz, judge my vow.";
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Comparison - Left Aligned:");
+    y += 14.4;
+
+    try doc.setFont(.helvetica, 11);
+    region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+    _ = try doc.writeParagraph(&region, compare_text, .{ .alignment = .left, .valign = .middle, .break_on_hyphens = false });
+    y = region.y + region.cursor_y + 12;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Comparison - Justified:");
+    y += 14.4;
+
+    try doc.setFont(.helvetica, 11);
+    region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+    _ = try doc.writeParagraph(&region, compare_text, .{ .alignment = .justify, .valign = .middle, .break_on_hyphens = false });
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -787,6 +859,11 @@ test "integration: opentype_features PDF" {
 test "integration: text_flow PDF" {
     // Tests Text Flow API: regions, margins, writeLine, writeParagraph, drawRegion
     try runIntegrationTest("text_flow", generateTextFlowPdf);
+}
+
+test "integration: justify PDF" {
+    // Tests justified text alignment with word spacing
+    try runIntegrationTest("justify", generateJustifyPdf);
 }
 
 fn runIntegrationTest(

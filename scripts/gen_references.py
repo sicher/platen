@@ -838,6 +838,78 @@ def gen_text_flow():
     print("  text_flow.pdf")
 
 
+def gen_justify():
+    """Test justified text alignment."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    y = 50
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, y, "Justified Text Alignment")
+    y += 24
+
+    # Standard paragraph width (451 pts = page width - 72pt margins each side)
+    region_width = 451
+
+    # Test 1: Long justified paragraph (multiple lines)
+    pdf.set_font("Helvetica", "B", size=11)
+    pdf.text(50, y, "Long Justified Paragraph:")
+    y += 14.4
+
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(50, y)
+    text1 = ("Typography is the art and technique of arranging type to make written "
+             "language legible, readable, and appealing when displayed. The arrangement "
+             "of type involves selecting typefaces, point sizes, line lengths, line spacing, "
+             "and letter spacing, as well as adjusting the space between pairs of letters. "
+             "Justified text creates clean edges on both sides of a text block, which many "
+             "readers find visually appealing. However, it can create uneven spacing between "
+             "words, especially in narrow columns. The last line is typically left-aligned.")
+    pdf.multi_cell(w=region_width, h=11 * 1.2, text=text1, align="J")
+    y = pdf.get_y() + 16
+
+    # Test 2: Narrow column justified (more lines)
+    pdf.set_font("Helvetica", "B", size=11)
+    pdf.text(50, y, "Narrow Column (200pt):")
+    y += 14.4
+
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(50, y)
+    text2 = ("In narrow columns, justified text requires more word spacing adjustment. "
+             "Each line must stretch to fill the available width, which can create "
+             "noticeable gaps between words. Good typography balances readability with "
+             "visual appeal. The spacing should be even across the paragraph.")
+    pdf.multi_cell(w=200, h=11 * 1.2, text=text2, align="J")
+    y = pdf.get_y() + 16
+
+    # Test 3: Compare left vs justify with same long text
+    compare_text = ("The quick brown fox jumps over the lazy dog. Pack my box with five "
+                    "dozen liquor jugs. How vexingly quick daft zebras jump. The five boxing "
+                    "wizards jump quickly. Sphinx of black quartz, judge my vow.")
+
+    pdf.set_font("Helvetica", "B", size=11)
+    pdf.text(50, y, "Comparison - Left Aligned:")
+    y += 14.4
+
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(50, y)
+    pdf.multi_cell(w=300, h=11 * 1.2, text=compare_text, align="L")
+    y = pdf.get_y() + 12
+
+    pdf.set_font("Helvetica", "B", size=11)
+    pdf.text(50, y, "Comparison - Justified:")
+    y += 14.4
+
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(50, y)
+    pdf.multi_cell(w=300, h=11 * 1.2, text=compare_text, align="J")
+
+    pdf.output(OUTPUT_DIR / "justify.pdf")
+    print("  justify.pdf")
+
+
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -852,6 +924,7 @@ def main():
     gen_inter_fonts()
     gen_opentype_features()
     gen_text_flow()
+    gen_justify()
     print(f"\nDone. References in {OUTPUT_DIR}/")
 
 
