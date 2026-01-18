@@ -335,6 +335,9 @@ pub const EmbeddedFont = struct {
             .clig => self.feature_flags.clig = enabled,
             .dlig => self.feature_flags.dlig = enabled,
             .hlig => self.feature_flags.hlig = enabled,
+            .calt => self.feature_flags.calt = enabled,
+            .mark => self.feature_flags.mark = enabled,
+            .mkmk => self.feature_flags.mkmk = enabled,
         }
     }
 
@@ -367,17 +370,26 @@ pub const EmbeddedFont = struct {
             i += len;
         }
 
-        // Initialize OpenType features if liga or kern is enabled
-        if (self.feature_flags.liga or self.feature_flags.kern) {
+        // Initialize OpenType features if any GSUB/GPOS feature is enabled
+        const needs_ot = self.feature_flags.liga or self.feature_flags.dlig or
+            self.feature_flags.clig or self.feature_flags.hlig or
+            self.feature_flags.calt or self.feature_flags.kern;
+        if (needs_ot) {
             try self.initOpenTypeFeatures();
         }
 
-        // Apply ligature substitution if enabled
-        if (self.feature_flags.liga and base_glyphs.items.len > 0) {
+        // Apply GSUB substitutions if enabled (calt and/or ligatures)
+        if (base_glyphs.items.len > 0) {
             if (self.ot_features) |ot| {
-                if (ot.liga_lookups.items.len > 0) {
-                    // Apply ligatures and track substitutions
-                    try self.applyLigaturesAndTrack(codepoints.items, base_glyphs.items, scale);
+                const has_calt = self.feature_flags.calt and ot.chain_context_lookups.items.len > 0;
+                const has_liga = self.feature_flags.liga and ot.liga_lookups.items.len > 0;
+                const has_dlig = self.feature_flags.dlig and ot.dlig_lookups.items.len > 0;
+                const has_clig = self.feature_flags.clig and ot.clig_lookups.items.len > 0;
+                const has_hlig = self.feature_flags.hlig and ot.hlig_lookups.items.len > 0;
+
+                if (has_calt or has_liga or has_dlig or has_clig or has_hlig) {
+                    // Apply GSUB substitutions and track results
+                    try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale);
                     return;
                 }
             }
@@ -397,48 +409,90 @@ pub const EmbeddedFont = struct {
         }
     }
 
-    /// Apply ligatures and track the substituted glyphs
-    fn applyLigaturesAndTrack(self: *EmbeddedFont, codepoints: []const u21, base_glyphs: []const u16, scale: f64) !void {
+    /// Apply GSUB substitutions (calt and/or ligatures) and track all resulting glyphs
+    fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, base_glyphs: []const u16, scale: f64) !void {
         const ot = self.ot_features orelse return;
 
-        var pos: usize = 0;
-        while (pos < base_glyphs.len) {
-            var matched = false;
+        // Apply GSUB substitutions to get final glyph sequence
+        const final_glyphs = try ot.applyGSUBWithFlags(base_glyphs, self.feature_flags);
+        defer self.allocator.free(final_glyphs);
 
-            // Try each ligature lookup
-            for (ot.liga_lookups.items) |lookup| {
-                if (lookup.findLigature(base_glyphs, pos)) |match| {
-                    // Found a ligature!
-                    const lig_gid = match.lig_glyph;
+        // Track all glyphs in the final sequence
+        // We need to handle cases where substitutions occurred (ligatures/calt changes)
+        var src_pos: usize = 0;
+        var dst_pos: usize = 0;
 
-                    // Track the ligature glyph with its component codepoints
-                    if (!self.ligature_codepoints.contains(lig_gid)) {
-                        const lig_cps = try self.allocator.alloc(u21, match.consumed);
-                        for (0..match.consumed) |j| {
-                            lig_cps[j] = codepoints[pos + j];
+        while (dst_pos < final_glyphs.len and src_pos < codepoints.len) {
+            const gid = final_glyphs[dst_pos];
+
+            // Check if this might be a ligature (glyph consumes multiple codepoints)
+            // We detect this by checking if the glyph at dst_pos differs from base_glyphs[src_pos]
+            // and trying to find how many source glyphs were consumed
+            if (src_pos < base_glyphs.len and gid != base_glyphs[src_pos]) {
+                // A substitution occurred - could be a ligature or single substitution
+                // Try to find how many source glyphs map to this output glyph
+                var consumed: usize = 1;
+
+                // Check all enabled ligature features for a match
+                const lookup_arrays = [_][]const opentype.LigatureSubst{
+                    if (self.feature_flags.liga) ot.liga_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.dlig) ot.dlig_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.clig) ot.clig_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.hlig) ot.hlig_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.calt) ot.calt_liga_lookups.items else &[_]opentype.LigatureSubst{},
+                };
+
+                outer: for (lookup_arrays) |lookups| {
+                    for (lookups) |lookup| {
+                        if (lookup.findLigature(base_glyphs, src_pos, ot.ligature_sets.items, ot.ligature_structs.items)) |match| {
+                            if (match.lig_glyph == gid) {
+                                consumed = match.consumed;
+                                break :outer;
+                            }
                         }
-                        try self.ligature_codepoints.put(self.allocator, lig_gid, lig_cps);
                     }
-
-                    // Track width for the ligature glyph
-                    if (!self.cid_glyph_widths.contains(lig_gid)) {
-                        if (self.font.getGlyphWidth(lig_gid)) |w| {
-                            const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
-                            try self.cid_glyph_widths.put(self.allocator, lig_gid, width);
-                        }
-                    }
-
-                    pos += match.consumed;
-                    matched = true;
-                    break;
                 }
-            }
 
-            if (!matched) {
-                // No ligature - track the base glyph
-                const cp = codepoints[pos];
-                const gid = base_glyphs[pos];
+                if (consumed > 1) {
+                    // Ligature: track codepoints for ToUnicode mapping
+                    // But skip if this glyph is already mapped to a single codepoint
+                    // (e.g., Inter has ⇔ as both a direct glyph AND a <=> ligature)
+                    const already_single = blk: {
+                        var iter = self.cid_used_glyphs.iterator();
+                        while (iter.next()) |entry| {
+                            if (entry.value_ptr.* == gid) break :blk true;
+                        }
+                        break :blk false;
+                    };
+                    if (!already_single and !self.ligature_codepoints.contains(gid)) {
+                        const lig_cps = try self.allocator.alloc(u21, consumed);
+                        for (0..consumed) |j| {
+                            if (src_pos + j < codepoints.len) {
+                                lig_cps[j] = codepoints[src_pos + j];
+                            }
+                        }
+                        try self.ligature_codepoints.put(self.allocator, gid, lig_cps);
+                    }
+                } else {
+                    // Single substitution (calt): track codepoint->substituted glyph mapping
+                    const cp = codepoints[src_pos];
+                    if (!self.cid_used_glyphs.contains(cp)) {
+                        try self.cid_used_glyphs.put(self.allocator, cp, gid);
+                    }
+                }
 
+                // Track width for this glyph
+                if (!self.cid_glyph_widths.contains(gid)) {
+                    if (self.font.getGlyphWidth(gid)) |w| {
+                        const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+                        try self.cid_glyph_widths.put(self.allocator, gid, width);
+                    }
+                }
+
+                src_pos += consumed;
+            } else {
+                // No substitution or single calt substitution (1:1 mapping)
+                const cp = codepoints[src_pos];
                 if (!self.cid_used_glyphs.contains(cp)) {
                     try self.cid_used_glyphs.put(self.allocator, cp, gid);
                     if (!self.cid_glyph_widths.contains(gid)) {
@@ -448,8 +502,10 @@ pub const EmbeddedFont = struct {
                         }
                     }
                 }
-                pos += 1;
+                src_pos += 1;
             }
+
+            dst_pos += 1;
         }
     }
 
@@ -474,12 +530,16 @@ pub const EmbeddedFont = struct {
             i += len;
         }
 
-        // Apply ligatures if enabled and available
-        if (self.feature_flags.liga) {
-            if (self.ot_features) |ot| {
-                if (ot.liga_lookups.items.len > 0) {
-                    return ot.applyLigatures(base_glyphs.items);
-                }
+        // Apply GSUB substitutions if enabled and available
+        if (self.ot_features) |ot| {
+            const has_gsub = (self.feature_flags.calt and (ot.calt_liga_lookups.items.len > 0 or ot.chain_context_lookups.items.len > 0)) or
+                (self.feature_flags.liga and ot.liga_lookups.items.len > 0) or
+                (self.feature_flags.dlig and ot.dlig_lookups.items.len > 0) or
+                (self.feature_flags.clig and ot.clig_lookups.items.len > 0) or
+                (self.feature_flags.hlig and ot.hlig_lookups.items.len > 0);
+
+            if (has_gsub) {
+                return ot.applyGSUBWithFlags(base_glyphs.items, self.feature_flags);
             }
         }
 
@@ -494,6 +554,17 @@ pub const EmbeddedFont = struct {
             return ot.getKerning(glyph1, glyph2);
         }
         return 0;
+    }
+
+    /// Get mark positioning offset for a mark glyph following a base glyph
+    /// Returns (dx, dy) in font units (design units), or null if no positioning applies
+    pub fn getMarkOffset(self: *EmbeddedFont, base_glyph: u16, mark_glyph: u16) ?opentype.MarkOffset {
+        if (!self.feature_flags.mark and !self.feature_flags.mkmk) return null;
+
+        if (self.ot_features) |ot| {
+            return ot.getMarkOffset(base_glyph, mark_glyph);
+        }
+        return null;
     }
 
     /// Get glyph ID for a Unicode codepoint (CID mode)

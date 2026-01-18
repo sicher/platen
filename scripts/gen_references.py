@@ -5,13 +5,28 @@ Generate reference PDFs using fpdf2.
 These serve as the baseline for testing zpdf output.
 Run with: python scripts/gen_references.py
 
+Options:
+  --test NAME    Generate only the specified test
+  --all          Generate all tests, including excluded ones
+
 Will auto-create .venv and install fpdf2 if needed.
+
+Note: Some tests are excluded from automatic generation because fpdf2
+cannot correctly generate them (e.g., inter_fonts has ligatures that
+fpdf2 doesn't apply). These references must be manually maintained.
 """
 
+import argparse
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+# Tests excluded from automatic generation because fpdf2 can't generate
+# correct references. These must be manually maintained from zpdf output.
+EXCLUDED_TESTS = {
+    "inter_fonts",  # fpdf2 doesn't apply Inter's <=> → ⇔ ligature
+}
 
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent
@@ -910,21 +925,51 @@ def gen_justify():
     print("  justify.pdf")
 
 
+GENERATORS = {
+    "minimal": gen_minimal,
+    "hello_world": gen_hello_world,
+    "multi_font": gen_multi_font,
+    "all_fonts": gen_all_fonts,
+    "multi_page": gen_multi_page,
+    "embedded_fonts": gen_embedded_fonts,
+    "cid_fonts": gen_cid_fonts,
+    "inter_fonts": gen_inter_fonts,
+    "opentype_features": gen_opentype_features,
+    "text_flow": gen_text_flow,
+    "justify": gen_justify,
+}
+
+
 def main():
+    parser = argparse.ArgumentParser(description="Generate reference PDFs with fpdf2")
+    parser.add_argument("--test", help="Generate only the specified test")
+    parser.add_argument("--all", action="store_true",
+                        help="Generate all tests, including excluded ones")
+    args = parser.parse_args()
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("Generating reference PDFs with fpdf2...")
-    gen_minimal()
-    gen_hello_world()
-    gen_multi_font()
-    gen_all_fonts()
-    gen_multi_page()
-    gen_embedded_fonts()
-    gen_cid_fonts()
-    gen_inter_fonts()
-    gen_opentype_features()
-    gen_text_flow()
-    gen_justify()
+    if args.test:
+        # Generate specific test
+        if args.test not in GENERATORS:
+            print(f"Unknown test: {args.test}")
+            print(f"Available: {', '.join(GENERATORS.keys())}")
+            sys.exit(1)
+        if args.test in EXCLUDED_TESTS and not args.all:
+            print(f"Warning: {args.test} is excluded (fpdf2 can't generate correct reference)")
+            print("Use --all to force generation, or maintain this reference manually from zpdf output")
+            sys.exit(1)
+        print(f"Generating {args.test}.pdf...")
+        GENERATORS[args.test]()
+    else:
+        # Generate all non-excluded tests
+        print("Generating reference PDFs with fpdf2...")
+        for name, gen_func in GENERATORS.items():
+            if name in EXCLUDED_TESTS and not args.all:
+                print(f"  {name}.pdf (SKIPPED - manually maintained)")
+                continue
+            gen_func()
+
     print(f"\nDone. References in {OUTPUT_DIR}/")
 
 

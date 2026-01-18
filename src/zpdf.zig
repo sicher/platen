@@ -634,9 +634,9 @@ pub const Document = struct {
         });
     }
 
-    /// Render CID text with ligatures and kerning using TJ operator
-    /// Returns true if kerning was applied (used TJ), false if simple Tj was used
-    fn renderCIDTextWithKerning(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8) !bool {
+    /// Render CID text with ligatures, kerning, and mark positioning
+    /// Returns true if advanced positioning was used (kerning or marks)
+    fn renderCIDTextWithKerning(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8, font_size: f64) !bool {
         _ = self;
         // Get glyph sequence with ligatures applied
         const glyphs = try emb.getGlyphsForText(str);
@@ -647,15 +647,27 @@ pub const Document = struct {
         const has_remap = emb.gid_remap.count() > 0;
         const units_per_em = emb.font.head.?.units_per_em;
 
-        // Check if we have any kerning
+        // Check if we have any kerning or mark positioning
         var has_kerning = false;
-        if (emb.feature_flags.kern and emb.ot_features != null) {
-            for (0..glyphs.len - 1) |i| {
-                if (emb.getKerning(glyphs[i], glyphs[i + 1]) != 0) {
-                    has_kerning = true;
-                    break;
+        var has_marks = false;
+        if (emb.feature_flags.kern or emb.feature_flags.mark or emb.feature_flags.mkmk) {
+            for (0..glyphs.len) |i| {
+                if (i + 1 < glyphs.len) {
+                    if (emb.feature_flags.kern and emb.getKerning(glyphs[i], glyphs[i + 1]) != 0) {
+                        has_kerning = true;
+                    }
+                    if ((emb.feature_flags.mark or emb.feature_flags.mkmk) and
+                        emb.getMarkOffset(glyphs[i], glyphs[i + 1]) != null)
+                    {
+                        has_marks = true;
+                    }
                 }
             }
+        }
+
+        // If we have marks with y-offsets, use glyph-by-glyph rendering
+        if (has_marks) {
+            return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap);
         }
 
         if (!has_kerning) {
@@ -694,6 +706,140 @@ pub const Document = struct {
         }
 
         try cw.append(">] TJ\n");
+        return true;
+    }
+
+    /// Render glyphs with mark positioning using individual Td/Tj operations
+    fn renderWithMarkPositioning(cw: *ContentWriter, emb: *EmbeddedFont, glyphs: []const u16, font_size: f64, units_per_em: u16, has_remap: bool) !bool {
+        // Track cumulative x displacement from line start
+        var x_pos: f64 = 0;
+        var y_pos: f64 = 0;
+
+        var i: usize = 0;
+        while (i < glyphs.len) {
+            const gid = glyphs[i];
+            const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
+            const glyph_width = emb.getGlyphWidth(gid); // in 1/1000 em
+
+            // Check if next glyph is a mark that attaches to this one
+            var mark_count: usize = 0;
+            var j = i + 1;
+            while (j < glyphs.len) {
+                if (emb.getMarkOffset(glyphs[j - 1], glyphs[j]) != null) {
+                    mark_count += 1;
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if (mark_count == 0) {
+                // No marks - output base glyph with kerning
+                var kern: i16 = 0;
+                if (i + 1 < glyphs.len) {
+                    kern = emb.getKerning(gid, glyphs[i + 1]);
+                }
+
+                // Move to correct position if needed
+                if (x_pos != 0 or y_pos != 0) {
+                    try cw.print("{d:.4} {d:.4} Td ", .{ x_pos, y_pos });
+                    x_pos = 0;
+                    y_pos = 0;
+                }
+
+                // Output glyph
+                try cw.print("<{X:0>4}> Tj\n", .{final_gid});
+
+                // Advance position
+                const advance_pts = @as(f64, @floatFromInt(glyph_width)) * font_size / 1000.0;
+                if (kern != 0) {
+                    const kern_pts = @as(f64, @floatFromInt(kern)) * font_size / @as(f64, @floatFromInt(units_per_em));
+                    x_pos = advance_pts + kern_pts;
+                } else {
+                    x_pos = advance_pts;
+                }
+
+                i += 1;
+            } else {
+                // Base glyph followed by mark(s)
+                // Move to correct position if needed
+                if (x_pos != 0 or y_pos != 0) {
+                    try cw.print("{d:.4} {d:.4} Td ", .{ x_pos, y_pos });
+                    x_pos = 0;
+                    y_pos = 0;
+                }
+
+                // Output base glyph
+                try cw.print("<{X:0>4}> Tj\n", .{final_gid});
+
+                // Track position after base
+                const base_width_pts = @as(f64, @floatFromInt(glyph_width)) * font_size / 1000.0;
+
+                // Render marks
+                var prev_gid = gid;
+                var prev_width = glyph_width;
+                for (0..mark_count) |m| {
+                    const mark_gid = glyphs[i + 1 + m];
+                    const mark_final_gid = if (has_remap) emb.gid_remap.get(mark_gid) orelse 0 else mark_gid;
+
+                    if (emb.getMarkOffset(prev_gid, mark_gid)) |offset| {
+                        // Convert mark offset from design units to points
+                        const dx_pts = @as(f64, @floatFromInt(offset.dx)) * font_size / @as(f64, @floatFromInt(units_per_em));
+                        const dy_pts = @as(f64, @floatFromInt(offset.dy)) * font_size / @as(f64, @floatFromInt(units_per_em));
+
+                        // Calculate displacement from current position to mark position
+                        // Current position is after previous glyph's advance
+                        const prev_advance_pts = @as(f64, @floatFromInt(prev_width)) * font_size / 1000.0;
+                        const td_x = dx_pts - prev_advance_pts;
+                        const td_y = dy_pts;
+
+                        // Move to mark position
+                        try cw.print("{d:.4} {d:.4} Td ", .{ td_x, td_y });
+
+                        // Output mark
+                        try cw.print("<{X:0>4}> Tj\n", .{mark_final_gid});
+
+                        // Mark width (typically 0 for combining marks)
+                        const mark_width = emb.getGlyphWidth(mark_gid);
+                        const mark_advance_pts = @as(f64, @floatFromInt(mark_width)) * font_size / 1000.0;
+
+                        // Track where we are now for next mark or returning
+                        // After mark, position is at: mark_position + mark_advance
+                        // We need to eventually return to base_position + base_advance
+                        prev_width = mark_width;
+                        prev_gid = mark_gid;
+
+                        // Update cumulative offset from base position
+                        x_pos = -(dx_pts + mark_advance_pts);
+                        y_pos = -dy_pts;
+                    }
+                }
+
+                // Return to baseline after all marks
+                // x_pos and y_pos hold negative of where mark ended relative to base
+                // We need to move to base_origin + base_width from mark end position
+                x_pos = x_pos + base_width_pts;
+                // y_pos stays as is (return to baseline)
+
+                // Add kerning if next non-mark glyph exists
+                const next_base_idx = i + 1 + mark_count;
+                if (next_base_idx < glyphs.len) {
+                    const kern = emb.getKerning(gid, glyphs[next_base_idx]);
+                    if (kern != 0) {
+                        const kern_pts = @as(f64, @floatFromInt(kern)) * font_size / @as(f64, @floatFromInt(units_per_em));
+                        x_pos += kern_pts;
+                    }
+                }
+
+                i += 1 + mark_count;
+            }
+        }
+
+        // Final position adjustment if needed (for text that continues after)
+        if (x_pos != 0 or y_pos != 0) {
+            try cw.print("{d:.4} {d:.4} Td ", .{ x_pos, y_pos });
+        }
+
         return true;
     }
 
@@ -1444,8 +1590,8 @@ pub const Document = struct {
                             try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
 
                             if (emb.encoding == .identity) {
-                                // CID mode: output with ligatures and kerning
-                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data);
+                                // CID mode: output with ligatures, kerning, and mark positioning
+                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data, t.font_size);
                             } else {
                                 // WinAnsi mode
                                 try cw.append("(");

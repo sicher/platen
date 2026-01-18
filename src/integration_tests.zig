@@ -279,184 +279,206 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    // Load Inter TTF versions
-    // Disable kerning to match fpdf2 reference (which uses text() without shaping)
-    const inter_ttf = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_ttf.encoding = .identity;
-    inter_ttf.setFeature(.kern, false);
-    const inter_ttf_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
-    inter_ttf_bold.encoding = .identity;
-    inter_ttf_bold.setFeature(.kern, false);
-    const inter_ttf_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf");
-    inter_ttf_italic.encoding = .identity;
-    inter_ttf_italic.setFeature(.kern, false);
-    const inter_ttf_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf");
-    inter_ttf_bolditalic.encoding = .identity;
-    inter_ttf_bolditalic.setFeature(.kern, false);
+    // Load all font variants
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter.encoding = .identity;
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
+    inter_bold.encoding = .identity;
+    const inter_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf");
+    inter_italic.encoding = .identity;
+    const inter_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf");
+    inter_bolditalic.encoding = .identity;
 
-    // Load Inter OTF versions (CFF outlines)
-    const inter_otf = try doc.loadFont("test/fonts/Inter/Inter-Regular.otf");
-    inter_otf.encoding = .identity;
-    inter_otf.setFeature(.kern, false);
-    const inter_otf_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.otf");
-    inter_otf_bold.encoding = .identity;
-    inter_otf_bold.setFeature(.kern, false);
-    const inter_otf_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.otf");
-    inter_otf_italic.encoding = .identity;
-    inter_otf_italic.setFeature(.kern, false);
-    const inter_otf_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.otf");
-    inter_otf_bolditalic.encoding = .identity;
-    inter_otf_bolditalic.setFeature(.kern, false);
+    // Feature comparison fonts
+    const inter_no_kern = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_no_kern.encoding = .identity;
+    inter_no_kern.setFeature(.kern, false);
+
+    const inter_no_mark = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_no_mark.encoding = .identity;
+    inter_no_mark.setFeature(.mark, false);
+    inter_no_mark.setFeature(.mkmk, false);
 
     try doc.addPage();
-    var y: f64 = 30;
+    var y: f64 = 32;
 
-    // Title
-    try doc.setEmbeddedFont(inter_ttf_bold, 24);
-    try doc.writeAt(50, y, "Inter Font Showcase");
+    // ===== Title =====
+    try doc.setEmbeddedFont(inter_bold, 22);
+    try doc.writeAt(50, y, "Inter Font Family");
+    y += 32;
+
+    // ===== Font Styles =====
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(50, y, "Regular: The quick brown fox jumps over the lazy dog.");
+    y += 15;
+    try doc.setEmbeddedFont(inter_bold, 11);
+    try doc.writeAt(50, y, "Bold: The quick brown fox jumps over the lazy dog.");
+    y += 15;
+    try doc.setEmbeddedFont(inter_italic, 11);
+    try doc.writeAt(50, y, "Italic: The quick brown fox jumps over the lazy dog.");
+    y += 15;
+    try doc.setEmbeddedFont(inter_bolditalic, 11);
+    try doc.writeAt(50, y, "Bold Italic: The quick brown fox jumps over the lazy dog.");
+    y += 24;
+
+    // ===== OpenType Features =====
+    try doc.setEmbeddedFont(inter_bold, 13);
+    try doc.writeAt(50, y, "OpenType Features");
     y += 20;
-    try doc.setEmbeddedFont(inter_ttf, 8);
-    try doc.writeAt(50, y, "TTF (TrueType) and OTF (CFF) versions with OpenType features");
-    y += 20;
 
-    // === TTF Section ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 14);
-    try doc.writeAt(50, y, "TrueType (.ttf)");
-    y += 16;
-
-    try doc.setEmbeddedFont(inter_ttf, 10);
-    try doc.writeAt(50, y, "Regular: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 12;
-    try doc.setEmbeddedFont(inter_ttf_bold, 10);
-    try doc.writeAt(50, y, "Bold: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 12;
-    try doc.setEmbeddedFont(inter_ttf_italic, 10);
-    try doc.writeAt(50, y, "Italic: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 12;
-    try doc.setEmbeddedFont(inter_ttf_bolditalic, 10);
-    try doc.writeAt(50, y, "Bold Italic: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 16;
-
-    // === OTF Section ===
-    try doc.setEmbeddedFont(inter_otf_bold, 14);
-    try doc.writeAt(50, y, "OpenType/CFF (.otf)");
-    y += 16;
-
-    try doc.setEmbeddedFont(inter_otf, 10);
-    try doc.writeAt(50, y, "Regular: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 12;
-    try doc.setEmbeddedFont(inter_otf_bold, 10);
-    try doc.writeAt(50, y, "Bold: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 12;
-    try doc.setEmbeddedFont(inter_otf_italic, 10);
-    try doc.writeAt(50, y, "Italic: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 12;
-    try doc.setEmbeddedFont(inter_otf_bolditalic, 10);
-    try doc.writeAt(50, y, "Bold Italic: The quick brown fox jumps over the lazy dog. 0123456789");
-    y += 18;
-
-    // === Unicode Coverage ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 12);
-    try doc.writeAt(50, y, "Unicode Coverage");
+    // --- Kerning ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Kerning (kern)");
     y += 14;
-
-    try doc.setEmbeddedFont(inter_ttf, 9);
-    try doc.writeAt(50, y, "Latin Extended: ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏ àáâãäåæçèéêëìíîï");
-    y += 11;
-    try doc.writeAt(50, y, "More Latin: ÐÑÒÓÔÕÖØÙÚÛÜÝÞ\xc3\x9f ðñòóôõöøùúûüýþÿ");
-    y += 11;
-    try doc.writeAt(50, y, "Latin Extended-A: \xc4\x80\xc4\x81\xc4\x82\xc4\x83\xc4\x84\xc4\x85\xc4\x86\xc4\x87\xc4\x88\xc4\x89\xc4\x8a\xc4\x8b\xc4\x8c\xc4\x8d\xc4\x8e\xc4\x8f\xc4\x90\xc4\x91\xc4\x92\xc4\x93\xc4\x94\xc4\x95");
-    y += 11;
-    try doc.writeAt(50, y, "Latin Extended-B: Œœ\xc5\xa0\xc5\xa1\xc5\xb8\xc5\xbd\xc5\xbe\xc6\x92");
-    y += 11;
-    try doc.writeAt(50, y, "Greek: ΑΒΓΔΕΖΗΘΙ αβγδεζηθι");
-    y += 11;
-    try doc.writeAt(50, y, "Cyrillic: АБВГДЕЖЗИ абвгдежзи");
-    y += 13;
-
-    // === Punctuation & Symbols ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 12);
-    try doc.writeAt(50, y, "Punctuation & Symbols");
-    y += 14;
-
-    try doc.setEmbeddedFont(inter_ttf, 9);
-    try doc.writeAt(50, y, "Quotes: \xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d « guillemets » \xe2\x80\xb9single\xe2\x80\xba");
-    y += 11;
-    try doc.writeAt(50, y, "Dashes: hyphen- en\xe2\x80\x93dash em\xe2\x80\x94dash horizontal\xe2\x80\x95bar");
-    y += 11;
-    try doc.writeAt(50, y, "Currency: $ ¢ £ ¥ \xe2\x82\xac \xe2\x82\xa3 \xe2\x82\xa4 \xe2\x82\xb9 \xe2\x82\xbd");
-    y += 11;
-    try doc.writeAt(50, y, "Math: + \xe2\x88\x92 × ÷ = \xe2\x89\xa0 < > \xe2\x89\xa4 \xe2\x89\xa5 ± \xe2\x88\x9e \xe2\x89\x88");
-    y += 11;
-    try doc.writeAt(50, y, "Arrows: \xe2\x86\x90 \xe2\x86\x91 \xe2\x86\x92 \xe2\x86\x93 \xe2\x86\x94 \xe2\x86\x95 \xe2\x87\x90 \xe2\x87\x92 \xe2\x87\x94");
-    y += 11;
-    try doc.writeAt(50, y, "Misc: © ® \xe2\x84\xa2 ° § ¶ \xe2\x80\xa0 \xe2\x80\xa1 \xe2\x80\xa2 \xe2\x80\xa6 ¦");
-    y += 13;
-
-    // === Numbers & Figures ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 12);
-    try doc.writeAt(50, y, "Numbers & Figures");
-    y += 14;
-
-    try doc.setEmbeddedFont(inter_ttf, 9);
-    try doc.writeAt(50, y, "Lining figures: 0123456789 (default)");
-    y += 11;
-    try doc.writeAt(50, y, "Fractions: ¼ ½ ¾ \xe2\x85\x93 \xe2\x85\x94 \xe2\x85\x9b \xe2\x85\x9c \xe2\x85\x9d \xe2\x85\x9e");
-    y += 11;
-    try doc.writeAt(50, y, "Superscript: ¹ ² ³ \xe2\x81\xb4 \xe2\x81\xb5 \xe2\x81\xb6 \xe2\x81\xb7 \xe2\x81\xb8 \xe2\x81\xb9 \xe2\x81\xb0");
-    y += 11;
-    try doc.writeAt(50, y, "Subscript: \xe2\x82\x80 \xe2\x82\x81 \xe2\x82\x82 \xe2\x82\x83 \xe2\x82\x84 \xe2\x82\x85 \xe2\x82\x86 \xe2\x82\x87 \xe2\x82\x88 \xe2\x82\x89");
-    y += 11;
-    try doc.writeAt(50, y, "Ordinals: 1ª 2º 1st 2nd 3rd");
-    y += 13;
-
-    // === OpenType Features ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 12);
-    try doc.writeAt(50, y, "OpenType Features Available");
-    y += 14;
-
-    try doc.setEmbeddedFont(inter_ttf, 8);
-    try doc.writeAt(50, y, "GSUB: aalt calt case ccmp cv01-cv14 dlig dnom frac locl numr ordn pnum salt sinf ss01-ss08 subs sups tnum zero");
-    y += 10;
-    try doc.writeAt(50, y, "GPOS: cpsp kern mark mkmk");
-    y += 12;
-
-    try doc.setEmbeddedFont(inter_ttf, 9);
-    try doc.writeAt(50, y, "zero: Slashed zero 0 vs O (cv feature)");
-    y += 11;
-    try doc.writeAt(50, y, "tnum: Tabular 1111 vs pnum: Proportional 1111");
-    y += 11;
-    try doc.writeAt(50, y, "case: H·I vs H\xe2\x80\xa2I (case-sensitive punctuation)");
-    y += 11;
-    try doc.writeAt(50, y, "frac: 1/2 1/4 3/4 (fraction feature)");
-    y += 13;
-
-    // === ASCII Range ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 12);
-    try doc.writeAt(50, y, "ASCII Character Set");
-    y += 14;
-
-    try doc.setEmbeddedFont(inter_ttf, 8);
-    try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
-    y += 10;
-    try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
-    y += 13;
-
-    // === Size Comparison ===
-    try doc.setEmbeddedFont(inter_ttf_bold, 12);
-    try doc.writeAt(50, y, "Size Comparison (TTF vs OTF)");
-    y += 14;
-
-    try doc.setEmbeddedFont(inter_ttf, 18);
-    try doc.writeAt(50, y, "Inter TTF 18pt");
-    try doc.setEmbeddedFont(inter_otf, 18);
-    try doc.writeAt(250, y, "Inter OTF 18pt");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "OFF:");
+    try doc.setEmbeddedFont(inter_no_kern, 14);
+    try doc.writeAt(78, y, "AV AWAY To Wave");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(240, y, "ON:");
+    try doc.setEmbeddedFont(inter, 14);
+    try doc.writeAt(262, y, "AV AWAY To Wave");
     y += 22;
 
-    try doc.setEmbeddedFont(inter_ttf_bold, 18);
-    try doc.writeAt(50, y, "Inter TTF Bold");
-    try doc.setEmbeddedFont(inter_otf_bold, 18);
-    try doc.writeAt(250, y, "Inter OTF Bold");
+    // --- Mark Positioning ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Mark Positioning (mark/mkmk)");
+    y += 14;
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "OFF:");
+    try doc.setEmbeddedFont(inter_no_mark, 14);
+    try doc.writeAt(78, y, "A\xcc\x80 E\xcc\x81 O\xcc\x83 N\xcc\x83");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(180, y, "ON:");
+    try doc.setEmbeddedFont(inter, 14);
+    try doc.writeAt(202, y, "A\xcc\x80 E\xcc\x81 O\xcc\x83 N\xcc\x83");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(310, y, "Stacked:");
+    try doc.setEmbeddedFont(inter, 14);
+    try doc.writeAt(358, y, "e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83 a\xcc\x86\xcc\x89");
+    y += 22;
+
+    // --- Contextual Alternates (calt) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Contextual Alternates (calt)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(210, y, "[TODO: -> => <-> !== arrow ligatures]");
+    y += 18;
+
+    // --- Discretionary Ligatures (dlig) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Discretionary Ligatures (dlig)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(220, y, "[TODO: ct st discretionary forms]");
+    y += 18;
+
+    // --- Tabular/Proportional Figures (tnum/pnum) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Figure Styles (tnum/pnum)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(200, y, "[TODO: 0123456789 tabular vs proportional]");
+    y += 18;
+
+    // --- Fractions (frac) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Fractions (frac)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(155, y, "[TODO: 1/2 -> \xc2\xbd  3/4 -> \xc2\xbe  automatic fraction building]");
+    y += 18;
+
+    // --- Slashed Zero (zero) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Slashed Zero (zero)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(175, y, "[TODO: 0 vs slashed zero for code/data]");
+    y += 18;
+
+    // --- Case-Sensitive Forms (case) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Case-Sensitive (case)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(185, y, "[TODO: (HELLO) vs adjusted parens/punctuation]");
+    y += 18;
+
+    // --- Stylistic Sets (ss01-08) - TODO ---
+    try doc.setEmbeddedFont(inter_bold, 10);
+    try doc.writeAt(50, y, "Stylistic Sets (ss01-08)");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(195, y, "[TODO: alternate glyph designs per set]");
+    y += 22;
+
+    // ===== Unicode Coverage =====
+    try doc.setEmbeddedFont(inter_bold, 13);
+    try doc.writeAt(50, y, "Unicode Coverage");
+    y += 18;
+
+    // Latin Extended
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Latin");
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(88, y, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏ ÐÑÒÓÔÕÖØÙÚÛÜÝÞ\xc3\x9f àáâãäåæçèéêëìíîï ðñòóôõöøùúûüýþÿ");
+    y += 14;
+    try doc.writeAt(88, y, "\xc4\x80\xc4\x81\xc4\x82\xc4\x83\xc4\x84\xc4\x85\xc4\x86\xc4\x87\xc4\x88\xc4\x89\xc4\x8a\xc4\x8b\xc4\x8c\xc4\x8d\xc4\x8e\xc4\x8f\xc4\x90\xc4\x91\xc4\x92\xc4\x93\xc4\x94\xc4\x95 Œœ\xc5\xa0\xc5\xa1\xc5\xb8\xc5\xbd\xc5\xbe\xc6\x92");
+    y += 16;
+
+    // Greek & Cyrillic
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Greek");
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(88, y, "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠ αβγδεζηθικλμνξοπ");
+    y += 14;
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Cyrillic");
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(98, y, "АБВГДЕЖЗИЙКЛМНОП абвгдежзийклмноп");
+    y += 16;
+
+    // Punctuation
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Punctuation");
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(118, y, "\xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d \xc2\xabguillemets\xc2\xbb  hyphen- en\xe2\x80\x93dash em\xe2\x80\x94dash \xe2\x80\xa6");
+    y += 16;
+
+    // Currency & Math
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Currency");
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(105, y, "$ \xc2\xa2 \xc2\xa3 \xc2\xa5 \xe2\x82\xac \xe2\x82\xa3 \xe2\x82\xb9 \xe2\x82\xbd");
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(260, y, "Math");
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(295, y, "+ \xe2\x88\x92 \xc3\x97 \xc3\xb7 = \xe2\x89\xa0 \xe2\x89\xa4 \xe2\x89\xa5 \xc2\xb1 \xe2\x88\x9e \xe2\x88\x9a \xe2\x88\x91");
+    y += 16;
+
+    // Arrows & Symbols
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Arrows");
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(95, y, "\xe2\x86\x90 \xe2\x86\x91 \xe2\x86\x92 \xe2\x86\x93 \xe2\x86\x94 \xe2\x86\x95 \xe2\x87\x90 \xe2\x87\x92 \xe2\x87\x94");
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(260, y, "Symbols");
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(305, y, "\xc2\xa9 \xc2\xae \xe2\x84\xa2 \xc2\xb0 \xc2\xa7 \xc2\xb6 \xe2\x80\xa0 \xe2\x80\xa1 \xe2\x80\xa2");
+    y += 16;
+
+    // Figures
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Figures");
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(98, y, "0123456789  \xc2\xbc \xc2\xbd \xc2\xbe \xe2\x85\x93 \xe2\x85\x94  Super: \xc2\xb9\xc2\xb2\xc2\xb3\xe2\x81\xb4\xe2\x81\xb5  Sub: \xe2\x82\x80\xe2\x82\x81\xe2\x82\x82\xe2\x82\x83\xe2\x82\x84  H\xe2\x82\x82O CO\xe2\x82\x82 E=mc\xc2\xb2");
+    y += 16;
+
+    // ASCII
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "ASCII");
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.writeAt(85, y, "!\"#$%&'()*+,-./0123456789:;<=>?@ ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_` abcdefghijklmnopqrstuvwxyz{|}~");
+    y += 18;
+
+    // Footer: Available Features
+    try doc.setEmbeddedFont(inter, 7);
+    try doc.writeAt(50, y, "GSUB: aalt calt case ccmp cv01-14 dlig dnom frac locl numr ordn pnum salt sinf ss01-08 subs sups tnum zero | GPOS: cpsp kern mark mkmk");
 
     return doc.output();
 }

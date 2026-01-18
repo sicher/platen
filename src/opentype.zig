@@ -16,6 +16,9 @@ pub const Feature = enum(u32) {
     clig = tag("clig"), // Contextual Ligatures
     dlig = tag("dlig"), // Discretionary Ligatures
     hlig = tag("hlig"), // Historical Ligatures
+    calt = tag("calt"), // Contextual Alternates
+    mark = tag("mark"), // Mark Positioning
+    mkmk = tag("mkmk"), // Mark-to-Mark Positioning
 
     fn tag(comptime s: *const [4]u8) u32 {
         return std.mem.readInt(u32, s, .big);
@@ -28,6 +31,9 @@ pub const Feature = enum(u32) {
             tag("clig") => .clig,
             tag("dlig") => .dlig,
             tag("hlig") => .hlig,
+            tag("calt") => .calt,
+            tag("mark") => .mark,
+            tag("mkmk") => .mkmk,
             else => null,
         };
     }
@@ -40,6 +46,9 @@ pub const FeatureFlags = struct {
     clig: bool = false,
     dlig: bool = false,
     hlig: bool = false,
+    calt: bool = false, // Contextual alternates off by default (chain context needs debugging)
+    mark: bool = true, // Mark positioning on by default
+    mkmk: bool = true, // Mark-to-mark on by default
 };
 
 /// Coverage table - maps glyph IDs to coverage indices
@@ -113,29 +122,45 @@ pub const Ligature = struct {
     components: []const u16, // Component glyph IDs (excluding first)
 };
 
-/// Ligature set - all ligatures starting with a particular glyph
+/// Ligature set - indices into ligature_structs array
 pub const LigatureSet = struct {
-    ligatures: []const Ligature,
+    start: usize, // Start index in ligature_structs
+    count: usize, // Number of ligatures
 };
 
 /// Ligature substitution lookup (GSUB Lookup Type 4)
+/// Stores indices to avoid slice invalidation during parsing
 pub const LigatureSubst = struct {
     coverage: CoverageTable,
-    ligature_sets: []const LigatureSet,
+    sets_start: usize, // Start index in ligature_sets array
+    sets_count: usize, // Number of ligature sets
 
     /// Find a ligature match starting at the given position in the glyph sequence
     /// Returns the replacement glyph ID and number of glyphs consumed, or null if no match
-    pub fn findLigature(self: LigatureSubst, glyphs: []const u16, pos: usize) ?struct { lig_glyph: u16, consumed: usize } {
+    pub fn findLigature(
+        self: LigatureSubst,
+        glyphs: []const u16,
+        pos: usize,
+        ligature_sets: []const LigatureSet,
+        ligature_structs: []const Ligature,
+    ) ?struct { lig_glyph: u16, consumed: usize } {
         if (pos >= glyphs.len) return null;
 
         const first_glyph = glyphs[pos];
         const coverage_index = self.coverage.getCoverageIndex(first_glyph) orelse return null;
 
-        if (coverage_index >= self.ligature_sets.len) return null;
-        const lig_set = self.ligature_sets[coverage_index];
+        if (coverage_index >= self.sets_count) return null;
+        const set_idx = self.sets_start + coverage_index;
+        if (set_idx >= ligature_sets.len) return null;
+        const lig_set = ligature_sets[set_idx];
+
+        // Get ligatures for this set
+        const ligs_end = lig_set.start + lig_set.count;
+        if (ligs_end > ligature_structs.len) return null;
+        const ligs = ligature_structs[lig_set.start..ligs_end];
 
         // Try each ligature in the set (longer ones first typically)
-        for (lig_set.ligatures) |lig| {
+        for (ligs) |lig| {
             if (pos + 1 + lig.components.len > glyphs.len) continue;
 
             // Check if remaining glyphs match
@@ -156,6 +181,72 @@ pub const LigatureSubst = struct {
         }
 
         return null;
+    }
+};
+
+/// Single Substitution lookup (GSUB Lookup Type 1)
+/// Replaces single glyphs with other single glyphs
+pub const SingleSubst = struct {
+    coverage: CoverageTable,
+    format: u16,
+    delta: i16 = 0, // Format 1: add to glyph ID
+    substitutes: []const u16 = &[_]u16{}, // Format 2: direct mapping
+
+    /// Get the substitute glyph for an input glyph, or null if not covered
+    pub fn substitute(self: SingleSubst, glyph: u16) ?u16 {
+        const cov_index = self.coverage.getCoverageIndex(glyph) orelse return null;
+
+        return switch (self.format) {
+            1 => @bitCast(@as(i16, @bitCast(glyph)) +% self.delta),
+            2 => if (cov_index < self.substitutes.len) self.substitutes[cov_index] else null,
+            else => null,
+        };
+    }
+};
+
+/// Substitution lookup record - used in chaining context substitution
+pub const SubstLookupRecord = struct {
+    sequence_index: u16, // Which glyph in input sequence (0-based)
+    lookup_index: u16, // Which lookup to apply
+};
+
+/// Chaining Context Substitution Format 3 (GSUB Lookup Type 6)
+/// Uses coverage tables for matching; invokes nested lookups for substitution
+pub const ChainContextSubstF3 = struct {
+    backtrack_coverages: []const CoverageTable,
+    input_coverages: []const CoverageTable, // First coverage is at current position
+    lookahead_coverages: []const CoverageTable,
+    subst_records: []const SubstLookupRecord,
+
+    /// Check if this rule matches at the given position in the glyph sequence
+    /// Returns the substitution records to apply if matched, null otherwise
+    pub fn match(self: ChainContextSubstF3, glyphs: []const u16, pos: usize) ?[]const SubstLookupRecord {
+        // Need at least enough glyphs for input sequence
+        if (self.input_coverages.len == 0) return null;
+        if (pos + self.input_coverages.len > glyphs.len) return null;
+
+        // Check backtrack glyphs (in reverse order from pos-1)
+        for (self.backtrack_coverages, 0..) |cov, i| {
+            if (i >= pos) return null; // Not enough backtrack glyphs
+            const backtrack_glyph = glyphs[pos - 1 - i];
+            if (cov.getCoverageIndex(backtrack_glyph) == null) return null;
+        }
+
+        // Check input glyphs (starting at pos)
+        for (self.input_coverages, 0..) |cov, i| {
+            const input_glyph = glyphs[pos + i];
+            if (cov.getCoverageIndex(input_glyph) == null) return null;
+        }
+
+        // Check lookahead glyphs (after input sequence)
+        const lookahead_start = pos + self.input_coverages.len;
+        for (self.lookahead_coverages, 0..) |cov, i| {
+            if (lookahead_start + i >= glyphs.len) return null;
+            const lookahead_glyph = glyphs[lookahead_start + i];
+            if (cov.getCoverageIndex(lookahead_glyph) == null) return null;
+        }
+
+        return self.subst_records;
     }
 };
 
@@ -315,23 +406,166 @@ pub const PairPosLookup = struct {
     }
 };
 
+/// Anchor position in design units
+pub const Anchor = struct {
+    x: i16,
+    y: i16,
+};
+
+/// Mark record - mark class and anchor position
+pub const MarkRecord = struct {
+    mark_class: u16,
+    anchor: Anchor,
+};
+
+/// Mark positioning offset in design units
+pub const MarkOffset = struct {
+    dx: i16,
+    dy: i16,
+};
+
+/// Mark-to-Base Attachment lookup (GPOS Lookup Type 4)
+/// Attaches combining marks to base glyphs
+pub const MarkBasePos = struct {
+    mark_coverage: CoverageTable,
+    base_coverage: CoverageTable,
+    mark_class_count: u16,
+    mark_records: []const MarkRecord, // [mark_coverage_idx] -> class + anchor
+    base_anchors_data: []const u8, // Raw data for base anchor lookup
+    base_count: u16,
+    base_array_offset: usize, // Offset within data
+
+    /// Get attachment offset for a mark glyph attaching to a base glyph
+    /// Returns (dx, dy) adjustment in design units, or null if not applicable
+    pub fn getAttachment(self: MarkBasePos, mark_glyph: u16, base_glyph: u16) ?MarkOffset {
+        const mark_idx = self.mark_coverage.getCoverageIndex(mark_glyph) orelse return null;
+        const base_idx = self.base_coverage.getCoverageIndex(base_glyph) orelse return null;
+
+        if (mark_idx >= self.mark_records.len) return null;
+        const mark_rec = self.mark_records[mark_idx];
+
+        if (base_idx >= self.base_count) return null;
+        if (mark_rec.mark_class >= self.mark_class_count) return null;
+
+        // Base anchor offset: baseArrayOffset + baseIdx * (markClassCount * 2) + markClass * 2
+        const base_record_offset = self.base_array_offset + 2 + // skip baseCount
+            @as(usize, base_idx) * @as(usize, self.mark_class_count) * 2 +
+            @as(usize, mark_rec.mark_class) * 2;
+
+        if (base_record_offset + 2 > self.base_anchors_data.len) return null;
+        const anchor_offset = readU16(self.base_anchors_data, base_record_offset);
+        if (anchor_offset == 0) return null; // No anchor for this class
+
+        const anchor_addr = self.base_array_offset + anchor_offset;
+        if (anchor_addr + 6 > self.base_anchors_data.len) return null;
+
+        const base_anchor = Anchor{
+            .x = readI16(self.base_anchors_data, anchor_addr + 2),
+            .y = readI16(self.base_anchors_data, anchor_addr + 4),
+        };
+
+        // Offset = base anchor - mark anchor
+        return .{
+            .dx = base_anchor.x - mark_rec.anchor.x,
+            .dy = base_anchor.y - mark_rec.anchor.y,
+        };
+    }
+};
+
+/// Mark-to-Mark Attachment lookup (GPOS Lookup Type 6)
+/// Attaches combining marks to other marks (base marks)
+pub const MarkMarkPos = struct {
+    mark1_coverage: CoverageTable, // Combining mark (attaching mark)
+    mark2_coverage: CoverageTable, // Base mark (mark being attached to)
+    mark_class_count: u16,
+    mark1_records: []const MarkRecord, // Attaching marks
+    mark2_anchors_data: []const u8,
+    mark2_count: u16,
+    mark2_array_offset: usize,
+
+    /// Get attachment offset for mark1 attaching to mark2
+    pub fn getAttachment(self: MarkMarkPos, mark1_glyph: u16, mark2_glyph: u16) ?MarkOffset {
+        const mark1_idx = self.mark1_coverage.getCoverageIndex(mark1_glyph) orelse return null;
+        const mark2_idx = self.mark2_coverage.getCoverageIndex(mark2_glyph) orelse return null;
+
+        if (mark1_idx >= self.mark1_records.len) return null;
+        const mark1_rec = self.mark1_records[mark1_idx];
+
+        if (mark2_idx >= self.mark2_count) return null;
+        if (mark1_rec.mark_class >= self.mark_class_count) return null;
+
+        const mark2_record_offset = self.mark2_array_offset + 2 +
+            @as(usize, mark2_idx) * @as(usize, self.mark_class_count) * 2 +
+            @as(usize, mark1_rec.mark_class) * 2;
+
+        if (mark2_record_offset + 2 > self.mark2_anchors_data.len) return null;
+        const anchor_offset = readU16(self.mark2_anchors_data, mark2_record_offset);
+        if (anchor_offset == 0) return null;
+
+        const anchor_addr = self.mark2_array_offset + anchor_offset;
+        if (anchor_addr + 6 > self.mark2_anchors_data.len) return null;
+
+        const mark2_anchor = Anchor{
+            .x = readI16(self.mark2_anchors_data, anchor_addr + 2),
+            .y = readI16(self.mark2_anchors_data, anchor_addr + 4),
+        };
+
+        return .{
+            .dx = mark2_anchor.x - mark1_rec.anchor.x,
+            .dy = mark2_anchor.y - mark1_rec.anchor.y,
+        };
+    }
+};
+
+/// Reference to a GSUB lookup by type and index in respective array
+pub const GSUBLookupRef = union(enum) {
+    single: usize, // Index into single_lookups
+    liga: usize, // Index into liga_lookups
+    dlig: usize, // Index into dlig_lookups
+    clig: usize, // Index into clig_lookups
+    hlig: usize, // Index into hlig_lookups
+    calt_liga: usize, // Index into calt_liga_lookups
+    chain_context: usize, // Index into chain_context_lookups
+};
+
 /// OpenType features parsed from a font
 pub const OpenTypeFeatures = struct {
     allocator: std.mem.Allocator,
 
     // GSUB data
     gsub_data: ?[]const u8 = null,
-    liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{},
+    liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Standard ligatures
+    dlig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Discretionary ligatures
+    clig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Contextual ligatures
+    hlig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Historical ligatures
+    calt_liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Calt ligatures (e.g., arrow sequences)
+    single_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1
+    chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3
+
+    // Lookup index map: maps original lookup index -> lookup reference
+    gsub_lookup_map: std.AutoHashMapUnmanaged(u16, GSUBLookupRef) = .{},
 
     // GPOS data
     gpos_data: ?[]const u8 = null,
     kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .{},
+    mark_base_lookups: std.ArrayListUnmanaged(MarkBasePos) = .{}, // Type 4
+    mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .{}, // Type 6
 
     // Allocated memory for ligature data
     ligature_memory: std.ArrayListUnmanaged([]const u16) = .{},
     ligature_set_memory: std.ArrayListUnmanaged([]const Ligature) = .{},
     ligature_structs: std.ArrayListUnmanaged(Ligature) = .{},
     ligature_sets: std.ArrayListUnmanaged(LigatureSet) = .{},
+
+    // Allocated memory for single subst (Format 2 substitutes array)
+    single_subst_memory: std.ArrayListUnmanaged([]const u16) = .{},
+
+    // Allocated memory for chain context (coverages and records)
+    chain_coverage_memory: std.ArrayListUnmanaged([]const CoverageTable) = .{},
+    chain_record_memory: std.ArrayListUnmanaged([]const SubstLookupRecord) = .{},
+
+    // Allocated memory for mark records
+    mark_record_memory: std.ArrayListUnmanaged([]const MarkRecord) = .{},
 
     pub fn init(allocator: std.mem.Allocator) OpenTypeFeatures {
         return .{ .allocator = allocator };
@@ -347,19 +581,80 @@ pub const OpenTypeFeatures = struct {
         self.ligature_structs.deinit(self.allocator);
         self.ligature_sets.deinit(self.allocator);
         self.liga_lookups.deinit(self.allocator);
+        self.dlig_lookups.deinit(self.allocator);
+        self.clig_lookups.deinit(self.allocator);
+        self.hlig_lookups.deinit(self.allocator);
+        self.calt_liga_lookups.deinit(self.allocator);
         self.kern_lookups.deinit(self.allocator);
+
+        // Free single subst memory
+        for (self.single_subst_memory.items) |slice| {
+            self.allocator.free(slice);
+        }
+        self.single_subst_memory.deinit(self.allocator);
+        self.single_lookups.deinit(self.allocator);
+
+        // Free chain context memory
+        for (self.chain_coverage_memory.items) |slice| {
+            self.allocator.free(slice);
+        }
+        self.chain_coverage_memory.deinit(self.allocator);
+        for (self.chain_record_memory.items) |slice| {
+            self.allocator.free(slice);
+        }
+        self.chain_record_memory.deinit(self.allocator);
+        self.chain_context_lookups.deinit(self.allocator);
+
+        // Free mark record memory
+        for (self.mark_record_memory.items) |slice| {
+            self.allocator.free(slice);
+        }
+        self.mark_record_memory.deinit(self.allocator);
+        self.mark_base_lookups.deinit(self.allocator);
+        self.mark_mark_lookups.deinit(self.allocator);
+
+        // Free lookup map
+        self.gsub_lookup_map.deinit(self.allocator);
     }
 
     /// Parse GSUB table from font data
     pub fn parseGSUB(self: *OpenTypeFeatures, gsub_data: []const u8) !void {
         self.gsub_data = gsub_data;
+        // Parse feature-referenced lookups
         try self.parseGSUBFeature(gsub_data, Feature.liga);
+        try self.parseGSUBFeature(gsub_data, Feature.dlig);
+        try self.parseGSUBFeature(gsub_data, Feature.clig);
+        try self.parseGSUBFeature(gsub_data, Feature.hlig);
+        try self.parseGSUBFeature(gsub_data, Feature.calt);
+        // Then parse ALL lookups to enable nested lookup dispatch from calt
+        try self.parseAllGSUBLookups(gsub_data);
+    }
+
+    /// Parse ALL lookups in the GSUB lookup list
+    /// This enables nested lookup dispatch from chain context rules
+    /// Does NOT add to ligature arrays - only populates gsub_lookup_map
+    fn parseAllGSUBLookups(self: *OpenTypeFeatures, data: []const u8) !void {
+        if (data.len < 10) return;
+
+        const lookup_list_offset = readU16(data, 8);
+        if (lookup_list_offset + 2 > data.len) return;
+
+        const lookup_count = readU16(data, lookup_list_offset);
+
+        var i: u16 = 0;
+        while (i < lookup_count) : (i += 1) {
+            // parseGSUBLookup will skip if already parsed (via gsub_lookup_map)
+            // Pass null feature to indicate this is for nested dispatch only
+            try self.parseGSUBLookup(data, lookup_list_offset, i, null);
+        }
     }
 
     /// Parse GPOS table from font data
     pub fn parseGPOS(self: *OpenTypeFeatures, gpos_data: []const u8) !void {
         self.gpos_data = gpos_data;
         try self.parseGPOSFeature(gpos_data, Feature.kern);
+        try self.parseGPOSFeature(gpos_data, Feature.mark);
+        try self.parseGPOSFeature(gpos_data, Feature.mkmk);
     }
 
     fn parseGSUBFeature(self: *OpenTypeFeatures, data: []const u8, feature: Feature) !void {
@@ -396,8 +691,122 @@ pub const OpenTypeFeatures = struct {
                 if (li_offset + 2 > data.len) break;
 
                 const lookup_index = readU16(data, li_offset);
-                try self.parseLigatureLookup(data, lookup_list_offset, lookup_index);
+                try self.parseGSUBLookup(data, lookup_list_offset, lookup_index, feature);
             }
+        }
+    }
+
+    fn parseGSUBLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16, feature: ?Feature) !void {
+        // Skip if already parsed this lookup
+        if (self.gsub_lookup_map.contains(lookup_index)) return;
+
+        // Get lookup table offset
+        if (lookup_list_offset + 2 > data.len) return;
+        const lookup_count = readU16(data, lookup_list_offset);
+        if (lookup_index >= lookup_count) return;
+
+        const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
+        if (lookup_offset_pos + 2 > data.len) return;
+        const lookup_offset = readU16(data, lookup_offset_pos);
+        const lookup_table_offset = lookup_list_offset + lookup_offset;
+
+        if (lookup_table_offset + 6 > data.len) return;
+
+        const lookup_type = readU16(data, lookup_table_offset);
+        const subtable_count = readU16(data, lookup_table_offset + 4);
+
+        // Track starting index for this lookup type
+        const single_start = self.single_lookups.items.len;
+        const liga_start = self.liga_lookups.items.len;
+        const dlig_start = self.dlig_lookups.items.len;
+        const clig_start = self.clig_lookups.items.len;
+        const hlig_start = self.hlig_lookups.items.len;
+        const calt_liga_start = self.calt_liga_lookups.items.len;
+        const chain_start = self.chain_context_lookups.items.len;
+
+        var i: u16 = 0;
+        while (i < subtable_count) : (i += 1) {
+            const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
+            if (st_offset_pos + 2 > data.len) break;
+
+            const subtable_offset = readU16(data, st_offset_pos);
+            const subtable_addr = lookup_table_offset + subtable_offset;
+
+            switch (lookup_type) {
+                1 => try self.parseSingleSubtable(data, subtable_addr), // Type 1: Single Substitution
+                4 => { // Type 4: Ligature Substitution
+                    // Parse and append to appropriate feature array
+                    if (try self.parseLigatureSubtable(data, subtable_addr)) |lig_subst| {
+                        if (feature) |f| {
+                            switch (f) {
+                                .liga => try self.liga_lookups.append(self.allocator, lig_subst),
+                                .dlig => try self.dlig_lookups.append(self.allocator, lig_subst),
+                                .clig => try self.clig_lookups.append(self.allocator, lig_subst),
+                                .hlig => try self.hlig_lookups.append(self.allocator, lig_subst),
+                                .calt => try self.calt_liga_lookups.append(self.allocator, lig_subst),
+                                else => {}, // Other features, don't add to any array
+                            }
+                        }
+                        // If feature is null, don't add to any array (for nested dispatch only)
+                    }
+                },
+                6 => { // Type 6: Chaining Context Substitution
+                    // Only parse chain context for calt feature to avoid applying wrong rules
+                    if (feature) |f| {
+                        if (f == .calt) {
+                            try self.parseChainContextSubtable(data, subtable_addr);
+                        }
+                    }
+                },
+                else => {}, // Ignore unsupported types
+            }
+        }
+
+        // Record lookup mapping (first subtable parsed for this lookup)
+        const lookup_ref: ?GSUBLookupRef = switch (lookup_type) {
+            1 => if (self.single_lookups.items.len > single_start)
+                GSUBLookupRef{ .single = single_start }
+            else
+                null,
+            4 => blk: {
+                // Determine which ligature array was appended to based on feature
+                if (feature) |f| {
+                    switch (f) {
+                        .liga => break :blk if (self.liga_lookups.items.len > liga_start)
+                            GSUBLookupRef{ .liga = liga_start }
+                        else
+                            null,
+                        .dlig => break :blk if (self.dlig_lookups.items.len > dlig_start)
+                            GSUBLookupRef{ .dlig = dlig_start }
+                        else
+                            null,
+                        .clig => break :blk if (self.clig_lookups.items.len > clig_start)
+                            GSUBLookupRef{ .clig = clig_start }
+                        else
+                            null,
+                        .hlig => break :blk if (self.hlig_lookups.items.len > hlig_start)
+                            GSUBLookupRef{ .hlig = hlig_start }
+                        else
+                            null,
+                        .calt => break :blk if (self.calt_liga_lookups.items.len > calt_liga_start)
+                            GSUBLookupRef{ .calt_liga = calt_liga_start }
+                        else
+                            null,
+                        else => break :blk null, // Other feature
+                    }
+                } else {
+                    break :blk null; // No feature, no ligature ref
+                }
+            },
+            6 => if (self.chain_context_lookups.items.len > chain_start)
+                GSUBLookupRef{ .chain_context = chain_start }
+            else
+                null,
+            else => null,
+        };
+
+        if (lookup_ref) |ref| {
+            try self.gsub_lookup_map.put(self.allocator, lookup_index, ref);
         }
     }
 
@@ -432,7 +841,67 @@ pub const OpenTypeFeatures = struct {
                 if (li_offset + 2 > data.len) break;
 
                 const lookup_index = readU16(data, li_offset);
-                try self.parseKernLookup(data, lookup_list_offset, lookup_index);
+                try self.parseGPOSLookup(data, lookup_list_offset, lookup_index, feature);
+            }
+        }
+    }
+
+    fn parseGPOSLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16, feature: Feature) !void {
+        if (lookup_list_offset + 2 > data.len) return;
+        const lookup_count = readU16(data, lookup_list_offset);
+        if (lookup_index >= lookup_count) return;
+
+        const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
+        if (lookup_offset_pos + 2 > data.len) return;
+        const lookup_offset = readU16(data, lookup_offset_pos);
+        const lookup_table_offset = lookup_list_offset + lookup_offset;
+
+        if (lookup_table_offset + 6 > data.len) return;
+
+        const lookup_type = readU16(data, lookup_table_offset);
+        const subtable_count = readU16(data, lookup_table_offset + 4);
+
+        var i: u16 = 0;
+        while (i < subtable_count) : (i += 1) {
+            const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
+            if (st_offset_pos + 2 > data.len) break;
+
+            const subtable_offset = readU16(data, st_offset_pos);
+            const subtable_addr = lookup_table_offset + subtable_offset;
+
+            switch (lookup_type) {
+                2 => { // Type 2: Pair Adjustment (kerning)
+                    if (feature == .kern) try self.parseKernSubtable(data, subtable_addr);
+                },
+                4 => { // Type 4: Mark-to-Base
+                    if (feature == .mark) try self.parseMarkBaseSubtable(data, subtable_addr);
+                },
+                6 => { // Type 6: Mark-to-Mark
+                    if (feature == .mkmk) try self.parseMarkMarkSubtable(data, subtable_addr);
+                },
+                9 => { // Type 9: Extension Positioning (wraps other lookup types)
+                    if (subtable_addr + 8 > data.len) continue;
+                    const ext_format = readU16(data, subtable_addr);
+                    if (ext_format != 1) continue;
+                    const ext_lookup_type = readU16(data, subtable_addr + 2);
+                    const ext_offset = readU32(data, subtable_addr + 4);
+                    const actual_subtable_addr = subtable_addr + ext_offset;
+
+                    // Parse the actual subtable based on the extended type
+                    switch (ext_lookup_type) {
+                        2 => { // Pair Adjustment (kerning)
+                            if (feature == .kern) try self.parseKernSubtable(data, actual_subtable_addr);
+                        },
+                        4 => { // Mark-to-Base
+                            if (feature == .mark) try self.parseMarkBaseSubtable(data, actual_subtable_addr);
+                        },
+                        6 => { // Mark-to-Mark
+                            if (feature == .mkmk) try self.parseMarkMarkSubtable(data, actual_subtable_addr);
+                        },
+                        else => {},
+                    }
+                },
+                else => {},
             }
         }
     }
@@ -513,49 +982,18 @@ pub const OpenTypeFeatures = struct {
         return dflt_offset orelse latn_offset;
     }
 
-    fn parseLigatureLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16) !void {
-        // Get lookup table offset
-        if (lookup_list_offset + 2 > data.len) return;
-        const lookup_count = readU16(data, lookup_list_offset);
-        if (lookup_index >= lookup_count) return;
-
-        const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
-        if (lookup_offset_pos + 2 > data.len) return;
-        const lookup_offset = readU16(data, lookup_offset_pos);
-        const lookup_table_offset = lookup_list_offset + lookup_offset;
-
-        if (lookup_table_offset + 6 > data.len) return;
-
-        const lookup_type = readU16(data, lookup_table_offset);
-        const subtable_count = readU16(data, lookup_table_offset + 4);
-
-        // Only process Lookup Type 4 (Ligature Substitution)
-        if (lookup_type != 4) return;
-
-        var i: u16 = 0;
-        while (i < subtable_count) : (i += 1) {
-            const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
-            if (st_offset_pos + 2 > data.len) break;
-
-            const subtable_offset = readU16(data, st_offset_pos);
-            const subtable_addr = lookup_table_offset + subtable_offset;
-
-            try self.parseLigatureSubtable(data, subtable_addr);
-        }
-    }
-
-    fn parseLigatureSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
-        if (offset + 6 > data.len) return;
+    fn parseLigatureSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !?LigatureSubst {
+        if (offset + 6 > data.len) return null;
 
         const format = readU16(data, offset);
-        if (format != 1) return; // Only format 1 supported
+        if (format != 1) return null; // Only format 1 supported
 
         const coverage_offset = readU16(data, offset + 2);
         const lig_set_count = readU16(data, offset + 4);
 
         // Parse coverage table
         const coverage_addr = offset + coverage_offset;
-        if (coverage_addr + 4 > data.len) return;
+        if (coverage_addr + 4 > data.len) return null;
 
         const coverage = CoverageTable{
             .format = readU16(data, coverage_addr),
@@ -611,44 +1049,16 @@ pub const OpenTypeFeatures = struct {
             }
 
             try self.ligature_sets.append(self.allocator, .{
-                .ligatures = self.ligature_structs.items[ligs_start..],
+                .start = ligs_start,
+                .count = self.ligature_structs.items.len - ligs_start,
             });
         }
 
-        try self.liga_lookups.append(self.allocator, .{
+        return LigatureSubst{
             .coverage = coverage,
-            .ligature_sets = self.ligature_sets.items[lig_sets_start..],
-        });
-    }
-
-    fn parseKernLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16) !void {
-        if (lookup_list_offset + 2 > data.len) return;
-        const lookup_count = readU16(data, lookup_list_offset);
-        if (lookup_index >= lookup_count) return;
-
-        const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
-        if (lookup_offset_pos + 2 > data.len) return;
-        const lookup_offset = readU16(data, lookup_offset_pos);
-        const lookup_table_offset = lookup_list_offset + lookup_offset;
-
-        if (lookup_table_offset + 6 > data.len) return;
-
-        const lookup_type = readU16(data, lookup_table_offset);
-        const subtable_count = readU16(data, lookup_table_offset + 4);
-
-        // Only process Lookup Type 2 (Pair Adjustment)
-        if (lookup_type != 2) return;
-
-        var i: u16 = 0;
-        while (i < subtable_count) : (i += 1) {
-            const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
-            if (st_offset_pos + 2 > data.len) break;
-
-            const subtable_offset = readU16(data, st_offset_pos);
-            const subtable_addr = lookup_table_offset + subtable_offset;
-
-            try self.parseKernSubtable(data, subtable_addr);
-        }
+            .sets_start = lig_sets_start,
+            .sets_count = self.ligature_sets.items.len - lig_sets_start,
+        };
     }
 
     fn parseKernSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
@@ -708,6 +1118,368 @@ pub const OpenTypeFeatures = struct {
         }
     }
 
+    /// Parse GSUB Type 1: Single Substitution subtable
+    fn parseSingleSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
+        if (offset + 6 > data.len) return;
+
+        const format = readU16(data, offset);
+        const coverage_offset = readU16(data, offset + 2);
+
+        const coverage_addr = offset + coverage_offset;
+        if (coverage_addr + 4 > data.len) return;
+
+        const coverage = CoverageTable{
+            .format = readU16(data, coverage_addr),
+            .data = data[coverage_addr..],
+        };
+
+        if (format == 1) {
+            // Format 1: Add delta to glyph ID
+            const delta = readI16(data, offset + 4);
+            try self.single_lookups.append(self.allocator, .{
+                .coverage = coverage,
+                .format = 1,
+                .delta = delta,
+            });
+        } else if (format == 2) {
+            // Format 2: Direct substitution array
+            const glyph_count = readU16(data, offset + 4);
+            const substitutes = try self.allocator.alloc(u16, glyph_count);
+            errdefer self.allocator.free(substitutes);
+
+            var i: u16 = 0;
+            while (i < glyph_count) : (i += 1) {
+                const subst_offset = offset + 6 + @as(usize, i) * 2;
+                if (subst_offset + 2 > data.len) break;
+                substitutes[i] = readU16(data, subst_offset);
+            }
+
+            try self.single_subst_memory.append(self.allocator, substitutes);
+            try self.single_lookups.append(self.allocator, .{
+                .coverage = coverage,
+                .format = 2,
+                .substitutes = substitutes,
+            });
+        }
+    }
+
+    /// Parse GSUB Type 6: Chaining Context Substitution subtable
+    fn parseChainContextSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
+        if (offset + 4 > data.len) return;
+
+        const format = readU16(data, offset);
+        if (format != 3) return; // Only Format 3 supported for now
+
+        // Format 3 structure:
+        // format(2), backtrackGlyphCount(2), backtrackCoverages[],
+        // inputGlyphCount(2), inputCoverages[],
+        // lookaheadGlyphCount(2), lookaheadCoverages[],
+        // substCount(2), substLookupRecords[]
+
+        var pos = offset + 2;
+        if (pos + 2 > data.len) return;
+
+        // Parse backtrack coverages
+        const backtrack_count = readU16(data, pos);
+        pos += 2;
+
+        var backtrack_coverages = try self.allocator.alloc(CoverageTable, backtrack_count);
+        errdefer self.allocator.free(backtrack_coverages);
+
+        var i: u16 = 0;
+        while (i < backtrack_count) : (i += 1) {
+            if (pos + 2 > data.len) {
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            const cov_offset = readU16(data, pos);
+            pos += 2;
+            const cov_addr = offset + cov_offset;
+            if (cov_addr + 4 > data.len) {
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            backtrack_coverages[i] = .{
+                .format = readU16(data, cov_addr),
+                .data = data[cov_addr..],
+            };
+        }
+
+        // Parse input coverages
+        if (pos + 2 > data.len) {
+            self.allocator.free(backtrack_coverages);
+            return;
+        }
+        const input_count = readU16(data, pos);
+        pos += 2;
+
+        var input_coverages = try self.allocator.alloc(CoverageTable, input_count);
+        errdefer {
+            self.allocator.free(input_coverages);
+            self.allocator.free(backtrack_coverages);
+        }
+
+        i = 0;
+        while (i < input_count) : (i += 1) {
+            if (pos + 2 > data.len) {
+                self.allocator.free(input_coverages);
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            const cov_offset = readU16(data, pos);
+            pos += 2;
+            const cov_addr = offset + cov_offset;
+            if (cov_addr + 4 > data.len) {
+                self.allocator.free(input_coverages);
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            input_coverages[i] = .{
+                .format = readU16(data, cov_addr),
+                .data = data[cov_addr..],
+            };
+        }
+
+        // Parse lookahead coverages
+        if (pos + 2 > data.len) {
+            self.allocator.free(input_coverages);
+            self.allocator.free(backtrack_coverages);
+            return;
+        }
+        const lookahead_count = readU16(data, pos);
+        pos += 2;
+
+        var lookahead_coverages = try self.allocator.alloc(CoverageTable, lookahead_count);
+        errdefer {
+            self.allocator.free(lookahead_coverages);
+            self.allocator.free(input_coverages);
+            self.allocator.free(backtrack_coverages);
+        }
+
+        i = 0;
+        while (i < lookahead_count) : (i += 1) {
+            if (pos + 2 > data.len) {
+                self.allocator.free(lookahead_coverages);
+                self.allocator.free(input_coverages);
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            const cov_offset = readU16(data, pos);
+            pos += 2;
+            const cov_addr = offset + cov_offset;
+            if (cov_addr + 4 > data.len) {
+                self.allocator.free(lookahead_coverages);
+                self.allocator.free(input_coverages);
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            lookahead_coverages[i] = .{
+                .format = readU16(data, cov_addr),
+                .data = data[cov_addr..],
+            };
+        }
+
+        // Parse substitution records
+        if (pos + 2 > data.len) {
+            self.allocator.free(lookahead_coverages);
+            self.allocator.free(input_coverages);
+            self.allocator.free(backtrack_coverages);
+            return;
+        }
+        const subst_count = readU16(data, pos);
+        pos += 2;
+
+        var subst_records = try self.allocator.alloc(SubstLookupRecord, subst_count);
+        errdefer self.allocator.free(subst_records);
+
+        i = 0;
+        while (i < subst_count) : (i += 1) {
+            if (pos + 4 > data.len) {
+                self.allocator.free(subst_records);
+                self.allocator.free(lookahead_coverages);
+                self.allocator.free(input_coverages);
+                self.allocator.free(backtrack_coverages);
+                return;
+            }
+            subst_records[i] = .{
+                .sequence_index = readU16(data, pos),
+                .lookup_index = readU16(data, pos + 2),
+            };
+            pos += 4;
+        }
+
+        // Store memory for cleanup
+        try self.chain_coverage_memory.append(self.allocator, backtrack_coverages);
+        try self.chain_coverage_memory.append(self.allocator, input_coverages);
+        try self.chain_coverage_memory.append(self.allocator, lookahead_coverages);
+        try self.chain_record_memory.append(self.allocator, subst_records);
+
+        try self.chain_context_lookups.append(self.allocator, .{
+            .backtrack_coverages = backtrack_coverages,
+            .input_coverages = input_coverages,
+            .lookahead_coverages = lookahead_coverages,
+            .subst_records = subst_records,
+        });
+    }
+
+    /// Parse GPOS Type 4: Mark-to-Base Attachment subtable
+    fn parseMarkBaseSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
+        if (offset + 12 > data.len) return;
+
+        const format = readU16(data, offset);
+        if (format != 1) return; // Only format 1 supported
+
+        const mark_cov_offset = readU16(data, offset + 2);
+        const base_cov_offset = readU16(data, offset + 4);
+        const mark_class_count = readU16(data, offset + 6);
+        const mark_array_offset = readU16(data, offset + 8);
+        const base_array_offset = readU16(data, offset + 10);
+
+        // Parse mark coverage
+        const mark_cov_addr = offset + mark_cov_offset;
+        if (mark_cov_addr + 4 > data.len) return;
+        const mark_coverage = CoverageTable{
+            .format = readU16(data, mark_cov_addr),
+            .data = data[mark_cov_addr..],
+        };
+
+        // Parse base coverage
+        const base_cov_addr = offset + base_cov_offset;
+        if (base_cov_addr + 4 > data.len) return;
+        const base_coverage = CoverageTable{
+            .format = readU16(data, base_cov_addr),
+            .data = data[base_cov_addr..],
+        };
+
+        // Parse mark array
+        const mark_array_addr = offset + mark_array_offset;
+        if (mark_array_addr + 2 > data.len) return;
+        const mark_count = readU16(data, mark_array_addr);
+
+        var mark_records = try self.allocator.alloc(MarkRecord, mark_count);
+        errdefer self.allocator.free(mark_records);
+
+        var i: u16 = 0;
+        while (i < mark_count) : (i += 1) {
+            const rec_offset = mark_array_addr + 2 + @as(usize, i) * 4;
+            if (rec_offset + 4 > data.len) break;
+
+            const mark_class = readU16(data, rec_offset);
+            const anchor_offset = readU16(data, rec_offset + 2);
+            const anchor_addr = mark_array_addr + anchor_offset;
+
+            if (anchor_addr + 6 > data.len) {
+                mark_records[i] = .{ .mark_class = mark_class, .anchor = .{ .x = 0, .y = 0 } };
+            } else {
+                mark_records[i] = .{
+                    .mark_class = mark_class,
+                    .anchor = .{
+                        .x = readI16(data, anchor_addr + 2),
+                        .y = readI16(data, anchor_addr + 4),
+                    },
+                };
+            }
+        }
+
+        // Get base count
+        const base_array_addr = offset + base_array_offset;
+        if (base_array_addr + 2 > data.len) {
+            self.allocator.free(mark_records);
+            return;
+        }
+        const base_count = readU16(data, base_array_addr);
+
+        try self.mark_record_memory.append(self.allocator, mark_records);
+        try self.mark_base_lookups.append(self.allocator, .{
+            .mark_coverage = mark_coverage,
+            .base_coverage = base_coverage,
+            .mark_class_count = mark_class_count,
+            .mark_records = mark_records,
+            .base_anchors_data = data,
+            .base_count = base_count,
+            .base_array_offset = base_array_addr,
+        });
+    }
+
+    /// Parse GPOS Type 6: Mark-to-Mark Attachment subtable
+    fn parseMarkMarkSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
+        if (offset + 12 > data.len) return;
+
+        const format = readU16(data, offset);
+        if (format != 1) return; // Only format 1 supported
+
+        const mark1_cov_offset = readU16(data, offset + 2);
+        const mark2_cov_offset = readU16(data, offset + 4);
+        const mark_class_count = readU16(data, offset + 6);
+        const mark1_array_offset = readU16(data, offset + 8);
+        const mark2_array_offset = readU16(data, offset + 10);
+
+        // Parse mark1 coverage (combining mark)
+        const mark1_cov_addr = offset + mark1_cov_offset;
+        if (mark1_cov_addr + 4 > data.len) return;
+        const mark1_coverage = CoverageTable{
+            .format = readU16(data, mark1_cov_addr),
+            .data = data[mark1_cov_addr..],
+        };
+
+        // Parse mark2 coverage (base mark)
+        const mark2_cov_addr = offset + mark2_cov_offset;
+        if (mark2_cov_addr + 4 > data.len) return;
+        const mark2_coverage = CoverageTable{
+            .format = readU16(data, mark2_cov_addr),
+            .data = data[mark2_cov_addr..],
+        };
+
+        // Parse mark1 array
+        const mark1_array_addr = offset + mark1_array_offset;
+        if (mark1_array_addr + 2 > data.len) return;
+        const mark1_count = readU16(data, mark1_array_addr);
+
+        var mark1_records = try self.allocator.alloc(MarkRecord, mark1_count);
+        errdefer self.allocator.free(mark1_records);
+
+        var i: u16 = 0;
+        while (i < mark1_count) : (i += 1) {
+            const rec_offset = mark1_array_addr + 2 + @as(usize, i) * 4;
+            if (rec_offset + 4 > data.len) break;
+
+            const mark_class = readU16(data, rec_offset);
+            const anchor_offset = readU16(data, rec_offset + 2);
+            const anchor_addr = mark1_array_addr + anchor_offset;
+
+            if (anchor_addr + 6 > data.len) {
+                mark1_records[i] = .{ .mark_class = mark_class, .anchor = .{ .x = 0, .y = 0 } };
+            } else {
+                mark1_records[i] = .{
+                    .mark_class = mark_class,
+                    .anchor = .{
+                        .x = readI16(data, anchor_addr + 2),
+                        .y = readI16(data, anchor_addr + 4),
+                    },
+                };
+            }
+        }
+
+        // Get mark2 count
+        const mark2_array_addr = offset + mark2_array_offset;
+        if (mark2_array_addr + 2 > data.len) {
+            self.allocator.free(mark1_records);
+            return;
+        }
+        const mark2_count = readU16(data, mark2_array_addr);
+
+        try self.mark_record_memory.append(self.allocator, mark1_records);
+        try self.mark_mark_lookups.append(self.allocator, .{
+            .mark1_coverage = mark1_coverage,
+            .mark2_coverage = mark2_coverage,
+            .mark_class_count = mark_class_count,
+            .mark1_records = mark1_records,
+            .mark2_anchors_data = data,
+            .mark2_count = mark2_count,
+            .mark2_array_offset = mark2_array_addr,
+        });
+    }
+
     /// Apply ligature substitution to a glyph sequence
     /// Returns new glyph sequence with ligatures applied
     pub fn applyLigatures(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
@@ -724,7 +1496,7 @@ pub const OpenTypeFeatures = struct {
 
             // Try each ligature lookup
             for (self.liga_lookups.items) |lookup| {
-                if (lookup.findLigature(glyphs, pos)) |match| {
+                if (lookup.findLigature(glyphs, pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
                     try result.append(self.allocator, match.lig_glyph);
                     pos += match.consumed;
                     matched = true;
@@ -741,6 +1513,53 @@ pub const OpenTypeFeatures = struct {
         return result.toOwnedSlice(self.allocator);
     }
 
+    /// Apply ligature substitution using specific lookup array
+    fn applyFeatureLigatures(self: *OpenTypeFeatures, glyphs: []const u16, lookups: []const LigatureSubst) ![]u16 {
+        if (lookups.len == 0) {
+            return try self.allocator.dupe(u16, glyphs);
+        }
+
+        var result = std.ArrayListUnmanaged(u16){};
+        errdefer result.deinit(self.allocator);
+
+        var pos: usize = 0;
+        while (pos < glyphs.len) {
+            var matched = false;
+
+            // Try each ligature lookup
+            for (lookups) |lookup| {
+                if (lookup.findLigature(glyphs, pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
+                    try result.append(self.allocator, match.lig_glyph);
+                    pos += match.consumed;
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched) {
+                try result.append(self.allocator, glyphs[pos]);
+                pos += 1;
+            }
+        }
+
+        return result.toOwnedSlice(self.allocator);
+    }
+
+    /// Apply discretionary ligatures (dlig feature)
+    pub fn applyDlig(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
+        return self.applyFeatureLigatures(glyphs, self.dlig_lookups.items);
+    }
+
+    /// Apply contextual ligatures (clig feature)
+    pub fn applyClig(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
+        return self.applyFeatureLigatures(glyphs, self.clig_lookups.items);
+    }
+
+    /// Apply historical ligatures (hlig feature)
+    pub fn applyHlig(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
+        return self.applyFeatureLigatures(glyphs, self.hlig_lookups.items);
+    }
+
     /// Get kerning adjustment between two glyphs
     pub fn getKerning(self: *OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
         for (self.kern_lookups.items) |lookup| {
@@ -748,6 +1567,182 @@ pub const OpenTypeFeatures = struct {
             if (kern != 0) return kern;
         }
         return 0;
+    }
+
+    /// Apply contextual alternates (calt) substitution to a glyph sequence
+    /// Processes calt ligatures (e.g., ->) and chain context rules
+    pub fn applyCalt(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
+        const has_calt_liga = self.calt_liga_lookups.items.len > 0;
+        const has_chain = self.chain_context_lookups.items.len > 0;
+
+        if (!has_calt_liga and !has_chain) {
+            return try self.allocator.dupe(u16, glyphs);
+        }
+
+        // First apply calt's direct ligatures (e.g., -> to arrow)
+        var intermediate: []u16 = undefined;
+        var owns_intermediate = false;
+        if (has_calt_liga) {
+            intermediate = try self.applyFeatureLigatures(glyphs, self.calt_liga_lookups.items);
+            owns_intermediate = true;
+        } else {
+            intermediate = @constCast(glyphs);
+        }
+        defer if (owns_intermediate) self.allocator.free(intermediate);
+
+        // If no chain context, we're done
+        if (!has_chain) {
+            if (owns_intermediate) {
+                const copy = try self.allocator.dupe(u16, intermediate);
+                return copy;
+            }
+            return try self.allocator.dupe(u16, intermediate);
+        }
+
+        // Work with a mutable copy for chain context processing
+        var result = std.ArrayListUnmanaged(u16){};
+        errdefer result.deinit(self.allocator);
+        try result.appendSlice(self.allocator, intermediate);
+
+        // Process each position
+        var pos: usize = 0;
+        while (pos < result.items.len) {
+            // Try each chain context rule
+            for (self.chain_context_lookups.items) |chain_lookup| {
+                if (chain_lookup.match(result.items, pos)) |subst_records| {
+                    // Apply nested substitutions
+                    for (subst_records) |rec| {
+                        const target_pos = pos + rec.sequence_index;
+                        if (target_pos >= result.items.len) continue;
+
+                        // Find the referenced lookup
+                        if (self.gsub_lookup_map.get(rec.lookup_index)) |lookup_ref| {
+                            switch (lookup_ref) {
+                                .single => |idx| {
+                                    if (idx < self.single_lookups.items.len) {
+                                        const single = self.single_lookups.items[idx];
+                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
+                                .liga, .dlig, .clig, .hlig, .calt_liga => |idx| {
+                                    // Ligature substitution at target_pos
+                                    const lookups = switch (lookup_ref) {
+                                        .liga => self.liga_lookups.items,
+                                        .dlig => self.dlig_lookups.items,
+                                        .clig => self.clig_lookups.items,
+                                        .hlig => self.hlig_lookups.items,
+                                        .calt_liga => self.calt_liga_lookups.items,
+                                        else => unreachable,
+                                    };
+                                    if (idx < lookups.len) {
+                                        const liga = lookups[idx];
+                                        if (liga.findLigature(result.items, target_pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
+                                            // Replace glyphs with ligature
+                                            result.items[target_pos] = match.lig_glyph;
+                                            // Remove consumed glyphs (except first)
+                                            if (match.consumed > 1) {
+                                                const remove_count = match.consumed - 1;
+                                                const remove_start = target_pos + 1;
+                                                if (remove_start + remove_count <= result.items.len) {
+                                                    // Shift remaining elements
+                                                    const src_start = remove_start + remove_count;
+                                                    const src_end = result.items.len;
+                                                    std.mem.copyForwards(
+                                                        u16,
+                                                        result.items[remove_start..],
+                                                        result.items[src_start..src_end],
+                                                    );
+                                                    result.shrinkRetainingCapacity(result.items.len - remove_count);
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                .chain_context => {
+                                    // Nested chain context - skip for now to avoid recursion
+                                },
+                            }
+                        }
+                    }
+                    break; // Stop after first matching rule
+                }
+            }
+
+            // Always advance at least one position
+            pos += 1;
+        }
+
+        return result.toOwnedSlice(self.allocator);
+    }
+
+    /// Apply all GSUB substitutions (calt + ligatures) in proper order
+    /// Uses default feature flags (liga enabled, dlig/clig/hlig disabled)
+    pub fn applyGSUB(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
+        return self.applyGSUBWithFlags(glyphs, .{});
+    }
+
+    /// Apply all GSUB substitutions with explicit feature flags
+    pub fn applyGSUBWithFlags(self: *OpenTypeFeatures, glyphs: []const u16, flags: FeatureFlags) ![]u16 {
+        var current = try self.allocator.dupe(u16, glyphs);
+        errdefer self.allocator.free(current);
+
+        // Apply calt first (contextual alternates)
+        const has_calt = self.calt_liga_lookups.items.len > 0 or self.chain_context_lookups.items.len > 0;
+        if (flags.calt and has_calt) {
+            const next = try self.applyCalt(current);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        // Apply standard ligatures (liga)
+        if (flags.liga and self.liga_lookups.items.len > 0) {
+            const next = try self.applyLigatures(current);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        // Apply discretionary ligatures (dlig)
+        if (flags.dlig and self.dlig_lookups.items.len > 0) {
+            const next = try self.applyDlig(current);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        // Apply contextual ligatures (clig)
+        if (flags.clig and self.clig_lookups.items.len > 0) {
+            const next = try self.applyClig(current);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        // Apply historical ligatures (hlig)
+        if (flags.hlig and self.hlig_lookups.items.len > 0) {
+            const next = try self.applyHlig(current);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        return current;
+    }
+
+    /// Get mark positioning offset for a mark glyph following a base glyph
+    /// Returns (dx, dy) in design units, or null if no positioning applies
+    pub fn getMarkOffset(self: *OpenTypeFeatures, base_glyph: u16, mark_glyph: u16) ?MarkOffset {
+        // First try mark-to-base
+        for (self.mark_base_lookups.items) |lookup| {
+            if (lookup.getAttachment(mark_glyph, base_glyph)) |offset| {
+                return offset;
+            }
+        }
+        // Then try mark-to-mark (if base is also a mark)
+        for (self.mark_mark_lookups.items) |lookup| {
+            if (lookup.getAttachment(mark_glyph, base_glyph)) |offset| {
+                return offset;
+            }
+        }
+        return null;
     }
 };
 
@@ -852,12 +1847,13 @@ test "Coverage table format 2" {
 test "Ligature matching" {
     // Simple ligature: glyph 10 + glyph 11 -> glyph 100
     const components = [_]u16{11};
-    const ligatures = [_]Ligature{.{
+    const ligature_structs = [_]Ligature{.{
         .lig_glyph = 100,
         .components = &components,
     }};
     const lig_sets = [_]LigatureSet{.{
-        .ligatures = &ligatures,
+        .start = 0,
+        .count = 1,
     }};
 
     // Coverage: only glyph 10 covered
@@ -869,18 +1865,19 @@ test "Ligature matching" {
 
     const lookup = LigatureSubst{
         .coverage = .{ .format = 1, .data = &coverage_data },
-        .ligature_sets = &lig_sets,
+        .sets_start = 0,
+        .sets_count = 1,
     };
 
     const glyphs = [_]u16{ 10, 11, 12 };
 
-    const result = lookup.findLigature(&glyphs, 0);
+    const result = lookup.findLigature(&glyphs, 0, &lig_sets, &ligature_structs);
     try std.testing.expect(result != null);
     try std.testing.expectEqual(@as(u16, 100), result.?.lig_glyph);
     try std.testing.expectEqual(@as(usize, 2), result.?.consumed);
 
     // No match at position 1
-    try std.testing.expect(lookup.findLigature(&glyphs, 1) == null);
+    try std.testing.expect(lookup.findLigature(&glyphs, 1, &lig_sets, &ligature_structs) == null);
 }
 
 test "OpenTypeFeatures init and deinit" {
@@ -954,7 +1951,8 @@ test "applyLigatures" {
     });
 
     try features.ligature_sets.append(std.testing.allocator, .{
-        .ligatures = features.ligature_structs.items[0..1],
+        .start = 0,
+        .count = 1,
     });
 
     // Coverage: 'f' glyph (70)
@@ -967,7 +1965,8 @@ test "applyLigatures" {
 
     try features.liga_lookups.append(std.testing.allocator, .{
         .coverage = .{ .format = 1, .data = &coverage_data },
-        .ligature_sets = features.ligature_sets.items[0..1],
+        .sets_start = 0,
+        .sets_count = 1,
     });
 
     // Test: "fi" (glyphs 70, 71) -> ligature 100
@@ -1064,4 +2063,407 @@ test "Parse Satoshi GSUB ligatures" {
     try std.testing.expect(fi_result[0] != fl_result[0]);
     try std.testing.expect(fi_result[0] != ft_result[0]);
     try std.testing.expect(fl_result[0] != ft_result[0]);
+}
+
+test "Parse Inter calt feature (Type 1 and Type 6)" {
+    const ttf = @import("ttf.zig");
+
+    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+        std.debug.print("Failed to load Inter font: {}\n", .{err});
+        return err;
+    };
+    defer std.testing.allocator.free(result.data);
+
+    const font = result.font;
+
+    const gsub_data = font.getTable("GSUB".*) orelse {
+        std.debug.print("No GSUB table in Inter\n", .{});
+        return error.TableNotFound;
+    };
+
+    var features = OpenTypeFeatures.init(std.testing.allocator);
+    defer features.deinit();
+
+    try features.parseGSUB(gsub_data);
+
+    // Inter should have calt feature which uses Type 1 and Type 6 lookups
+    std.debug.print("\nInter GSUB parsed:\n", .{});
+    std.debug.print("  Single substitution lookups: {d}\n", .{features.single_lookups.items.len});
+    std.debug.print("  Chaining context lookups: {d}\n", .{features.chain_context_lookups.items.len});
+    std.debug.print("  Liga lookups: {d}\n", .{features.liga_lookups.items.len});
+    std.debug.print("  Dlig lookups: {d}\n", .{features.dlig_lookups.items.len});
+    std.debug.print("  Clig lookups: {d}\n", .{features.clig_lookups.items.len});
+    std.debug.print("  Hlig lookups: {d}\n", .{features.hlig_lookups.items.len});
+
+    // Inter has extensive calt feature with arrow ligatures etc.
+    // We should have some Type 1 or Type 6 lookups
+    const has_calt_lookups = features.single_lookups.items.len > 0 or
+        features.chain_context_lookups.items.len > 0;
+    try std.testing.expect(has_calt_lookups);
+}
+
+test "Parse Inter mark/mkmk features (GPOS Type 4 and 6)" {
+    const ttf = @import("ttf.zig");
+
+    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+        std.debug.print("Failed to load Inter font: {}\n", .{err});
+        return err;
+    };
+    defer std.testing.allocator.free(result.data);
+
+    const font = result.font;
+
+    const gpos_data = font.getTable("GPOS".*) orelse {
+        std.debug.print("No GPOS table in Inter\n", .{});
+        return error.TableNotFound;
+    };
+
+    var features = OpenTypeFeatures.init(std.testing.allocator);
+    defer features.deinit();
+
+    try features.parseGPOS(gpos_data);
+
+    std.debug.print("\nInter GPOS parsed:\n", .{});
+    std.debug.print("  Kerning lookups: {d}\n", .{features.kern_lookups.items.len});
+    std.debug.print("  Mark-to-Base lookups: {d}\n", .{features.mark_base_lookups.items.len});
+    std.debug.print("  Mark-to-Mark lookups: {d}\n", .{features.mark_mark_lookups.items.len});
+
+    // Inter should have mark positioning for diacritics
+    try std.testing.expect(features.mark_base_lookups.items.len > 0);
+}
+
+test "Single substitution" {
+    // Test Format 1: delta substitution
+    const coverage_data_f1 = [_]u8{
+        0x00, 0x01, // format = 1
+        0x00, 0x02, // glyphCount = 2
+        0x00, 0x64, // glyph 100
+        0x00, 0x65, // glyph 101
+    };
+
+    const single_f1 = SingleSubst{
+        .coverage = .{ .format = 1, .data = &coverage_data_f1 },
+        .format = 1,
+        .delta = 10, // Add 10 to glyph ID
+    };
+
+    // Glyph 100 -> 110, Glyph 101 -> 111
+    try std.testing.expectEqual(@as(?u16, 110), single_f1.substitute(100));
+    try std.testing.expectEqual(@as(?u16, 111), single_f1.substitute(101));
+    try std.testing.expectEqual(@as(?u16, null), single_f1.substitute(102)); // Not covered
+
+    // Test Format 2: direct mapping
+    const substitutes = [_]u16{ 200, 201 };
+    const single_f2 = SingleSubst{
+        .coverage = .{ .format = 1, .data = &coverage_data_f1 },
+        .format = 2,
+        .substitutes = &substitutes,
+    };
+
+    try std.testing.expectEqual(@as(?u16, 200), single_f2.substitute(100));
+    try std.testing.expectEqual(@as(?u16, 201), single_f2.substitute(101));
+    try std.testing.expectEqual(@as(?u16, null), single_f2.substitute(102));
+}
+
+test "Chain context matching" {
+    // Simple test: backtrack=[a], input=[b], lookahead=[c]
+    // Match sequence: a b c (when pos is at b)
+
+    const cov_a_data = [_]u8{
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x61, // format 1, count 1, glyph 'a' (97)
+    };
+    const cov_b_data = [_]u8{
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x62, // format 1, count 1, glyph 'b' (98)
+    };
+    const cov_c_data = [_]u8{
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x63, // format 1, count 1, glyph 'c' (99)
+    };
+
+    const backtrack_cov = [_]CoverageTable{.{ .format = 1, .data = &cov_a_data }};
+    const input_cov = [_]CoverageTable{.{ .format = 1, .data = &cov_b_data }};
+    const lookahead_cov = [_]CoverageTable{.{ .format = 1, .data = &cov_c_data }};
+    const subst_recs = [_]SubstLookupRecord{.{ .sequence_index = 0, .lookup_index = 5 }};
+
+    const chain = ChainContextSubstF3{
+        .backtrack_coverages = &backtrack_cov,
+        .input_coverages = &input_cov,
+        .lookahead_coverages = &lookahead_cov,
+        .subst_records = &subst_recs,
+    };
+
+    // Test matching sequence: 'a' 'b' 'c' with pos=1 (at 'b')
+    const glyphs_abc = [_]u16{ 97, 98, 99 }; // a b c
+    const match_result = chain.match(&glyphs_abc, 1);
+    try std.testing.expect(match_result != null);
+    try std.testing.expectEqual(@as(usize, 1), match_result.?.len);
+    try std.testing.expectEqual(@as(u16, 0), match_result.?[0].sequence_index);
+    try std.testing.expectEqual(@as(u16, 5), match_result.?[0].lookup_index);
+
+    // Test non-matching: 'x' 'b' 'c' with pos=1 (backtrack fails)
+    const glyphs_xbc = [_]u16{ 120, 98, 99 };
+    try std.testing.expect(chain.match(&glyphs_xbc, 1) == null);
+
+    // Test non-matching: 'a' 'b' 'x' with pos=1 (lookahead fails)
+    const glyphs_abx = [_]u16{ 97, 98, 120 };
+    try std.testing.expect(chain.match(&glyphs_abx, 1) == null);
+
+    // Test non-matching: pos=0 (not enough backtrack)
+    try std.testing.expect(chain.match(&glyphs_abc, 0) == null);
+}
+
+test "applyCalt with Inter font" {
+    const ttf = @import("ttf.zig");
+
+    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+        std.debug.print("Failed to load Inter font: {}\n", .{err});
+        return err;
+    };
+    defer std.testing.allocator.free(result.data);
+
+    const font = result.font;
+
+    const gsub_data = font.getTable("GSUB".*) orelse {
+        std.debug.print("No GSUB table in Inter\n", .{});
+        return error.TableNotFound;
+    };
+
+    var features = OpenTypeFeatures.init(std.testing.allocator);
+    defer features.deinit();
+
+    try features.parseGSUB(gsub_data);
+
+    // Verify lookup map is populated
+    std.debug.print("\nLookup map entries: {d}\n", .{features.gsub_lookup_map.count()});
+    try std.testing.expect(features.gsub_lookup_map.count() > 0);
+
+    // Get test glyph IDs
+    const glyph_minus = font.getGlyphId('-') orelse 0;
+    const glyph_gt = font.getGlyphId('>') orelse 0;
+    std.debug.print("Glyph IDs: - = {d}, > = {d}\n", .{ glyph_minus, glyph_gt });
+
+    // Inter's arrow ligatures (-> etc) are in the 'calt' feature
+    // Inter does NOT have a 'liga' feature at all
+
+    const test_glyphs = [_]u16{ glyph_minus, glyph_gt };
+
+    // applyLigatures should NOT transform -> (no liga feature in Inter)
+    const liga_result = try features.applyLigatures(&test_glyphs);
+    defer std.testing.allocator.free(liga_result);
+    std.debug.print("applyLigatures: [{d}, {d}] -> {any}\n", .{ glyph_minus, glyph_gt, liga_result });
+
+    // Should be unchanged - no liga lookups
+    try std.testing.expectEqual(@as(usize, 2), liga_result.len);
+
+    // applyCalt SHOULD transform -> to arrow
+    const calt_result = try features.applyCalt(&test_glyphs);
+    defer std.testing.allocator.free(calt_result);
+    std.debug.print("applyCalt: [{d}, {d}] -> {any}\n", .{ glyph_minus, glyph_gt, calt_result });
+
+    // The arrow ligature should produce a single glyph
+    try std.testing.expectEqual(@as(usize, 1), calt_result.len);
+    try std.testing.expectEqual(@as(u16, 1805), calt_result[0]); // Arrow glyph
+}
+
+test "calt should not corrupt regular text" {
+    const ttf = @import("ttf.zig");
+
+    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+        std.debug.print("Failed to load Inter font: {}\n", .{err});
+        return err;
+    };
+    defer std.testing.allocator.free(result.data);
+
+    const font = result.font;
+
+    const gsub_data = font.getTable("GSUB".*) orelse {
+        std.debug.print("No GSUB table in Inter\n", .{});
+        return error.TableNotFound;
+    };
+
+    var features = OpenTypeFeatures.init(std.testing.allocator);
+    defer features.deinit();
+
+    try features.parseGSUB(gsub_data);
+
+    // Test with "Latin Extended:" - should NOT be corrupted
+    const test_str = "Latin Extended:";
+    var glyphs_latin = std.ArrayListUnmanaged(u16){};
+    defer glyphs_latin.deinit(std.testing.allocator);
+
+    for (test_str) |c| {
+        if (font.getGlyphId(c)) |gid| {
+            try glyphs_latin.append(std.testing.allocator, gid);
+        }
+    }
+
+    std.debug.print("\nTesting calt on '{s}':\n", .{test_str});
+    std.debug.print("  Input glyphs: {any}\n", .{glyphs_latin.items});
+
+    const calt_result = try features.applyCalt(glyphs_latin.items);
+    defer std.testing.allocator.free(calt_result);
+
+    std.debug.print("  Output glyphs: {any}\n", .{calt_result});
+
+    // Check for any mismatches
+    var mismatches: usize = 0;
+    const min_len = @min(glyphs_latin.items.len, calt_result.len);
+    for (0..min_len) |i| {
+        if (calt_result[i] != glyphs_latin.items[i]) {
+            const expected_char: u8 = test_str[i];
+            std.debug.print("  MISMATCH at pos {d} ('{c}'): expected glyph {d}, got {d}\n", .{ i, expected_char, glyphs_latin.items[i], calt_result[i] });
+            mismatches += 1;
+        }
+    }
+
+    // The glyphs should be the same (no contextual alternates for regular text)
+    try std.testing.expectEqual(@as(usize, 0), mismatches);
+
+    // Also test with arrows in the middle: "A -> B"
+    const test_str2 = "A -> B Latin";
+    var glyphs_arrow = std.ArrayListUnmanaged(u16){};
+    defer glyphs_arrow.deinit(std.testing.allocator);
+
+    for (test_str2) |c| {
+        if (font.getGlyphId(c)) |gid| {
+            try glyphs_arrow.append(std.testing.allocator, gid);
+        }
+    }
+
+    std.debug.print("\nTesting calt on '{s}':\n", .{test_str2});
+    std.debug.print("  Input glyphs: {any}\n", .{glyphs_arrow.items});
+
+    const calt_result2 = try features.applyCalt(glyphs_arrow.items);
+    defer std.testing.allocator.free(calt_result2);
+
+    std.debug.print("  Output glyphs: {any}\n", .{calt_result2});
+
+    // The arrow should be transformed, but text before/after should remain unchanged
+    // Expected: A [space] [arrow] [space] B [space] L a t i n
+    // The -> becomes a single arrow glyph, so output should be 2 shorter
+}
+
+test "applyGSUB combines calt and liga" {
+    var features = OpenTypeFeatures.init(std.testing.allocator);
+    defer features.deinit();
+
+    // Test with empty lookups - should just return copy
+    const test_glyphs = [_]u16{ 100, 101, 102 };
+    const result = try features.applyGSUB(&test_glyphs);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqual(@as(usize, 3), result.len);
+    try std.testing.expectEqual(@as(u16, 100), result[0]);
+    try std.testing.expectEqual(@as(u16, 101), result[1]);
+    try std.testing.expectEqual(@as(u16, 102), result[2]);
+}
+
+test "getMarkOffset" {
+    var features = OpenTypeFeatures.init(std.testing.allocator);
+    defer features.deinit();
+
+    // With no mark lookups, should return null
+    const result = features.getMarkOffset(100, 200);
+    try std.testing.expect(result == null);
+}
+
+test "Inter mark positioning for combining diacritics" {
+    const allocator = std.testing.allocator;
+    const ttf = @import("ttf.zig");
+
+    // Load Inter font
+    const file = std.fs.cwd().openFile("test/fonts/Inter/Inter-Regular.ttf", .{}) catch {
+        return; // Skip if font not available
+    };
+    defer file.close();
+
+    const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch return;
+    defer allocator.free(data);
+
+    const font = ttf.Font.parse(data) catch return;
+
+    // Initialize OpenType features
+    var ot = OpenTypeFeatures.init(allocator);
+    defer ot.deinit();
+
+    // Parse GPOS for mark positioning
+    if (font.getTable("GPOS".*)) |gpos_data| {
+        try ot.parseGPOS(gpos_data);
+    } else {
+        return; // No GPOS table
+    }
+
+    // Get glyph IDs for test characters
+    const base_a = font.getGlyphId('A') orelse return;
+    const base_e = font.getGlyphId('e') orelse return;
+    const combining_grave = font.getGlyphId(0x0300) orelse return; // COMBINING GRAVE ACCENT
+    const combining_acute = font.getGlyphId(0x0301) orelse return; // COMBINING ACUTE ACCENT
+
+    std.debug.print("\nInter mark positioning test:\n", .{});
+    std.debug.print("  'A' glyph: {}, combining grave (0300): {}\n", .{ base_a, combining_grave });
+    std.debug.print("  'e' glyph: {}, combining acute (0301): {}\n", .{ base_e, combining_acute });
+    std.debug.print("  Mark-to-Base lookups: {}\n", .{ot.mark_base_lookups.items.len});
+
+    // Check if Inter has mark positioning data for these combinations
+    if (ot.getMarkOffset(base_a, combining_grave)) |offset| {
+        std.debug.print("  A + grave offset: dx={}, dy={}\n", .{ offset.dx, offset.dy });
+        // Mark offset should have non-zero values
+        try std.testing.expect(offset.dx != 0 or offset.dy != 0);
+    } else {
+        std.debug.print("  No mark offset for A + grave\n", .{});
+    }
+
+    if (ot.getMarkOffset(base_e, combining_acute)) |offset| {
+        std.debug.print("  e + acute offset: dx={}, dy={}\n", .{ offset.dx, offset.dy });
+        try std.testing.expect(offset.dx != 0 or offset.dy != 0);
+    } else {
+        std.debug.print("  No mark offset for e + acute\n", .{});
+    }
+}
+
+test "dlig/clig/hlig separate parsing" {
+    const allocator = std.testing.allocator;
+    const ttf = @import("ttf.zig");
+
+    // Load Inter font (has dlig feature)
+    const file = std.fs.cwd().openFile("test/fonts/Inter/Inter-Regular.ttf", .{}) catch {
+        return; // Skip if font not available
+    };
+    defer file.close();
+
+    const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch return;
+    defer allocator.free(data);
+
+    const font = ttf.Font.parse(data) catch return;
+
+    const gsub_data = font.getTable("GSUB".*) orelse return;
+
+    var features = OpenTypeFeatures.init(allocator);
+    defer features.deinit();
+
+    try features.parseGSUB(gsub_data);
+
+    // Inter has dlig and calt (with ligatures), but NOT liga/clig/hlig
+    try std.testing.expectEqual(@as(usize, 0), features.liga_lookups.items.len); // No liga feature
+    try std.testing.expect(features.dlig_lookups.items.len > 0); // Inter has dlig
+    try std.testing.expectEqual(@as(usize, 0), features.clig_lookups.items.len);
+    try std.testing.expectEqual(@as(usize, 0), features.hlig_lookups.items.len);
+    try std.testing.expect(features.calt_liga_lookups.items.len > 0); // Calt has arrow ligatures
+
+    // Test applyGSUBWithFlags with dlig enabled
+    // Get some test glyphs (we'll just test that the function runs without error)
+    const glyph_a = font.getGlyphId('a') orelse 0;
+    const glyph_b = font.getGlyphId('b') orelse 0;
+    const test_glyphs = [_]u16{ glyph_a, glyph_b };
+
+    // Apply with default flags (liga on, dlig off)
+    const result1 = try features.applyGSUBWithFlags(&test_glyphs, .{});
+    defer allocator.free(result1);
+
+    // Apply with dlig enabled
+    const result2 = try features.applyGSUBWithFlags(&test_glyphs, .{ .dlig = true });
+    defer allocator.free(result2);
+
+    // Both should complete without error (results may or may not differ depending on font)
+    try std.testing.expect(result1.len >= 1);
+    try std.testing.expect(result2.len >= 1);
 }

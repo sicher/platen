@@ -65,6 +65,12 @@ pub fn main() !void {
         const font_path = if (args.len > 2) args[2] else "test/fonts/Inter/Inter-Regular.otf";
         const output_path = if (args.len > 3) args[3] else "cff_test.pdf";
         try generateCffTestPdf(allocator, font_path, output_path);
+    } else if (std.mem.eql(u8, cmd, "mark-test")) {
+        // Test mark positioning (GPOS mark/mkmk)
+        const font_path = if (args.len > 2) args[2] else "test/fonts/Inter/Inter-Regular.ttf";
+        const output_path = if (args.len > 3) args[3] else "mark_test.pdf";
+        try generateMarkTestPdf(allocator, font_path, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -92,6 +98,7 @@ fn printUsage() !void {
         \\                         (default: auto - structural first, then semantic)
         \\  font-info <ttf>      Show TrueType font information
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
+        \\  mark-test [ttf] [out]   Test GPOS mark positioning (diacritics)
         \\
     ;
     try stdout.writeAll(usage);
@@ -345,6 +352,75 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     try print("  Subset CFF: {} bytes\n", .{subset_size});
     try print("  Glyphs used: {} (max gid: {})\n", .{ used_glyphs, max_gid });
     try print("  Reduction: {d:.1}%\n", .{100.0 - @as(f64, @floatFromInt(subset_size)) / @as(f64, @floatFromInt(orig_size)) * 100.0});
+}
+
+fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    const font = doc.loadFont(font_path) catch |err| {
+        try print("Error loading font '{s}': {}\n", .{ font_path, err });
+        return;
+    };
+    font.encoding = .identity;
+    // Enable mark positioning features
+    font.setFeature(.mark, true);
+    font.setFeature(.mkmk, true);
+
+    try doc.addPage();
+    var y: f64 = 30;
+
+    try doc.setEmbeddedFont(font, 24);
+    try doc.writeAt(50, y, "Mark Positioning Test");
+    y += 30;
+
+    try doc.setEmbeddedFont(font, 14);
+    try doc.writeAt(50, y, "GPOS Type 4 (mark-to-base) and Type 6 (mark-to-mark)");
+    y += 24;
+
+    // Test text with combining diacritical marks
+    // These are separate Unicode combining characters (U+0300-U+036F)
+    try doc.setEmbeddedFont(font, 18);
+
+    // Pre-composed vs combining (visual comparison)
+    try doc.writeAt(50, y, "Pre-composed: À É Î Õ Ü ñ");
+    y += 24;
+    // U+0041 U+0300 = A + COMBINING GRAVE ACCENT
+    // U+0045 U+0301 = E + COMBINING ACUTE ACCENT
+    // U+0049 U+0302 = I + COMBINING CIRCUMFLEX ACCENT
+    // U+004F U+0303 = O + COMBINING TILDE
+    // U+0055 U+0308 = U + COMBINING DIAERESIS
+    // U+006E U+0303 = n + COMBINING TILDE
+    try doc.writeAt(50, y, "Combining: A\xcc\x80 E\xcc\x81 I\xcc\x82 O\xcc\x83 U\xcc\x88 n\xcc\x83");
+    y += 30;
+
+    // More complex combinations
+    try doc.writeAt(50, y, "Double marks: o\xcc\x82\xcc\x81 e\xcc\x84\xcc\x81"); // ô + acute, ē + acute
+    y += 24;
+
+    // Vietnamese-style stacked diacritics
+    try doc.writeAt(50, y, "Vietnamese: a\xcc\x82\xcc\x80 e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83"); // â + grave, ê + acute, ô + tilde
+    y += 30;
+
+    // Comparison row
+    try doc.setEmbeddedFont(font, 12);
+    try doc.writeAt(50, y, "If mark positioning works, combining characters should align with pre-composed.");
+    y += 16;
+    try doc.writeAt(50, y, "Without mark positioning, combining marks appear after the base character.");
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+
+    // Show mark/mkmk lookup stats
+    if (font.ot_features) |ot| {
+        try print("GPOS stats:\n", .{});
+        try print("  Mark-to-Base lookups: {}\n", .{ot.mark_base_lookups.items.len});
+        try print("  Mark-to-Mark lookups: {}\n", .{ot.mark_mark_lookups.items.len});
+    }
 }
 
 // Use shared test infrastructure from zpdf module
