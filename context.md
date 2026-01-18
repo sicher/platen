@@ -3,6 +3,13 @@
 ## Current Focus
 OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk working. **calt disabled by default** (chain context has a bug at scale - unit tests pass but integration test shows bizarre substitutions like L→J). Ready for graphics support.
 
+## What We Did (Session 2026-01-18 #29) [COMPLETE]
+- **Fixed mark/mkmk positioning causing overlapping characters**:
+  - `getGlyphWidth()` was returning 0 for glyphs not in CID width cache (like combining marks)
+  - Added fallback to get width directly from font's hmtx table with proper scaling
+  - Mark positioning now correctly places diacritics (À É Õ Ñ render correctly)
+- All 154 tests pass
+
 ## What We Did (Session 2026-01-18 #28) [COMPLETE]
 - **Fixed GPOS Extension Positioning (Type 9) parsing**:
   - Inter font uses Type 9 extension lookups to wrap Type 2 kerning data
