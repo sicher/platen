@@ -658,6 +658,186 @@ def gen_opentype_features():
     print("  opentype_features.pdf")
 
 
+def gen_text_flow():
+    """Text Flow API test - regions, margins, writeLine, writeParagraph."""
+    pdf = make_pdf()
+    pdf.set_margins(72, 72, 72)  # 1 inch margins
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(72, 72, "Text Flow API Test")
+
+    # Calculate region (page width - margins)
+    region_x = 72
+    region_width = 595.28 - 72 - 72  # A4 width - margins
+    y = 112  # Start below title
+
+    # Test lines with different alignments
+    pdf.set_font("Helvetica", "", size=12)
+
+    # Left aligned (default)
+    pdf.text(region_x, y, "Left aligned line (default)")
+    y += 14.4  # line height = font_size * 1.2
+
+    # Center aligned
+    text = "Center aligned line"
+    text_width = pdf.get_string_width(text)
+    x_center = region_x + (region_width - text_width) / 2
+    pdf.text(x_center, y, text)
+    y += 14.4
+
+    # Right aligned
+    text = "Right aligned line"
+    text_width = pdf.get_string_width(text)
+    x_right = region_x + region_width - text_width
+    pdf.text(x_right, y, text)
+    y += 14.4
+
+    # Spacing
+    y += 12
+
+    # Word Wrapping Test header
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Word Wrapping Test:")
+    y += 14.4
+
+    # Word wrapping paragraph using multi_cell
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(region_x, y)
+    paragraph1 = ("This is a test paragraph that demonstrates word wrapping. "
+                  "The text should automatically wrap to fit within the region width. "
+                  "Long words like supercalifragilisticexpialidocious should also be handled.")
+    pdf.multi_cell(w=region_width, h=11 * 1.2, text=paragraph1, align="L")
+    y = pdf.get_y() + 12
+
+    # Demo 1: Regular hyphens - compound words stay together (100pt column)
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Regular Hyphens (100pt column):")
+    y += 14.4
+
+    # At 11pt: "Look:" ~22pt, "state-of-the-art" ~86pt
+    # "Look: state-of-the-art" ~111pt > 100pt, so word wraps to next line
+    # With break_on_hyphens=false, the compound word stays intact
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(region_x, y)
+    paragraph2a = "Look: state-of-the-art works."
+    pdf.multi_cell(w=100, h=11 * 1.2, text=paragraph2a, align="L")
+    y = pdf.get_y() + 12
+
+    # Demo 2: Soft-hyphens - word breaks at soft-hyphen point (26pt column)
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Soft-Hyphens (26pt column):")
+    y += 14.4
+
+    # At 11pt: "in-" ~12.8pt, "com-" ~24.4pt, both fit in 26pt
+    # Word breaks recursively at soft-hyphen points
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(region_x, y)
+    paragraph2b = "in\u00adcom\u00adpre\u00adhen\u00adsi\u00adble"
+    pdf.multi_cell(w=26, h=11 * 1.2, text=paragraph2b, align="L")
+    y = pdf.get_y() + 12
+
+    # Demo 3: Character wrap - long word without soft-hyphens in narrow column
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Character Wrap (50pt column):")
+    y += 14.4
+
+    # "supercalifragilisticexpialidocious" is ~155pt at 11pt, won't fit in 50pt
+    # Without soft-hyphens, it overflows the line (character-level handling)
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(region_x, y)
+    pdf.multi_cell(w=50, h=11 * 1.2, text="supercalifragilisticexpialidocious", align="L")
+    y = pdf.get_y() + 12
+
+    # Centered Paragraph header
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Centered Paragraph:")
+    y += 14.4
+
+    # Centered paragraph
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(region_x, y)
+    paragraph3 = ("This paragraph is center aligned. Each line of text "
+                  "will be centered within the region width.")
+    pdf.multi_cell(w=region_width, h=11 * 1.2, text=paragraph3, align="C")
+    y = pdf.get_y() + 12
+
+    # Overflow Test header - 150pt width forces more wrapping
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Overflow Test (150pt wide, 30pt tall):")
+    y += 14.4
+
+    # 150pt width forces more line wraps; 30pt height fits ~2 lines at 13.2pt each
+    pdf.set_font("Helvetica", "", size=11)
+    overflow_text = ("Line one fits here. Line two fits here. "
+                     "Line three overflows. Line four overflows.")
+    line_height = 11 * 1.2
+    lines_that_fit = int(30 / line_height)  # 2 lines
+    col_width = 150
+    words = overflow_text.split()
+    current_line = ""
+    lines_output = 0
+    overflow_words = []
+
+    for i, word in enumerate(words):
+        test_line = current_line + (" " if current_line else "") + word
+        if pdf.get_string_width(test_line) <= col_width:
+            current_line = test_line
+        else:
+            if lines_output < lines_that_fit:
+                pdf.set_xy(region_x, y + lines_output * line_height)
+                pdf.cell(w=col_width, h=line_height, text=current_line, align="L")
+                lines_output += 1
+                current_line = word
+            else:
+                overflow_words = words[i-1:]
+                break
+
+    # Handle last line
+    if current_line and lines_output < lines_that_fit:
+        pdf.set_xy(region_x, y + lines_output * line_height)
+        pdf.cell(w=col_width, h=line_height, text=current_line, align="L")
+        lines_output += 1
+    elif current_line:
+        if not overflow_words:
+            overflow_words = [current_line]
+
+    y += lines_output * line_height + 12
+
+    # Show what overflowed
+    pdf.set_font("Helvetica", "B", size=10)
+    pdf.text(region_x, y, "Overflow content:")
+    y += 12
+    pdf.set_font("Helvetica", "", size=10)
+    if overflow_words:
+        overflow_content = " ".join(overflow_words)[:60]  # Truncate for display
+        pdf.text(region_x, y, overflow_content)
+    else:
+        pdf.text(region_x, y, "(no overflow)")
+    y += 16
+
+    # Region with Border header
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(region_x, y, "Region with Border:")
+    y += 14.4
+
+    # Draw bordered region with fill
+    box_height = 60
+    pdf.set_fill_color(242, 242, 242)  # Light gray (0.95 * 255)
+    pdf.rect(region_x, y, region_width, box_height, style="FD")
+
+    # Text inside box
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(region_x, y + 5)
+    pdf.multi_cell(w=region_width, h=11 * 1.2,
+                   text="This text is inside a bordered region with a light gray background fill.",
+                   align="L")
+
+    pdf.output(OUTPUT_DIR / "text_flow.pdf")
+    print("  text_flow.pdf")
+
+
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -671,6 +851,7 @@ def main():
     gen_cid_fonts()
     gen_inter_fonts()
     gen_opentype_features()
+    gen_text_flow()
     print(f"\nDone. References in {OUTPUT_DIR}/")
 
 

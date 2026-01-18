@@ -43,6 +43,172 @@ pub const FontHandle = union(enum) {
     }
 };
 
+// ============================================================================
+// Units - all measurements in PDF are in points (1pt = 1/72 inch)
+// ============================================================================
+
+/// Points per inch.
+pub const pt_per_inch = 72.0;
+
+/// Points per millimeter.
+pub const pt_per_mm = 72.0 / 25.4;
+
+/// Points per centimeter.
+pub const pt_per_cm = 72.0 / 2.54;
+
+/// Converts inches to points.
+pub fn inches(n: f64) f64 {
+    return n * pt_per_inch;
+}
+
+/// Converts millimeters to points.
+pub fn mm(n: f64) f64 {
+    return n * pt_per_mm;
+}
+
+/// Converts centimeters to points.
+pub fn cm(n: f64) f64 {
+    return n * pt_per_cm;
+}
+
+// ============================================================================
+// Text Flow API Types
+// ============================================================================
+
+/// RGB color. Values are 0.0 to 1.0.
+pub const Color = struct {
+    r: f64,
+    g: f64,
+    b: f64,
+
+    pub const black = Color{ .r = 0, .g = 0, .b = 0 };
+    pub const white = Color{ .r = 1, .g = 1, .b = 1 };
+    pub const red = Color{ .r = 1, .g = 0, .b = 0 };
+    pub const green = Color{ .r = 0, .g = 1, .b = 0 };
+    pub const blue = Color{ .r = 0, .g = 0, .b = 1 };
+    // TODO: CMYK, grayscale, spot colors
+};
+
+/// Border specification for regions.
+pub const Border = struct {
+    top: bool = false,
+    bottom: bool = false,
+    left: bool = false,
+    right: bool = false,
+
+    pub const none = Border{};
+    pub const all = Border{ .top = true, .bottom = true, .left = true, .right = true };
+};
+
+/// Text alignment.
+/// Horizontal text alignment.
+pub const Align = enum {
+    left,
+    center,
+    right,
+    justify,
+};
+
+/// Vertical text alignment within line height.
+pub const VAlign = enum {
+    /// Baseline at content_y + font_size (simple, no leading adjustment).
+    top,
+    /// Baseline centered: content_y + font_size - leading/2 (fpdf2 compatible).
+    middle,
+    /// Baseline at content_y + line_height (text sits on bottom edge).
+    bottom,
+};
+
+/// Document margins in points.
+pub const Margins = struct {
+    left: f64 = 72,
+    right: f64 = 72,
+    top: f64 = 72,
+    bottom: f64 = 72,
+};
+
+/// Region padding in points (defaults to zero).
+pub const Padding = struct {
+    left: f64 = 0,
+    right: f64 = 0,
+    top: f64 = 0,
+    bottom: f64 = 0,
+};
+
+/// Rectangular area for content placement with cursor tracking.
+pub const Region = struct {
+    /// Left edge x coordinate.
+    x: f64,
+    /// Top edge y coordinate (from page top).
+    y: f64,
+    /// Region width.
+    width: f64,
+    /// Region height.
+    height: f64,
+    /// Current cursor y position within content area (relative to top padding).
+    cursor_y: f64 = 0,
+    /// Inner padding (content inset from region edges).
+    padding: Padding = .{},
+    /// Border styling.
+    border: Border = .{},
+    /// Background fill color.
+    fill: ?Color = null,
+
+    /// Returns remaining height in content area.
+    pub fn remainingHeight(self: Region) f64 {
+        return self.height - self.padding.top - self.padding.bottom - self.cursor_y;
+    }
+
+    /// Returns usable width inside padding.
+    pub fn contentWidth(self: Region) f64 {
+        return self.width - self.padding.left - self.padding.right;
+    }
+
+    /// Returns true if the given metrics fit in remaining space.
+    pub fn fits(self: Region, m: TextMetrics) bool {
+        return m.height <= self.remainingHeight();
+    }
+};
+
+/// Result of writeLine or writeParagraph.
+pub const WriteResult = struct {
+    /// Number of lines rendered.
+    lines_written: usize,
+    /// Text that didn't fit, or null if all text was written.
+    overflow: ?[]const u8,
+};
+
+/// Options for writeLine (single line, no wrap).
+pub const LineOptions = struct {
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+};
+
+/// Options for writeParagraph (wrapped text).
+pub const ParagraphOptions = struct {
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+    /// First line indent in points.
+    first_indent: f64 = 0,
+    /// Allow breaking after regular hyphens in compound words (e.g., "state-of-the-art").
+    /// Default true. Set false for fpdf2 compatibility (only soft-hyphens break).
+    break_on_hyphens: bool = true,
+};
+
+/// Options for writeFlow (auto-pagination).
+pub const FlowOptions = struct {
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+    /// First line indent in points.
+    first_indent: f64 = 0,
+};
+
 /// Page size in points (1 point = 1/72 inch)
 pub const PageSize = struct {
     width: f64,
@@ -200,6 +366,8 @@ pub const Document = struct {
     allocator: std.mem.Allocator,
     pages: std.ArrayListUnmanaged(Page),
     page_size: PageSize,
+    /// Document margins.
+    margins: Margins = .{},
     // Text state
     current_font: ?StandardFont = null,
     current_embedded: ?*EmbeddedFont = null,
@@ -289,6 +457,21 @@ pub const Document = struct {
         self.line_height = height;
     }
 
+    /// Set document margins.
+    pub fn setMargins(self: *Document, m: Margins) void {
+        self.margins = m;
+    }
+
+    /// Returns a region for the current page respecting document margins.
+    pub fn getPageRegion(self: *Document) Region {
+        return .{
+            .x = self.margins.left,
+            .y = self.margins.top,
+            .width = self.page_size.width - self.margins.left - self.margins.right,
+            .height = self.page_size.height - self.margins.top - self.margins.bottom,
+        };
+    }
+
     /// Set OpenType feature for all embedded fonts
     /// Example: doc.setFeature(.liga, false) to disable ligatures
     pub fn setFeature(self: *Document, feature: opentype.Feature, enabled: bool) void {
@@ -355,9 +538,8 @@ pub const Document = struct {
         return self.page_size.height - self.y;
     }
 
-    /// Draw text at the current position
-    /// Text is stored as a deferred command and rendered later (after font subsetting)
-    pub fn text(self: *Document, str: []const u8) !void {
+    /// Writes text at the current cursor position.
+    pub fn write(self: *Document, str: []const u8) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
@@ -379,8 +561,9 @@ pub const Document = struct {
             return error.NoFont;
         };
 
-        // Create owned copy of text
-        const text_copy = try self.allocator.dupe(u8, str);
+        // Create owned copy of text, stripping soft-hyphens (U+00AD)
+        // Soft-hyphens are invisible unless used as break points
+        const text_copy = try stripSoftHyphens(self.allocator, str);
         errdefer self.allocator.free(text_copy);
 
         // Store deferred command
@@ -459,10 +642,457 @@ pub const Document = struct {
         return true;
     }
 
-    /// Draw text at a specific position
-    pub fn textAt(self: *Document, x: f64, y: f64, str: []const u8) !void {
+    /// Writes text at the specified position.
+    pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !void {
         self.setXY(x, y);
-        try self.text(str);
+        try self.write(str);
+    }
+
+    /// Measures text width using current font (standard or embedded).
+    /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
+    pub fn getTextWidth(self: *Document, str: []const u8) f64 {
+        // Fast path: no soft-hyphens
+        if (!containsSoftHyphens(str)) {
+            if (self.current_embedded) |emb| {
+                return emb.measureTextWidth(str, self.font_size);
+            }
+            return metrics.measureTextWidth(str, self.getTextStyle());
+        }
+
+        // Slow path: filter out soft-hyphens using stack buffer
+        var buf: [4096]u8 = undefined;
+        var j: usize = 0;
+        var i: usize = 0;
+        while (i < str.len and j < buf.len) {
+            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+                i += 2; // Skip soft-hyphen
+            } else {
+                buf[j] = str[i];
+                j += 1;
+                i += 1;
+            }
+        }
+        const filtered = buf[0..j];
+
+        if (self.current_embedded) |emb| {
+            return emb.measureTextWidth(filtered, self.font_size);
+        }
+        return metrics.measureTextWidth(filtered, self.getTextStyle());
+    }
+
+    /// Writes a single line of text into a region.
+    /// Does not wrap text. Advances the region cursor by one line height.
+    pub fn writeLine(self: *Document, region: *Region, str: []const u8, opts: LineOptions) !WriteResult {
+        return self.writeLineInternal(region, str, opts.alignment, opts.valign, 0);
+    }
+
+    /// Internal line writer with indent and valign support.
+    fn writeLineInternal(self: *Document, region: *Region, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
+        const line_height = self.getLineHeightPts();
+
+        // Check if we have room for a line
+        if (region.remainingHeight() < line_height) {
+            return .{
+                .lines_written = 0,
+                .overflow = str,
+            };
+        }
+
+        const text_width = self.getTextWidth(str);
+        const content_width = region.contentWidth();
+        const available_width = content_width - indent;
+
+        // Calculate x position based on alignment (content starts at x + padding.left)
+        const content_x = region.x + region.padding.left;
+        const x = switch (alignment) {
+            .left => content_x + indent,
+            .center => content_x + indent + (available_width - text_width) / 2,
+            .right => content_x + content_width - text_width,
+            .justify => content_x + indent, // justify handled separately for multi-word lines
+        };
+
+        // Calculate y position based on vertical alignment
+        const content_y = region.y + region.padding.top;
+        const leading = line_height - self.font_size;
+        const y = switch (valign) {
+            // Baseline at content_y + cursor_y + font_size (simple)
+            .top => content_y + region.cursor_y + self.font_size,
+            // Baseline centered: subtract leading/2 (fpdf2 compatible)
+            .middle => content_y + region.cursor_y + self.font_size - leading / 2,
+            // Baseline at bottom of line height
+            .bottom => content_y + region.cursor_y + line_height,
+        };
+
+        // Render text
+        try self.writeAt(x, y, str);
+
+        // Advance cursor
+        region.cursor_y += line_height;
+
+        return .{
+            .lines_written = 1,
+            .overflow = null,
+        };
+    }
+
+    /// Find a soft-hyphen break point in a word that fits within max_width.
+    /// Soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) marks optional break points.
+    /// Returns the byte position where to break (soft-hyphen will be replaced with visible hyphen).
+    fn findSoftHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
+        var best_break: ?usize = null;
+        var i: usize = 0;
+        while (i + 1 < word.len) {
+            // Soft-hyphen in UTF-8 is 0xC2 0xAD
+            if (word[i] == 0xC2 and word[i + 1] == 0xAD) {
+                // Found a soft-hyphen - measure prefix with a visible hyphen substituted
+                const prefix = word[0..i];
+                const prefix_width = self.getTextWidth(prefix) + self.getTextWidth("-");
+                if (prefix_width <= max_width) {
+                    best_break = i; // Position of the soft-hyphen
+                } else {
+                    break; // Prefix too wide, no point checking further
+                }
+                i += 2; // Skip the 2-byte soft-hyphen
+            } else {
+                i += 1;
+            }
+        }
+        return best_break;
+    }
+
+    /// Find a regular hyphen break point in a word that fits within max_width.
+    /// Regular hyphens stay visible; we break AFTER the hyphen (e.g., "state-" / "of-the-art").
+    /// Returns the byte position after the hyphen where to split.
+    fn findHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
+        var best_break: ?usize = null;
+        for (word, 0..) |c, i| {
+            if (c == '-' and i > 0 and i + 1 < word.len) {
+                // Found a hyphen - measure prefix including the hyphen
+                const prefix = word[0 .. i + 1];
+                const prefix_width = self.getTextWidth(prefix);
+                if (prefix_width <= max_width) {
+                    best_break = i + 1; // Position after the hyphen
+                } else {
+                    break; // Prefix too wide, no point checking further
+                }
+            }
+        }
+        return best_break;
+    }
+
+    /// Find a character break point in a word that fits within max_width.
+    /// This is a last resort when no hyphen or soft-hyphen breaks are available.
+    /// Returns the byte position where to break (respecting UTF-8 boundaries).
+    fn findCharacterBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
+        var best_break: ?usize = null;
+        var current_width: f64 = 0;
+        var i: usize = 0;
+
+        while (i < word.len) {
+            // Find the end of the current UTF-8 character
+            const char_len = std.unicode.utf8ByteSequenceLength(word[i]) catch 1;
+            const char_end = @min(i + char_len, word.len);
+
+            // Measure width including this character
+            const prefix_width = self.getTextWidth(word[0..char_end]);
+
+            if (prefix_width <= max_width) {
+                best_break = char_end;
+                current_width = prefix_width;
+                i = char_end;
+            } else {
+                break;
+            }
+        }
+
+        // Only return if we found at least one character that fits
+        if (best_break) |pos| {
+            if (pos > 0 and pos < word.len) {
+                return pos;
+            }
+        }
+        return null;
+    }
+
+    /// Strip soft-hyphens (U+00AD) from text.
+    /// Soft-hyphens are invisible formatting characters that only appear as visible
+    /// hyphens when text breaks at that point. Returns allocated copy without soft-hyphens.
+    fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
+        // Count non-soft-hyphen bytes
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i < str.len) {
+            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+                i += 2; // Skip soft-hyphen
+            } else {
+                count += 1;
+                i += 1;
+            }
+        }
+
+        // If no soft-hyphens, just duplicate
+        if (count == str.len) {
+            return allocator.dupe(u8, str);
+        }
+
+        // Copy without soft-hyphens
+        const result = try allocator.alloc(u8, count);
+        var j: usize = 0;
+        i = 0;
+        while (i < str.len) {
+            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+                i += 2; // Skip soft-hyphen
+            } else {
+                result[j] = str[i];
+                j += 1;
+                i += 1;
+            }
+        }
+        return result;
+    }
+
+    /// Check if text contains any soft-hyphens.
+    fn containsSoftHyphens(str: []const u8) bool {
+        var i: usize = 0;
+        while (i + 1 < str.len) : (i += 1) {
+            if (str[i] == 0xC2 and str[i + 1] == 0xAD) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// Writes wrapped text into a region.
+    /// Returns overflow text if it doesn't fit in the remaining region height.
+    pub fn writeParagraph(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
+        const line_height = self.getLineHeightPts();
+        const space_width = self.getTextWidth(" ");
+        var lines_written: usize = 0;
+        var is_first_line = true;
+
+        // Process text word by word
+        var remaining = str;
+        while (remaining.len > 0) {
+            // Check if we have room for another line
+            if (region.remainingHeight() < line_height) {
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = remaining,
+                };
+            }
+
+            // Calculate available width for this line (respects padding)
+            const indent = if (is_first_line) opts.first_indent else 0;
+            const line_width = region.contentWidth() - indent;
+
+            // Build a line by collecting words
+            var line_end: usize = 0;
+            var current_width: f64 = 0;
+            var word_start: usize = 0;
+            var in_word = false;
+            var soft_hyphen_break = false;
+
+            for (remaining, 0..) |c, i| {
+                const is_space = c == ' ' or c == '\t' or c == '\n';
+
+                if (is_space and in_word) {
+                    // End of word - check if it fits
+                    const word = remaining[word_start..i];
+                    const word_width = self.getTextWidth(word);
+
+                    if (current_width + word_width <= line_width) {
+                        // Word fits
+                        current_width += word_width + space_width;
+                        line_end = i;
+                    } else if (line_end == 0) {
+                        // First word doesn't fit on empty line - try breaking at hyphens
+                        if (opts.break_on_hyphens) {
+                            if (findHyphenBreak(self, word, line_width)) |break_pos| {
+                                line_end = word_start + break_pos;
+                                break;
+                            }
+                        }
+                        // Try soft-hyphen break as fallback
+                        if (findSoftHyphenBreak(self, word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                            soft_hyphen_break = true;
+                        } else if (findCharacterBreak(self, word, line_width)) |break_pos| {
+                            // Last resort: character-level break
+                            line_end = word_start + break_pos;
+                        } else {
+                            // Nothing fits, include word anyway (will overflow)
+                            line_end = i;
+                        }
+                        break;
+                    } else {
+                        // Word doesn't fit, wrap to next line (keep word intact)
+                        break;
+                    }
+                    in_word = false;
+
+                    // Handle newline as line break
+                    if (c == '\n') {
+                        line_end = i;
+                        break;
+                    }
+                } else if (!is_space and !in_word) {
+                    // Start of word
+                    word_start = i;
+                    in_word = true;
+                }
+            }
+
+            // Handle last word if we're still in one
+            if (in_word) {
+                const word = remaining[word_start..];
+                const word_width = self.getTextWidth(word);
+
+                if (current_width + word_width <= line_width) {
+                    line_end = remaining.len;
+                } else if (line_end == 0) {
+                    // First word doesn't fit - try breaking at hyphens
+                    if (opts.break_on_hyphens) {
+                        if (findHyphenBreak(self, word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                        }
+                    }
+                    // Try soft-hyphen break as fallback
+                    if (line_end == 0) {
+                        if (findSoftHyphenBreak(self, word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                            soft_hyphen_break = true;
+                        } else if (findCharacterBreak(self, word, line_width)) |break_pos| {
+                            // Last resort: character-level break
+                            line_end = word_start + break_pos;
+                        } else {
+                            line_end = remaining.len; // Nothing fits, include anyway
+                        }
+                    }
+                }
+                // else: word doesn't fit, leave line_end as is (wrap word to next line)
+            }
+
+            // Handle empty remaining (shouldn't happen but safety)
+            if (line_end == 0) {
+                break;
+            }
+
+            // Get the line text and trim trailing spaces
+            var line = remaining[0..line_end];
+            while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t')) {
+                line = line[0 .. line.len - 1];
+            }
+
+            // Render the line (with visible hyphen if breaking at soft-hyphen)
+            if (soft_hyphen_break) {
+                // Append visible hyphen for soft-hyphen break
+                var buf: [4096]u8 = undefined;
+                if (line.len < buf.len - 1) {
+                    @memcpy(buf[0..line.len], line);
+                    buf[line.len] = '-';
+                    _ = try self.writeLineInternal(region, buf[0 .. line.len + 1], opts.alignment, opts.valign, indent);
+                } else {
+                    // Line too long for buffer, render without hyphen (fallback)
+                    _ = try self.writeLineInternal(region, line, opts.alignment, opts.valign, indent);
+                }
+            } else {
+                _ = try self.writeLineInternal(region, line, opts.alignment, opts.valign, indent);
+            }
+            lines_written += 1;
+            is_first_line = false;
+
+            // Skip past rendered text
+            if (soft_hyphen_break) {
+                // Skip the 2-byte soft-hyphen (0xC2 0xAD)
+                remaining = remaining[line_end + 2 ..];
+            } else {
+                remaining = remaining[line_end..];
+            }
+            // Skip any following whitespace
+            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
+                remaining = remaining[1..];
+            }
+        }
+
+        return .{
+            .lines_written = lines_written,
+            .overflow = null,
+        };
+    }
+
+    /// Writes text flowing across pages automatically.
+    /// Adds new pages as needed when text overflows.
+    pub fn writeFlow(self: *Document, str: []const u8, opts: FlowOptions) !void {
+        var remaining: ?[]const u8 = str;
+
+        while (remaining) |txt| {
+            var region = self.getPageRegion();
+            const result = try self.writeParagraph(&region, txt, .{
+                .alignment = opts.alignment,
+                .valign = opts.valign,
+                .first_indent = opts.first_indent,
+            });
+            remaining = result.overflow;
+            if (remaining != null) {
+                try self.addPage();
+            }
+        }
+    }
+
+    /// Draws a region's border and fill (without text).
+    pub fn drawRegion(self: *Document, region: *const Region) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+
+        // Convert from top-left coordinates to PDF coordinates (bottom-left origin)
+        const pdf_y = self.page_size.height - region.y - region.height;
+
+        // Build raw PDF commands for the region
+        // Use q/Q (save/restore) to isolate graphics state changes (colors, etc.)
+        var buf: [512]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Fill if specified
+        if (region.fill) |color| {
+            len += (std.fmt.bufPrint(buf[len..], "{d:.3} {d:.3} {d:.3} rg\n", .{ color.r, color.g, color.b }) catch unreachable).len;
+            len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ region.x, pdf_y, region.width, region.height }) catch unreachable).len;
+        }
+
+        // Draw border if specified
+        if (region.border.top or region.border.bottom or region.border.left or region.border.right) {
+            // Set line width to 0.567pt (fpdf2 default: 0.2mm)
+            len += (std.fmt.bufPrint(buf[len..], "0.567 w\n", .{}) catch unreachable).len;
+            // Set stroke color to black
+            len += (std.fmt.bufPrint(buf[len..], "0 0 0 RG\n", .{}) catch unreachable).len;
+
+            if (region.border.top) {
+                const y_top = pdf_y + region.height;
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, y_top, region.x + region.width, y_top }) catch unreachable).len;
+            }
+            if (region.border.bottom) {
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, pdf_y, region.x + region.width, pdf_y }) catch unreachable).len;
+            }
+            if (region.border.left) {
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, pdf_y, region.x, pdf_y + region.height }) catch unreachable).len;
+            }
+            if (region.border.right) {
+                const x_right = region.x + region.width;
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ x_right, pdf_y, x_right, pdf_y + region.height }) catch unreachable).len;
+            }
+        }
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        if (len > 0) {
+            const raw_copy = try self.allocator.dupe(u8, buf[0..len]);
+            errdefer self.allocator.free(raw_copy);
+            try page.commands.append(self.allocator, .{ .raw = raw_copy });
+        }
     }
 
     /// Render deferred commands to page content bytes
@@ -955,7 +1585,7 @@ test "Document with text" {
 
     try doc.addPage();
     try doc.setFont(.helvetica, 12);
-    try doc.textAt(50, 50, "Hello, World!");
+    try doc.writeAt(50, 50, "Hello, World!");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -989,7 +1619,7 @@ test "text without font returns error" {
 
     try doc.addPage();
     // Should fail because no font is set
-    try std.testing.expectError(error.NoFont, doc.text("test"));
+    try std.testing.expectError(error.NoFont, doc.write("test"));
 }
 
 test "text without page returns error" {
@@ -998,7 +1628,7 @@ test "text without page returns error" {
 
     try doc.setFont(.helvetica, 12);
     // Should fail because no page is added
-    try std.testing.expectError(error.NoPage, doc.text("test"));
+    try std.testing.expectError(error.NoPage, doc.write("test"));
 }
 
 test "multiple fonts on single page" {
@@ -1009,13 +1639,13 @@ test "multiple fonts on single page" {
     try doc.addPage();
 
     try doc.setFont(.helvetica, 12);
-    try doc.textAt(50, 50, "Helvetica");
+    try doc.writeAt(50, 50, "Helvetica");
 
     try doc.setFont(.times_roman, 12);
-    try doc.textAt(50, 70, "Times");
+    try doc.writeAt(50, 70, "Times");
 
     try doc.setFont(.courier, 12);
-    try doc.textAt(50, 90, "Courier");
+    try doc.writeAt(50, 90, "Courier");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1034,16 +1664,16 @@ test "font styles" {
     try doc.addPage();
 
     try doc.setFont(.helvetica, 12);
-    try doc.textAt(50, 50, "Normal");
+    try doc.writeAt(50, 50, "Normal");
 
     try doc.setFont(.helvetica_bold, 12);
-    try doc.textAt(50, 70, "Bold");
+    try doc.writeAt(50, 70, "Bold");
 
     try doc.setFont(.helvetica_oblique, 12);
-    try doc.textAt(50, 90, "Italic");
+    try doc.writeAt(50, 90, "Italic");
 
     try doc.setFont(.helvetica_bold_oblique, 12);
-    try doc.textAt(50, 110, "BoldItalic");
+    try doc.writeAt(50, 110, "BoldItalic");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1078,10 +1708,10 @@ test "multiple pages" {
 
     try doc.addPage();
     try doc.setFont(.helvetica, 12);
-    try doc.textAt(50, 50, "Page 1");
+    try doc.writeAt(50, 50, "Page 1");
 
     try doc.addPage();
-    try doc.textAt(50, 50, "Page 2");
+    try doc.writeAt(50, 50, "Page 2");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1117,7 +1747,7 @@ test "all 14 standard fonts" {
     var y: f64 = 50;
     for (all_fonts) |font| {
         try doc.setFont(font, 10);
-        try doc.textAt(50, y, font.pdfName());
+        try doc.writeAt(50, y, font.pdfName());
         y += 15;
     }
 
@@ -1257,7 +1887,7 @@ test "render text with embedded font" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
-    try doc.textAt(50, 50, "Hello, World!");
+    try doc.writeAt(50, 50, "Hello, World!");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1293,15 +1923,15 @@ test "mix standard and embedded fonts" {
 
     // Use standard font first
     try doc.setFont(.helvetica, 12);
-    try doc.textAt(50, 50, "Helvetica text");
+    try doc.writeAt(50, 50, "Helvetica text");
 
     // Switch to embedded font
     try doc.setEmbeddedFont(courier_prime, 14);
-    try doc.textAt(50, 70, "Courier Prime text");
+    try doc.writeAt(50, 70, "Courier Prime text");
 
     // Switch back to standard
     try doc.setFont(.times_roman, 12);
-    try doc.textAt(50, 90, "Times text");
+    try doc.writeAt(50, 90, "Times text");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1325,10 +1955,10 @@ test "multiple embedded fonts" {
     try doc.addPage();
 
     try doc.setEmbeddedFont(courier_regular, 12);
-    try doc.textAt(50, 50, "Regular");
+    try doc.writeAt(50, 50, "Regular");
 
     try doc.setEmbeddedFont(courier_bold, 12);
-    try doc.textAt(50, 70, "Bold");
+    try doc.writeAt(50, 70, "Bold");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1358,11 +1988,11 @@ test "embedded font on multiple pages" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
-    try doc.textAt(50, 50, "Page 1");
+    try doc.writeAt(50, 50, "Page 1");
 
     try doc.addPage();
     // Font should still be set
-    try doc.textAt(50, 50, "Page 2");
+    try doc.writeAt(50, 50, "Page 2");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1412,7 +2042,7 @@ test "embedded font widths array in PDF" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
-    try doc.textAt(50, 50, "Test");
+    try doc.writeAt(50, 50, "Test");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1449,7 +2079,7 @@ test "PDF output is valid with embedded font" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 24);
-    try doc.textAt(100, 100, "Test embedded font!");
+    try doc.writeAt(100, 100, "Test embedded font!");
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1464,4 +2094,574 @@ test "PDF output is valid with embedded font" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Length1") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "stream\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "\nendstream") != null);
+}
+
+// ============================================================================
+// Text Flow API Tests
+// ============================================================================
+
+test "unit conversions" {
+    // 1 inch = 72 points
+    try std.testing.expectEqual(@as(f64, 72), inches(1));
+    try std.testing.expectEqual(@as(f64, 36), inches(0.5));
+
+    // 25.4mm = 1 inch = 72 points
+    try std.testing.expectApproxEqAbs(@as(f64, 72), mm(25.4), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.835), mm(1), 0.001);
+
+    // 2.54cm = 1 inch = 72 points
+    try std.testing.expectApproxEqAbs(@as(f64, 72), cm(2.54), 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 28.35), cm(1), 0.01);
+}
+
+test "getPageRegion respects margins" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setMargins(.{ .left = 50, .right = 50, .top = 100, .bottom = 100 });
+    const region = doc.getPageRegion();
+
+    try std.testing.expectEqual(@as(f64, 50), region.x);
+    try std.testing.expectEqual(@as(f64, 100), region.y);
+    try std.testing.expectEqual(PageSize.A4.width - 100, region.width);
+    try std.testing.expectEqual(PageSize.A4.height - 200, region.height);
+}
+
+test "writeLine advances cursor" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = doc.getPageRegion();
+    const initial_cursor = region.cursor_y;
+
+    _ = try doc.writeLine(&region, "Test line", .{});
+
+    try std.testing.expect(region.cursor_y > initial_cursor);
+    try std.testing.expectEqual(doc.getLineHeightPts(), region.cursor_y);
+}
+
+test "writeLine alignment" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 100, .y = 100, .width = 400, .height = 600 };
+
+    // Test left alignment (default)
+    _ = try doc.writeLine(&region, "Left", .{});
+    // Test center alignment
+    _ = try doc.writeLine(&region, "Center", .{ .alignment = .center });
+    // Test right alignment
+    _ = try doc.writeLine(&region, "Right", .{ .alignment = .right });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Basic validation - PDF should be valid
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "writeParagraph word wrapping" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 600 };
+    const long_text = "This is a longer piece of text that should wrap across multiple lines within the region.";
+
+    const result = try doc.writeParagraph(&region, long_text, .{});
+
+    try std.testing.expect(result.lines_written > 1);
+    try std.testing.expect(result.overflow == null);
+}
+
+test "writeParagraph overflow" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Small region - line height at 12pt with 1.2 factor = 14.4pt
+    // Region of 15pt should fit one line, but not two (would need 28.8pt)
+    var region = Region{ .x = 50, .y = 50, .width = 100, .height = 15 };
+    const long_text = "Word one two three four five six seven eight nine ten.";
+
+    const result = try doc.writeParagraph(&region, long_text, .{});
+
+    // Should only fit one line due to height constraint
+    try std.testing.expectEqual(@as(usize, 1), result.lines_written);
+    try std.testing.expect(result.overflow != null);
+}
+
+test "writeFlow creates multiple pages" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+    doc.setMargins(.{ .left = 50, .right = 50, .top = 50, .bottom = 50 });
+
+    // Generate long text that should span multiple pages
+    // A4 height is ~842pt, minus margins (100pt) = 742pt usable
+    // At 12pt font with 1.2 line height = 14.4pt per line
+    // ~51 lines per page, so we need >51 lines worth of text
+    const paragraph = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor. " ** 100;
+
+    try doc.writeFlow(paragraph, .{});
+
+    // Should have created multiple pages
+    try std.testing.expect(doc.pages.items.len > 1);
+}
+
+test "drawRegion with border" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    const region = Region{
+        .x = 50,
+        .y = 50,
+        .width = 200,
+        .height = 100,
+        .border = Border.all,
+    };
+
+    try doc.drawRegion(&region);
+
+    // Verify page has commands (the raw drawing commands)
+    try std.testing.expect(doc.pages.items[0].commands.items.len == 1);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Basic PDF structure validation
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "%%EOF") != null);
+}
+
+test "drawRegion with fill" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    const region = Region{
+        .x = 50,
+        .y = 50,
+        .width = 200,
+        .height = 100,
+        .fill = Color.red,
+    };
+
+    try doc.drawRegion(&region);
+
+    // Verify page has commands (the raw drawing commands)
+    try std.testing.expect(doc.pages.items[0].commands.items.len == 1);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Basic PDF structure validation
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "%%EOF") != null);
+}
+
+test "findHyphenBreak finds break at regular hyphen" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // "state-of-the-art" - should find breaks after each hyphen
+    const word = "state-of-the-art";
+
+    // Width that fits "state-" but not more
+    const state_width = doc.getTextWidth("state-");
+    const result = doc.findHyphenBreak(word, state_width + 1);
+    try std.testing.expectEqual(@as(?usize, 6), result); // "state-" is 6 bytes
+
+    // Width that fits "state-of-" but not "state-of-the-"
+    const state_of_width = doc.getTextWidth("state-of-");
+    const result2 = doc.findHyphenBreak(word, state_of_width + 1);
+    try std.testing.expectEqual(@as(?usize, 9), result2); // "state-of-" is 9 bytes
+}
+
+test "findHyphenBreak returns null for word without hyphens" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const word = "supercalifragilistic";
+    const result = doc.findHyphenBreak(word, 1000);
+    try std.testing.expectEqual(@as(?usize, null), result);
+}
+
+test "findSoftHyphenBreak finds break at soft hyphen" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // "ex\xc2\xadplicit" - soft-hyphen between "ex" and "plicit"
+    const word = "ex\xc2\xadplicit";
+
+    // Width that fits "ex-" (prefix + visible hyphen)
+    const ex_width = doc.getTextWidth("ex-");
+    const result = doc.findSoftHyphenBreak(word, ex_width + 1);
+    try std.testing.expectEqual(@as(?usize, 2), result); // Position of soft-hyphen
+}
+
+test "findSoftHyphenBreak returns null for word without soft hyphens" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const word = "explicit";
+    const result = doc.findSoftHyphenBreak(word, 1000);
+    try std.testing.expectEqual(@as(?usize, null), result);
+}
+
+test "soft hyphens stripped from text output" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Write text with soft-hyphens
+    try doc.write("ex\xc2\xadplic\xc2\xadit");
+
+    // The stored text should have soft-hyphens stripped
+    const page = &doc.pages.items[0];
+    try std.testing.expectEqual(@as(usize, 1), page.commands.items.len);
+    const cmd = page.commands.items[0];
+    try std.testing.expectEqualStrings("explicit", cmd.text.text_data);
+}
+
+test "soft-hyphen recursive breaking in narrow column" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 11);
+
+    // At 11pt Helvetica:
+    // - "in-" is ~12.8pt (fits in 26pt)
+    // - "com-" is ~24.4pt (fits in 26pt)
+    // - "compre-" is ~36.7pt (doesn't fit in 26pt)
+    // So with 26pt column, we should get: "in-", "com-", "pre-", "hen-", "si-", "ble"
+
+    // 26pt column - wide enough for "com-" to fit
+    var region = Region{ .x = 72, .y = 100, .width = 26, .height = 200 };
+    const word = "in\xc2\xadcom\xc2\xadpre\xc2\xadhen\xc2\xadsi\xc2\xadble";
+
+    const result = try doc.writeParagraph(&region, word, .{ .break_on_hyphens = false });
+
+    // Should produce multiple lines (at least 3)
+    const page = &doc.pages.items[0];
+    var text_count: usize = 0;
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            text_count += 1;
+        }
+    }
+
+    // With 26pt column, "incomprehensible" must break multiple times
+    try std.testing.expect(result.lines_written >= 3);
+    try std.testing.expect(text_count >= 3);
+}
+
+test "soft hyphens excluded from text width" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Width with soft-hyphens should equal width without
+    const with_soft = doc.getTextWidth("ex\xc2\xadplic\xc2\xadit");
+    const without_soft = doc.getTextWidth("explicit");
+    try std.testing.expectEqual(without_soft, with_soft);
+}
+
+test "writeParagraph breaks at hyphens when enabled" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Narrow region - forces "state-of-the-art" to break if hyphen breaking enabled
+    // At 12pt Helvetica, "state-of-the-art" is about 86pt wide
+    // Make region narrow enough to force a break
+    var region = Region{ .x = 50, .y = 50, .width = 70, .height = 200 };
+
+    const result = try doc.writeParagraph(&region, "state-of-the-art", .{ .break_on_hyphens = true });
+
+    // With hyphen breaking enabled, should break into multiple lines
+    try std.testing.expect(result.lines_written > 1);
+}
+
+test "writeParagraph keeps hyphenated words together when disabled" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Region wide enough for the word to fit on one line
+    // At 12pt Helvetica, "state-of-the-art" is about 86pt wide
+    var region = Region{ .x = 50, .y = 50, .width = 90, .height = 200 };
+
+    const result = try doc.writeParagraph(&region, "state-of-the-art", .{ .break_on_hyphens = false });
+
+    // With hyphen breaking disabled, word stays together on one line
+    try std.testing.expectEqual(@as(usize, 1), result.lines_written);
+}
+
+test "writeParagraph character-level wrapping for long words" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Narrow region - long word without soft-hyphens will be character-wrapped
+    // At 12pt Helvetica, "supercalifragilisticexpialidocious" is about 180pt wide
+    var region = Region{ .x = 50, .y = 50, .width = 60, .height = 200 };
+
+    const result = try doc.writeParagraph(&region, "supercalifragilisticexpialidocious", .{});
+
+    // Long word should be broken into multiple lines via character wrapping
+    try std.testing.expect(result.lines_written > 1);
+
+    // All characters should be output (no overflow)
+    try std.testing.expect(result.overflow == null);
+}
+
+test "writeParagraph first line indent" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 200 };
+    const text = "First line has indent. Second line does not.";
+
+    _ = try doc.writeParagraph(&region, text, .{ .first_indent = 20 });
+
+    // Check that two text commands were created (two lines)
+    const page = &doc.pages.items[0];
+    var text_count: usize = 0;
+    var first_x: ?f64 = null;
+    var second_x: ?f64 = null;
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            text_count += 1;
+            if (first_x == null) {
+                first_x = cmd.text.x;
+            } else if (second_x == null) {
+                second_x = cmd.text.x;
+            }
+        }
+    }
+
+    try std.testing.expect(text_count >= 2);
+    // First line should be 20pt further right than second line
+    if (first_x != null and second_x != null) {
+        try std.testing.expectApproxEqAbs(first_x.? - 20, second_x.?, 0.1);
+    }
+}
+
+test "writeParagraph overflow returns remaining text" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Region that can only fit 2 lines (line height = 14.4pt at 12pt font)
+    var region = Region{ .x = 50, .y = 50, .width = 100, .height = 30 };
+    const text = "Line one fits here. Line two fits too. Line three overflows. Line four too.";
+
+    const result = try doc.writeParagraph(&region, text, .{});
+
+    try std.testing.expectEqual(@as(usize, 2), result.lines_written);
+    try std.testing.expect(result.overflow != null);
+    // Overflow should contain the text that didn't fit
+    try std.testing.expect(std.mem.indexOf(u8, result.overflow.?, "Line three") != null);
+}
+
+test "writeParagraph newline forces line break" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
+    const text = "Line one.\nLine two.\nLine three.";
+
+    const result = try doc.writeParagraph(&region, text, .{});
+
+    // Should have 3 lines due to explicit newlines
+    try std.testing.expectEqual(@as(usize, 3), result.lines_written);
+}
+
+test "writeLine returns overflow for too-long text" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Small region that can only fit ~1 line
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 15 };
+
+    const result1 = try doc.writeLine(&region, "First line", .{});
+    try std.testing.expectEqual(@as(usize, 1), result1.lines_written);
+    try std.testing.expect(result1.overflow == null);
+
+    // Second line should indicate no room
+    const result2 = try doc.writeLine(&region, "Second line", .{});
+    try std.testing.expectEqual(@as(usize, 0), result2.lines_written);
+    try std.testing.expectEqualStrings("Second line", result2.overflow.?);
+}
+
+test "region padding affects content area" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    // Region with padding
+    var region = Region{
+        .x = 50,
+        .y = 50,
+        .width = 200,
+        .height = 100,
+        .padding = .{ .left = 10, .right = 10, .top = 5, .bottom = 5 },
+    };
+
+    // Content width should be width - left - right
+    try std.testing.expectEqual(@as(f64, 180), region.contentWidth());
+
+    // Remaining height initially should be height - top - bottom
+    try std.testing.expectEqual(@as(f64, 90), region.remainingHeight());
+
+    // Write a line and check remaining height decreased
+    _ = try doc.writeLine(&region, "Test", .{});
+    try std.testing.expect(region.remainingHeight() < 90);
+}
+
+test "writeFlow handles empty text" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+    doc.setMargins(.{ .left = 50, .right = 50, .top = 50, .bottom = 50 });
+
+    // Empty text should not crash
+    try doc.writeFlow("", .{});
+
+    // Should still have just one page
+    try std.testing.expectEqual(@as(usize, 1), doc.pages.items.len);
+}
+
+test "writeFlow respects margins" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+    doc.setMargins(.{ .left = 100, .right = 100, .top = 100, .bottom = 100 });
+
+    try doc.writeFlow("Short text.", .{});
+
+    // Check text position respects left margin
+    const page = &doc.pages.items[0];
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            try std.testing.expect(cmd.text.x >= 100);
+        }
+    }
+}
+
+test "valign top puts baseline at cursor + font_size" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    _ = try doc.writeLine(&region, "Test", .{ .valign = .top });
+
+    const page = &doc.pages.items[0];
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            // top-down y = region.y + cursor_y(0) + font_size(12) = 112
+            // PDF y = page_height(841.89) - 112 = 729.89
+            try std.testing.expectApproxEqAbs(@as(f64, 729.89), cmd.text.y, 0.1);
+        }
+    }
+}
+
+test "valign middle adjusts for leading" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    _ = try doc.writeLine(&region, "Test", .{ .valign = .middle });
+
+    const page = &doc.pages.items[0];
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            // line_height = 12 * 1.2 = 14.4, leading = 2.4
+            // top-down y = region.y + cursor_y(0) + font_size(12) - leading/2(1.2) = 110.8
+            // PDF y = page_height(841.89) - 110.8 = 731.09
+            try std.testing.expectApproxEqAbs(@as(f64, 731.09), cmd.text.y, 0.1);
+        }
+    }
+}
+
+test "valign bottom puts baseline at cursor + line_height" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    _ = try doc.writeLine(&region, "Test", .{ .valign = .bottom });
+
+    const page = &doc.pages.items[0];
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            // top-down y = region.y + cursor_y(0) + line_height(14.4) = 114.4
+            // PDF y = page_height(841.89) - 114.4 = 727.49
+            try std.testing.expectApproxEqAbs(@as(f64, 727.49), cmd.text.y, 0.1);
+        }
+    }
 }

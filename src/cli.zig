@@ -175,16 +175,16 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
 
     try doc.addPage();
     try doc.setFont(.helvetica, 24);
-    try doc.textAt(50, 50, "Hello, World!");
+    try doc.writeAt(50, 50, "Hello, World!");
 
     try doc.setFont(.helvetica_bold, 16);
-    try doc.textAt(50, 100, "This is zpdf - a PDF library for Zig");
+    try doc.writeAt(50, 100, "This is zpdf - a PDF library for Zig");
 
     try doc.setFont(.times_roman, 12);
-    try doc.textAt(50, 150, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats");
+    try doc.writeAt(50, 150, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats");
 
     try doc.setFont(.courier, 10);
-    try doc.textAt(50, 200, "Fixed-width font for code");
+    try doc.writeAt(50, 200, "Fixed-width font for code");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -208,44 +208,44 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
 
     // Title with standard font
     try doc.setFont(.helvetica_bold, 24);
-    try doc.textAt(50, 50, "Embedded Font Test");
+    try doc.writeAt(50, 50, "Embedded Font Test");
 
     // Show font info
     try doc.setFont(.helvetica, 12);
     var info_buf: [256]u8 = undefined;
     const info = std.fmt.bufPrint(&info_buf, "Font: {s}", .{custom_font.name}) catch "Font: Unknown";
-    try doc.textAt(50, 80, info);
+    try doc.writeAt(50, 80, info);
 
     // Use embedded font at various sizes
     try doc.setEmbeddedFont(custom_font, 24);
-    try doc.textAt(50, 120, "The quick brown fox jumps over the lazy dog.");
+    try doc.writeAt(50, 120, "The quick brown fox jumps over the lazy dog.");
 
     try doc.setEmbeddedFont(custom_font, 18);
-    try doc.textAt(50, 160, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    try doc.writeAt(50, 160, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 
     try doc.setEmbeddedFont(custom_font, 18);
-    try doc.textAt(50, 190, "abcdefghijklmnopqrstuvwxyz");
+    try doc.writeAt(50, 190, "abcdefghijklmnopqrstuvwxyz");
 
     try doc.setEmbeddedFont(custom_font, 18);
-    try doc.textAt(50, 220, "0123456789 !@#$%^&*()");
+    try doc.writeAt(50, 220, "0123456789 !@#$%^&*()");
 
     // Mix with standard fonts
     try doc.setFont(.helvetica, 12);
-    try doc.textAt(50, 270, "Standard font (Helvetica) for comparison");
+    try doc.writeAt(50, 270, "Standard font (Helvetica) for comparison");
 
     try doc.setEmbeddedFont(custom_font, 12);
-    try doc.textAt(50, 290, "Embedded font at same size (12pt)");
+    try doc.writeAt(50, 290, "Embedded font at same size (12pt)");
 
     // Multiple lines
     try doc.setEmbeddedFont(custom_font, 14);
-    try doc.textAt(50, 340, "Line 1: This is a test of the embedded font.");
-    try doc.textAt(50, 360, "Line 2: Lorem ipsum dolor sit amet.");
-    try doc.textAt(50, 380, "Line 3: Consectetur adipiscing elit.");
+    try doc.writeAt(50, 340, "Line 1: This is a test of the embedded font.");
+    try doc.writeAt(50, 360, "Line 2: Lorem ipsum dolor sit amet.");
+    try doc.writeAt(50, 380, "Line 3: Consectetur adipiscing elit.");
 
     // Page 2 - stress test
     try doc.addPage();
     try doc.setFont(.helvetica_bold, 18);
-    try doc.textAt(50, 50, "Page 2: Extended Character Test");
+    try doc.writeAt(50, 50, "Page 2: Extended Character Test");
 
     try doc.setEmbeddedFont(custom_font, 14);
     var y: f64 = 80;
@@ -258,17 +258,17 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     const line5 = "`abcdefghijklmno";
     const line6 = "pqrstuvwxyz{|}~";
 
-    try doc.textAt(50, y, line1);
+    try doc.writeAt(50, y, line1);
     y += 20;
-    try doc.textAt(50, y, line2);
+    try doc.writeAt(50, y, line2);
     y += 20;
-    try doc.textAt(50, y, line3);
+    try doc.writeAt(50, y, line3);
     y += 20;
-    try doc.textAt(50, y, line4);
+    try doc.writeAt(50, y, line4);
     y += 20;
-    try doc.textAt(50, y, line5);
+    try doc.writeAt(50, y, line5);
     y += 20;
-    try doc.textAt(50, y, line6);
+    try doc.writeAt(50, y, line6);
     y += 30;
 
     // Show metrics
@@ -280,7 +280,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.descent,
         custom_font.cap_height,
     }) catch "Metrics unavailable";
-    try doc.textAt(50, y, ascent_info);
+    try doc.writeAt(50, y, ascent_info);
     y += 15;
 
     const bbox_info = std.fmt.bufPrint(&metrics_buf, "BBox: [{d}, {d}, {d}, {d}]", .{
@@ -289,7 +289,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.bbox[2],
         custom_font.bbox[3],
     }) catch "BBox unavailable";
-    try doc.textAt(50, y, bbox_info);
+    try doc.writeAt(50, y, bbox_info);
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -314,11 +314,11 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
 
     // Just a few characters to test subsetting
     try doc.setEmbeddedFont(font, 24);
-    try doc.textAt(50, 50, "Hello CFF!");
+    try doc.writeAt(50, 50, "Hello CFF!");
 
     try doc.setEmbeddedFont(font, 18);
-    try doc.textAt(50, 100, "ABCDEFGHIJ");
-    try doc.textAt(50, 130, "0123456789");
+    try doc.writeAt(50, 100, "ABCDEFGHIJ");
+    try doc.writeAt(50, 130, "0123456789");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
