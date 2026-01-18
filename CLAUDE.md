@@ -24,6 +24,8 @@ for generating codemaps!
 
 Make sure both of these tools are locally available in this project!
 
+If you need additional tools, MAKE SURE you install them local to the project. NEVER install global tool unless it's specifically allowed.
+
 ## Refactoring
 
 If doing refactoring, start by running "zigmap" and "simgrep" to get good overview data before digging into details.
@@ -36,6 +38,8 @@ If doing refactoring, start by running "zigmap" and "simgrep" to get good overvi
 - Make sure to keep a command line tool up to date, allowing access to all library innards so they can be tested!
 
 - Make sure to add proper tests, both unit tests and integration tests. If you have to manually test something, it should likely be part of the test suite.
+
+- NEVER mask failed test results with increased test tolerance!!!!!
 
 ## Pairing rules
 
