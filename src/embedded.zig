@@ -9,6 +9,7 @@ const std = @import("std");
 const ttf = @import("ttf.zig");
 const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
+pub const opentype = @import("opentype.zig");
 
 // Re-export commonly used functions from subsetting modules
 const readU16 = ttf_subset.readU16;
@@ -161,6 +162,14 @@ pub const EmbeddedFont = struct {
     // Only populated for CFF fonts with subsetting enabled
     gid_remap: std.AutoArrayHashMapUnmanaged(u16, u16) = .{},
 
+    // OpenType feature support
+    ot_features: ?*opentype.OpenTypeFeatures = null,
+    feature_flags: opentype.FeatureFlags = .{}, // liga=on, kern=on by default
+
+    // Ligature glyph → original codepoints mapping for ToUnicode CMap
+    // Key: ligature glyph ID (original), Value: array of codepoints that form it
+    ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .{},
+
     /// Load and parse a TTF font from file
     pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
         const result = try ttf.Font.fromFile(allocator, path);
@@ -265,6 +274,16 @@ pub const EmbeddedFont = struct {
         self.cid_used_glyphs.deinit(self.allocator);
         self.cid_glyph_widths.deinit(self.allocator);
         self.gid_remap.deinit(self.allocator);
+        // Free OpenType features
+        if (self.ot_features) |ot| {
+            ot.deinit();
+            self.allocator.destroy(ot);
+        }
+        // Free ligature codepoint arrays
+        for (self.ligature_codepoints.values()) |codepoints| {
+            self.allocator.free(codepoints);
+        }
+        self.ligature_codepoints.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -284,10 +303,52 @@ pub const EmbeddedFont = struct {
         return count;
     }
 
+    /// Initialize OpenType features (GSUB/GPOS) if not already done
+    pub fn initOpenTypeFeatures(self: *EmbeddedFont) !void {
+        if (self.ot_features != null) return;
+
+        const ot = try self.allocator.create(opentype.OpenTypeFeatures);
+        ot.* = opentype.OpenTypeFeatures.init(self.allocator);
+        errdefer {
+            ot.deinit();
+            self.allocator.destroy(ot);
+        }
+
+        // Parse GSUB table if present (for ligatures)
+        if (self.font.getTable("GSUB".*)) |gsub_data| {
+            try ot.parseGSUB(gsub_data);
+        }
+
+        // Parse GPOS table if present (for kerning)
+        if (self.font.getTable("GPOS".*)) |gpos_data| {
+            try ot.parseGPOS(gpos_data);
+        }
+
+        self.ot_features = ot;
+    }
+
+    /// Set OpenType feature flag
+    pub fn setFeature(self: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
+        switch (feature) {
+            .liga => self.feature_flags.liga = enabled,
+            .kern => self.feature_flags.kern = enabled,
+            .clig => self.feature_flags.clig = enabled,
+            .dlig => self.feature_flags.dlig = enabled,
+            .hlig => self.feature_flags.hlig = enabled,
+        }
+    }
+
     /// Mark Unicode codepoints as used (CID mode)
     /// Parses UTF-8 text and records Unicode→GlyphID mappings
+    /// Applies ligature substitution if enabled
     pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8) !void {
         const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
+
+        // First pass: decode text into codepoints and map to glyph IDs
+        var codepoints = std.ArrayListUnmanaged(u21){};
+        defer codepoints.deinit(self.allocator);
+        var base_glyphs = std.ArrayListUnmanaged(u16){};
+        defer base_glyphs.deinit(self.allocator);
 
         var i: usize = 0;
         while (i < text.len) {
@@ -299,27 +360,140 @@ pub const EmbeddedFont = struct {
                 continue;
             };
 
-            // Check if already tracked
-            if (self.cid_used_glyphs.contains(codepoint)) {
-                i += len;
-                continue;
-            }
-
-            // Look up glyph ID for this codepoint
-            if (self.font.getGlyphId(codepoint)) |gid| {
-                try self.cid_used_glyphs.put(self.allocator, codepoint, gid);
-
-                // Also store width if not already cached
-                if (!self.cid_glyph_widths.contains(gid)) {
-                    if (self.font.getGlyphWidth(gid)) |w| {
-                        const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
-                        try self.cid_glyph_widths.put(self.allocator, gid, width);
-                    }
-                }
-            }
+            try codepoints.append(self.allocator, codepoint);
+            const gid = self.font.getGlyphId(codepoint) orelse 0;
+            try base_glyphs.append(self.allocator, gid);
 
             i += len;
         }
+
+        // Initialize OpenType features if liga or kern is enabled
+        if (self.feature_flags.liga or self.feature_flags.kern) {
+            try self.initOpenTypeFeatures();
+        }
+
+        // Apply ligature substitution if enabled
+        if (self.feature_flags.liga and base_glyphs.items.len > 0) {
+            if (self.ot_features) |ot| {
+                if (ot.liga_lookups.items.len > 0) {
+                    // Apply ligatures and track substitutions
+                    try self.applyLigaturesAndTrack(codepoints.items, base_glyphs.items, scale);
+                    return;
+                }
+            }
+        }
+
+        // No ligatures - just track the base glyphs
+        for (codepoints.items, base_glyphs.items) |cp, gid| {
+            if (self.cid_used_glyphs.contains(cp)) continue;
+
+            try self.cid_used_glyphs.put(self.allocator, cp, gid);
+            if (!self.cid_glyph_widths.contains(gid)) {
+                if (self.font.getGlyphWidth(gid)) |w| {
+                    const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+                    try self.cid_glyph_widths.put(self.allocator, gid, width);
+                }
+            }
+        }
+    }
+
+    /// Apply ligatures and track the substituted glyphs
+    fn applyLigaturesAndTrack(self: *EmbeddedFont, codepoints: []const u21, base_glyphs: []const u16, scale: f64) !void {
+        const ot = self.ot_features orelse return;
+
+        var pos: usize = 0;
+        while (pos < base_glyphs.len) {
+            var matched = false;
+
+            // Try each ligature lookup
+            for (ot.liga_lookups.items) |lookup| {
+                if (lookup.findLigature(base_glyphs, pos)) |match| {
+                    // Found a ligature!
+                    const lig_gid = match.lig_glyph;
+
+                    // Track the ligature glyph with its component codepoints
+                    if (!self.ligature_codepoints.contains(lig_gid)) {
+                        const lig_cps = try self.allocator.alloc(u21, match.consumed);
+                        for (0..match.consumed) |j| {
+                            lig_cps[j] = codepoints[pos + j];
+                        }
+                        try self.ligature_codepoints.put(self.allocator, lig_gid, lig_cps);
+                    }
+
+                    // Track width for the ligature glyph
+                    if (!self.cid_glyph_widths.contains(lig_gid)) {
+                        if (self.font.getGlyphWidth(lig_gid)) |w| {
+                            const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+                            try self.cid_glyph_widths.put(self.allocator, lig_gid, width);
+                        }
+                    }
+
+                    pos += match.consumed;
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched) {
+                // No ligature - track the base glyph
+                const cp = codepoints[pos];
+                const gid = base_glyphs[pos];
+
+                if (!self.cid_used_glyphs.contains(cp)) {
+                    try self.cid_used_glyphs.put(self.allocator, cp, gid);
+                    if (!self.cid_glyph_widths.contains(gid)) {
+                        if (self.font.getGlyphWidth(gid)) |w| {
+                            const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+                            try self.cid_glyph_widths.put(self.allocator, gid, width);
+                        }
+                    }
+                }
+                pos += 1;
+            }
+        }
+    }
+
+    /// Get glyph sequence for text with ligature substitution applied
+    /// Returns allocated slice that caller must free
+    pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {
+        var base_glyphs = std.ArrayListUnmanaged(u16){};
+        defer base_glyphs.deinit(self.allocator);
+
+        var i: usize = 0;
+        while (i < text.len) {
+            const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+            if (i + len > text.len) break;
+
+            const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
+                i += 1;
+                continue;
+            };
+
+            const gid = self.font.getGlyphId(codepoint) orelse 0;
+            try base_glyphs.append(self.allocator, gid);
+            i += len;
+        }
+
+        // Apply ligatures if enabled and available
+        if (self.feature_flags.liga) {
+            if (self.ot_features) |ot| {
+                if (ot.liga_lookups.items.len > 0) {
+                    return ot.applyLigatures(base_glyphs.items);
+                }
+            }
+        }
+
+        return base_glyphs.toOwnedSlice(self.allocator);
+    }
+
+    /// Get kerning value between two glyphs (in font units)
+    pub fn getKerning(self: *EmbeddedFont, glyph1: u16, glyph2: u16) i16 {
+        if (!self.feature_flags.kern) return 0;
+
+        if (self.ot_features) |ot| {
+            return ot.getKerning(glyph1, glyph2);
+        }
+        return 0;
     }
 
     /// Get glyph ID for a Unicode codepoint (CID mode)
@@ -467,6 +641,7 @@ pub const EmbeddedFont = struct {
     }
 
     /// Generate ToUnicode CMap for CID mode (2-byte glyph IDs → Unicode)
+    /// Includes ligature glyph → component codepoints mappings for proper text extraction
     pub fn generateCIDToUnicodeCMap(self: *const EmbeddedFont) ![]const u8 {
         var cmap = std.ArrayListUnmanaged(u8){};
         errdefer cmap.deinit(self.allocator);
@@ -489,27 +664,28 @@ pub const EmbeddedFont = struct {
             \\
         );
 
-        // Count entries
-        const count = self.cid_used_glyphs.count();
-        if (count > 0) {
-            // Write bfchar entries (glyph ID → Unicode codepoint)
+        // Count entries: regular glyphs + ligature glyphs
+        const regular_count = self.cid_used_glyphs.count();
+        const ligature_count = self.ligature_codepoints.count();
+        const total_count = regular_count + ligature_count;
+
+        if (total_count > 0) {
+            // Write bfchar entries (glyph ID → Unicode codepoint(s))
             var count_buf: [16]u8 = undefined;
-            const count_str = std.fmt.bufPrint(&count_buf, "{d} beginbfchar\n", .{count}) catch unreachable;
+            const count_str = std.fmt.bufPrint(&count_buf, "{d} beginbfchar\n", .{total_count}) catch unreachable;
             try cmap.appendSlice(self.allocator, count_str);
 
-            // Iterate over codepoint→glyph mappings
             const has_remap = self.gid_remap.count() > 0;
+
+            // Regular glyphs: codepoint → single Unicode
             var iter = self.cid_used_glyphs.iterator();
             while (iter.next()) |entry| {
                 const codepoint = entry.key_ptr.*;
                 const orig_gid = entry.value_ptr.*;
-                // Use remapped GID if available
                 const gid = if (has_remap) self.gid_remap.get(orig_gid) orelse 0 else orig_gid;
                 var entry_buf: [48]u8 = undefined;
 
-                // Handle surrogate pairs for codepoints > 0xFFFF
                 if (codepoint > 0xFFFF) {
-                    // UTF-16 surrogate pair
                     const adjusted = codepoint - 0x10000;
                     const high: u16 = @intCast(0xD800 + (adjusted >> 10));
                     const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
@@ -519,6 +695,34 @@ pub const EmbeddedFont = struct {
                     const entry_s = std.fmt.bufPrint(&entry_buf, "<{X:0>4}> <{X:0>4}>\n", .{ gid, codepoint }) catch unreachable;
                     try cmap.appendSlice(self.allocator, entry_s);
                 }
+            }
+
+            // Ligature glyphs: ligature glyph → sequence of Unicode codepoints
+            var lig_iter = self.ligature_codepoints.iterator();
+            while (lig_iter.next()) |entry| {
+                const orig_lig_gid = entry.key_ptr.*;
+                const lig_codepoints = entry.value_ptr.*;
+                const lig_gid = if (has_remap) self.gid_remap.get(orig_lig_gid) orelse 0 else orig_lig_gid;
+
+                // Format: <GID> <UTF16_CODEPOINT_SEQUENCE>
+                var entry_buf: [128]u8 = undefined;
+                var fbs = std.io.fixedBufferStream(&entry_buf);
+                const writer = fbs.writer();
+
+                try writer.print("<{X:0>4}> <", .{lig_gid});
+                for (lig_codepoints) |cp| {
+                    if (cp > 0xFFFF) {
+                        const adjusted = cp - 0x10000;
+                        const high: u16 = @intCast(0xD800 + (adjusted >> 10));
+                        const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
+                        try writer.print("{X:0>4}{X:0>4}", .{ high, low });
+                    } else {
+                        try writer.print("{X:0>4}", .{cp});
+                    }
+                }
+                try writer.writeAll(">\n");
+
+                try cmap.appendSlice(self.allocator, fbs.getWritten());
             }
 
             try cmap.appendSlice(self.allocator, "endbfchar\n");
@@ -1296,6 +1500,12 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
         try glyph_set.put(allocator, entry.value_ptr.*, {});
     }
 
+    // Add ligature glyph IDs (they don't have single codepoints so aren't in cid_used_glyphs)
+    var lig_iter = emb.ligature_codepoints.iterator();
+    while (lig_iter.next()) |entry| {
+        try glyph_set.put(allocator, entry.key_ptr.*, {});
+    }
+
     // Recursively add composite glyph components
     var changed = true;
     while (changed) {
@@ -1558,6 +1768,12 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     var cid_iter = emb.cid_used_glyphs.iterator();
     while (cid_iter.next()) |entry| {
         try glyph_set.put(allocator, entry.value_ptr.*, {});
+    }
+
+    // Add ligature glyph IDs
+    var lig_iter = emb.ligature_codepoints.iterator();
+    while (lig_iter.next()) |entry| {
+        try glyph_set.put(allocator, entry.key_ptr.*, {});
     }
 
     // Find max glyph ID
@@ -1847,12 +2063,31 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     try glyph_list.append(allocator, 0); // .notdef always first
 
+    // Use a set to avoid duplicates
+    var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
+    defer glyph_set.deinit(allocator);
+
     var cid_iter = emb.cid_used_glyphs.iterator();
     while (cid_iter.next()) |entry| {
         const gid = entry.value_ptr.*;
-        if (gid != 0) { // Don't duplicate .notdef
-            try glyph_list.append(allocator, gid);
+        if (gid != 0) {
+            try glyph_set.put(allocator, gid, {});
         }
+    }
+
+    // Add ligature glyph IDs
+    var lig_iter = emb.ligature_codepoints.iterator();
+    while (lig_iter.next()) |entry| {
+        const lig_gid = entry.key_ptr.*;
+        if (lig_gid != 0) {
+            try glyph_set.put(allocator, lig_gid, {});
+        }
+    }
+
+    // Convert set to list
+    var set_iter = glyph_set.keyIterator();
+    while (set_iter.next()) |gid| {
+        try glyph_list.append(allocator, gid.*);
     }
 
     // Sort glyph IDs (keeps .notdef at 0, others in ascending order)
@@ -2000,11 +2235,15 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const use_string_subsetting = true;
     const string_index_data = if (use_string_subsetting) string_subset.data else cff_data[string_start..string_end];
 
-    // Build format 0 charset with original SIDs (standard SIDs don't need remapping)
+    // Build format 0 charset with remapped SIDs
+    // Standard SIDs (< 391) don't need remapping, but custom strings do
     try new_charset.append(allocator, 0); // Format 0
     for (charset_sids.items[1..]) |orig_sid| {
-        // Don't remap SIDs - macOS needs original SIDs for glyph lookup
-        try new_charset.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, orig_sid)));
+        const final_sid = if (use_string_subsetting and orig_sid >= 391)
+            sid_remap.get(orig_sid) orelse orig_sid
+        else
+            orig_sid;
+        try new_charset.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, final_sid)));
     }
 
     // Private DICT handling
@@ -2794,4 +3033,103 @@ test "mixed font types in same document" {
     // OTF/CFF should have CFF version
     const otf_data = otf_font.getFontData();
     try std.testing.expectEqual(@as(u8, 1), otf_data[0]);
+}
+
+test "OpenType features initialization" {
+    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    defer font.deinit();
+
+    // Features should not be initialized yet (lazy)
+    try std.testing.expect(font.ot_features == null);
+
+    // Default flags
+    try std.testing.expect(font.feature_flags.liga);
+    try std.testing.expect(font.feature_flags.kern);
+
+    // Initialize features
+    try font.initOpenTypeFeatures();
+    try std.testing.expect(font.ot_features != null);
+
+    // Charter has GPOS but no GSUB
+    try std.testing.expectEqual(@as(usize, 0), font.ot_features.?.liga_lookups.items.len);
+    try std.testing.expect(font.ot_features.?.kern_lookups.items.len > 0);
+}
+
+test "OpenType kerning applied in text rendering" {
+    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    defer font.deinit();
+    font.encoding = .identity;
+
+    // Text with common kerning pairs
+    try font.markUnicodeCharsUsed("AVATAR");
+
+    // OpenType features should now be initialized
+    try std.testing.expect(font.ot_features != null);
+
+    // Get glyphs for text (will have ligatures/kerning applied during rendering)
+    const glyphs = try font.getGlyphsForText("AV");
+    defer font.allocator.free(glyphs);
+
+    // Should have 2 glyphs (no ligatures in Charter)
+    try std.testing.expectEqual(@as(usize, 2), glyphs.len);
+
+    // Get kerning between A and V
+    const kern = font.getKerning(glyphs[0], glyphs[1]);
+    // AV should have negative kerning (letters move closer)
+    try std.testing.expect(kern < 0);
+}
+
+test "setFeature disables kerning" {
+    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    defer font.deinit();
+    font.encoding = .identity;
+
+    // Initialize features
+    try font.initOpenTypeFeatures();
+
+    // Get kerning for AV with kern enabled
+    const glyph_A = font.font.getGlyphId('A') orelse 0;
+    const glyph_V = font.font.getGlyphId('V') orelse 0;
+    const kern_enabled = font.getKerning(glyph_A, glyph_V);
+
+    // Disable kerning
+    font.setFeature(.kern, false);
+    const kern_disabled = font.getKerning(glyph_A, glyph_V);
+
+    // With kern disabled, should return 0
+    try std.testing.expectEqual(@as(i16, 0), kern_disabled);
+    // With kern enabled, should have been non-zero
+    try std.testing.expect(kern_enabled != 0);
+}
+
+test "Satoshi ligature codepoint tracking" {
+    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf");
+    defer font.deinit();
+    font.encoding = .identity;
+
+    // Mark text with ligatures
+    try font.markUnicodeCharsUsed("fi fl ft");
+
+    // Check ligature codepoints were tracked
+    std.debug.print("\nLigature codepoints tracked: {d}\n", .{font.ligature_codepoints.count()});
+
+    var iter = font.ligature_codepoints.iterator();
+    while (iter.next()) |entry| {
+        const lig_gid = entry.key_ptr.*;
+        const codepoints = entry.value_ptr.*;
+        std.debug.print("  Ligature glyph {d} -> codepoints: ", .{lig_gid});
+        for (codepoints) |cp| {
+            std.debug.print("{c}({d}) ", .{ @as(u8, @intCast(cp)), cp });
+        }
+        std.debug.print("\n", .{});
+    }
+
+    // Should have tracked fi, fl, ft ligatures (3 different glyph IDs)
+    try std.testing.expect(font.ligature_codepoints.count() >= 3);
+
+    // Check that each ligature has 2 codepoints
+    iter = font.ligature_codepoints.iterator();
+    while (iter.next()) |entry| {
+        try std.testing.expectEqual(@as(usize, 2), entry.value_ptr.*.len);
+    }
 }

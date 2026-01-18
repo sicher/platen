@@ -56,7 +56,20 @@ def make_pdf():
     pdf = FPDF(unit="pt", format="A4")
     pdf.set_margins(0, 0, 0)
     pdf.set_auto_page_break(False)
+    pdf.c_margin = 0  # Remove cell margin so write()/cell() position like text()
     return pdf
+
+
+def shaped_text(pdf, x, y, text, h=None):
+    """Write text at position with text shaping (kerning, ligatures).
+
+    fpdf2's text() doesn't apply shaping, but write() does.
+    This helper positions text at (x, y) using write() for proper shaping.
+    """
+    if h is None:
+        h = pdf.font_size
+    pdf.set_xy(x, y - h * 0.8)  # Adjust for baseline
+    pdf.write(h=h, text=text)
 
 
 def gen_minimal():
@@ -264,7 +277,11 @@ def gen_embedded_fonts():
 
 
 def gen_cid_fonts():
-    """PDF with CID fonts (Identity-H encoding) for full Unicode support."""
+    """PDF with CID fonts (Identity-H encoding) for full Unicode support.
+
+    Note: This test focuses on CID encoding and Unicode support, not OpenType features.
+    We use text() instead of shaped_text() for consistent positioning with zpdf.
+    """
     pdf = make_pdf()
 
     # Font paths
@@ -497,6 +514,150 @@ def gen_inter_fonts():
     print("  inter_fonts.pdf")
 
 
+def gen_opentype_features():
+    """Dense one-pager showcasing OpenType ligatures, kerning, and numeric features.
+
+    Note: fpdf2 text shaping only works with write()/multi_cell(), not text().
+    We use write() with set_xy() for positioned text with shaping.
+    """
+    pdf = make_pdf()
+
+    fonts_dir = Path("test/fonts")
+
+    # Satoshi has liga (fi, fl, ff, ffi, ffl, f_t), kern, tnum, pnum
+    satoshi_dir = fonts_dir / "Satoshi"
+    pdf.add_font("Satoshi", "", str(satoshi_dir / "Satoshi-Regular.otf"))
+    pdf.add_font("Satoshi", "B", str(satoshi_dir / "Satoshi-Bold.otf"))
+    pdf.add_font("Satoshi", "I", str(satoshi_dir / "Satoshi-Italic.otf"))
+
+    # Charter has kern but no liga
+    charter_dir = fonts_dir / "Charter"
+    pdf.add_font("Charter", "", str(charter_dir / "Charter Regular.ttf"))
+    pdf.add_font("Charter", "B", str(charter_dir / "Charter Bold.ttf"))
+
+    # Inter has tnum, pnum, zero, many cv features
+    inter_dir = fonts_dir / "Inter"
+    pdf.add_font("Inter", "", str(inter_dir / "Inter-Regular.ttf"))
+    pdf.add_font("Inter", "B", str(inter_dir / "Inter-Bold.ttf"))
+
+    pdf.add_page()
+    y = 25
+
+    # Title - enable text shaping with ligatures and kerning
+    pdf.set_text_shaping(True, features={"liga": True, "kern": True})
+    pdf.set_font("Satoshi", "B", size=20)
+    shaped_text(pdf, 50, y, "OpenType Features Showcase")
+    y += 16
+    pdf.set_font("Satoshi", "", size=7)
+    shaped_text(pdf, 50, y, "Ligatures (liga), Kerning (kern), Tabular Figures (tnum), and more")
+    y += 12
+
+    # === Ligatures Section ===
+    pdf.set_font("Satoshi", "B", size=11)
+    shaped_text(pdf, 50, y, "Standard Ligatures (liga)")
+    y += 11
+
+    pdf.set_font("Satoshi", "", size=9)
+    shaped_text(pdf, 50, y, "Satoshi: fi fl ff ffi ffl ligatures enabled")
+    y += 10
+
+    # Words with ligatures - compact layout
+    pdf.set_font("Satoshi", "", size=10)
+    shaped_text(pdf, 50, y, "office efficient waffle difficult affidavit affluent")
+    y += 12
+    shaped_text(pdf, 50, y, "find five flow flag coffee effect staff differ suffix")
+    y += 12
+    shaped_text(pdf, 50, y, "after soft gift lift draft shift swift left craft")
+    y += 14
+
+    # === Kerning Section ===
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Kerning (kern)")
+    y += 11
+
+    pdf.set_font("Charter", "", size=10)
+    pdf.set_text_shaping(True, features={"kern": True})
+    shaped_text(pdf, 50, y, "AV AWAY AVATAR To Today We Weather LT AT TA VA WA Yo")
+    y += 12
+    shaped_text(pdf, 50, y, "Typography: proper letter spacing for readability")
+    y += 14
+
+    # === Tabular Figures ===
+    # Note: tnum/pnum features not implemented in zpdf, so we just show the text with liga+kern
+    pdf.set_text_shaping(True, features={"liga": True, "kern": True})
+    pdf.set_font("Satoshi", "B", size=11)
+    shaped_text(pdf, 50, y, "Tabular vs Proportional Figures (tnum/pnum)")
+    y += 11
+
+    pdf.set_font("Satoshi", "", size=9)
+    shaped_text(pdf, 50, y, "Numbers align in columns when using tabular figures:")
+    y += 10
+
+    # Show tnum vs pnum side by side (zpdf doesn't implement tnum/pnum, so just use liga+kern)
+    pdf.set_font("Satoshi", "", size=10)
+    shaped_text(pdf, 50, y, "tnum: 1111  0000  1234")
+    shaped_text(pdf, 200, y, "1,234.56")
+    y += 11
+    shaped_text(pdf, 50, y, "tnum: 9999  1010  5678")
+    shaped_text(pdf, 200, y, "9,876.54")
+    y += 12
+
+    shaped_text(pdf, 50, y, "pnum: 1111  0000  1234")
+    shaped_text(pdf, 200, y, "1,234.56")
+    y += 11
+    shaped_text(pdf, 50, y, "pnum: 9999  1010  5678")
+    shaped_text(pdf, 200, y, "9,876.54")
+    y += 14
+
+    # === Inter stylistic features ===
+    # Note: zero/tnum features not yet implemented in zpdf, so use text() for comparison
+    pdf.set_font("Inter", "B", size=11)
+    pdf.text(50, y, "Inter: Character Variants & Stylistic Sets")
+    y += 11
+
+    pdf.set_font("Inter", "", size=9)
+    # Default (no shaping - zpdf doesn't implement these features yet)
+    pdf.text(50, y, "Default: 0123456789 Il1| agy")
+    y += 10
+
+    # Slashed zero (zero feature) - using text() since zpdf doesn't implement zero
+    pdf.text(50, y, "zero feature: 0123456789 (slashed zero)")
+    y += 10
+
+    # Tabular with slashed zero - using text() since zpdf doesn't implement tnum/zero
+    pdf.text(50, y, "tnum+zero: 0123456789 (tabular + slashed)")
+    y += 12
+
+    # === Combined features paragraph ===
+    pdf.set_text_shaping(True, features={"liga": True, "kern": True})
+    pdf.set_font("Satoshi", "B", size=11)
+    shaped_text(pdf, 50, y, "Paragraph with Multiple Features:")
+    y += 11
+
+    pdf.set_font("Satoshi", "", size=8)
+    shaped_text(pdf, 50, y, "The efficient office staff finished 5,432 affidavits in 2024. Officials offered")
+    y += 9
+    shaped_text(pdf, 50, y, "to fix afflicted files worth $1,234,567.89. The coffee effect was sufficient after fifty")
+    y += 9
+    shaped_text(pdf, 50, y, "efforts. Different offices refined workflow: Task A=1111, B=2222, C=3333.")
+    y += 12
+
+    # === Bold/Italic with ligatures ===
+    pdf.set_font("Satoshi", "B", size=10)
+    shaped_text(pdf, 50, y, "Styles: Bold: office efficient waffle")
+    y += 11
+    pdf.set_font("Satoshi", "I", size=10)
+    shaped_text(pdf, 50, y, "Styles: Italic: office efficient waffle")
+    y += 12
+
+    # Footer note
+    pdf.set_font("Satoshi", "", size=6)
+    shaped_text(pdf, 50, y, "Features: liga=ligatures, kern=kerning, tnum=tabular figures, pnum=proportional figures, zero=slashed zero")
+
+    pdf.output(OUTPUT_DIR / "opentype_features.pdf")
+    print("  opentype_features.pdf")
+
+
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -509,6 +670,7 @@ def main():
     gen_embedded_fonts()
     gen_cid_fonts()
     gen_inter_fonts()
+    gen_opentype_features()
     print(f"\nDone. References in {OUTPUT_DIR}/")
 
 

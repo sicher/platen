@@ -24,6 +24,7 @@ const test_cases = [_]TestCase{
     .{ .name = "embedded_fonts", .generate = generateEmbeddedFontsPdf },
     .{ .name = "cid_fonts", .generate = generateCIDFontsPdf },
     .{ .name = "inter_fonts", .generate = generateInterFontsPdf },
+    .{ .name = "opentype_features", .generate = generateOpenTypeFeaturessPdf },
 };
 
 // ============================================================================
@@ -213,11 +214,14 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load fonts and set to CID (Identity-H) mode for full Unicode
+    // Disable kerning to match fpdf2 reference (which uses text() without shaping)
     const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
     charter.encoding = .identity;
+    charter.setFeature(.kern, false);
 
     const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
     courier.encoding = .identity;
+    courier.setFeature(.kern, false);
 
     try doc.addPage();
     var y: f64 = 50;
@@ -255,6 +259,7 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Compare with WinAnsi mode (should look the same for basic chars)
     const charter_winansi = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
+    charter_winansi.setFeature(.kern, false);
     // Default is .win_ansi
 
     try doc.setEmbeddedFont(charter_winansi, 12);
@@ -272,24 +277,33 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load Inter TTF versions
+    // Disable kerning to match fpdf2 reference (which uses text() without shaping)
     const inter_ttf = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
     inter_ttf.encoding = .identity;
+    inter_ttf.setFeature(.kern, false);
     const inter_ttf_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
     inter_ttf_bold.encoding = .identity;
+    inter_ttf_bold.setFeature(.kern, false);
     const inter_ttf_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf");
     inter_ttf_italic.encoding = .identity;
+    inter_ttf_italic.setFeature(.kern, false);
     const inter_ttf_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf");
     inter_ttf_bolditalic.encoding = .identity;
+    inter_ttf_bolditalic.setFeature(.kern, false);
 
     // Load Inter OTF versions (CFF outlines)
     const inter_otf = try doc.loadFont("test/fonts/Inter/Inter-Regular.otf");
     inter_otf.encoding = .identity;
+    inter_otf.setFeature(.kern, false);
     const inter_otf_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.otf");
     inter_otf_bold.encoding = .identity;
+    inter_otf_bold.setFeature(.kern, false);
     const inter_otf_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.otf");
     inter_otf_italic.encoding = .identity;
+    inter_otf_italic.setFeature(.kern, false);
     const inter_otf_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.otf");
     inter_otf_bolditalic.encoding = .identity;
+    inter_otf_bolditalic.setFeature(.kern, false);
 
     try doc.addPage();
     var y: f64 = 30;
@@ -444,6 +458,137 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Satoshi has liga (fi, fl, ff, ffi, ffl), kern, tnum, pnum
+    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf");
+    satoshi.encoding = .identity;
+    const satoshi_bold = try doc.loadFont("test/fonts/Satoshi/Satoshi-Bold.otf");
+    satoshi_bold.encoding = .identity;
+    const satoshi_italic = try doc.loadFont("test/fonts/Satoshi/Satoshi-Italic.otf");
+    satoshi_italic.encoding = .identity;
+
+    // Charter has kern but no liga
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
+    charter.encoding = .identity;
+    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
+    charter_bold.encoding = .identity;
+
+    // Inter has tnum, pnum, zero features
+    // Note: Disable kerning for Inter - fpdf2 reference uses text() without shaping for these
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter.encoding = .identity;
+    inter.setFeature(.kern, false);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
+    inter_bold.encoding = .identity;
+    inter_bold.setFeature(.kern, false);
+
+    try doc.addPage();
+    var y: f64 = 25;
+
+    // Title
+    try doc.setEmbeddedFont(satoshi_bold, 20);
+    try doc.textAt(50, y, "OpenType Features Showcase");
+    y += 16;
+    try doc.setEmbeddedFont(satoshi, 7);
+    try doc.textAt(50, y, "Ligatures (liga), Kerning (kern), Tabular Figures (tnum), and more");
+    y += 12;
+
+    // === Ligatures Section ===
+    try doc.setEmbeddedFont(satoshi_bold, 11);
+    try doc.textAt(50, y, "Standard Ligatures (liga)");
+    y += 11;
+
+    try doc.setEmbeddedFont(satoshi, 9);
+    try doc.textAt(50, y, "Satoshi: fi fl ff ffi ffl ligatures enabled");
+    y += 10;
+
+    // Words with ligatures - compact layout
+    try doc.setEmbeddedFont(satoshi, 10);
+    try doc.textAt(50, y, "office efficient waffle difficult affidavit affluent");
+    y += 12;
+    try doc.textAt(50, y, "find five flow flag coffee effect staff differ suffix");
+    y += 12;
+    try doc.textAt(50, y, "after soft gift lift draft shift swift left craft");
+    y += 14;
+
+    // === Kerning Section ===
+    try doc.setEmbeddedFont(charter_bold, 11);
+    try doc.textAt(50, y, "Kerning (kern)");
+    y += 11;
+
+    try doc.setEmbeddedFont(charter, 10);
+    try doc.textAt(50, y, "AV AWAY AVATAR To Today We Weather LT AT TA VA WA Yo");
+    y += 12;
+    try doc.textAt(50, y, "Typography: proper letter spacing for readability");
+    y += 14;
+
+    // === Tabular Figures ===
+    try doc.setEmbeddedFont(satoshi_bold, 11);
+    try doc.textAt(50, y, "Tabular vs Proportional Figures (tnum/pnum)");
+    y += 11;
+
+    try doc.setEmbeddedFont(satoshi, 9);
+    try doc.textAt(50, y, "Numbers align in columns when using tabular figures:");
+    y += 10;
+
+    try doc.setEmbeddedFont(satoshi, 10);
+    try doc.textAt(50, y, "tnum: 1111  0000  1234");
+    try doc.textAt(200, y, "1,234.56");
+    y += 11;
+    try doc.textAt(50, y, "tnum: 9999  1010  5678");
+    try doc.textAt(200, y, "9,876.54");
+    y += 12;
+    try doc.textAt(50, y, "pnum: 1111  0000  1234");
+    try doc.textAt(200, y, "1,234.56");
+    y += 11;
+    try doc.textAt(50, y, "pnum: 9999  1010  5678");
+    try doc.textAt(200, y, "9,876.54");
+    y += 14;
+
+    // === Inter stylistic features ===
+    try doc.setEmbeddedFont(inter_bold, 11);
+    try doc.textAt(50, y, "Inter: Character Variants & Stylistic Sets");
+    y += 11;
+
+    try doc.setEmbeddedFont(inter, 9);
+    try doc.textAt(50, y, "Default: 0123456789 Il1| agy");
+    y += 10;
+    try doc.textAt(50, y, "zero feature: 0123456789 (slashed zero)");
+    y += 10;
+    try doc.textAt(50, y, "tnum+zero: 0123456789 (tabular + slashed)");
+    y += 12;
+
+    // === Combined features paragraph ===
+    try doc.setEmbeddedFont(satoshi_bold, 11);
+    try doc.textAt(50, y, "Paragraph with Multiple Features:");
+    y += 11;
+
+    try doc.setEmbeddedFont(satoshi, 8);
+    try doc.textAt(50, y, "The efficient office staff finished 5,432 affidavits in 2024. Officials offered");
+    y += 9;
+    try doc.textAt(50, y, "to fix afflicted files worth $1,234,567.89. The coffee effect was sufficient after fifty");
+    y += 9;
+    try doc.textAt(50, y, "efforts. Different offices refined workflow: Task A=1111, B=2222, C=3333.");
+    y += 12;
+
+    // === Bold/Italic with ligatures ===
+    try doc.setEmbeddedFont(satoshi_bold, 10);
+    try doc.textAt(50, y, "Styles: Bold: office efficient waffle");
+    y += 11;
+    try doc.setEmbeddedFont(satoshi_italic, 10);
+    try doc.textAt(50, y, "Styles: Italic: office efficient waffle");
+    y += 12;
+
+    // Footer note
+    try doc.setEmbeddedFont(satoshi, 6);
+    try doc.textAt(50, y, "Features: liga=ligatures, kern=kerning, tnum=tabular figures, pnum=proportional figures, zero=slashed zero");
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -482,6 +627,11 @@ test "integration: inter_fonts PDF" {
     try runIntegrationTest("inter_fonts", generateInterFontsPdf);
 }
 
+test "integration: opentype_features PDF" {
+    // Tests OpenType ligatures (liga) and kerning (kern)
+    try runIntegrationTest("opentype_features", generateOpenTypeFeaturessPdf);
+}
+
 fn runIntegrationTest(
     name: []const u8,
     generate: *const fn (std.mem.Allocator) anyerror![]u8,
@@ -492,9 +642,22 @@ fn runIntegrationTest(
     const pdf = try generate(allocator);
     defer allocator.free(pdf);
 
-    // Build reference path
-    var path_buf: [256]u8 = undefined;
-    const ref_path = std.fmt.bufPrint(&path_buf, "test/reference/{s}.pdf", .{name}) catch unreachable;
+    // Build paths
+    var ref_path_buf: [256]u8 = undefined;
+    var actual_path_buf: [256]u8 = undefined;
+    var expected_path_buf: [256]u8 = undefined;
+    const ref_path = std.fmt.bufPrint(&ref_path_buf, "test/reference/{s}.pdf", .{name}) catch unreachable;
+    const actual_path = std.fmt.bufPrint(&actual_path_buf, "test/output/{s}_actual.pdf", .{name}) catch unreachable;
+    const expected_path = std.fmt.bufPrint(&expected_path_buf, "test/output/{s}_expected.pdf", .{name}) catch unreachable;
+
+    // Always save actual output for inspection
+    if (std.fs.cwd().createFile(actual_path, .{})) |file| {
+        defer file.close();
+        file.writeAll(pdf) catch {};
+    } else |_| {}
+
+    // Copy reference to expected for side-by-side comparison
+    std.fs.cwd().copyFile(ref_path, std.fs.cwd(), expected_path, .{}) catch {};
 
     // Compare against reference
     var result = try testing.compareWithReference(allocator, pdf, ref_path);
@@ -502,6 +665,8 @@ fn runIntegrationTest(
 
     if (!result.equal) {
         std.debug.print("\n=== Integration test failed: {s} ===\n", .{name});
+        std.debug.print("  Actual:   {s}\n", .{actual_path});
+        std.debug.print("  Expected: {s}\n", .{expected_path});
         if (result.diff) |diff| {
             std.debug.print("{s}\n", .{diff});
         }

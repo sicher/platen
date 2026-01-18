@@ -304,6 +304,7 @@ fn comparePdfsSemantic(allocator: std.mem.Allocator, actual: []const u8, expecte
     tmp_expected.file.close();
 
     // Run semantic comparator
+    // Tolerance of 1pt for minor floating-point rounding differences
     var child = std.process.Child.init(
         &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" },
         allocator,

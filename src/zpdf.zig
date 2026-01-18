@@ -28,6 +28,7 @@ pub const Font = fonts.Font;
 pub const TextMetrics = metrics.TextMetrics;
 pub const TextStyle = metrics.TextStyle;
 pub const EmbeddedFont = embedded.EmbeddedFont;
+pub const opentype = embedded.opentype;
 
 /// Handle to a loaded font (either standard or embedded)
 pub const FontHandle = union(enum) {
@@ -288,6 +289,20 @@ pub const Document = struct {
         self.line_height = height;
     }
 
+    /// Set OpenType feature for all embedded fonts
+    /// Example: doc.setFeature(.liga, false) to disable ligatures
+    pub fn setFeature(self: *Document, feature: opentype.Feature, enabled: bool) void {
+        for (self.embedded_fonts.items) |font| {
+            font.setFeature(feature, enabled);
+        }
+    }
+
+    /// Set OpenType feature for a specific embedded font
+    pub fn setFontFeature(self: *Document, font: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
+        _ = self;
+        font.setFeature(feature, enabled);
+    }
+
     /// Get current line height in points
     pub fn getLineHeightPts(self: *Document) f64 {
         return self.font_size * self.line_height;
@@ -381,28 +396,67 @@ pub const Document = struct {
         });
     }
 
-    /// Append hex string with 2-byte glyph IDs for CID mode
-    fn appendCIDHexString(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8) !void {
+    /// Render CID text with ligatures and kerning using TJ operator
+    /// Returns true if kerning was applied (used TJ), false if simple Tj was used
+    fn renderCIDTextWithKerning(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8) !bool {
         _ = self;
-        var i: usize = 0;
-        while (i < str.len) {
-            const len = std.unicode.utf8ByteSequenceLength(str[i]) catch 1;
-            if (i + len > str.len) break;
+        // Get glyph sequence with ligatures applied
+        const glyphs = try emb.getGlyphsForText(str);
+        defer emb.allocator.free(glyphs);
 
-            const codepoint = std.unicode.utf8Decode(str[i..][0..len]) catch {
-                // Invalid UTF-8, output notdef glyph
-                try cw.append("0000");
-                i += 1;
-                continue;
-            };
+        if (glyphs.len == 0) return false;
 
-            const gid = emb.getGlyphIdForCodepoint(codepoint);
+        const has_remap = emb.gid_remap.count() > 0;
+        const units_per_em = emb.font.head.?.units_per_em;
+
+        // Check if we have any kerning
+        var has_kerning = false;
+        if (emb.feature_flags.kern and emb.ot_features != null) {
+            for (0..glyphs.len - 1) |i| {
+                if (emb.getKerning(glyphs[i], glyphs[i + 1]) != 0) {
+                    has_kerning = true;
+                    break;
+                }
+            }
+        }
+
+        if (!has_kerning) {
+            // No kerning - use simple hex string
+            try cw.append("<");
+            for (glyphs) |gid| {
+                const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
+                var hex_buf: [4]u8 = undefined;
+                _ = std.fmt.bufPrint(&hex_buf, "{X:0>4}", .{final_gid}) catch unreachable;
+                try cw.append(&hex_buf);
+            }
+            try cw.append("> Tj\n");
+            return false;
+        }
+
+        // Use TJ operator with kerning adjustments
+        // Format: [<HexGlyphs> kern <HexGlyphs> kern ...] TJ
+        try cw.append("[<");
+
+        for (glyphs, 0..) |gid, i| {
+            const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
             var hex_buf: [4]u8 = undefined;
-            _ = std.fmt.bufPrint(&hex_buf, "{X:0>4}", .{gid}) catch unreachable;
+            _ = std.fmt.bufPrint(&hex_buf, "{X:0>4}", .{final_gid}) catch unreachable;
             try cw.append(&hex_buf);
 
-            i += len;
+            // Add kerning adjustment before next glyph
+            if (i + 1 < glyphs.len) {
+                const kern = emb.getKerning(gid, glyphs[i + 1]);
+                if (kern != 0) {
+                    // Convert from font units to 1/1000 em, negate for TJ
+                    // TJ uses positive values to move left (reduce spacing)
+                    const kern_1000: i32 = @divTrunc(@as(i32, kern) * 1000, @as(i32, units_per_em));
+                    try cw.print("> {d} <", .{-kern_1000});
+                }
+            }
         }
+
+        try cw.append(">] TJ\n");
+        return true;
     }
 
     /// Draw text at a specific position
@@ -434,10 +488,8 @@ pub const Document = struct {
                             try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
 
                             if (emb.encoding == .identity) {
-                                // CID mode: output hex string with (remapped) glyph IDs
-                                try cw.append("<");
-                                try self.appendCIDHexString(&cw, emb, t.text_data);
-                                try cw.append("> Tj\n");
+                                // CID mode: output with ligatures and kerning
+                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data);
                             } else {
                                 // WinAnsi mode
                                 try cw.append("(");
