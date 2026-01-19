@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Index - zpdf API</title>
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #222;
+            --code-bg: #f5f5f5;
+            --link: #0066cc;
+            --border: #ddd;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a1a;
+                --fg: #e0e0e0;
+                --code-bg: #2d2d2d;
+                --link: #6db3f2;
+                --border: #444;
+            }
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: var(--bg);
+            color: var(--fg);
+        }
+        nav {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        nav a {
+            margin-right: 1rem;
+            color: var(--link);
+            text-decoration: none;
+        }
+        nav a:hover {
+            text-decoration: underline;
+        }
+        h1, h2, h3 {
+            margin-top: 2rem;
+        }
+        h1 {
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        code {
+            font-family: "SF Mono", Consolas, monospace;
+            font-size: 0.9em;
+            background: var(--code-bg);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 1rem;
+            overflow-x: auto;
+            border-radius: 5px;
+        }
+        pre code {
+            padding: 0;
+            background: none;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1rem 0;
+        }
+        th, td {
+            border: 1px solid var(--border);
+            padding: 0.5rem;
+            text-align: left;
+        }
+        th {
+            background: var(--code-bg);
+        }
+        a {
+            color: var(--link);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <strong>zpdf API:</strong>
+        <a href="index.html">Index</a>
+        <a href="zpdf.html">zpdf</a>
+        <a href="embedded.html">embedded</a>
+        <a href="fonts.html">fonts</a>
+        <a href="metrics.html">metrics</a>
+        <a href="objects.html">objects</a>
+        <a href="writer.html">writer</a>
+    </nav>
+    <h1>zpdf API Documentation</h1>
+<p>Fast PDF rendering library for Zig</p>
+<h2>Modules</h2>
+<ul>
+<li><a href="zpdf.html"><code>zpdf</code></a> - Main module - PDF document creation</li>
+<li><a href="embedded.html"><code>embedded</code></a> - Embedded font handling (TTF/OTF)</li>
+<li><a href="fonts.html"><code>fonts</code></a> - Standard PDF fonts</li>
+<li><a href="metrics.html"><code>metrics</code></a> - Text metrics and measurement</li>
+<li><a href="objects.html"><code>objects</code></a> - PDF object types</li>
+<li><a href="writer.html"><code>writer</code></a> - Low-level PDF writer</li>
+</ul>
+
+</body>
+</html>

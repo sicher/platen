@@ -57,4 +57,9 @@ pub fn build(b: *std.Build) void {
     const run_lib_tests = b.addRunArtifact(lib_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_tests.step);
+
+    // Documentation (using zigmarkdoc via shell script)
+    const docs_cmd = b.addSystemCommand(&.{ "scripts/gen_docs.sh" });
+    const docs_step = b.step("docs", "Generate API documentation (Markdown)");
+    docs_step.dependOn(&docs_cmd.step);
 }

@@ -593,6 +593,14 @@ pub const EmbeddedFont = struct {
         return 0;
     }
 
+    /// Get width for a Unicode codepoint (CID mode), in 1/1000 em
+    /// Returns 0 if codepoint not found in font
+    pub fn getCodepointWidth(self: *const EmbeddedFont, codepoint: u21) u16 {
+        const gid = self.getGlyphIdForCodepoint(codepoint);
+        if (gid == 0) return 0;
+        return self.getGlyphWidth(gid);
+    }
+
     /// Count used glyphs in CID mode
     pub fn countUsedGlyphs(self: *const EmbeddedFont) usize {
         return self.cid_used_glyphs.count();
