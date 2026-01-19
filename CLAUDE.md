@@ -26,6 +26,8 @@ Make sure both of these tools are locally available in this project!
 
 If you need additional tools, MAKE SURE you install them local to the project. NEVER install global tool unless it's specifically allowed.
 
+Check what's already installed in the local .venv python environment, like fonttools.
+
 ## Refactoring
 
 If doing refactoring, start by running "zigmap" and "simgrep" to get good overview data before digging into details.

@@ -851,9 +851,10 @@ pub const EmbeddedFont = struct {
         }.lessThan);
 
         // Output as individual entries: gid [width]
+        // Note: space after each entry ensures proper parsing by all PDF readers
         for (gid_width_pairs.items) |pair| {
             var entry_buf: [32]u8 = undefined;
-            const entry = std.fmt.bufPrint(&entry_buf, "{d} [{d}]", .{ pair.gid, pair.width }) catch unreachable;
+            const entry = std.fmt.bufPrint(&entry_buf, "{d} [{d}] ", .{ pair.gid, pair.width }) catch unreachable;
             try buf.appendSlice(self.allocator, entry);
         }
 
