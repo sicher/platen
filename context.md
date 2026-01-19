@@ -3,6 +3,37 @@
 ## Current Focus
 OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk working. **calt disabled by default** (chain context has a bug at scale - unit tests pass but integration test shows bizarre substitutions like L→J). Ready for graphics support.
 
+## What We Did (Session 2026-01-19 #31) [COMPLETE]
+- **Fixed Gentium diacritics PDF Y coordinate issue**:
+  - PDF was rendering bottom-up because test used wrong coordinate convention
+  - Changed from `y = 780; y -= ...` to `y = 32; y += ...` to match zpdf's top-origin system
+- **Enhanced Gentium diacritics reference with uppercase/lowercase pairs**:
+  - All examples now show Aa, Ee, Oo pairs (e.g., Aa Ee Oo with diacritics)
+  - Descriptions moved to word-wrapped regions on right side using `writeParagraph`
+  - Fixed baseline alignment with `desc_offset` adjustment
+- **Fixed Vietnamese horn characters**: Changed to precomposed Oo Uu (horn doesn't combine well)
+- Added `test "integration: gentium_diacritics PDF"` test declaration
+- All 157 tests pass
+
+## What We Did (Session 2026-01-19 #30) [COMPLETE]
+- **Fixed mark positioning to use Tm absolute coordinates (like LibreOffice)**:
+  - Changed from relative Td positioning to absolute "1 0 0 1 x y Tm" for each glyph
+  - Each glyph now gets explicit absolute coordinates instead of relying on PDF auto-advance
+  - Fixed stacked Vietnamese diacritics (mark-to-mark) by tracking prev_x/prev_y between marks
+- **Fixed mark detection for multiple marks on same base**:
+  - Detection loop now checks mark-to-base fallback when mark-to-mark fails
+  - Example: s + cedilla (below) + acute (above) - both attach to 's', not to each other
+  - Rendering correctly uses base coordinates for both marks
+- **Added "Below+Above" showcase to inter_fonts test**:
+  - Demonstrates marks both above and below base character: ş́ ç̂ ţ̃
+  - Note: Inter font only has proper cedilla anchors for s/c/t/S/C/T (ogonek/dot-below anchors place marks above baseline)
+- **Added comprehensive Gentium diacritics reference PDF**:
+  - New integration test: `gentium_diacritics` with Gentium-Regular/Bold/Italic
+  - Gentium has 4 mark-base + 2 mark-mark lookups with extensive diacritic coverage
+  - Showcases: combining marks (above/below), stacked Vietnamese, above+below combos, precomposed Vietnamese, Latin Extended (ogonek/cedilla/caron), multiple diacritics stress test
+  - Sample text in Vietnamese, Polish, Turkish, French
+- All 156 tests pass
+
 ## What We Did (Session 2026-01-18 #29) [COMPLETE]
 - **Fixed mark/mkmk positioning causing overlapping characters**:
   - `getGlyphWidth()` was returning 0 for glyphs not in CID width cache (like combining marks)
