@@ -1,7 +1,19 @@
 # zpdf Context
 
 ## Current Focus
-OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk working. **calt disabled by default** (chain context has a bug at scale - unit tests pass but integration test shows bizarre substitutions like L→J). Ready for graphics support.
+OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk working. **calt disabled by default** (chain context has a bug at scale). Ready for graphics support. API docs now generated via `zig build docs`.
+
+## What We Did (Session 2026-01-19 #32) [COMPLETE]
+- **Added static HTML API documentation build step**:
+  - `zig build docs` generates markdown via zigmarkdoc, converts to static HTML
+  - Docs output to `docs/` directory (viewable without server)
+  - Dark mode support, navigation bar, syntax highlighting
+  - Installed zigmarkdoc tool in `tools/zigmarkdoc/`
+  - Scripts: `scripts/gen_docs.sh`, `scripts/md_to_html.py`
+- **Added `getCodepointWidth(u21)` to EmbeddedFont**:
+  - Unicode-aware character width for CID mode
+  - Complements existing `getCharWidth(u8)` for WinAnsi mode
+- All 156 tests pass
 
 ## What We Did (Session 2026-01-19 #31) [COMPLETE]
 - **Fixed Gentium diacritics PDF Y coordinate issue**:
