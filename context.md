@@ -3,6 +3,16 @@
 ## Current Focus
 OpenType features all working: liga, dlig (with chain context), clig, hlig, kern, mark, mkmk, calt, tnum, pnum, frac, zero, case, ss01. Ready for graphics support or more stylistic sets (ss02-08).
 
+## What We Did (Session 2026-01-20 #35) [COMPLETE]
+- **Improved inter_fonts test layout**:
+  - Two-column layout with OFF/ON column headers (x=80 and x=330)
+  - All OFF examples aligned left, all ON examples aligned right
+  - Consistent spacing between feature rows
+- **Improved feature examples**:
+  - calt: Arrow ligatures (-> => <- <=>) showing contextual substitution
+  - case: A@B (C) 3 + 9 = 12 * 1 showing case-sensitive punctuation adjustment
+  - Added stacked marks row (ẳ ế ộ ỗ) for mark-to-mark demo (ON side only)
+
 ## What We Did (Session 2026-01-20 #34) [COMPLETE]
 - **Fixed zero/case/ss01 features not being applied**:
   - Root cause 1: parseGSUB didn't call parseGSUBFeature for zero, case, ss01
