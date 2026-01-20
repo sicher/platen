@@ -390,7 +390,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(80, y + 12, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91"); // À É Õ Ñ
     try doc.setEmbeddedFont(inter, 12);
     try doc.writeAt(330, y + 12, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91");
-    y += 18;
+    y += 28;
     // Stacked marks (mark-to-mark): ẳ ế ộ ỗ (Vietnamese with double diacritics)
     try doc.setEmbeddedFont(inter_bold, 9);
     try doc.writeAt(50, y, "Stacked:");
@@ -398,7 +398,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(80, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97"); // ẳ ế ộ ỗ
     try doc.setEmbeddedFont(inter, 12);
     try doc.writeAt(330, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97");
-    y += 22;
+    y += 16;
 
     // --- Contextual Alternates (calt) ---
     try doc.setEmbeddedFont(inter_bold, 10);
