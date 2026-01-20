@@ -363,172 +363,120 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 24;
 
     // ===== OpenType Features =====
+    // Two-column layout: OFF examples on left (x=80), ON examples on right (x=330)
     try doc.setEmbeddedFont(inter_bold, 13);
     try doc.writeAt(50, y, "OpenType Features");
-    y += 20;
+    y += 18;
+
+    // Column headers
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(80, y, "OFF");
+    try doc.writeAt(330, y, "ON");
+    y += 14;
 
     // --- Kerning ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Kerning (kern)");
-    y += 14;
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "OFF:");
-    try doc.setEmbeddedFont(inter_no_kern, 14);
-    try doc.writeAt(78, y, "AV AWAY To Wave");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(240, y, "ON:");
-    try doc.setEmbeddedFont(inter, 14);
-    try doc.writeAt(262, y, "AV AWAY To Wave");
-    y += 22;
+    try doc.setEmbeddedFont(inter_no_kern, 12);
+    try doc.writeAt(80, y + 12, "AV AWAY To Wave");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(330, y + 12, "AV AWAY To Wave");
+    y += 28;
 
     // --- Mark Positioning ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Mark Positioning (mark/mkmk)");
-    y += 14;
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "OFF:");
-    try doc.setEmbeddedFont(inter_no_mark, 14);
-    try doc.writeAt(78, y, "A\xcc\x80 E\xcc\x81 O\xcc\x83 N\xcc\x83");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(180, y, "ON:");
-    try doc.setEmbeddedFont(inter, 14);
-    try doc.writeAt(202, y, "A\xcc\x80 E\xcc\x81 O\xcc\x83 N\xcc\x83");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(310, y, "Stacked:");
-    try doc.setEmbeddedFont(inter, 14);
-    try doc.writeAt(358, y, "e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83 a\xcc\x86\xcc\x89");
-    y += 20;
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(310, y, "Below+Above:");
-    try doc.setEmbeddedFont(inter, 14);
-    // s + cedilla (below) + acute (above), c + cedilla + circumflex, t + cedilla + tilde
-    // Note: Inter font has proper anchors for cedilla but not for ogonek/dot-below
-    try doc.writeAt(380, y, "s\xcc\xa7\xcc\x81 c\xcc\xa7\xcc\x82 t\xcc\xa7\xcc\x83");
+    try doc.setEmbeddedFont(inter_no_mark, 12);
+    try doc.writeAt(80, y + 12, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91"); // À É Õ Ñ
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(330, y + 12, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91");
+    y += 18;
+    // Stacked marks (mark-to-mark): ẳ ế ộ ỗ (Vietnamese with double diacritics)
+    try doc.setEmbeddedFont(inter_bold, 9);
+    try doc.writeAt(50, y, "Stacked:");
+    try doc.setEmbeddedFont(inter_no_mark, 12);
+    try doc.writeAt(80, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97"); // ẳ ế ộ ỗ
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(330, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97");
     y += 22;
 
     // --- Contextual Alternates (calt) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Contextual Alternates (calt)");
-    y += 14;
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "OFF:");
-    try doc.setEmbeddedFont(inter_no_calt, 12);
-    try doc.writeAt(78, y, "-> => <- <=> 3*9 12:34 3\xe2\x80\x938 +8+x");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(310, y, "ON:");
-    try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(332, y, "-> => <- <=> 3*9 12:34 3\xe2\x80\x938 +8+x");
-    y += 18;
+    try doc.setEmbeddedFont(inter_no_calt, 11);
+    try doc.writeAt(80, y + 12, "-> => <- <=>");
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(330, y + 12, "-> => <- <=>");
+    y += 28;
 
     // --- Discretionary Ligatures (dlig) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Discretionary Ligatures (dlig)");
-    y += 14;
-    // Interrobangs
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "OFF:");
-    try doc.setEmbeddedFont(inter, 14);
-    try doc.writeAt(78, y, "!? ?!");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(140, y, "ON:");
-    try doc.setEmbeddedFont(inter_dlig, 14);
-    try doc.writeAt(162, y, "!? ?!");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(210, y, "(interrobangs \xe2\x80\xbd)");
-    y += 18;
-    // Contextual f/t variants
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(78, y, "ff fi ffi ft tt tf rf rt vf wt");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(270, y, "ON:");
+    try doc.writeAt(80, y + 12, "!? ff fi ft tt");
     try doc.setEmbeddedFont(inter_dlig, 12);
-    try doc.writeAt(292, y, "ff fi ffi ft tt tf rf rt vf wt");
-    y += 22;
+    try doc.writeAt(330, y + 12, "!? ff fi ft tt");
+    y += 28;
 
     // --- Tabular/Proportional Figures (tnum/pnum) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Figure Styles (tnum/pnum)");
-    y += 14;
-    // Side-by-side comparison showing alignment difference
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "Proportional:");
-    try doc.writeAt(200, y, "Tabular:");
+    try doc.writeAt(80, y + 12, "Proportional:");
+    try doc.writeAt(330, y + 12, "Tabular:");
+    y += 24;
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(80, y, "1111.00");
+    try doc.setEmbeddedFont(inter_tnum, 10);
+    try doc.writeAt(330, y, "1111.00");
     y += 12;
-    // Row 1
-    try doc.setEmbeddedFont(inter, 11);
-    try doc.writeAt(50, y, "1111.00");
-    try doc.setEmbeddedFont(inter_tnum, 11);
-    try doc.writeAt(200, y, "1111.00");
-    y += 13;
-    // Row 2
-    try doc.setEmbeddedFont(inter, 11);
-    try doc.writeAt(50, y, "2480.50");
-    try doc.setEmbeddedFont(inter_tnum, 11);
-    try doc.writeAt(200, y, "2480.50");
-    y += 13;
-    // Row 3
-    try doc.setEmbeddedFont(inter, 11);
-    try doc.writeAt(50, y, "9999.99");
-    try doc.setEmbeddedFont(inter_tnum, 11);
-    try doc.writeAt(200, y, "9999.99");
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(80, y, "2480.50");
+    try doc.setEmbeddedFont(inter_tnum, 10);
+    try doc.writeAt(330, y, "2480.50");
+    y += 12;
+    try doc.setEmbeddedFont(inter, 10);
+    try doc.writeAt(80, y, "9999.99");
+    try doc.setEmbeddedFont(inter_tnum, 10);
+    try doc.writeAt(330, y, "9999.99");
     y += 18;
 
     // --- Fractions (frac) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Fractions (frac)");
-    y += 14;
-    // OFF uses regular slash, ON uses fraction slash U+2044 with frac feature
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(50, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(78, y, "1/2 3/4 5/8 7/16"); // regular slash
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(220, y, "ON:");
+    try doc.writeAt(80, y + 12, "1/2 3/4 5/8");
     try doc.setEmbeddedFont(inter_frac, 12);
-    try doc.writeAt(242, y, "1\xe2\x81\x842 3\xe2\x81\x844 5\xe2\x81\x848 7\xe2\x81\x8416"); // fraction slash U+2044
-    y += 20;
+    try doc.writeAt(330, y + 12, "1\xe2\x81\x842 3\xe2\x81\x844 5\xe2\x81\x848"); // fraction slash U+2044
+    y += 28;
 
     // --- Slashed Zero (zero) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Slashed Zero (zero)");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(180, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(210, y, "0 10 200");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(310, y, "ON:");
+    try doc.writeAt(80, y + 12, "0 10 200");
     try doc.setEmbeddedFont(inter_zero, 12);
-    try doc.writeAt(335, y, "0 10 200");
-    y += 18;
+    try doc.writeAt(330, y + 12, "0 10 200");
+    y += 28;
 
     // --- Case-Sensitive Forms (case) ---
     // Note: calt OFF needed because calt contextually applies case-like substitutions
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Case-Sensitive (case)");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(180, y, "OFF:");
     try doc.setEmbeddedFont(inter_nocalt, 12);
-    try doc.writeAt(210, y, "(A) [B] @");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(310, y, "ON:");
+    try doc.writeAt(80, y + 12, "A@B (C) 3 + 9 = 12 * 1");
     try doc.setEmbeddedFont(inter_case, 12);
-    try doc.writeAt(335, y, "(A) [B] @");
-    y += 18;
+    try doc.writeAt(330, y + 12, "A@B (C) 3 + 9 = 12 * 1");
+    y += 28;
 
     // --- Stylistic Set 1 (ss01) - alternate digits ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Stylistic Set 1 (ss01)");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(180, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(210, y, "3 4 6 9");
-    try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(310, y, "ON:");
+    try doc.writeAt(80, y + 12, "3 4 6 9");
     try doc.setEmbeddedFont(inter_ss01, 12);
-    try doc.writeAt(335, y, "3 4 6 9");
-    y += 22;
+    try doc.writeAt(330, y + 12, "3 4 6 9");
+    y += 28;
 
     // ===== Unicode Coverage =====
     try doc.setEmbeddedFont(inter_bold, 13);
