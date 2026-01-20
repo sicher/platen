@@ -1,7 +1,21 @@
 # zpdf Context
 
 ## Current Focus
-Major performance milestone: 71% overall speedup (3.5x faster). Performance is now well-optimized. Next: graphics support or additional features.
+Major performance milestone: 75% overall speedup (4x faster). Performance is now well-optimized. Next: graphics support or additional features.
+
+## What We Did (Session 2026-01-20 #41) [COMPLETE]
+- **Implemented cmap cache and ASCII lookup table - 12% overall improvement**:
+  - Added `cmap_subtable_offset` and `cmap_format` fields to Font struct (ttf.zig:27-29)
+  - Added `ascii_glyphs[128]` lookup table for O(1) ASCII character lookup (ttf.zig:31-33)
+  - Added `initCmapCache()` function called during font parse (ttf.zig:86-134)
+  - Updated `getGlyphId()` to use ASCII cache first, then cached subtable (ttf.zig:216-237)
+- **Performance results**:
+  - Total: 752ms → 660ms (12% faster)
+  - Simple text: 73ms → 39ms (47% faster)
+  - Text flow: 54ms → 33ms (39% faster)
+  - "No features" microbenchmark: 0.050ms → 0.030ms (40% faster)
+- **Updated PERFORMANCE.md** with optimization #13 details
+- All 156 tests pass
 
 ## What We Did (Session 2026-01-20 #40) [COMPLETE]
 - **Implemented arena allocator per page - ~4% overall improvement**:

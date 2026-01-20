@@ -2,14 +2,14 @@
 
 ## Executive Summary
 
-Performance profiling on 2026-01-20 achieved **5.3x speedup** for OpenType text shaping and **70% overall improvement** for a 100-page PDF generation benchmark.
+Performance profiling on 2026-01-20 achieved **6x speedup** for OpenType text shaping and **75% overall improvement** for a 100-page PDF generation benchmark.
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| OpenType heavy (100 pages) | 1244ms | 235ms | **5.3x faster** |
-| PDF output (100 pages) | 680ms | 274ms | **60% faster** |
-| Page rendering (100 pages) | 553ms | 151ms | **73% faster (3.7x)** |
-| Total time (100 pages) | ~2600ms | ~752ms | **71% faster (3.5x)** |
+| OpenType heavy (100 pages) | 1244ms | 204ms | **6x faster** |
+| PDF output (100 pages) | 680ms | 277ms | **59% faster** |
+| Page rendering (100 pages) | 553ms | 153ms | **72% faster (3.6x)** |
+| Total time (100 pages) | ~2600ms | ~660ms | **75% faster (4x)** |
 
 ## Benchmark Configuration
 
@@ -21,26 +21,26 @@ Performance profiling on 2026-01-20 achieved **5.3x speedup** for OpenType text 
 ## Current Performance Breakdown
 
 ```
-Font loading:      2ms   (0%)
-Simple text:      73ms  (10%)
-OpenType heavy:  235ms  (31%)
-Unicode/marks:   113ms  (15%)
-Text flow:        54ms   (7%)
-PDF output:      274ms  (36%)
+Font loading:      1ms   (0%)
+Simple text:      39ms   (6%)
+OpenType heavy:  204ms  (31%)
+Unicode/marks:   105ms  (16%)
+Text flow:        33ms   (5%)
+PDF output:      277ms  (42%)
 --------------------------
-TOTAL:           752ms
+TOTAL:           660ms
 ```
 
 ### PDF Output Breakdown
 
 ```
 Subset generation:   7ms   (3%)
-Page rendering:    151ms  (55%)
-Font writing:       18ms   (7%)
-Page writing:       97ms  (35%)
+Page rendering:    153ms  (55%)
+Font writing:       17ms   (6%)
+Page writing:       98ms  (35%)
 Finish (xref):       0ms   (0%)
 --------------------------
-TOTAL:             274ms
+TOTAL:             277ms
 ```
 
 ## Optimizations Implemented
@@ -156,38 +156,56 @@ const Page = struct {
 };
 ```
 
+### 13. Cmap Cache and ASCII Lookup Table (ttf.zig:27-33, 86-134)
+
+**Problem**: Every `getGlyphId()` call searched through cmap subtables to find the best one, then did a binary search. This happened for every single character.
+
+**Solution**: Cache the best cmap subtable offset/format once during font parse. Additionally, pre-populate a 128-entry ASCII glyph lookup table for O(1) access to the most common characters.
+
+**Impact**: **12% overall improvement** (752ms → 660ms). Simple text 47% faster, text flow 39% faster.
+
+```zig
+// Cached cmap lookup (set once during parse)
+cmap_subtable_offset: u32 = 0,
+cmap_format: u16 = 0,
+
+// ASCII glyph cache for O(1) lookup
+ascii_glyphs: [128]u16 = [_]u16{0} ** 128,
+has_ascii_cache: bool = false,
+```
+
 ## Shaping Microbenchmark Results
 
 Per-call timing for 5000 iterations:
 
 | Test Case | Time/call | Notes |
 |-----------|-----------|-------|
-| No features | 0.050ms | Baseline - UTF-8 decode + glyph lookup |
-| Liga only | 0.045ms | Fast - Charter has no GSUB |
-| Calt only | 0.065ms | 65 chain rules in Inter (indexed) |
-| Simple ASCII | 0.062ms | With calt+liga enabled |
+| No features | 0.030ms | Baseline - ASCII cache hit |
+| Liga only | 0.028ms | Fast - Charter has no GSUB |
+| Calt only | 0.067ms | 65 chain rules in Inter (indexed) |
+| Simple ASCII | 0.053ms | With calt+liga enabled |
 | All features | 0.088ms | dlig, clig, frac enabled too |
 
 ## Remaining Bottlenecks
 
-### 1. PDF Output (274ms, 36% of total)
+### 1. PDF Output (277ms, 42% of total)
 
 Well-optimized. Breakdown:
-- Page rendering: 151ms (55%) - kerning cached, hex optimized
-- Page writing: 97ms (35%) - zlib compression
-- Font writing: 18ms (7%) - font subsetting + embedding
+- Page rendering: 153ms (55%) - kerning cached, hex optimized
+- Page writing: 98ms (35%) - zlib compression
+- Font writing: 17ms (6%) - font subsetting + embedding
 
-### 2. OpenType Shaping (235ms, 31% of total)
+### 2. OpenType Shaping (204ms, 31% of total)
 
-Now well-optimized with chain context rule index. Remaining costs:
-- UTF-8 decode + cmap lookup
+Now well-optimized with chain context rule index and cmap cache. Remaining costs:
 - Ligature application (still O(n) per ligature table)
 - Feature flag checks
+- Non-ASCII cmap binary search
 
-### 3. Simple Text (73ms, 10% of total)
+### 3. Simple Text (39ms, 6% of total)
 
-Uses Charter font with no GSUB. Cost is mostly:
-- UTF-8 decode + cmap lookup
+Uses Charter font with no GSUB. Now fast with ASCII cache - cost is mostly:
+- UTF-8 decode (minimal)
 - Command struct building
 
 ## Suggested Future Optimizations
@@ -206,20 +224,14 @@ Uses Charter font with no GSUB. Cost is mostly:
    - Use zlib level 1 instead of 6 for faster compression
    - Trade ~1% file size increase for ~3x compression speedup
 
-### Low Impact
-
-4. **SIMD Glyph Mapping**
-   - Vectorize cmap lookups for ASCII range
-   - Most benefit for simple ASCII text
-
 ## Comparison: Text Shaping vs Line Breaking
 
 Interesting observation: **Optimal line breaking (Knuth-Plass) is faster than text shaping**.
 
 | Operation | Time | Calls | Per-call |
 |-----------|------|-------|----------|
-| Text flow (optimal breaking) | 54ms | 50 paragraphs | 1.1ms |
-| OpenType heavy (shaping) | 235ms | 1250 lines | 0.19ms |
+| Text flow (optimal breaking) | 33ms | 50 paragraphs | 0.66ms |
+| OpenType heavy (shaping) | 204ms | 1250 lines | 0.16ms |
 
 Text flow uses Charter font which has **no GSUB table** - it skips shaping entirely. The line breaking algorithm itself is very efficient.
 
@@ -238,6 +250,7 @@ zig build perf -- --pages=10 --iterations=1
 
 ## Files Modified
 
+- `src/ttf.zig` - Cmap subtable cache, ASCII glyph lookup table
 - `src/opentype.zig` - Scratch buffers, fast-path matching, pre-allocation, kerning cache, calt rule index
 - `src/embedded.zig` - Scratch buffers, O(1) lookup, cached kern/mark flags, output allocator parameter
 - `src/zpdf.zig` - Fast soft-hyphen check, early exit kerning check, fast hex conversion, output timing instrumentation, page arena allocator

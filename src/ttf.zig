@@ -24,6 +24,14 @@ pub const Font = struct {
     hhea: ?HheaTable = null,
     maxp: ?MaxpTable = null,
 
+    // Cached cmap lookup (avoids subtable search on every glyph lookup)
+    cmap_subtable_offset: u32 = 0,
+    cmap_format: u16 = 0,
+
+    // ASCII glyph cache for O(1) lookup of common characters
+    ascii_glyphs: [128]u16 = [_]u16{0} ** 128,
+    has_ascii_cache: bool = false,
+
     /// Load a font from file
     pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !struct { font: Font, data: []const u8 } {
         const file = try std.fs.cwd().openFile(path, .{});
@@ -69,7 +77,60 @@ pub const Font = struct {
         font.hhea = font.parseHhea();
         font.maxp = font.parseMaxp();
 
+        // Initialize cmap cache for fast glyph lookups
+        font.initCmapCache();
+
         return font;
+    }
+
+    /// Initialize cmap cache - find best subtable once, cache ASCII glyphs
+    fn initCmapCache(self: *Font) void {
+        const cmap_data = self.getTable("cmap".*) orelse return;
+        if (cmap_data.len < 4) return;
+
+        const num_tables = readU16(cmap_data, 2);
+
+        // Find best subtable (prefer format 12 for full Unicode, then format 4)
+        var i: usize = 0;
+        while (i < num_tables) : (i += 1) {
+            const record_offset = 4 + i * 8;
+            if (record_offset + 8 > cmap_data.len) break;
+
+            const platform_id = readU16(cmap_data, record_offset);
+            const encoding_id = readU16(cmap_data, record_offset + 2);
+            const subtable_offset = readU32(cmap_data, record_offset + 4);
+
+            // Accept Unicode platforms
+            const is_unicode = (platform_id == 0) or
+                (platform_id == 3 and (encoding_id == 1 or encoding_id == 10));
+
+            if (is_unicode and subtable_offset < cmap_data.len) {
+                const format = readU16(cmap_data, subtable_offset);
+                // Prefer format 12 (full Unicode) over format 4 (BMP only)
+                if (format == 12) {
+                    self.cmap_subtable_offset = subtable_offset;
+                    self.cmap_format = 12;
+                    break; // Best possible
+                } else if (format == 4 and self.cmap_format == 0) {
+                    self.cmap_subtable_offset = subtable_offset;
+                    self.cmap_format = 4;
+                }
+            }
+        }
+
+        // Populate ASCII cache if we found a valid subtable
+        if (self.cmap_format != 0) {
+            const subtable_data = cmap_data[self.cmap_subtable_offset..];
+            for (0..128) |cp| {
+                const gid = switch (self.cmap_format) {
+                    4 => parseCmapFormat4(subtable_data, @intCast(cp)),
+                    12 => parseCmapFormat12(subtable_data, @intCast(cp)),
+                    else => null,
+                };
+                self.ascii_glyphs[cp] = gid orelse 0;
+            }
+            self.has_ascii_cache = true;
+        }
     }
 
     /// Check if this is a CFF-based font (OTF with PostScript outlines)
@@ -153,6 +214,24 @@ pub const Font = struct {
 
     /// Get glyph ID for a Unicode codepoint
     pub fn getGlyphId(self: *const Font, codepoint: u21) ?u16 {
+        // Fast path: ASCII cache (O(1) lookup for most text)
+        if (self.has_ascii_cache and codepoint < 128) {
+            const gid = self.ascii_glyphs[codepoint];
+            return if (gid != 0) gid else null;
+        }
+
+        // Use cached subtable if available (skips subtable search)
+        if (self.cmap_format != 0) {
+            const cmap_data = self.getTable("cmap".*) orelse return null;
+            const subtable_data = cmap_data[self.cmap_subtable_offset..];
+            return switch (self.cmap_format) {
+                4 => parseCmapFormat4(subtable_data, codepoint),
+                12 => parseCmapFormat12(subtable_data, codepoint),
+                else => null,
+            };
+        }
+
+        // Fallback: full cmap lookup (only if cache wasn't initialized)
         const cmap_data = self.getTable("cmap".*) orelse return null;
         return parseCmapLookup(cmap_data, codepoint);
     }
