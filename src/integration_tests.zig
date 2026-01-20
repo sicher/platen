@@ -325,7 +325,12 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_zero.encoding = .identity;
     inter_zero.setFeature(.zero, true);
 
-    // Case-sensitive forms comparison (case is OFF by default)
+    // Case-sensitive forms comparison - need calt OFF for proper OFF display
+    // (calt contextually applies case-like substitutions near uppercase)
+    const inter_nocalt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_nocalt.encoding = .identity;
+    inter_nocalt.setFeature(.calt, false);
+
     const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
     inter_case.encoding = .identity;
     inter_case.setFeature(.case, true);
@@ -489,39 +494,40 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Slashed Zero (zero)");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(175, y, "OFF:");
+    try doc.writeAt(180, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(200, y, "0 10 20 100");
+    try doc.writeAt(210, y, "0 10 200");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(295, y, "ON:");
+    try doc.writeAt(310, y, "ON:");
     try doc.setEmbeddedFont(inter_zero, 12);
-    try doc.writeAt(316, y, "0 10 20 100");
+    try doc.writeAt(335, y, "0 10 200");
     y += 18;
 
     // --- Case-Sensitive Forms (case) ---
+    // Note: calt OFF needed because calt contextually applies case-like substitutions
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Case-Sensitive (case)");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(175, y, "OFF:");
-    try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(200, y, "A@B 3+9\xe2\x89\x8812*1"); // ≈ is U+2248 = E2 89 88
+    try doc.writeAt(180, y, "OFF:");
+    try doc.setEmbeddedFont(inter_nocalt, 12);
+    try doc.writeAt(210, y, "(A) [B] @");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(320, y, "ON:");
+    try doc.writeAt(310, y, "ON:");
     try doc.setEmbeddedFont(inter_case, 12);
-    try doc.writeAt(340, y, "A@B 3+9\xe2\x89\x8812*1");
+    try doc.writeAt(335, y, "(A) [B] @");
     y += 18;
 
-    // --- Stylistic Set 1 (ss01) ---
+    // --- Stylistic Set 1 (ss01) - alternate digits ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Stylistic Set 1 (ss01)");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(175, y, "OFF:");
+    try doc.writeAt(180, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(200, y, "3 4 6 9 a g");
+    try doc.writeAt(210, y, "3 4 6 9");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(295, y, "ON:");
+    try doc.writeAt(310, y, "ON:");
     try doc.setEmbeddedFont(inter_ss01, 12);
-    try doc.writeAt(316, y, "3 4 6 9 a g");
+    try doc.writeAt(335, y, "3 4 6 9");
     y += 22;
 
     // ===== Unicode Coverage =====
