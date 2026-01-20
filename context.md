@@ -4,6 +4,11 @@
 OpenType features all working: liga, dlig (with chain context), clig, hlig, kern, mark, mkmk, calt, tnum, pnum, frac, zero, case, ss01. Ready for graphics support or more stylistic sets (ss02-08).
 
 ## What We Did (Session 2026-01-20 #34) [COMPLETE]
+- **Fixed zero/case/ss01 features not being applied**:
+  - Root cause 1: parseGSUB didn't call parseGSUBFeature for zero, case, ss01
+  - Root cause 2: embedded.zig needs_ot check didn't include new features
+  - Root cause 3: has_gsub checks didn't trigger applyGSUBWithFlags for new features
+  - Added all new features to needs_ot and has_gsub checks in embedded.zig
 - **Added OpenType figure/number features to inter_fonts test**:
   - dlig: Added chain context support for f/t variants (ff fi ffi ft tt tf rf rt vf wt), interrobangs (!? → ‽)
   - tnum/pnum: Tabular vs proportional figures side-by-side comparison
