@@ -69,6 +69,11 @@ pub const EmbeddedFont = struct {
     cid_used_glyphs: std.AutoArrayHashMapUnmanaged(u21, u16) = .{},
     cid_glyph_widths: std.AutoArrayHashMapUnmanaged(u16, u16) = .{}, // GID → width in 1/1000 em
 
+    // Glyph → codepoint mapping for ToUnicode (handles calt contextual variants)
+    // Key: glyph ID, Value: Unicode codepoint that produced this glyph
+    // Needed because calt can produce different glyphs for the same codepoint in different contexts
+    glyph_to_codepoint: std.AutoArrayHashMapUnmanaged(u16, u21) = .{},
+
     // Glyph ID remapping for compact CFF subsets (original GID → new compact GID)
     // Only populated for CFF fonts with subsetting enabled
     gid_remap: std.AutoArrayHashMapUnmanaged(u16, u16) = .{},
@@ -77,9 +82,17 @@ pub const EmbeddedFont = struct {
     ot_features: ?*opentype.OpenTypeFeatures = null,
     feature_flags: opentype.FeatureFlags = .{}, // liga=on, kern=on by default
 
+    // Cached flags for fast render-time checks (set by initOpenTypeFeatures)
+    has_kern_data: bool = false, // True if font has ANY kerning pairs
+    has_mark_data: bool = false, // True if font has ANY mark positioning
+
     // Ligature glyph → original codepoints mapping for ToUnicode CMap
     // Key: ligature glyph ID (original), Value: array of codepoints that form it
-    ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .{}
+    ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .{},
+
+    // Scratch buffers for shaping (reused across calls to avoid allocations)
+    scratch_codepoints: std.ArrayListUnmanaged(u21) = .{},
+    scratch_glyphs: std.ArrayListUnmanaged(u16) = .{}
 }
 ```
 
@@ -260,9 +273,13 @@ pub fn markCharsUsed(self: *EmbeddedFont, text: []const u8) void
 Mark Unicode codepoints as used (CID mode)
 Parses UTF-8 text and records Unicode→GlyphID mappings
 Applies ligature substitution if enabled
+Mark Unicode characters as used for subsetting and return the computed glyph sequence.
+Returns the final glyph sequence (caller owns the memory) for caching.
+Mark unicode chars as used for subsetting and return glyph IDs.
+output_allocator: allocator for the returned glyph slice (if null, uses self.allocator)
 
 ```zig
-pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8) !void
+pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8, output_allocator: ?std.mem.Allocator) ![]u16
 ```
 
 #### `measureTextWidth`

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>layout - zpdf API</title>
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #222;
+            --code-bg: #f5f5f5;
+            --link: #0066cc;
+            --border: #ddd;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a1a;
+                --fg: #e0e0e0;
+                --code-bg: #2d2d2d;
+                --link: #6db3f2;
+                --border: #444;
+            }
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: var(--bg);
+            color: var(--fg);
+        }
+        nav {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        nav a {
+            margin-right: 1rem;
+            color: var(--link);
+            text-decoration: none;
+        }
+        nav a:hover {
+            text-decoration: underline;
+        }
+        h1, h2, h3 {
+            margin-top: 2rem;
+        }
+        h1 {
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        code {
+            font-family: "SF Mono", Consolas, monospace;
+            font-size: 0.9em;
+            background: var(--code-bg);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 1rem;
+            overflow-x: auto;
+            border-radius: 5px;
+        }
+        pre code {
+            padding: 0;
+            background: none;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1rem 0;
+        }
+        th, td {
+            border: 1px solid var(--border);
+            padding: 0.5rem;
+            text-align: left;
+        }
+        th {
+            background: var(--code-bg);
+        }
+        a {
+            color: var(--link);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <strong>zpdf API:</strong>
+        <a href="index.html">Index</a>
+        <a href="zpdf.html">zpdf</a>
+        <a href="embedded.html">embedded</a>
+        <a href="fonts.html">fonts</a>
+        <a href="metrics.html">metrics</a>
+        <a href="objects.html">objects</a>
+        <a href="writer.html">writer</a>
+    </nav>
+    <h1 id="layout">layout</h1>
+<p>Layout types for zpdf - regions, alignment, margins, and page sizes.</p>
+<h2 id="enums">Enums</h2>
+<h3 id="align"><code>Align</code></h3>
+<p>Horizontal text alignment.</p>
+<pre><code class="language-zig">pub const Align = enum {
+    left,
+    center,
+    right,
+    justify,
+}
+</code></pre>
+<h3 id="drawstyle"><code>DrawStyle</code></h3>
+<p>Drawing style for shapes.</p>
+<pre><code class="language-zig">pub const DrawStyle = enum {
+    /// Only stroke the outline (S operator).
+    stroke,
+    /// Only fill the interior (f operator).
+    fill,
+    /// Fill and stroke (B operator).
+    fill_stroke,
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fill</code></td>
+<td>Only fill the interior (f operator).</td>
+</tr>
+<tr>
+<td><code>fill_stroke</code></td>
+<td>Fill and stroke (B operator).</td>
+</tr>
+<tr>
+<td><code>stroke</code></td>
+<td>Only stroke the outline (S operator).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="linebreaking"><code>LineBreaking</code></h3>
+<p>Line breaking algorithm for paragraph layout.</p>
+<pre><code class="language-zig">pub const LineBreaking = enum {
+    /// Greedy algorithm: fill each line as much as possible before moving to next.
+    /// Fast but can produce uneven line lengths.
+    greedy,
+    /// Knuth-Plass optimal algorithm: minimize total &quot;badness&quot; across all lines.
+    /// Considers entire paragraph to produce more balanced line lengths.
+    optimal,
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>greedy</code></td>
+<td>Greedy algorithm: fill each line as much as possible before moving to next.</td>
+</tr>
+<tr>
+<td>Fast but can produce uneven line lengths.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>optimal</code></td>
+<td>Knuth-Plass optimal algorithm: minimize total "badness" across all lines.</td>
+</tr>
+<tr>
+<td>Considers entire paragraph to produce more balanced line lengths.</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="linecap"><code>LineCap</code></h3>
+<p>Line cap style (PDF J operator).</p>
+<pre><code class="language-zig">pub const LineCap = enum(u8) {
+    /// Butt cap: line ends at endpoint.
+    butt = 0,
+    /// Round cap: semicircle at endpoint.
+    round = 1,
+    /// Square cap: half-width square at endpoint.
+    square = 2,
+}
+</code></pre>
+<h3 id="linejoin"><code>LineJoin</code></h3>
+<p>Line join style (PDF j operator).</p>
+<pre><code class="language-zig">pub const LineJoin = enum(u8) {
+    /// Miter join: sharp corner.
+    miter = 0,
+    /// Round join: circular arc at corner.
+    round = 1,
+    /// Bevel join: diagonal cut at corner.
+    bevel = 2,
+}
+</code></pre>
+<h3 id="valign"><code>VAlign</code></h3>
+<p>Vertical text alignment within line height.</p>
+<pre><code class="language-zig">pub const VAlign = enum {
+    /// Baseline at content_y + font_size (simple, no leading adjustment).
+    top,
+    /// Baseline centered: content_y + font_size - leading/2 (fpdf2 compatible).
+    middle,
+    /// Baseline at content_y + line_height (text sits on bottom edge).
+    bottom,
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bottom</code></td>
+<td>Baseline at content_y + line_height (text sits on bottom edge).</td>
+</tr>
+<tr>
+<td><code>middle</code></td>
+<td>Baseline centered: content_y + font_size - leading/2 (fpdf2 compatible).</td>
+</tr>
+<tr>
+<td><code>top</code></td>
+<td>Baseline at content_y + font_size (simple, no leading adjustment).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="structs">Structs</h2>
+<h3 id="border"><code>Border</code></h3>
+<p>Border specification for regions.</p>
+<pre><code class="language-zig">pub const Border = struct {
+    top: bool = false,
+    bottom: bool = false,
+    left: bool = false,
+    right: bool = false,
+
+    pub const none = Border{};
+    pub const all = Border{ .top = true, .bottom = true, .left = true, .right = true };
+}
+</code></pre>
+<h3 id="dashpattern"><code>DashPattern</code></h3>
+<p>Dash pattern for stroked lines (PDF d operator).</p>
+<pre><code class="language-zig">pub const DashPattern = struct {
+    /// Length of dash in points (0 = solid line).
+    dash: f64 = 0,
+    /// Length of gap in points.
+    gap: f64 = 0,
+    /// Phase offset in points.
+    phase: f64 = 0,
+
+    /// Solid line (no dashing).
+    pub const solid = DashPattern{};
+}
+</code></pre>
+<h3 id="flowoptions"><code>FlowOptions</code></h3>
+<p>Options for writeFlow (auto-pagination).</p>
+<pre><code class="language-zig">pub const FlowOptions = struct {
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+    /// First line indent in points.
+    first_indent: f64 = 0,
+}
+</code></pre>
+<h3 id="lineoptions"><code>LineOptions</code></h3>
+<p>Options for writeLine (single line, no wrap).</p>
+<pre><code class="language-zig">pub const LineOptions = struct {
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+}
+</code></pre>
+<h3 id="margins"><code>Margins</code></h3>
+<p>Document margins in points.</p>
+<pre><code class="language-zig">pub const Margins = struct {
+    left: f64 = 72,
+    right: f64 = 72,
+    top: f64 = 72,
+    bottom: f64 = 72,
+}
+</code></pre>
+<h3 id="padding"><code>Padding</code></h3>
+<p>Region padding in points (defaults to zero).</p>
+<pre><code class="language-zig">pub const Padding = struct {
+    left: f64 = 0,
+    right: f64 = 0,
+    top: f64 = 0,
+    bottom: f64 = 0,
+}
+</code></pre>
+<h3 id="pagesize"><code>PageSize</code></h3>
+<p>Page size in points (1 point = 1/72 inch)</p>
+<pre><code class="language-zig">pub const PageSize = struct {
+    width: f64,
+    height: f64,
+
+    pub const A4 = PageSize{ .width = 595.28, .height = 841.89 };
+    pub const Letter = PageSize{ .width = 612, .height = 792 };
+}
+</code></pre>
+<h3 id="paragraphoptions"><code>ParagraphOptions</code></h3>
+<p>Options for writeParagraph (wrapped text).</p>
+<pre><code class="language-zig">pub const ParagraphOptions = struct {
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+    /// First line indent in points.
+    first_indent: f64 = 0,
+    /// Allow breaking after regular hyphens in compound words (e.g., &quot;state-of-the-art&quot;).
+    /// Default true. Set false for fpdf2 compatibility (only soft-hyphens break).
+    break_on_hyphens: bool = true,
+    /// Line breaking algorithm. Greedy is fast, optimal (Knuth-Plass) produces better results.
+    line_breaking: LineBreaking = .greedy,
+}
+</code></pre>
+<h3 id="region"><code>Region</code></h3>
+<p>Rectangular area for content placement with cursor tracking.</p>
+<pre><code class="language-zig">pub const Region = struct {
+    /// Left edge x coordinate.
+    x: f64,
+    /// Top edge y coordinate (from page top).
+    y: f64,
+    /// Region width.
+    width: f64,
+    /// Region height.
+    height: f64,
+    /// Current cursor y position within content area (relative to top padding).
+    cursor_y: f64 = 0,
+    /// Inner padding (content inset from region edges).
+    padding: Padding = .{},
+    /// Border styling.
+    border: Border = .{},
+    /// Background fill color.
+    fill: ?Color = null
+}
+</code></pre>
+<h4 id="contentwidth"><code>contentWidth</code></h4>
+<p>Returns usable width inside padding.</p>
+<pre><code class="language-zig">pub fn contentWidth(self: Region) f64
+</code></pre>
+<h4 id="fits"><code>fits</code></h4>
+<p>Returns true if the given metrics fit in remaining space.</p>
+<pre><code class="language-zig">pub fn fits(self: Region, m: TextMetrics) bool
+</code></pre>
+<h4 id="remainingheight"><code>remainingHeight</code></h4>
+<p>Returns remaining height in content area.</p>
+<pre><code class="language-zig">pub fn remainingHeight(self: Region) f64
+</code></pre>
+<h3 id="writeresult"><code>WriteResult</code></h3>
+<p>Result of writeLine or writeParagraph.</p>
+<pre><code class="language-zig">pub const WriteResult = struct {
+    /// Number of lines rendered.
+    lines_written: usize,
+    /// Text that didn't fit, or null if all text was written.
+    overflow: ?[]const u8,
+}
+</code></pre>
+<h2 id="constants">Constants</h2>
+<h3 id="color"><code>Color</code></h3>
+<pre><code class="language-zig">pub const Color = color.Color;
+</code></pre>
+<h3 id="textmetrics"><code>TextMetrics</code></h3>
+<pre><code class="language-zig">pub const TextMetrics = metrics.TextMetrics;
+</code></pre>
+</body>
+</html>

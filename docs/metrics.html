@@ -101,6 +101,38 @@
 <p>Character widths are in 1000ths of an em (1 em = font size).
 To get actual width in points: width * font_size / 1000</p>
 <h2 id="structs">Structs</h2>
+<h3 id="fontmetrics"><code>FontMetrics</code></h3>
+<p>Font metrics scaled to a specific font size (in points).
+All values are in points at the given font size.</p>
+<pre><code class="language-zig">pub const FontMetrics = struct {
+    /// Distance from baseline to top of tallest glyph (positive, in points)
+    ascender: f64,
+    /// Distance from baseline to bottom of lowest glyph (negative, in points)
+    descender: f64,
+    /// Height of capital letters (in points)
+    cap_height: f64,
+    /// Height of lowercase 'x' (in points, estimated if not available)
+    x_height: f64,
+    /// The font size these metrics are scaled to
+    font_size: f64,
+    /// Units per em in the original font (useful for advanced calculations)
+    units_per_em: u16
+}
+</code></pre>
+<h4 id="lineheight"><code>lineHeight</code></h4>
+<p>Total line height from ascender to descender</p>
+<pre><code class="language-zig">pub fn lineHeight(self: FontMetrics) f64
+</code></pre>
+<h3 id="standardfontmetrics"><code>StandardFontMetrics</code></h3>
+<p>Standard font metrics in 1000 units per em (PDF standard)
+These are typical values for the Adobe base 14 fonts</p>
+<pre><code class="language-zig">pub const StandardFontMetrics = struct {
+    ascender: i16,
+    descender: i16,
+    cap_height: i16,
+    x_height: i16,
+}
+</code></pre>
 <h3 id="textmetrics"><code>TextMetrics</code></h3>
 <p>Text measurement result</p>
 <pre><code class="language-zig">pub const TextMetrics = struct {
@@ -128,6 +160,10 @@ To get actual width in points: width * font_size / 1000</p>
 <h3 id="charwidth"><code>charWidth</code></h3>
 <p>Get character width for a font (in 1000ths of an em)</p>
 <pre><code class="language-zig">pub fn charWidth(font: fonts.StandardFont, char: u8) u16
+</code></pre>
+<h3 id="getstandardfontmetrics"><code>getStandardFontMetrics</code></h3>
+<p>Get metrics for standard fonts (in 1000 units)</p>
+<pre><code class="language-zig">pub fn getStandardFontMetrics(font: fonts.StandardFont) StandardFontMetrics
 </code></pre>
 <h3 id="measuretext"><code>measureText</code></h3>
 <p>Measure text and return full metrics</p>

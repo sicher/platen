@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>document - zpdf API</title>
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #222;
+            --code-bg: #f5f5f5;
+            --link: #0066cc;
+            --border: #ddd;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a1a;
+                --fg: #e0e0e0;
+                --code-bg: #2d2d2d;
+                --link: #6db3f2;
+                --border: #444;
+            }
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: var(--bg);
+            color: var(--fg);
+        }
+        nav {
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        nav a {
+            margin-right: 1rem;
+            color: var(--link);
+            text-decoration: none;
+        }
+        nav a:hover {
+            text-decoration: underline;
+        }
+        h1, h2, h3 {
+            margin-top: 2rem;
+        }
+        h1 {
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        code {
+            font-family: "SF Mono", Consolas, monospace;
+            font-size: 0.9em;
+            background: var(--code-bg);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+        }
+        pre {
+            background: var(--code-bg);
+            padding: 1rem;
+            overflow-x: auto;
+            border-radius: 5px;
+        }
+        pre code {
+            padding: 0;
+            background: none;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1rem 0;
+        }
+        th, td {
+            border: 1px solid var(--border);
+            padding: 0.5rem;
+            text-align: left;
+        }
+        th {
+            background: var(--code-bg);
+        }
+        a {
+            color: var(--link);
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <strong>zpdf API:</strong>
+        <a href="index.html">Index</a>
+        <a href="zpdf.html">zpdf</a>
+        <a href="embedded.html">embedded</a>
+        <a href="fonts.html">fonts</a>
+        <a href="metrics.html">metrics</a>
+        <a href="objects.html">objects</a>
+        <a href="writer.html">writer</a>
+    </nav>
+    <h1 id="document">document</h1>
+<p>Document struct for zpdf - PDF document creation and management.</p>
+<p>This module contains the core Document type that handles page management,
+text rendering, font handling, and PDF output generation.</p>
+<h2 id="imports">Imports</h2>
+<pre><code class="language-zig">pub const Writer = @import(&quot;writer.zig&quot;).Writer;
+pub const color = @import(&quot;color.zig&quot;);
+pub const embedded = @import(&quot;embedded.zig&quot;);
+pub const fonts = @import(&quot;fonts.zig&quot;);
+pub const layout = @import(&quot;layout.zig&quot;);
+pub const metrics = @import(&quot;metrics.zig&quot;);
+pub const objects = @import(&quot;objects.zig&quot;);
+pub const ttf = @import(&quot;ttf.zig&quot;);
+pub const zlib = @import(&quot;zlib.zig&quot;);
+</code></pre>
+<h2 id="structs">Structs</h2>
+<h3 id="document_1"><code>Document</code></h3>
+<p>PDF Document</p>
+<pre><code class="language-zig">pub const Document = struct {
+    allocator: std.mem.Allocator,
+    pages: std.ArrayListUnmanaged(Page),
+    page_size: PageSize,
+    /// Document margins.
+    margins: Margins = .{},
+    // Text state
+    current_font: ?StandardFont = null,
+    current_embedded: ?*EmbeddedFont = null,
+    font_size: f64 = 12,
+    x: f64 = 0,
+    y: f64 = 0,
+    /// Extra space between characters (in points). Can be negative.
+    char_spacing: f64 = 0,
+    /// Line height as multiple of font size. Default 1.2 (20% leading).
+    line_height: f64 = 1.2,
+    /// Text color (default black).
+    text_color: Color = Color.black,
+    /// Fill color for shapes (default black).
+    fill_color: Color = Color.black,
+    /// Stroke/draw color for lines and borders (default black).
+    draw_color: Color = Color.black,
+    /// Line width for strokes in points (default 0.567pt = 0.2mm, fpdf2 default).
+    line_width: f64 = 0.567,
+    /// Dash pattern for stroked lines.
+    dash_pattern: layout.DashPattern = .{},
+    /// Line cap style (fpdf2 default is square/projecting).
+    line_cap: layout.LineCap = .square,
+    /// Line join style.
+    line_join: layout.LineJoin = .miter,
+    // Track all fonts used across document
+    used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
+    // Track all embedded fonts
+    embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .{}
+}
+</code></pre>
+<h4 id="addpage"><code>addPage</code></h4>
+<p>Add a new page</p>
+<pre><code class="language-zig">pub fn addPage(self: *Document) !void
+</code></pre>
+<h4 id="deinit"><code>deinit</code></h4>
+<pre><code class="language-zig">pub fn deinit(self: *Document) void
+</code></pre>
+<h4 id="drawcircle"><code>drawCircle</code></h4>
+<p>Draw a circle (special case of ellipse).
+Parameters match fpdf2: (x, y) is the CENTER of the circle, radius is the circle radius.
+Coordinates are from top-left origin.</p>
+<pre><code class="language-zig">pub fn drawCircle(self: *Document, x: f64, y: f64, radius: f64, style: DrawStyle) !void
+</code></pre>
+<h4 id="drawellipse"><code>drawEllipse</code></h4>
+<p>Draw an ellipse using 4 cubic Bezier curves.
+Parameters match fpdf2: (x, y) is upper-left of bounding box, (w, h) is full width/height.
+Coordinates are from top-left origin.</p>
+<pre><code class="language-zig">pub fn drawEllipse(self: *Document, x: f64, y: f64, w: f64, h: f64, style: DrawStyle) !void
+</code></pre>
+<h4 id="drawline"><code>drawLine</code></h4>
+<p>Draw a line between two points.
+Coordinates are from top-left origin.</p>
+<pre><code class="language-zig">pub fn drawLine(self: *Document, x1: f64, y1: f64, x2: f64, y2: f64) !void
+</code></pre>
+<h4 id="drawpolygon"><code>drawPolygon</code></h4>
+<p>Draw a closed polygon.
+Coordinates are from top-left origin.</p>
+<pre><code class="language-zig">pub fn drawPolygon(self: *Document, points: []const Point, style: DrawStyle) !void
+</code></pre>
+<h4 id="drawrect"><code>drawRect</code></h4>
+<p>Draw a rectangle.
+Coordinates are from top-left origin.</p>
+<pre><code class="language-zig">pub fn drawRect(self: *Document, x: f64, y: f64, w: f64, h: f64, style: DrawStyle) !void
+</code></pre>
+<h4 id="drawregion"><code>drawRegion</code></h4>
+<p>Draws a region's border and fill (without text).</p>
+<pre><code class="language-zig">pub fn drawRegion(self: *Document, region: Region) !void
+</code></pre>
+<h4 id="findhyphenbreak"><code>findHyphenBreak</code></h4>
+<p>Find a regular hyphen break point in a word that fits within max_width.
+Regular hyphens stay visible; we break AFTER the hyphen (e.g., "state-" / "of-the-art").
+Returns the byte position after the hyphen where to split.</p>
+<pre><code class="language-zig">pub fn findHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize
+</code></pre>
+<h4 id="findsofthyphenbreak"><code>findSoftHyphenBreak</code></h4>
+<p>Find a soft-hyphen break point in a word that fits within max_width.
+Soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) marks optional break points.
+Returns the byte position where to break (soft-hyphen will be replaced with visible hyphen).</p>
+<pre><code class="language-zig">pub fn findSoftHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize
+</code></pre>
+<h4 id="getfontmetrics"><code>getFontMetrics</code></h4>
+<p>Get font metrics for the current font, scaled to the current font size.
+Returns metrics in points at the current font size.</p>
+<pre><code class="language-zig">pub fn getFontMetrics(self: *Document) FontMetrics
+</code></pre>
+<h4 id="getlineheightpts"><code>getLineHeightPts</code></h4>
+<p>Get current line height in points</p>
+<pre><code class="language-zig">pub fn getLineHeightPts(self: *Document) f64
+</code></pre>
+<h4 id="getpageregion"><code>getPageRegion</code></h4>
+<p>Returns a region for the current page respecting document margins.</p>
+<pre><code class="language-zig">pub fn getPageRegion(self: *Document) Region
+</code></pre>
+<h4 id="gettextstyle"><code>getTextStyle</code></h4>
+<p>Get current text style for measurement</p>
+<pre><code class="language-zig">pub fn getTextStyle(self: *Document) TextStyle
+</code></pre>
+<h4 id="gettextwidth"><code>getTextWidth</code></h4>
+<p>Measures text width using current font (standard or embedded).
+Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.</p>
+<pre><code class="language-zig">pub fn getTextWidth(self: *Document, str: []const u8) f64
+</code></pre>
+<h4 id="getx"><code>getX</code></h4>
+<p>Get current X position</p>
+<pre><code class="language-zig">pub fn getX(self: *Document) f64
+</code></pre>
+<h4 id="gety"><code>getY</code></h4>
+<p>Get current Y position (from top)</p>
+<pre><code class="language-zig">pub fn getY(self: *Document) f64
+</code></pre>
+<h4 id="init"><code>init</code></h4>
+<pre><code class="language-zig">pub fn init(allocator: std.mem.Allocator) Document
+</code></pre>
+<h4 id="loadfont"><code>loadFont</code></h4>
+<p>Load a TrueType font from file</p>
+<pre><code class="language-zig">pub fn loadFont(self: *Document, path: []const u8) !*EmbeddedFont
+</code></pre>
+<h4 id="measuretext"><code>measureText</code></h4>
+<p>Measure text dimensions without rendering</p>
+<pre><code class="language-zig">pub fn measureText(self: *Document, text_str: []const u8) TextMetrics
+</code></pre>
+<h4 id="measuretextwidth"><code>measureTextWidth</code></h4>
+<p>Measure text width in points</p>
+<pre><code class="language-zig">pub fn measureTextWidth(self: *Document, text_str: []const u8) f64
+</code></pre>
+<h4 id="output"><code>output</code></h4>
+<p>Generate PDF output</p>
+<pre><code class="language-zig">pub fn output(self: *Document) ![]u8
+</code></pre>
+<h4 id="renderpagecommands"><code>renderPageCommands</code></h4>
+<p>Render deferred commands to page content bytes
+Called after subsetting so glyph IDs are properly remapped</p>
+<pre><code class="language-zig">pub fn renderPageCommands(self: *Document, page: *Page) !void
+</code></pre>
+<h4 id="setcharspacing"><code>setCharSpacing</code></h4>
+<p>Set character spacing (extra space between characters, in points)</p>
+<pre><code class="language-zig">pub fn setCharSpacing(self: *Document, spacing: f64) void
+</code></pre>
+<h4 id="setdashpattern"><code>setDashPattern</code></h4>
+<p>Set dash pattern for stroked lines.</p>
+<pre><code class="language-zig">pub fn setDashPattern(self: *Document, dash: f64, gap: f64, phase: f64) void
+</code></pre>
+<h4 id="setdrawcolor"><code>setDrawColor</code></h4>
+<p>Set draw/stroke color (for lines and borders).</p>
+<pre><code class="language-zig">pub fn setDrawColor(self: *Document, c: Color) void
+</code></pre>
+<h4 id="setembeddedfont"><code>setEmbeddedFont</code></h4>
+<p>Set an embedded font as current</p>
+<pre><code class="language-zig">pub fn setEmbeddedFont(self: *Document, font: *EmbeddedFont, size: f64) !void
+</code></pre>
+<h4 id="setfeature"><code>setFeature</code></h4>
+<p>Set OpenType feature for all embedded fonts
+Example: doc.setFeature(.liga, false) to disable ligatures</p>
+<pre><code class="language-zig">pub fn setFeature(self: *Document, feature: opentype.Feature, enabled: bool) void
+</code></pre>
+<h4 id="setfillcolor"><code>setFillColor</code></h4>
+<p>Set fill color (for shapes and backgrounds).</p>
+<pre><code class="language-zig">pub fn setFillColor(self: *Document, c: Color) void
+</code></pre>
+<h4 id="setfont"><code>setFont</code></h4>
+<p>Set the current font and size (standard font)</p>
+<pre><code class="language-zig">pub fn setFont(self: *Document, font: StandardFont, size: f64) !void
+</code></pre>
+<h4 id="setfontfeature"><code>setFontFeature</code></h4>
+<p>Set OpenType feature for a specific embedded font</p>
+<pre><code class="language-zig">pub fn setFontFeature(self: *Document, font: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void
+</code></pre>
+<h4 id="setlinecap"><code>setLineCap</code></h4>
+<p>Set line cap style.</p>
+<pre><code class="language-zig">pub fn setLineCap(self: *Document, cap: LineCap) void
+</code></pre>
+<h4 id="setlineheight"><code>setLineHeight</code></h4>
+<p>Set line height (as multiple of font size, e.g. 1.2 = 120%)</p>
+<pre><code class="language-zig">pub fn setLineHeight(self: *Document, height: f64) void
+</code></pre>
+<h4 id="setlinejoin"><code>setLineJoin</code></h4>
+<p>Set line join style.</p>
+<pre><code class="language-zig">pub fn setLineJoin(self: *Document, join: LineJoin) void
+</code></pre>
+<h4 id="setlinewidth"><code>setLineWidth</code></h4>
+<p>Set line width for strokes (in points).</p>
+<pre><code class="language-zig">pub fn setLineWidth(self: *Document, width: f64) void
+</code></pre>
+<h4 id="setmargins"><code>setMargins</code></h4>
+<p>Set document margins.</p>
+<pre><code class="language-zig">pub fn setMargins(self: *Document, m: Margins) void
+</code></pre>
+<h4 id="setsolidline"><code>setSolidLine</code></h4>
+<p>Reset to solid line (no dashing).</p>
+<pre><code class="language-zig">pub fn setSolidLine(self: *Document) void
+</code></pre>
+<h4 id="settextcolor"><code>setTextColor</code></h4>
+<p>Set text color.</p>
+<pre><code class="language-zig">pub fn setTextColor(self: *Document, c: Color) void
+</code></pre>
+<h4 id="setx"><code>setX</code></h4>
+<p>Set X position</p>
+<pre><code class="language-zig">pub fn setX(self: *Document, x: f64) void
+</code></pre>
+<h4 id="setxy"><code>setXY</code></h4>
+<p>Set current position (in points from top-left)</p>
+<pre><code class="language-zig">pub fn setXY(self: *Document, x: f64, y: f64) void
+</code></pre>
+<h4 id="sety"><code>setY</code></h4>
+<p>Set Y position (from top)</p>
+<pre><code class="language-zig">pub fn setY(self: *Document, y: f64) void
+</code></pre>
+<h4 id="write"><code>write</code></h4>
+<p>Writes text at the current cursor position.</p>
+<pre><code class="language-zig">pub fn write(self: *Document, str: []const u8) !void
+</code></pre>
+<h4 id="writeat"><code>writeAt</code></h4>
+<p>Writes text at the specified position.</p>
+<pre><code class="language-zig">pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !void
+</code></pre>
+<h4 id="writeflow"><code>writeFlow</code></h4>
+<p>Write text with automatic pagination.
+Creates new pages as needed to fit all text.</p>
+<pre><code class="language-zig">pub fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !usize
+</code></pre>
+<h4 id="writeline"><code>writeLine</code></h4>
+<p>Writes a single line of text into a region.
+Does not wrap text. Advances the region cursor by one line height.</p>
+<pre><code class="language-zig">pub fn writeLine(self: *Document, region: *Region, str: []const u8, opts: LineOptions) !WriteResult
+</code></pre>
+<h4 id="writeparagraph"><code>writeParagraph</code></h4>
+<p>Writes wrapped text into a region.
+Supports word wrapping, soft-hyphen breaking, and optional hyphenated word breaking.</p>
+<pre><code class="language-zig">pub fn writeParagraph(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult
+</code></pre>
+<h2 id="unions">Unions</h2>
+<h3 id="fonthandle"><code>FontHandle</code></h3>
+<p>Handle to a loaded font (either standard or embedded)</p>
+<pre><code class="language-zig">pub const FontHandle = union(enum) {
+    standard: StandardFont,
+    embedded: *EmbeddedFont
+}
+</code></pre>
+<h4 id="name"><code>name</code></h4>
+<pre><code class="language-zig">pub fn name(self: FontHandle) []const u8
+</code></pre>
+<h2 id="constants">Constants</h2>
+<h3 id="align"><code>Align</code></h3>
+<pre><code class="language-zig">pub const Align = layout.Align;
+</code></pre>
+<h3 id="border"><code>Border</code></h3>
+<pre><code class="language-zig">pub const Border = layout.Border;
+</code></pre>
+<h3 id="color"><code>Color</code></h3>
+<pre><code class="language-zig">pub const Color = color.Color;
+</code></pre>
+<h3 id="dashpattern"><code>DashPattern</code></h3>
+<pre><code class="language-zig">pub const DashPattern = layout.DashPattern;
+</code></pre>
+<h3 id="drawstyle"><code>DrawStyle</code></h3>
+<pre><code class="language-zig">pub const DrawStyle = layout.DrawStyle;
+</code></pre>
+<h3 id="embeddedfont"><code>EmbeddedFont</code></h3>
+<pre><code class="language-zig">pub const EmbeddedFont = embedded.EmbeddedFont;
+</code></pre>
+<h3 id="flowoptions"><code>FlowOptions</code></h3>
+<pre><code class="language-zig">pub const FlowOptions = layout.FlowOptions;
+</code></pre>
+<h3 id="font"><code>Font</code></h3>
+<pre><code class="language-zig">pub const Font = fonts.Font;
+</code></pre>
+<h3 id="fontmetrics"><code>FontMetrics</code></h3>
+<pre><code class="language-zig">pub const FontMetrics = metrics.FontMetrics;
+</code></pre>
+<h3 id="linebreaking"><code>LineBreaking</code></h3>
+<pre><code class="language-zig">pub const LineBreaking = layout.LineBreaking;
+</code></pre>
+<h3 id="linecap"><code>LineCap</code></h3>
+<pre><code class="language-zig">pub const LineCap = layout.LineCap;
+</code></pre>
+<h3 id="linejoin"><code>LineJoin</code></h3>
+<pre><code class="language-zig">pub const LineJoin = layout.LineJoin;
+</code></pre>
+<h3 id="lineoptions"><code>LineOptions</code></h3>
+<pre><code class="language-zig">pub const LineOptions = layout.LineOptions;
+</code></pre>
+<h3 id="margins"><code>Margins</code></h3>
+<pre><code class="language-zig">pub const Margins = layout.Margins;
+</code></pre>
+<h3 id="padding"><code>Padding</code></h3>
+<pre><code class="language-zig">pub const Padding = layout.Padding;
+</code></pre>
+<h3 id="pagesize"><code>PageSize</code></h3>
+<pre><code class="language-zig">pub const PageSize = layout.PageSize;
+</code></pre>
+<h3 id="paragraphoptions"><code>ParagraphOptions</code></h3>
+<pre><code class="language-zig">pub const ParagraphOptions = layout.ParagraphOptions;
+</code></pre>
+<h3 id="region"><code>Region</code></h3>
+<pre><code class="language-zig">pub const Region = layout.Region;
+</code></pre>
+<h3 id="standardfont"><code>StandardFont</code></h3>
+<pre><code class="language-zig">pub const StandardFont = fonts.StandardFont;
+</code></pre>
+<h3 id="textmetrics"><code>TextMetrics</code></h3>
+<pre><code class="language-zig">pub const TextMetrics = metrics.TextMetrics;
+</code></pre>
+<h3 id="textstyle"><code>TextStyle</code></h3>
+<pre><code class="language-zig">pub const TextStyle = metrics.TextStyle;
+</code></pre>
+<h3 id="valign"><code>VAlign</code></h3>
+<pre><code class="language-zig">pub const VAlign = layout.VAlign;
+</code></pre>
+<h3 id="writeresult"><code>WriteResult</code></h3>
+<pre><code class="language-zig">pub const WriteResult = layout.WriteResult;
+</code></pre>
+<h3 id="opentype"><code>opentype</code></h3>
+<pre><code class="language-zig">pub const opentype = embedded.opentype;
+</code></pre>
+</body>
+</html>

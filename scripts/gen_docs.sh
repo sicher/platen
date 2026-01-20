@@ -10,7 +10,7 @@ DOCS_DIR="docs"
 mkdir -p "$DOCS_DIR"
 
 # Source files to document
-SOURCES="src/zpdf.zig src/embedded.zig src/fonts.zig src/metrics.zig src/objects.zig src/writer.zig"
+SOURCES="src/zpdf.zig src/document.zig src/layout.zig src/embedded.zig src/fonts.zig src/metrics.zig src/objects.zig src/writer.zig"
 
 # Generate markdown for each module
 for src in $SOURCES; do
