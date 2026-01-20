@@ -394,10 +394,8 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     // Stacked marks (mark-to-mark): ẳ ế ộ ỗ (Vietnamese with double diacritics)
     try doc.setEmbeddedFont(inter_bold, 9);
     try doc.writeAt(50, y, "Stacked:");
-    try doc.setEmbeddedFont(inter_no_mark, 12);
-    try doc.writeAt(80, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97"); // ẳ ế ộ ỗ
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(330, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97");
+    try doc.writeAt(330, y, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97"); // ẳ ế ộ ỗ
     y += 16;
 
     // --- Contextual Alternates (calt) ---
