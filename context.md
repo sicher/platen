@@ -1,7 +1,17 @@
 # zpdf Context
 
 ## Current Focus
-Major performance milestone: 75% overall speedup (4x faster). Performance is now well-optimized. Next: graphics support or additional features.
+Major performance milestone: 75% overall speedup (4x faster). 2600ms → 654ms for 100-page PDF. Performance is now well-optimized. Next: graphics support or additional features.
+
+## What We Did (Session 2026-01-20 #42) [COMPLETE]
+- **Added ASCII fast path for UTF-8 decoding - ~1% improvement**:
+  - Skip `utf8ByteSequenceLength` and `utf8Decode` for bytes < 128
+  - Byte value equals codepoint directly for ASCII
+  - Updated both `markUnicodeCharsUsed` and `getGlyphsForText` loops
+- **Performance results**:
+  - Total: 660ms → 654ms
+  - Combined with cmap cache: pure ASCII text now has minimal overhead
+- All 156 tests pass
 
 ## What We Did (Session 2026-01-20 #41) [COMPLETE]
 - **Implemented cmap cache and ASCII lookup table - 12% overall improvement**:
