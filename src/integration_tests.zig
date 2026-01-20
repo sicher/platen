@@ -305,6 +305,21 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_no_calt.encoding = .identity;
     inter_no_calt.setFeature(.calt, false);
 
+    // Discretionary ligatures comparison (dlig is OFF by default)
+    const inter_dlig = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_dlig.encoding = .identity;
+    inter_dlig.setFeature(.dlig, true);
+
+    // Tabular figures comparison (tnum is OFF by default - proportional is default)
+    const inter_tnum = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_tnum.encoding = .identity;
+    inter_tnum.setFeature(.tnum, true);
+
+    // Fractions comparison (frac is OFF by default)
+    const inter_frac = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_frac.encoding = .identity;
+    inter_frac.setFeature(.frac, true);
+
     try doc.addPage();
     var y: f64 = 32;
 
@@ -385,26 +400,75 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(332, y, "-> => <- <=> 3*9 12:34 3\xe2\x80\x938 +8+x");
     y += 18;
 
-    // --- Discretionary Ligatures (dlig) - TODO ---
+    // --- Discretionary Ligatures (dlig) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Discretionary Ligatures (dlig)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(220, y, "[TODO: ct st discretionary forms]");
+    y += 14;
+    // Interrobangs
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "OFF:");
+    try doc.setEmbeddedFont(inter, 14);
+    try doc.writeAt(78, y, "!? ?!");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(140, y, "ON:");
+    try doc.setEmbeddedFont(inter_dlig, 14);
+    try doc.writeAt(162, y, "!? ?!");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(210, y, "(interrobangs \xe2\x80\xbd)");
     y += 18;
+    // Contextual f/t variants
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "OFF:");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(78, y, "ff fi ffi ft tt tf rf rt vf wt");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(270, y, "ON:");
+    try doc.setEmbeddedFont(inter_dlig, 12);
+    try doc.writeAt(292, y, "ff fi ffi ft tt tf rf rt vf wt");
+    y += 22;
 
-    // --- Tabular/Proportional Figures (tnum/pnum) - TODO ---
+    // --- Tabular/Proportional Figures (tnum/pnum) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Figure Styles (tnum/pnum)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(200, y, "[TODO: 0123456789 tabular vs proportional]");
+    y += 14;
+    // Side-by-side comparison showing alignment difference
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "Proportional:");
+    try doc.writeAt(200, y, "Tabular:");
+    y += 12;
+    // Row 1
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(50, y, "1111.00");
+    try doc.setEmbeddedFont(inter_tnum, 11);
+    try doc.writeAt(200, y, "1111.00");
+    y += 13;
+    // Row 2
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(50, y, "2480.50");
+    try doc.setEmbeddedFont(inter_tnum, 11);
+    try doc.writeAt(200, y, "2480.50");
+    y += 13;
+    // Row 3
+    try doc.setEmbeddedFont(inter, 11);
+    try doc.writeAt(50, y, "9999.99");
+    try doc.setEmbeddedFont(inter_tnum, 11);
+    try doc.writeAt(200, y, "9999.99");
     y += 18;
 
-    // --- Fractions (frac) - TODO ---
+    // --- Fractions (frac) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Fractions (frac)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(155, y, "[TODO: 1/2 -> \xc2\xbd  3/4 -> \xc2\xbe  automatic fraction building]");
-    y += 18;
+    y += 14;
+    // OFF uses regular slash, ON uses fraction slash U+2044 with frac feature
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "OFF:");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(78, y, "1/2 3/4 5/8 7/16"); // regular slash
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(220, y, "ON:");
+    try doc.setEmbeddedFont(inter_frac, 12);
+    try doc.writeAt(242, y, "1\xe2\x81\x842 3\xe2\x81\x844 5\xe2\x81\x848 7\xe2\x81\x8416"); // fraction slash U+2044
+    y += 20;
 
     // --- Slashed Zero (zero) - TODO ---
     try doc.setEmbeddedFont(inter_bold, 10);

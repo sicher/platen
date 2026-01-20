@@ -344,6 +344,9 @@ pub const EmbeddedFont = struct {
             .calt => self.feature_flags.calt = enabled,
             .mark => self.feature_flags.mark = enabled,
             .mkmk => self.feature_flags.mkmk = enabled,
+            .tnum => self.feature_flags.tnum = enabled,
+            .pnum => self.feature_flags.pnum = enabled,
+            .frac => self.feature_flags.frac = enabled,
         }
     }
 
