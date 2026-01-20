@@ -30,6 +30,7 @@ const test_cases = [_]TestCase{
     .{ .name = "justify", .generate = generateJustifyPdf },
     .{ .name = "optimal_breaks", .generate = generateOptimalBreaksPdf },
     .{ .name = "colored_text", .generate = generateColoredTextPdf },
+    .{ .name = "shapes", .generate = generateShapesPdf },
 };
 
 // ============================================================================
@@ -1252,6 +1253,160 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "Graphics Primitives Test");
+
+    var y: f64 = 60;
+
+    // === Lines ===
+    try doc.setFont(.helvetica_bold, 12);
+    try doc.writeAt(50, y, "Lines:");
+    y += 15;
+
+    // Simple line
+    doc.setDrawColor(zpdf.Color.black);
+    doc.setLineWidth(1);
+    try doc.drawLine(50, y, 150, y);
+    y += 10;
+
+    // Thick line
+    doc.setLineWidth(3);
+    try doc.drawLine(50, y, 150, y);
+    y += 10;
+
+    // Colored line
+    doc.setDrawColor(zpdf.Color.red);
+    doc.setLineWidth(2);
+    try doc.drawLine(50, y, 150, y);
+    y += 10;
+
+    // Dashed line
+    doc.setDrawColor(zpdf.Color.blue);
+    doc.setDashPattern(5, 3, 0);
+    try doc.drawLine(50, y, 150, y);
+    doc.setSolidLine();
+    y += 20;
+
+    // Reset
+    doc.setDrawColor(zpdf.Color.black);
+    doc.setLineWidth(1);
+
+    // === Rectangles ===
+    try doc.setFont(.helvetica_bold, 12);
+    try doc.writeAt(50, y, "Rectangles:");
+    y += 15;
+
+    // Stroke only
+    try doc.drawRect(50, y, 60, 30, .stroke);
+
+    // Fill only
+    doc.setFillColor(zpdf.Color.fromRgb255(200, 200, 255)); // Light blue
+    try doc.drawRect(130, y, 60, 30, .fill);
+
+    // Fill and stroke
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 200)); // Light red
+    doc.setDrawColor(zpdf.Color.red);
+    doc.setLineWidth(2);
+    try doc.drawRect(210, y, 60, 30, .fill_stroke);
+    y += 45;
+
+    // Reset
+    doc.setDrawColor(zpdf.Color.black);
+    doc.setLineWidth(1);
+
+    // === Circles ===
+    try doc.setFont(.helvetica_bold, 12);
+    try doc.writeAt(50, y, "Circles:");
+    y += 15;
+
+    // Stroke circle
+    try doc.drawCircle(80, y + 25, 25, .stroke);
+
+    // Filled circle
+    doc.setFillColor(zpdf.Color.fromRgb255(200, 255, 200)); // Light green
+    try doc.drawCircle(160, y + 25, 25, .fill);
+
+    // Fill and stroke
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 255, 200)); // Light yellow
+    doc.setDrawColor(zpdf.Color.fromRgb255(0, 128, 0)); // Dark green
+    doc.setLineWidth(2);
+    try doc.drawCircle(240, y + 25, 25, .fill_stroke);
+    y += 65;
+
+    // Reset
+    doc.setDrawColor(zpdf.Color.black);
+    doc.setLineWidth(1);
+
+    // === Ellipses ===
+    try doc.setFont(.helvetica_bold, 12);
+    try doc.writeAt(50, y, "Ellipses:");
+    y += 15;
+
+    // Horizontal ellipse - bounding box: (x, y+20) with width=40, height=20
+    // fpdf2: ellipse(80, y+20, 40, 20) means upper-left at (80, y+20), size 40x20
+    try doc.drawEllipse(80, y + 20, 40, 20, .stroke);
+
+    // Vertical ellipse
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 255)); // Light magenta
+    try doc.drawEllipse(180, y + 20, 20, 30, .fill_stroke);
+
+    // Large ellipse
+    doc.setFillColor(zpdf.Color.fromRgb255(200, 255, 255)); // Light cyan
+    try doc.drawEllipse(280, y + 20, 50, 20, .fill);
+    y += 55;
+
+    // === Polygons ===
+    try doc.setFont(.helvetica_bold, 12);
+    try doc.writeAt(50, y, "Polygons:");
+    y += 15;
+
+    // Triangle
+    doc.setDrawColor(zpdf.Color.black);
+    const triangle = [_]zpdf.Point{
+        .{ .x = 80, .y = y },
+        .{ .x = 50, .y = y + 40 },
+        .{ .x = 110, .y = y + 40 },
+    };
+    try doc.drawPolygon(&triangle, .stroke);
+
+    // Square
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 220, 180)); // Light orange
+    const square = [_]zpdf.Point{
+        .{ .x = 140, .y = y },
+        .{ .x = 180, .y = y },
+        .{ .x = 180, .y = y + 40 },
+        .{ .x = 140, .y = y + 40 },
+    };
+    try doc.drawPolygon(&square, .fill);
+
+    // Pentagon
+    const std_math = @import("std").math;
+    const cx: f64 = 250;
+    const cy: f64 = y + 20;
+    const r: f64 = 25;
+    var pentagon: [5]zpdf.Point = undefined;
+    for (0..5) |i| {
+        const angle = std_math.pi / 2.0 + @as(f64, @floatFromInt(i)) * 2.0 * std_math.pi / 5.0;
+        pentagon[i] = .{
+            .x = cx + r * @cos(angle),
+            .y = cy - r * @sin(angle),
+        };
+    }
+    doc.setFillColor(zpdf.Color.fromRgb255(220, 220, 255)); // Light purple
+    doc.setDrawColor(zpdf.Color.fromRgb255(100, 100, 200));
+    doc.setLineWidth(2);
+    try doc.drawPolygon(&pentagon, .fill_stroke);
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -1318,6 +1473,11 @@ test "integration: optimal_breaks PDF" {
 test "integration: colored_text PDF" {
     // Tests colored text using various color spaces (RGB, grayscale)
     try runIntegrationTest("colored_text", generateColoredTextPdf);
+}
+
+test "integration: shapes PDF" {
+    // Tests graphics primitives: lines, rectangles, circles, ellipses, polygons
+    try runIntegrationTest("shapes", generateShapesPdf);
 }
 
 fn runIntegrationTest(

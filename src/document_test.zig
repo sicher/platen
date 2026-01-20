@@ -1401,3 +1401,243 @@ test "getFontMetrics lineHeight" {
     const expected_lh = m.ascender - m.descender;
     try std.testing.expectApproxEqAbs(expected_lh, m.lineHeight(), 0.001);
 }
+
+// ============================================================================
+// Graphics Primitives Tests
+// ============================================================================
+
+test "drawLine basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.drawLine(50, 50, 200, 200);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify valid PDF with a content stream (content is compressed)
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
+}
+
+test "drawLine without page returns error" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try std.testing.expectError(error.NoPage, doc.drawLine(0, 0, 100, 100));
+}
+
+test "drawRect stroke" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.drawRect(50, 50, 100, 80, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify valid PDF (content is compressed, detailed check in integration tests)
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
+}
+
+test "drawRect fill" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.drawRect(50, 50, 100, 80, .fill);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawRect fill_stroke" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.drawRect(50, 50, 100, 80, .fill_stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawCircle basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.drawCircle(200, 300, 50, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
+}
+
+test "drawEllipse basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    // drawEllipse(x, y, w, h) - bounding box upper-left at (200, 300), size 80x40
+    try doc.drawEllipse(200, 300, 80, 40, .fill);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawPolygon triangle" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    const points = [_]document.Document.Point{
+        .{ .x = 100, .y = 100 },
+        .{ .x = 200, .y = 100 },
+        .{ .x = 150, .y = 50 },
+    };
+    try doc.drawPolygon(&points, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawPolygon less than 3 points does nothing" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    const points = [_]document.Document.Point{
+        .{ .x = 100, .y = 100 },
+        .{ .x = 200, .y = 100 },
+    };
+    // Should not error, just do nothing
+    try doc.drawPolygon(&points, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // PDF should still be valid
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "setLineWidth stores value" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default line width is 0.567 (fpdf2 default)
+    try std.testing.expectApproxEqAbs(@as(f64, 0.567), doc.line_width, 0.001);
+
+    doc.setLineWidth(5.0);
+    try std.testing.expectApproxEqAbs(@as(f64, 5.0), doc.line_width, 0.001);
+}
+
+test "setDashPattern stores values" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is solid line (all zeros)
+    try std.testing.expectApproxEqAbs(@as(f64, 0), doc.dash_pattern.dash, 0.001);
+
+    doc.setDashPattern(3, 2, 1);
+    try std.testing.expectApproxEqAbs(@as(f64, 3), doc.dash_pattern.dash, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 2), doc.dash_pattern.gap, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 1), doc.dash_pattern.phase, 0.001);
+}
+
+test "setSolidLine clears dash pattern" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setDashPattern(3, 2, 0);
+    doc.setSolidLine();
+
+    try std.testing.expectApproxEqAbs(@as(f64, 0), doc.dash_pattern.dash, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 0), doc.dash_pattern.gap, 0.001);
+}
+
+test "setLineCap stores value" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is square (matches fpdf2)
+    try std.testing.expectEqual(document.LineCap.square, doc.line_cap);
+
+    doc.setLineCap(.round);
+    try std.testing.expectEqual(document.LineCap.round, doc.line_cap);
+
+    doc.setLineCap(.butt);
+    try std.testing.expectEqual(document.LineCap.butt, doc.line_cap);
+}
+
+test "setLineJoin stores value" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is miter
+    try std.testing.expectEqual(document.LineJoin.miter, doc.line_join);
+
+    doc.setLineJoin(.round);
+    try std.testing.expectEqual(document.LineJoin.round, doc.line_join);
+
+    doc.setLineJoin(.bevel);
+    try std.testing.expectEqual(document.LineJoin.bevel, doc.line_join);
+}
+
+test "setDrawColor stores value" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is black
+    try std.testing.expectEqual(Color.black, doc.draw_color);
+
+    doc.setDrawColor(Color.red);
+    try std.testing.expectEqual(Color.red, doc.draw_color);
+}
+
+test "setFillColor stores value" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is black
+    try std.testing.expectEqual(Color.black, doc.fill_color);
+
+    doc.setFillColor(Color.blue);
+    try std.testing.expectEqual(Color.blue, doc.fill_color);
+}
+
+test "graphics state used in output" {
+    // Test that the document with graphics state produces valid PDF
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    doc.setLineWidth(3.0);
+    doc.setDashPattern(5, 3, 0);
+    doc.setLineCap(.round);
+    doc.setLineJoin(.bevel);
+    doc.setDrawColor(Color.red);
+    doc.setFillColor(Color.blue);
+
+    try doc.drawRect(50, 50, 100, 80, .fill_stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify valid PDF is produced (content validation in integration tests)
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
+}

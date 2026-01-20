@@ -1,7 +1,43 @@
 # zpdf Context
 
 ## Current Focus
-Major refactoring complete: Split large zpdf.zig into document.zig + document_test.zig + facade. All 171 tests pass. Next: graphics support or remaining text features (underline, rotation, etc).
+Graphics primitives implemented. All tests pass. Next: images (JPEG/PNG embedding), advanced drawing (Path API), or remaining text features.
+
+## What We Did (Session 2026-01-20 #47) [COMPLETE]
+- **Fixed drawCircle coordinate handling** in `document.zig`:
+  - fpdf2's `circle(x, y, r)` takes CENTER coordinates, not bounding box
+  - zpdf's `drawCircle` was incorrectly passing (x, y) directly to `drawEllipse` which expects bounding box coordinates
+  - Fix: Convert center to bounding box in drawCircle: `drawEllipse(x - radius, y - radius, diameter, diameter, style)`
+  - Updated comment to correctly document that (x, y) is the CENTER of the circle
+- **Fixed default line cap** to match fpdf2:
+  - fpdf2 uses `2 J` (projecting square cap) as default, not butt cap
+  - Changed `line_cap` default from `.butt` (0) to `.square` (2) in Document struct
+  - Updated unit test to expect `.square` as default
+- All 195 tests pass, semantic comparison passes for all PDFs including shapes
+
+## What We Did (Session 2026-01-20 #46) [COMPLETE]
+- **Implemented graphics primitives** in `document.zig`:
+  - Added types to `layout.zig`: `DrawStyle` (stroke/fill/fill_stroke), `LineCap` (butt/round/square), `LineJoin` (miter/round/bevel), `DashPattern`
+  - Added state fields to Document: `line_width`, `dash_pattern`, `line_cap`, `line_join`
+  - Added setter methods: `setLineWidth()`, `setDashPattern()`, `setSolidLine()`, `setLineCap()`, `setLineJoin()`
+  - Added shape drawing methods: `drawLine()`, `drawRect()`, `drawCircle()`, `drawEllipse()`, `drawPolygon()`
+  - Ellipse uses 4 cubic Bezier curves (KAPPA = 0.5522847498)
+  - Polygon supports arbitrary point arrays
+  - All methods use `q`/`Q` graphics state save/restore
+  - Re-exported new types in `zpdf.zig`
+- **Added unit tests** for graphics primitives in `document_test.zig`:
+  - Tests for all shape methods (drawLine, drawRect, drawCircle, drawEllipse, drawPolygon)
+  - Tests for state setters (setLineWidth, setDashPattern, setLineCap, setLineJoin)
+  - Tests verify valid PDF output (content is compressed, so checking structure not raw operators)
+- **Added fpdf2 reference generator** (`gen_shapes()` in `gen_references.py`):
+  - Lines (solid, thick, colored, dashed)
+  - Rectangles (stroke, fill, fill_stroke)
+  - Circles and ellipses with various styles
+  - Polygons (triangle, square, pentagon)
+- **Added integration test** (`generateShapesPdf` in `integration_tests.zig`):
+  - Matches fpdf2 reference layout
+  - 16 integration tests now pass (including new shapes test)
+- All 195 tests pass
 
 ## What We Did (Session 2026-01-20 #45) [COMPLETE]
 - **Fixed refactoring regressions** - 3 failing tests (`all_fonts`, `justify`, `optimal_breaks`):
@@ -280,7 +316,7 @@ Major refactoring complete: Split large zpdf.zig into document.zig + document_te
 - All 152 tests pass
 
 ## Remaining Work
-- **Graphics support**: Images, drawing primitives (lines, rectangles, etc.)
+- **Graphics support**: Images (JPEG/PNG embedding), Path API (moveTo, lineTo, curveTo)
 
 ## What We Did (Session 2026-01-18 #25) [COMPLETE]
 - **Implemented mark positioning in PDF rendering**:
@@ -911,10 +947,10 @@ Major refactoring complete: Split large zpdf.zig into document.zig + document_te
 2. **PNG embedding** - decode, handle alpha as soft mask
 3. **PDF embedding** - parse external PDF, embed as Form XObject
 
-### Priority 2: Drawing Primitives
-4. Basic shapes: line, rect, circle, ellipse, polygon
+### Priority 2: Advanced Drawing (DONE: Basic Shapes)
+4. ~~Basic shapes: line, rect, circle, ellipse, polygon~~ ✓ DONE
 5. Path API: moveTo, lineTo, curveTo, closePath, stroke, fill
-6. Styling: stroke/fill color, line width, dash patterns
+6. ~~Styling: stroke/fill color, line width, dash patterns~~ ✓ DONE
 
 ### Priority 3: Text Flow Enhancements
 7. measureWrappedText (measure without rendering)

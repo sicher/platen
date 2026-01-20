@@ -988,6 +988,144 @@ def gen_justify():
     print("  justify.pdf")
 
 
+def gen_shapes():
+    """Test graphics primitives: lines, rectangles, circles, ellipses, polygons."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "Graphics Primitives Test")
+
+    y = 60
+
+    # === Lines ===
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(50, y, "Lines:")
+    y += 15
+
+    # Simple line
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(1)
+    pdf.line(50, y, 150, y)
+    y += 10
+
+    # Thick line
+    pdf.set_line_width(3)
+    pdf.line(50, y, 150, y)
+    y += 10
+
+    # Colored line
+    pdf.set_draw_color(255, 0, 0)  # Red
+    pdf.set_line_width(2)
+    pdf.line(50, y, 150, y)
+    y += 10
+
+    # Dashed line
+    pdf.set_draw_color(0, 0, 255)  # Blue
+    pdf.set_dash_pattern(dash=5, gap=3)
+    pdf.line(50, y, 150, y)
+    pdf.set_dash_pattern()  # Reset to solid
+    y += 20
+
+    # Reset colors
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(1)
+
+    # === Rectangles ===
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(50, y, "Rectangles:")
+    y += 15
+
+    # Stroke only
+    pdf.rect(50, y, 60, 30, style="D")  # D = Draw (stroke)
+
+    # Fill only
+    pdf.set_fill_color(200, 200, 255)  # Light blue
+    pdf.rect(130, y, 60, 30, style="F")  # F = Fill
+
+    # Fill and stroke
+    pdf.set_fill_color(255, 200, 200)  # Light red
+    pdf.set_draw_color(255, 0, 0)  # Red border
+    pdf.set_line_width(2)
+    pdf.rect(210, y, 60, 30, style="FD")  # FD = Fill + Draw
+    y += 45
+
+    # Reset
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(1)
+
+    # === Circles ===
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(50, y, "Circles:")
+    y += 15
+
+    # Stroke circle
+    pdf.circle(80, y + 25, 25, style="D")
+
+    # Filled circle
+    pdf.set_fill_color(200, 255, 200)  # Light green
+    pdf.circle(160, y + 25, 25, style="F")
+
+    # Fill and stroke
+    pdf.set_fill_color(255, 255, 200)  # Light yellow
+    pdf.set_draw_color(0, 128, 0)  # Dark green
+    pdf.set_line_width(2)
+    pdf.circle(240, y + 25, 25, style="FD")
+    y += 65
+
+    # Reset
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(1)
+
+    # === Ellipses ===
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(50, y, "Ellipses:")
+    y += 15
+
+    # Horizontal ellipse
+    pdf.ellipse(80, y + 20, 40, 20, style="D")
+
+    # Vertical ellipse
+    pdf.set_fill_color(255, 200, 255)  # Light magenta
+    pdf.ellipse(180, y + 20, 20, 30, style="FD")
+
+    # Large ellipse
+    pdf.set_fill_color(200, 255, 255)  # Light cyan
+    pdf.ellipse(280, y + 20, 50, 20, style="F")
+    y += 55
+
+    # === Polygons ===
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(50, y, "Polygons:")
+    y += 15
+
+    # Triangle
+    pdf.set_draw_color(0, 0, 0)
+    pdf.polygon([(80, y), (50, y + 40), (110, y + 40)], style="D")
+
+    # Square
+    pdf.set_fill_color(255, 220, 180)  # Light orange
+    pdf.polygon([(140, y), (180, y), (180, y + 40), (140, y + 40)], style="F")
+
+    # Pentagon
+    import math
+    cx, cy, r = 250, y + 20, 25
+    pentagon = []
+    for i in range(5):
+        angle = math.pi / 2 + i * 2 * math.pi / 5  # Start from top
+        px = cx + r * math.cos(angle)
+        py = cy - r * math.sin(angle)  # Flip Y for PDF coords
+        pentagon.append((px, py))
+    pdf.set_fill_color(220, 220, 255)  # Light purple
+    pdf.set_draw_color(100, 100, 200)
+    pdf.set_line_width(2)
+    pdf.polygon(pentagon, style="FD")
+
+    pdf.output(OUTPUT_DIR / "shapes.pdf")
+    print("  shapes.pdf")
+
+
 GENERATORS = {
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,
@@ -1001,6 +1139,7 @@ GENERATORS = {
     "text_flow": gen_text_flow,
     "justify": gen_justify,
     "colored_text": gen_colored_text,
+    "shapes": gen_shapes,
 }
 
 

@@ -45,6 +45,12 @@ pub const ParagraphOptions = layout.ParagraphOptions;
 pub const FlowOptions = layout.FlowOptions;
 pub const PageSize = layout.PageSize;
 
+// Graphics types
+pub const DrawStyle = layout.DrawStyle;
+pub const LineCap = layout.LineCap;
+pub const LineJoin = layout.LineJoin;
+pub const DashPattern = layout.DashPattern;
+
 pub const opentype = embedded.opentype;
 
 // ============================================================================
@@ -267,6 +273,14 @@ pub const Document = struct {
     fill_color: Color = Color.black,
     /// Stroke/draw color for lines and borders (default black).
     draw_color: Color = Color.black,
+    /// Line width for strokes in points (default 0.567pt = 0.2mm, fpdf2 default).
+    line_width: f64 = 0.567,
+    /// Dash pattern for stroked lines.
+    dash_pattern: layout.DashPattern = .{},
+    /// Line cap style (fpdf2 default is square/projecting).
+    line_cap: layout.LineCap = .square,
+    /// Line join style.
+    line_join: layout.LineJoin = .miter,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
     // Track all embedded fonts
@@ -359,6 +373,31 @@ pub const Document = struct {
     /// Set draw/stroke color (for lines and borders).
     pub fn setDrawColor(self: *Document, c: Color) void {
         self.draw_color = c;
+    }
+
+    /// Set line width for strokes (in points).
+    pub fn setLineWidth(self: *Document, width: f64) void {
+        self.line_width = width;
+    }
+
+    /// Set dash pattern for stroked lines.
+    pub fn setDashPattern(self: *Document, dash: f64, gap: f64, phase: f64) void {
+        self.dash_pattern = .{ .dash = dash, .gap = gap, .phase = phase };
+    }
+
+    /// Reset to solid line (no dashing).
+    pub fn setSolidLine(self: *Document) void {
+        self.dash_pattern = .{};
+    }
+
+    /// Set line cap style.
+    pub fn setLineCap(self: *Document, cap: LineCap) void {
+        self.line_cap = cap;
+    }
+
+    /// Set line join style.
+    pub fn setLineJoin(self: *Document, join: LineJoin) void {
+        self.line_join = join;
     }
 
     /// Set document margins.
@@ -1465,6 +1504,275 @@ pub const Document = struct {
             const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
             try page.commands.append(self.allocator, .{ .raw = raw_copy });
         }
+    }
+
+    // ========================================================================
+    // Graphics Primitives
+    // ========================================================================
+
+    /// Write graphics state operators (line width, dash pattern, colors).
+    /// Used internally by shape drawing methods.
+    fn writeGraphicsState(self: *Document, buf: []u8, style: DrawStyle) usize {
+        var len: usize = 0;
+
+        // Line width
+        len += (std.fmt.bufPrint(buf[len..], "{d:.3} w\n", .{self.line_width}) catch unreachable).len;
+
+        // Dash pattern
+        if (self.dash_pattern.dash > 0) {
+            len += (std.fmt.bufPrint(buf[len..], "[{d:.3} {d:.3}] {d:.3} d\n", .{ self.dash_pattern.dash, self.dash_pattern.gap, self.dash_pattern.phase }) catch unreachable).len;
+        } else {
+            len += (std.fmt.bufPrint(buf[len..], "[] 0 d\n", .{}) catch unreachable).len;
+        }
+
+        // Line cap and join
+        len += (std.fmt.bufPrint(buf[len..], "{d} J {d} j\n", .{ @intFromEnum(self.line_cap), @intFromEnum(self.line_join) }) catch unreachable).len;
+
+        // Stroke color (for stroke and fill_stroke)
+        if (style == .stroke or style == .fill_stroke) {
+            var color_buf: [64]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&color_buf);
+            self.draw_color.writeStroke(fbs.writer()) catch unreachable;
+            const color_str = fbs.getWritten();
+            @memcpy(buf[len .. len + color_str.len], color_str);
+            len += color_str.len;
+        }
+
+        // Fill color (for fill and fill_stroke)
+        if (style == .fill or style == .fill_stroke) {
+            var color_buf: [64]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&color_buf);
+            self.fill_color.writeFill(fbs.writer()) catch unreachable;
+            const color_str = fbs.getWritten();
+            @memcpy(buf[len .. len + color_str.len], color_str);
+            len += color_str.len;
+        }
+
+        return len;
+    }
+
+    /// Get PDF path operator for the given draw style.
+    fn getPathOperator(style: DrawStyle) []const u8 {
+        return switch (style) {
+            .stroke => "S\n",
+            .fill => "f\n",
+            .fill_stroke => "B\n",
+        };
+    }
+
+    /// Draw a line between two points.
+    /// Coordinates are from top-left origin.
+    pub fn drawLine(self: *Document, x1: f64, y1: f64, x2: f64, y2: f64) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Convert from top-left to PDF coordinates (bottom-left origin)
+        const pdf_y1 = page_height - y1;
+        const pdf_y2 = page_height - y2;
+
+        var buf: [512]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Graphics state (line width, dash, colors)
+        len += self.writeGraphicsState(buf[len..], .stroke);
+
+        // Move to start, line to end, stroke
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ x1, pdf_y1, x2, pdf_y2 }) catch unreachable).len;
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+    }
+
+    /// Draw a rectangle.
+    /// Coordinates are from top-left origin.
+    pub fn drawRect(self: *Document, x: f64, y: f64, w: f64, h: f64, style: DrawStyle) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Convert from top-left to PDF coordinates (bottom-left origin)
+        const pdf_y = page_height - y - h;
+
+        var buf: [512]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Graphics state
+        len += self.writeGraphicsState(buf[len..], style);
+
+        // Rectangle path and operator
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re ", .{ x, pdf_y, w, h }) catch unreachable).len;
+        const op = getPathOperator(style);
+        @memcpy(buf[len .. len + op.len], op);
+        len += op.len;
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+    }
+
+    /// Draw an ellipse using 4 cubic Bezier curves.
+    /// Parameters match fpdf2: (x, y) is upper-left of bounding box, (w, h) is full width/height.
+    /// Coordinates are from top-left origin.
+    pub fn drawEllipse(self: *Document, x: f64, y: f64, w: f64, h: f64, style: DrawStyle) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Calculate center and radii from bounding box
+        const rx = w / 2.0;
+        const ry = h / 2.0;
+        const cx = x + rx; // center x
+        const cy = y + ry; // center y (in top-origin coords)
+
+        // Convert center from top-left to PDF coordinates (bottom-left origin)
+        const pdf_cy = page_height - cy;
+
+        // Kappa constant for approximating circles with cubic Bezier curves
+        // This is (4/3)*tan(pi/8) ≈ 0.5522847498
+        const KAPPA: f64 = 0.5522847498307936;
+
+        const kx = rx * KAPPA;
+        const ky = ry * KAPPA;
+
+        var buf: [1024]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Graphics state
+        len += self.writeGraphicsState(buf[len..], style);
+
+        // Start at right-most point (cx + rx, cy)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ cx + rx, pdf_cy }) catch unreachable).len;
+
+        // Top-right quadrant: from (cx+rx, cy) to (cx, cy+ry)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            cx + rx,
+            pdf_cy + ky,
+            cx + kx,
+            pdf_cy + ry,
+            cx,
+            pdf_cy + ry,
+        }) catch unreachable).len;
+
+        // Top-left quadrant: from (cx, cy+ry) to (cx-rx, cy)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            cx - kx,
+            pdf_cy + ry,
+            cx - rx,
+            pdf_cy + ky,
+            cx - rx,
+            pdf_cy,
+        }) catch unreachable).len;
+
+        // Bottom-left quadrant: from (cx-rx, cy) to (cx, cy-ry)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            cx - rx,
+            pdf_cy - ky,
+            cx - kx,
+            pdf_cy - ry,
+            cx,
+            pdf_cy - ry,
+        }) catch unreachable).len;
+
+        // Bottom-right quadrant: from (cx, cy-ry) to (cx+rx, cy)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            cx + kx,
+            pdf_cy - ry,
+            cx + rx,
+            pdf_cy - ky,
+            cx + rx,
+            pdf_cy,
+        }) catch unreachable).len;
+
+        // Close path and apply style
+        const op = getPathOperator(style);
+        @memcpy(buf[len .. len + op.len], op);
+        len += op.len;
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+    }
+
+    /// Draw a circle (special case of ellipse).
+    /// Parameters match fpdf2: (x, y) is the CENTER of the circle, radius is the circle radius.
+    /// Coordinates are from top-left origin.
+    pub fn drawCircle(self: *Document, x: f64, y: f64, radius: f64, style: DrawStyle) !void {
+        // fpdf2 circle(x, y, r) takes center coordinates
+        // Convert to bounding box for drawEllipse
+        const diameter = radius * 2.0;
+        return self.drawEllipse(x - radius, y - radius, diameter, diameter, style);
+    }
+
+    /// Point for polygon drawing.
+    pub const Point = struct {
+        x: f64,
+        y: f64,
+    };
+
+    /// Draw a closed polygon.
+    /// Coordinates are from top-left origin.
+    pub fn drawPolygon(self: *Document, points: []const Point, style: DrawStyle) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        if (points.len < 3) return; // Need at least 3 points for a polygon
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Calculate required buffer size: ~50 bytes per point + overhead
+        const buf_size = 256 + points.len * 64;
+        const buf = try page.pageAllocator().alloc(u8, buf_size);
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Graphics state
+        len += self.writeGraphicsState(buf[len..], style);
+
+        // Move to first point
+        const pdf_y0 = page_height - points[0].y;
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ points[0].x, pdf_y0 }) catch unreachable).len;
+
+        // Line to remaining points
+        for (points[1..]) |pt| {
+            const pdf_y = page_height - pt.y;
+            len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ pt.x, pdf_y }) catch unreachable).len;
+        }
+
+        // Close path
+        len += (std.fmt.bufPrint(buf[len..], "h ", .{}) catch unreachable).len;
+
+        // Apply style
+        const op = getPathOperator(style);
+        @memcpy(buf[len .. len + op.len], op);
+        len += op.len;
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        // Shrink buffer to actual size (arena allocator)
+        const raw_copy = buf[0..len];
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
     }
 
     /// Render deferred commands to page content bytes

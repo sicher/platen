@@ -51,6 +51,13 @@ pub const ParagraphOptions = document.ParagraphOptions;
 pub const FlowOptions = document.FlowOptions;
 pub const PageSize = document.PageSize;
 
+// Re-export graphics types
+pub const DrawStyle = document.DrawStyle;
+pub const LineCap = document.LineCap;
+pub const LineJoin = document.LineJoin;
+pub const DashPattern = document.DashPattern;
+pub const Point = document.Document.Point;
+
 // Re-export OpenType features
 pub const opentype = document.opentype;
 

@@ -145,3 +145,50 @@ pub const PageSize = struct {
     pub const A4 = PageSize{ .width = 595.28, .height = 841.89 };
     pub const Letter = PageSize{ .width = 612, .height = 792 };
 };
+
+// ============================================================================
+// Graphics Types
+// ============================================================================
+
+/// Drawing style for shapes.
+pub const DrawStyle = enum {
+    /// Only stroke the outline (S operator).
+    stroke,
+    /// Only fill the interior (f operator).
+    fill,
+    /// Fill and stroke (B operator).
+    fill_stroke,
+};
+
+/// Line cap style (PDF J operator).
+pub const LineCap = enum(u8) {
+    /// Butt cap: line ends at endpoint.
+    butt = 0,
+    /// Round cap: semicircle at endpoint.
+    round = 1,
+    /// Square cap: half-width square at endpoint.
+    square = 2,
+};
+
+/// Line join style (PDF j operator).
+pub const LineJoin = enum(u8) {
+    /// Miter join: sharp corner.
+    miter = 0,
+    /// Round join: circular arc at corner.
+    round = 1,
+    /// Bevel join: diagonal cut at corner.
+    bevel = 2,
+};
+
+/// Dash pattern for stroked lines (PDF d operator).
+pub const DashPattern = struct {
+    /// Length of dash in points (0 = solid line).
+    dash: f64 = 0,
+    /// Length of gap in points.
+    gap: f64 = 0,
+    /// Phase offset in points.
+    phase: f64 = 0,
+
+    /// Solid line (no dashing).
+    pub const solid = DashPattern{};
+};
