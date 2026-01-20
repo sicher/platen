@@ -167,7 +167,7 @@ const ContentWriter = struct {
         try self.page.content.appendSlice(self.allocator, data);
     }
 
-    fn print(self: *ContentWriter, comptime fmt: []const u8, args: anytype) !void {
+    pub fn print(self: *ContentWriter, comptime fmt: []const u8, args: anytype) !void {
         var buf: [256]u8 = undefined;
         const slice = std.fmt.bufPrint(&buf, fmt, args) catch {
             // Buffer too small, allocate
@@ -1477,8 +1477,8 @@ pub const Document = struct {
                 .text => |t| {
                     // Begin text block
                     try cw.append("BT\n");
-                    // Ensure black text color (0 g)
-                    try cw.append("0 g\n");
+                    // Set text color
+                    try t.text_color.writeFill(&cw);
 
                     switch (t.font) {
                         .embedded => |emb| {

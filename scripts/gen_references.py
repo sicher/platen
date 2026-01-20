@@ -853,6 +853,69 @@ def gen_text_flow():
     print("  text_flow.pdf")
 
 
+def gen_colored_text():
+    """Test colored text using various color spaces."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    y = 50
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, y, "Colored Text Test")
+    y += 30
+
+    # Black text (default)
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.set_text_color(0, 0, 0)  # Black
+    pdf.text(50, y, "Black text (default)")
+    y += 20
+
+    # Red text
+    pdf.set_text_color(255, 0, 0)  # Red
+    pdf.text(50, y, "Red text (RGB: 255, 0, 0)")
+    y += 20
+
+    # Green text
+    pdf.set_text_color(0, 255, 0)  # Green
+    pdf.text(50, y, "Green text (RGB: 0, 255, 0)")
+    y += 20
+
+    # Blue text
+    pdf.set_text_color(0, 0, 255)  # Blue
+    pdf.text(50, y, "Blue text (RGB: 0, 0, 255)")
+    y += 20
+
+    # Gray text (using grayscale)
+    pdf.set_text_color(128)  # 50% gray
+    pdf.text(50, y, "Gray text (50% gray)")
+    y += 20
+
+    # Custom color (orange)
+    pdf.set_text_color(255, 165, 0)  # Orange
+    pdf.text(50, y, "Orange text (RGB: 255, 165, 0)")
+    y += 20
+
+    # Back to black
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(50, y, "Back to black text")
+    y += 30
+
+    # Multiple colors on same line (using multiple text() calls)
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(50, y, "Mixed colors: ")
+    pdf.set_text_color(255, 0, 0)
+    pdf.text(145, y, "Red ")
+    pdf.set_text_color(0, 255, 0)
+    pdf.text(175, y, "Green ")
+    pdf.set_text_color(0, 0, 255)
+    pdf.text(220, y, "Blue")
+
+    pdf.output(OUTPUT_DIR / "colored_text.pdf")
+    print("  colored_text.pdf")
+
+
 def gen_justify():
     """Test justified text alignment."""
     pdf = make_pdf()
@@ -937,6 +1000,7 @@ GENERATORS = {
     "opentype_features": gen_opentype_features,
     "text_flow": gen_text_flow,
     "justify": gen_justify,
+    "colored_text": gen_colored_text,
 }
 
 

@@ -29,6 +29,7 @@ const test_cases = [_]TestCase{
     .{ .name = "text_flow", .generate = generateTextFlowPdf },
     .{ .name = "justify", .generate = generateJustifyPdf },
     .{ .name = "optimal_breaks", .generate = generateOptimalBreaksPdf },
+    .{ .name = "colored_text", .generate = generateColoredTextPdf },
 };
 
 // ============================================================================
@@ -1189,6 +1190,68 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    var y: f64 = 50;
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, y, "Colored Text Test");
+    y += 30;
+
+    // Black text (default)
+    try doc.setFont(.helvetica, 12);
+    doc.setTextColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Black text (default)");
+    y += 20;
+
+    // Red text
+    doc.setTextColor(zpdf.Color.red);
+    try doc.writeAt(50, y, "Red text (RGB: 255, 0, 0)");
+    y += 20;
+
+    // Green text
+    doc.setTextColor(zpdf.Color.green);
+    try doc.writeAt(50, y, "Green text (RGB: 0, 255, 0)");
+    y += 20;
+
+    // Blue text
+    doc.setTextColor(zpdf.Color.blue);
+    try doc.writeAt(50, y, "Blue text (RGB: 0, 0, 255)");
+    y += 20;
+
+    // Gray text (using grayscale) - 128/255 = 0.502
+    doc.setTextColor(zpdf.Color.grayscale(128.0 / 255.0));
+    try doc.writeAt(50, y, "Gray text (50% gray)");
+    y += 20;
+
+    // Custom color (orange) - RGB 255, 165, 0
+    doc.setTextColor(zpdf.Color.fromRgb255(255, 165, 0));
+    try doc.writeAt(50, y, "Orange text (RGB: 255, 165, 0)");
+    y += 20;
+
+    // Back to black
+    doc.setTextColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Back to black text");
+    y += 30;
+
+    // Multiple colors on same line (using multiple writeAt calls)
+    try doc.setFont(.helvetica_bold, 12);
+    doc.setTextColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Mixed colors: ");
+    doc.setTextColor(zpdf.Color.red);
+    try doc.writeAt(145, y, "Red ");
+    doc.setTextColor(zpdf.Color.green);
+    try doc.writeAt(175, y, "Green ");
+    doc.setTextColor(zpdf.Color.blue);
+    try doc.writeAt(220, y, "Blue");
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -1250,6 +1313,11 @@ test "integration: justify PDF" {
 test "integration: optimal_breaks PDF" {
     // Tests Knuth-Plass optimal line breaking vs greedy algorithm
     try runIntegrationTest("optimal_breaks", generateOptimalBreaksPdf);
+}
+
+test "integration: colored_text PDF" {
+    // Tests colored text using various color spaces (RGB, grayscale)
+    try runIntegrationTest("colored_text", generateColoredTextPdf);
 }
 
 fn runIntegrationTest(
