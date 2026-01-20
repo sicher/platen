@@ -325,6 +325,11 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_zero.encoding = .identity;
     inter_zero.setFeature(.zero, true);
 
+    // Case-sensitive forms comparison (case is OFF by default)
+    const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_case.encoding = .identity;
+    inter_case.setFeature(.case, true);
+
     try doc.addPage();
     var y: f64 = 32;
 
@@ -488,11 +493,17 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(316, y, "0 10 20 100");
     y += 18;
 
-    // --- Case-Sensitive Forms (case) - TODO ---
+    // --- Case-Sensitive Forms (case) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Case-Sensitive (case)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(185, y, "[TODO: (HELLO) vs adjusted parens/punctuation]");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(180, y, "OFF:");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(206, y, "(HELLO) [WORD]");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(320, y, "ON:");
+    try doc.setEmbeddedFont(inter_case, 12);
+    try doc.writeAt(340, y, "(HELLO) [WORD]");
     y += 18;
 
     // --- Stylistic Sets (ss01-08) - TODO ---
