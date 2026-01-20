@@ -1024,9 +1024,9 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
         .width = region_width,
         .height = 60,
         .border = zpdf.Border.all,
-        .fill = zpdf.Color{ .r = 0.95, .g = 0.95, .b = 0.95 },
+        .fill = zpdf.Color.fromRgb(0.95, 0.95, 0.95),
     };
-    try doc.drawRegion(&boxed_region);
+    try doc.drawRegion(boxed_region);
 
     try doc.setFont(.helvetica, 11);
     // fpdf2 uses set_xy(x, y+5), so we set cursor_y = 5 to match
@@ -1144,8 +1144,8 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     var mono_optimal = zpdf.Region{ .x = 180, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
     _ = try doc.writeParagraph(&mono_greedy, mono_text, .{ .line_breaking = .greedy });
     _ = try doc.writeParagraph(&mono_optimal, mono_text, .{ .line_breaking = .optimal });
-    try doc.drawRegion(&mono_greedy);
-    try doc.drawRegion(&mono_optimal);
+    try doc.drawRegion(mono_greedy);
+    try doc.drawRegion(mono_optimal);
 
     // Labels
     try doc.setFont(.helvetica, 8);
@@ -1179,12 +1179,12 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.setFont(.times_roman, 10);
     var left_col = zpdf.Region{ .x = left_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
     _ = try doc.writeParagraph(&left_col, lorem, .{ .line_breaking = .greedy, .alignment = .justify });
-    try doc.drawRegion(&left_col);
+    try doc.drawRegion(left_col);
 
     // Right column - Optimal
     var right_col = zpdf.Region{ .x = right_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
     _ = try doc.writeParagraph(&right_col, lorem, .{ .line_breaking = .optimal, .alignment = .justify });
-    try doc.drawRegion(&right_col);
+    try doc.drawRegion(right_col);
 
     return doc.output();
 }

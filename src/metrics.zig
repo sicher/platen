@@ -13,6 +13,78 @@ pub const TextMetrics = struct {
     char_count: usize,
 };
 
+/// Font metrics scaled to a specific font size (in points).
+/// All values are in points at the given font size.
+pub const FontMetrics = struct {
+    /// Distance from baseline to top of tallest glyph (positive, in points)
+    ascender: f64,
+    /// Distance from baseline to bottom of lowest glyph (negative, in points)
+    descender: f64,
+    /// Height of capital letters (in points)
+    cap_height: f64,
+    /// Height of lowercase 'x' (in points, estimated if not available)
+    x_height: f64,
+    /// The font size these metrics are scaled to
+    font_size: f64,
+    /// Units per em in the original font (useful for advanced calculations)
+    units_per_em: u16,
+
+    /// Total line height from ascender to descender
+    pub fn lineHeight(self: FontMetrics) f64 {
+        return self.ascender - self.descender;
+    }
+};
+
+/// Standard font metrics in 1000 units per em (PDF standard)
+/// These are typical values for the Adobe base 14 fonts
+pub const StandardFontMetrics = struct {
+    ascender: i16,
+    descender: i16,
+    cap_height: i16,
+    x_height: i16,
+};
+
+/// Get metrics for standard fonts (in 1000 units)
+pub fn getStandardFontMetrics(font: fonts.StandardFont) StandardFontMetrics {
+    return switch (font) {
+        // Helvetica family
+        .helvetica, .helvetica_bold, .helvetica_oblique, .helvetica_bold_oblique => .{
+            .ascender = 718,
+            .descender = -207,
+            .cap_height = 718,
+            .x_height = 523,
+        },
+        // Times family
+        .times_roman, .times_bold, .times_italic, .times_bold_italic => .{
+            .ascender = 683,
+            .descender = -217,
+            .cap_height = 662,
+            .x_height = 450,
+        },
+        // Courier family
+        .courier, .courier_bold, .courier_oblique, .courier_bold_oblique => .{
+            .ascender = 629,
+            .descender = -157,
+            .cap_height = 562,
+            .x_height = 426,
+        },
+        // Symbol
+        .symbol => .{
+            .ascender = 1010,
+            .descender = -293,
+            .cap_height = 1010,
+            .x_height = 500,
+        },
+        // ZapfDingbats
+        .zapf_dingbats => .{
+            .ascender = 820,
+            .descender = -143,
+            .cap_height = 820,
+            .x_height = 500,
+        },
+    };
+}
+
 /// Text style with spacing overrides
 pub const TextStyle = struct {
     font: fonts.StandardFont = .helvetica,

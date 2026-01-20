@@ -1,0 +1,2013 @@
+//! Document struct for zpdf - PDF document creation and management.
+//!
+//! This module contains the core Document type that handles page management,
+//! text rendering, font handling, and PDF output generation.
+
+const std = @import("std");
+
+// Module imports
+pub const objects = @import("objects.zig");
+pub const fonts = @import("fonts.zig");
+pub const metrics = @import("metrics.zig");
+pub const ttf = @import("ttf.zig");
+pub const embedded = @import("embedded.zig");
+pub const color = @import("color.zig");
+pub const layout = @import("layout.zig");
+pub const Writer = @import("writer.zig").Writer;
+pub const zlib = @import("zlib.zig");
+
+const ObjectId = objects.ObjectId;
+const Ref = objects.Ref;
+const Dict = objects.Dict;
+const Array = objects.Array;
+const Value = objects.Value;
+
+// Type aliases
+pub const StandardFont = fonts.StandardFont;
+pub const Font = fonts.Font;
+pub const TextMetrics = metrics.TextMetrics;
+pub const TextStyle = metrics.TextStyle;
+pub const FontMetrics = metrics.FontMetrics;
+pub const EmbeddedFont = embedded.EmbeddedFont;
+pub const Color = color.Color;
+
+// Layout types
+pub const Border = layout.Border;
+pub const Align = layout.Align;
+pub const VAlign = layout.VAlign;
+pub const LineBreaking = layout.LineBreaking;
+pub const Margins = layout.Margins;
+pub const Padding = layout.Padding;
+pub const Region = layout.Region;
+pub const WriteResult = layout.WriteResult;
+pub const LineOptions = layout.LineOptions;
+pub const ParagraphOptions = layout.ParagraphOptions;
+pub const FlowOptions = layout.FlowOptions;
+pub const PageSize = layout.PageSize;
+
+pub const opentype = embedded.opentype;
+
+// ============================================================================
+// Internal Types
+// ============================================================================
+
+// Fast hex conversion lookup table
+const hex_chars = "0123456789ABCDEF";
+
+/// Fast conversion of u16 to 4-character hex string
+fn writeHex4(buf: *[4]u8, val: u16) void {
+    buf[0] = hex_chars[(val >> 12) & 0xF];
+    buf[1] = hex_chars[(val >> 8) & 0xF];
+    buf[2] = hex_chars[(val >> 4) & 0xF];
+    buf[3] = hex_chars[val & 0xF];
+}
+
+/// Handle to a loaded font (either standard or embedded)
+pub const FontHandle = union(enum) {
+    standard: StandardFont,
+    embedded: *EmbeddedFont,
+
+    pub fn name(self: FontHandle) []const u8 {
+        return switch (self) {
+            .standard => |f| f.pdfName(),
+            .embedded => |e| e.name,
+        };
+    }
+};
+
+/// Font reference for deferred text commands
+const FontRef = union(enum) {
+    standard: StandardFont,
+    embedded: *EmbeddedFont,
+};
+
+/// Text command parameters for deferred rendering
+const TextCommand = struct {
+    x: f64,
+    y: f64,
+    font_size: f64,
+    char_spacing: f64,
+    word_spacing: f64, // Extra space added between words for justification
+    text_data: []const u8, // Owned copy of text
+    font: FontRef,
+    /// Text color
+    text_color: Color,
+    /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
+    cached_glyphs: ?[]const u16 = null,
+};
+
+/// Content command for deferred rendering (enables glyph ID remapping)
+const ContentCommand = union(enum) {
+    /// Text command with all rendering parameters
+    text: TextCommand,
+    /// Raw content (for non-text operations that don't need deferred processing)
+    raw: []const u8, // Owned copy
+};
+
+/// Internal page representation
+const Page = struct {
+    content: std.ArrayListUnmanaged(u8), // Legacy: direct content bytes
+    commands: std.ArrayListUnmanaged(ContentCommand), // Deferred commands
+    used_fonts: std.AutoHashMapUnmanaged(StandardFont, void),
+    used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
+
+    // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
+    // All page allocations freed at once in deinit - no individual free() calls
+    arena: std.heap.ArenaAllocator,
+
+    fn init(backing_allocator: std.mem.Allocator) Page {
+        return .{
+            .content = .{},
+            .commands = .{},
+            .used_fonts = .{},
+            .used_embedded = .{},
+            .arena = std.heap.ArenaAllocator.init(backing_allocator),
+        };
+    }
+
+    /// Get the arena allocator for page-local allocations
+    fn pageAllocator(self: *Page) std.mem.Allocator {
+        return self.arena.allocator();
+    }
+
+    fn deinit(self: *Page, backing_allocator: std.mem.Allocator) void {
+        // Arena frees all text_data, cached_glyphs, etc. in one operation
+        self.arena.deinit();
+
+        // These use the backing allocator, not the arena
+        self.commands.deinit(backing_allocator);
+        self.content.deinit(backing_allocator);
+        self.used_fonts.deinit(backing_allocator);
+        self.used_embedded.deinit(backing_allocator);
+    }
+
+    fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
+        try self.used_fonts.put(allocator, font, {});
+    }
+
+    fn markEmbeddedUsed(self: *Page, allocator: std.mem.Allocator, font: *EmbeddedFont) !void {
+        // Check if already in list
+        for (self.used_embedded.items) |f| {
+            if (f == font) return;
+        }
+        try self.used_embedded.append(allocator, font);
+    }
+
+    fn writer(self: *Page, allocator: std.mem.Allocator) ContentWriter {
+        return ContentWriter{ .page = self, .allocator = allocator };
+    }
+};
+
+/// Writer for page content stream
+const ContentWriter = struct {
+    page: *Page,
+    allocator: std.mem.Allocator,
+
+    fn append(self: *ContentWriter, data: []const u8) !void {
+        try self.page.content.appendSlice(self.allocator, data);
+    }
+
+    fn print(self: *ContentWriter, comptime fmt: []const u8, args: anytype) !void {
+        var buf: [256]u8 = undefined;
+        const slice = std.fmt.bufPrint(&buf, fmt, args) catch {
+            // Buffer too small, allocate
+            const str = try std.fmt.allocPrint(self.allocator, fmt, args);
+            defer self.allocator.free(str);
+            try self.append(str);
+            return;
+        };
+        try self.append(slice);
+    }
+
+    /// Append a string with PDF string escaping (for literal strings)
+    /// Escapes (, ), and \ characters
+    fn appendEscaped(self: *ContentWriter, str: []const u8) !void {
+        for (str) |c| {
+            switch (c) {
+                '\\' => try self.page.content.appendSlice(self.allocator, "\\\\"),
+                '(' => try self.page.content.appendSlice(self.allocator, "\\("),
+                ')' => try self.page.content.appendSlice(self.allocator, "\\)"),
+                else => try self.page.content.append(self.allocator, c),
+            }
+        }
+    }
+
+    /// Return std.io.Writer interface for this ContentWriter
+    fn writer(self: *ContentWriter) std.io.GenericWriter(*ContentWriter, error{OutOfMemory}, writeBytes) {
+        return .{ .context = self };
+    }
+
+    fn writeBytes(self: *ContentWriter, bytes: []const u8) error{OutOfMemory}!usize {
+        self.page.content.appendSlice(self.allocator, bytes) catch return error.OutOfMemory;
+        return bytes.len;
+    }
+};
+
+/// Get a short resource name for a font (F1, F2, etc.)
+fn fontResourceName(font: StandardFont) []const u8 {
+    return switch (font) {
+        .helvetica => "F1",
+        .helvetica_bold => "F2",
+        .helvetica_oblique => "F3",
+        .helvetica_bold_oblique => "F4",
+        .times_roman => "F5",
+        .times_bold => "F6",
+        .times_italic => "F7",
+        .times_bold_italic => "F8",
+        .courier => "F9",
+        .courier_bold => "F10",
+        .courier_oblique => "F11",
+        .courier_bold_oblique => "F12",
+        .symbol => "F13",
+        .zapf_dingbats => "F14",
+    };
+}
+
+/// Static resource names for embedded fonts (E1, E2, etc.)
+const embedded_font_names = [_][]const u8{
+    "E1",  "E2",  "E3",  "E4",  "E5",  "E6",  "E7",  "E8",
+    "E9",  "E10", "E11", "E12", "E13", "E14", "E15", "E16",
+    "E17", "E18", "E19", "E20", "E21", "E22", "E23", "E24",
+    "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32",
+};
+
+/// Get a short resource name for an embedded font by index
+fn embeddedFontResourceName(idx: usize) []const u8 {
+    if (idx < embedded_font_names.len) {
+        return embedded_font_names[idx];
+    }
+    // Fallback - this shouldn't happen with reasonable font counts
+    return "E99";
+}
+
+// ============================================================================
+// Document
+// ============================================================================
+
+/// PDF Document
+pub const Document = struct {
+    allocator: std.mem.Allocator,
+    pages: std.ArrayListUnmanaged(Page),
+    page_size: PageSize,
+    /// Document margins.
+    margins: Margins = .{},
+    // Text state
+    current_font: ?StandardFont = null,
+    current_embedded: ?*EmbeddedFont = null,
+    font_size: f64 = 12,
+    x: f64 = 0,
+    y: f64 = 0,
+    /// Extra space between characters (in points). Can be negative.
+    char_spacing: f64 = 0,
+    /// Line height as multiple of font size. Default 1.2 (20% leading).
+    line_height: f64 = 1.2,
+    /// Text color (default black).
+    text_color: Color = Color.black,
+    /// Fill color for shapes (default black).
+    fill_color: Color = Color.black,
+    /// Stroke/draw color for lines and borders (default black).
+    draw_color: Color = Color.black,
+    // Track all fonts used across document
+    used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
+    // Track all embedded fonts
+    embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .{},
+
+    pub fn init(allocator: std.mem.Allocator) Document {
+        return .{
+            .allocator = allocator,
+            .pages = .{},
+            .page_size = PageSize.A4,
+        };
+    }
+
+    pub fn deinit(self: *Document) void {
+        for (self.pages.items) |*page| {
+            page.deinit(self.allocator);
+        }
+        self.pages.deinit(self.allocator);
+        self.used_fonts.deinit(self.allocator);
+        // Clean up embedded fonts
+        for (self.embedded_fonts.items) |font| {
+            font.deinit();
+        }
+        self.embedded_fonts.deinit(self.allocator);
+    }
+
+    /// Add a new page
+    pub fn addPage(self: *Document) !void {
+        try self.pages.append(self.allocator, Page.init(self.allocator));
+        // Reset position to top-left (PDF coordinates: origin at bottom-left)
+        self.x = 0;
+        self.y = self.page_size.height;
+    }
+
+    /// Set the current font and size (standard font)
+    pub fn setFont(self: *Document, font: StandardFont, size: f64) !void {
+        self.current_font = font;
+        self.current_embedded = null; // Clear embedded font
+        self.font_size = size;
+        try self.used_fonts.put(self.allocator, font, {});
+    }
+
+    /// Load a TrueType font from file
+    pub fn loadFont(self: *Document, path: []const u8) !*EmbeddedFont {
+        const font = try EmbeddedFont.fromFile(self.allocator, path);
+        try self.embedded_fonts.append(self.allocator, font);
+        return font;
+    }
+
+    /// Set an embedded font as current
+    pub fn setEmbeddedFont(self: *Document, font: *EmbeddedFont, size: f64) !void {
+        self.current_embedded = font;
+        self.current_font = null; // Clear standard font
+        self.font_size = size;
+        // Ensure font is in our list
+        for (self.embedded_fonts.items) |f| {
+            if (f == font) return;
+        }
+        try self.embedded_fonts.append(self.allocator, font);
+    }
+
+    /// Get index of embedded font (for resource naming)
+    fn getEmbeddedFontIndex(self: *Document, font: *EmbeddedFont) ?usize {
+        for (self.embedded_fonts.items, 0..) |f, i| {
+            if (f == font) return i;
+        }
+        return null;
+    }
+
+    /// Set character spacing (extra space between characters, in points)
+    pub fn setCharSpacing(self: *Document, spacing: f64) void {
+        self.char_spacing = spacing;
+    }
+
+    /// Set line height (as multiple of font size, e.g. 1.2 = 120%)
+    pub fn setLineHeight(self: *Document, height: f64) void {
+        self.line_height = height;
+    }
+
+    /// Set text color.
+    pub fn setTextColor(self: *Document, c: Color) void {
+        self.text_color = c;
+    }
+
+    /// Set fill color (for shapes and backgrounds).
+    pub fn setFillColor(self: *Document, c: Color) void {
+        self.fill_color = c;
+    }
+
+    /// Set draw/stroke color (for lines and borders).
+    pub fn setDrawColor(self: *Document, c: Color) void {
+        self.draw_color = c;
+    }
+
+    /// Set document margins.
+    pub fn setMargins(self: *Document, m: Margins) void {
+        self.margins = m;
+    }
+
+    /// Returns a region for the current page respecting document margins.
+    pub fn getPageRegion(self: *Document) Region {
+        return .{
+            .x = self.margins.left,
+            .y = self.margins.top,
+            .width = self.page_size.width - self.margins.left - self.margins.right,
+            .height = self.page_size.height - self.margins.top - self.margins.bottom,
+        };
+    }
+
+    /// Set OpenType feature for all embedded fonts
+    /// Example: doc.setFeature(.liga, false) to disable ligatures
+    pub fn setFeature(self: *Document, feature: opentype.Feature, enabled: bool) void {
+        for (self.embedded_fonts.items) |font| {
+            font.setFeature(feature, enabled);
+        }
+    }
+
+    /// Set OpenType feature for a specific embedded font
+    pub fn setFontFeature(self: *Document, font: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
+        _ = self;
+        font.setFeature(feature, enabled);
+    }
+
+    /// Get current line height in points
+    pub fn getLineHeightPts(self: *Document) f64 {
+        return self.font_size * self.line_height;
+    }
+
+    /// Get current text style for measurement
+    pub fn getTextStyle(self: *Document) TextStyle {
+        return .{
+            .font = self.current_font orelse .helvetica,
+            .size = self.font_size,
+            .char_spacing = self.char_spacing,
+            .line_height = self.line_height,
+        };
+    }
+
+    /// Get font metrics for the current font, scaled to the current font size.
+    /// Returns metrics in points at the current font size.
+    pub fn getFontMetrics(self: *Document) FontMetrics {
+        const size = self.font_size;
+
+        if (self.current_embedded) |emb| {
+            // Embedded font: use actual metrics from the font
+            // Metrics are stored in 1000 units, scale to points
+            const scale = size / 1000.0;
+            return .{
+                .ascender = @as(f64, @floatFromInt(emb.ascent)) * scale,
+                .descender = @as(f64, @floatFromInt(emb.descent)) * scale,
+                .cap_height = @as(f64, @floatFromInt(emb.cap_height)) * scale,
+                // x_height estimated as 70% of cap_height if not available
+                .x_height = @as(f64, @floatFromInt(emb.cap_height)) * scale * 0.7,
+                .font_size = size,
+                .units_per_em = emb.font.head.?.units_per_em,
+            };
+        } else if (self.current_font) |font| {
+            // Standard font: use predefined metrics
+            const m = metrics.getStandardFontMetrics(font);
+            const scale = size / 1000.0;
+            return .{
+                .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
+                .descender = @as(f64, @floatFromInt(m.descender)) * scale,
+                .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
+                .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
+                .font_size = size,
+                .units_per_em = 1000, // Standard fonts use 1000 units per em
+            };
+        } else {
+            // No font set, return Helvetica defaults
+            const m = metrics.getStandardFontMetrics(.helvetica);
+            const scale = size / 1000.0;
+            return .{
+                .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
+                .descender = @as(f64, @floatFromInt(m.descender)) * scale,
+                .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
+                .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
+                .font_size = size,
+                .units_per_em = 1000,
+            };
+        }
+    }
+
+    /// Measure text dimensions without rendering
+    pub fn measureText(self: *Document, text_str: []const u8) TextMetrics {
+        return metrics.measureText(text_str, self.getTextStyle());
+    }
+
+    /// Measure text width in points
+    pub fn measureTextWidth(self: *Document, text_str: []const u8) f64 {
+        return metrics.measureTextWidth(text_str, self.getTextStyle());
+    }
+
+    /// Set current position (in points from top-left)
+    pub fn setXY(self: *Document, x: f64, y: f64) void {
+        self.x = x;
+        // Convert from top-left to PDF coordinates (bottom-left origin)
+        self.y = self.page_size.height - y;
+    }
+
+    /// Set X position
+    pub fn setX(self: *Document, x: f64) void {
+        self.x = x;
+    }
+
+    /// Set Y position (from top)
+    pub fn setY(self: *Document, y: f64) void {
+        self.y = self.page_size.height - y;
+    }
+
+    /// Get current X position
+    pub fn getX(self: *Document) f64 {
+        return self.x;
+    }
+
+    /// Get current Y position (from top)
+    pub fn getY(self: *Document) f64 {
+        return self.page_size.height - self.y;
+    }
+
+    /// Writes text at the current cursor position.
+    pub fn write(self: *Document, str: []const u8) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_alloc = page.pageAllocator();
+
+        // Create owned copy of text, stripping soft-hyphens (U+00AD)
+        // Soft-hyphens are invisible unless used as break points
+        // Allocated on page arena - freed when page is destroyed
+        const text_copy = try stripSoftHyphens(page_alloc, str);
+
+        // Determine font reference, mark as used, and cache glyphs
+        var cached_glyphs: ?[]const u16 = null;
+
+        const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
+            try page.markEmbeddedUsed(self.allocator, emb);
+            // Mark chars/glyphs as used for subsetting and cache glyphs
+            if (emb.encoding == .identity) {
+                cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+            } else {
+                emb.markCharsUsed(text_copy);
+            }
+            break :blk .{ .embedded = emb };
+        } else if (self.current_font) |font| blk: {
+            try page.markFontUsed(self.allocator, font);
+            break :blk .{ .standard = font };
+        } else {
+            return error.NoFont;
+        };
+
+        // Store deferred command with cached glyphs
+        try page.commands.append(self.allocator, .{
+            .text = .{
+                .x = self.x,
+                .y = self.y,
+                .font_size = self.font_size,
+                .char_spacing = self.char_spacing,
+                .word_spacing = 0,
+                .text_data = text_copy,
+                .font = font_ref,
+                .text_color = self.text_color,
+                .cached_glyphs = cached_glyphs,
+            },
+        });
+    }
+
+    /// Internal: Write text at position with specified word spacing (for justification).
+    fn writeWithWordSpacing(self: *Document, x: f64, y: f64, str: []const u8, word_spacing: f64) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_alloc = page.pageAllocator();
+
+        // Create owned copy of text, stripping soft-hyphens
+        // Allocated on page arena - freed when page is destroyed
+        const text_copy = try stripSoftHyphens(page_alloc, str);
+
+        // Determine font reference, mark as used, and cache glyphs
+        var cached_glyphs: ?[]const u16 = null;
+
+        const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
+            try page.markEmbeddedUsed(self.allocator, emb);
+            if (emb.encoding == .identity) {
+                cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+            } else {
+                emb.markCharsUsed(text_copy);
+            }
+            break :blk .{ .embedded = emb };
+        } else if (self.current_font) |font| blk: {
+            try page.markFontUsed(self.allocator, font);
+            break :blk .{ .standard = font };
+        } else {
+            return error.NoFont;
+        };
+
+        // Store deferred command with word spacing and cached glyphs
+        // Convert Y from top-left to PDF coordinates (bottom-left origin)
+        try page.commands.append(self.allocator, .{
+            .text = .{
+                .x = x,
+                .y = self.page_size.height - y,
+                .font_size = self.font_size,
+                .char_spacing = self.char_spacing,
+                .word_spacing = word_spacing,
+                .text_data = text_copy,
+                .font = font_ref,
+                .text_color = self.text_color,
+                .cached_glyphs = cached_glyphs,
+            },
+        });
+    }
+
+    /// Render CID text with ligatures, kerning, and mark positioning
+    /// Returns true if advanced positioning was used (kerning or marks)
+    /// start_x, start_y are absolute page coordinates for Tm-based mark positioning
+    /// If cached_glyphs is provided, uses those instead of computing from str
+    fn renderCIDTextWithKerning(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8, cached_glyphs: ?[]const u16, font_size: f64, start_x: f64, start_y: f64) !bool {
+        _ = self;
+        // Use cached glyphs if available, otherwise compute
+        const glyphs_to_free: ?[]u16 = if (cached_glyphs == null) try emb.getGlyphsForText(str) else null;
+        defer if (glyphs_to_free) |g| emb.allocator.free(g);
+        const glyphs = cached_glyphs orelse glyphs_to_free.?;
+
+        if (glyphs.len == 0) return false;
+
+        const has_remap = emb.gid_remap.count() > 0;
+        const units_per_em = emb.font.head.?.units_per_em;
+
+        // Check if we have any kerning or mark positioning
+        // Fast path: skip check loop if font has no kerning/mark data at all
+        var has_kerning = false;
+        var has_marks = false;
+        const check_kern = emb.feature_flags.kern and emb.has_kern_data;
+        const check_marks = (emb.feature_flags.mark or emb.feature_flags.mkmk) and emb.has_mark_data;
+        if (check_kern or check_marks) {
+            // Early exit once both are found (or we know we won't find the other)
+            for (0..glyphs.len -| 1) |i| {
+                if (!has_kerning and check_kern and emb.getKerning(glyphs[i], glyphs[i + 1]) != 0) {
+                    has_kerning = true;
+                    if (!check_marks or has_marks) break;
+                }
+                if (!has_marks and check_marks and emb.getMarkOffset(glyphs[i], glyphs[i + 1]) != null) {
+                    has_marks = true;
+                    if (!check_kern or has_kerning) break;
+                }
+            }
+        }
+
+        // If we have marks with y-offsets, use Tm-based absolute positioning (like LibreOffice)
+        if (has_marks) {
+            return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y);
+        }
+
+        // No marks - use Td for initial position
+        try cw.print("{d:.2} {d:.2} Td\n", .{ start_x, start_y });
+
+        if (!has_kerning) {
+            // No kerning - use simple hex string
+            try cw.append("<");
+            var hex_buf: [4]u8 = undefined;
+            for (glyphs) |gid| {
+                const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
+                writeHex4(&hex_buf, final_gid);
+                try cw.append(&hex_buf);
+            }
+            try cw.append("> Tj\n");
+            return false;
+        }
+
+        // Use TJ operator with kerning adjustments
+        // Format: [<HexGlyphs> kern <HexGlyphs> kern ...] TJ
+        try cw.append("[<");
+        var hex_buf: [4]u8 = undefined;
+
+        for (glyphs, 0..) |gid, i| {
+            const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
+            writeHex4(&hex_buf, final_gid);
+            try cw.append(&hex_buf);
+
+            // Add kerning adjustment before next glyph
+            if (i + 1 < glyphs.len) {
+                const kern = emb.getKerning(gid, glyphs[i + 1]);
+                if (kern != 0) {
+                    // Convert from font units to 1/1000 em, negate for TJ
+                    // TJ uses positive values to move left (reduce spacing)
+                    const kern_1000: i32 = @divTrunc(@as(i32, kern) * 1000, @as(i32, units_per_em));
+                    try cw.print("> {d} <", .{-kern_1000});
+                }
+            }
+        }
+
+        try cw.append(">] TJ\n");
+        return true;
+    }
+
+    /// Render glyphs with mark positioning using absolute Tm positioning (like LibreOffice).
+    /// Each glyph gets positioned with "1 0 0 1 x y Tm" followed by glyph Tj.
+    /// This avoids relying on PDF auto-advance behavior.
+    fn renderWithMarkPositioning(cw: *ContentWriter, emb: *EmbeddedFont, glyphs: []const u16, font_size: f64, units_per_em: u16, has_remap: bool, start_x: f64, start_y: f64) !bool {
+        // Track absolute position for each glyph
+        var abs_x = start_x;
+        const abs_y = start_y; // Baseline doesn't change for horizontal text
+
+        var i: usize = 0;
+        while (i < glyphs.len) {
+            const gid = glyphs[i];
+            const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
+            const glyph_width = emb.getGlyphWidth(gid); // in 1/1000 em
+            const glyph_width_pts = @as(f64, @floatFromInt(glyph_width)) * font_size / 1000.0;
+
+            // Check if next glyphs are marks that attach to this base (or to other marks)
+            // A mark can attach to:
+            // 1. The previous glyph (mark-to-mark for stacked diacritics)
+            // 2. The base glyph directly (multiple marks on same base, e.g., cedilla below + acute above)
+            var mark_count: usize = 0;
+            var j = i + 1;
+            while (j < glyphs.len) {
+                const potential_mark = glyphs[j];
+                // Check mark-to-mark (attaches to previous glyph)
+                if (emb.getMarkOffset(glyphs[j - 1], potential_mark) != null) {
+                    mark_count += 1;
+                    j += 1;
+                }
+                // Check mark-to-base (attaches directly to base, e.g., acute on 's' when cedilla is also present)
+                else if (emb.getMarkOffset(gid, potential_mark) != null) {
+                    mark_count += 1;
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Save base glyph origin for mark positioning
+            const base_x = abs_x;
+            const base_y = abs_y;
+
+            // Position and output base glyph using Tm (absolute positioning)
+            try cw.print("1 0 0 1 {d:.2} {d:.2} Tm ", .{ abs_x, abs_y });
+            try cw.print("<{X:0>4}> Tj\n", .{final_gid});
+
+            // Advance position for next base glyph
+            abs_x += glyph_width_pts;
+
+            if (mark_count > 0) {
+                // Render marks with absolute positioning
+                // Track previous glyph for mark-to-mark positioning
+                var prev_gid = gid;
+                var prev_x = base_x;
+                var prev_y = base_y;
+
+                for (0..mark_count) |m| {
+                    const mark_gid = glyphs[i + 1 + m];
+                    const mark_final_gid = if (has_remap) emb.gid_remap.get(mark_gid) orelse 0 else mark_gid;
+
+                    // Try mark-to-mark first (attaches to previous mark)
+                    // Then try mark-to-base (attaches directly to base)
+                    var ref_x = base_x;
+                    var ref_y = base_y;
+                    var offset: ?opentype.MarkOffset = emb.getMarkOffset(prev_gid, mark_gid);
+                    if (offset != null) {
+                        // Mark-to-mark: position relative to previous mark
+                        ref_x = prev_x;
+                        ref_y = prev_y;
+                    } else {
+                        // Try mark-to-base: position relative to base glyph
+                        offset = emb.getMarkOffset(gid, mark_gid);
+                    }
+
+                    if (offset) |off| {
+                        // Convert mark offset from design units to points
+                        const dx_pts = @as(f64, @floatFromInt(off.dx)) * font_size / @as(f64, @floatFromInt(units_per_em));
+                        const dy_pts = @as(f64, @floatFromInt(off.dy)) * font_size / @as(f64, @floatFromInt(units_per_em));
+
+                        // Mark position is relative to reference glyph (base or previous mark)
+                        const mark_x = ref_x + dx_pts;
+                        const mark_y = ref_y + dy_pts;
+
+                        // Position and output mark using Tm (absolute positioning)
+                        try cw.print("1 0 0 1 {d:.2} {d:.2} Tm ", .{ mark_x, mark_y });
+                        try cw.print("<{X:0>4}> Tj\n", .{mark_final_gid});
+
+                        // Update prev position for potential mark-to-mark stacking
+                        prev_gid = mark_gid;
+                        prev_x = mark_x;
+                        prev_y = mark_y;
+                    }
+                }
+
+                i += 1 + mark_count;
+            } else {
+                i += 1;
+            }
+
+            // Add kerning if next glyph exists
+            const next_idx = i;
+            if (next_idx < glyphs.len) {
+                const kern = emb.getKerning(gid, glyphs[next_idx]);
+                if (kern != 0) {
+                    const kern_pts = @as(f64, @floatFromInt(kern)) * font_size / @as(f64, @floatFromInt(units_per_em));
+                    abs_x += kern_pts;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// Writes text at the specified position.
+    pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !void {
+        self.setXY(x, y);
+        try self.write(str);
+    }
+
+    /// Measures text width using current font (standard or embedded).
+    /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
+    pub fn getTextWidth(self: *Document, str: []const u8) f64 {
+        // Fast path: no soft-hyphens
+        if (!containsSoftHyphens(str)) {
+            if (self.current_embedded) |emb| {
+                return emb.measureTextWidth(str, self.font_size);
+            }
+            return metrics.measureTextWidth(str, self.getTextStyle());
+        }
+
+        // Slow path: filter out soft-hyphens using stack buffer
+        var buf: [4096]u8 = undefined;
+        var j: usize = 0;
+        var i: usize = 0;
+        while (i < str.len and j < buf.len) {
+            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+                i += 2; // Skip soft-hyphen
+            } else {
+                buf[j] = str[i];
+                j += 1;
+                i += 1;
+            }
+        }
+        const filtered = buf[0..j];
+
+        if (self.current_embedded) |emb| {
+            return emb.measureTextWidth(filtered, self.font_size);
+        }
+        return metrics.measureTextWidth(filtered, self.getTextStyle());
+    }
+
+    /// Writes a single line of text into a region.
+    /// Does not wrap text. Advances the region cursor by one line height.
+    pub fn writeLine(self: *Document, region: *Region, str: []const u8, opts: LineOptions) !WriteResult {
+        return self.writeLineInternal(region, str, opts.alignment, opts.valign, 0);
+    }
+
+    /// Internal line writer with indent and valign support.
+    fn writeLineInternal(self: *Document, region: *Region, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
+        const line_height = self.getLineHeightPts();
+
+        // Check if we have room for a line
+        if (region.remainingHeight() < line_height) {
+            return .{
+                .lines_written = 0,
+                .overflow = str,
+            };
+        }
+
+        const text_width = self.getTextWidth(str);
+        const content_width = region.contentWidth();
+        const available_width = content_width - indent;
+
+        // Count spaces for justification calculation
+        var space_count: usize = 0;
+        for (str) |c| {
+            if (c == ' ') space_count += 1;
+        }
+
+        // Calculate word spacing for justified text
+        // Only justify if there are spaces and text doesn't fill line
+        const extra_space = available_width - text_width;
+        const word_spacing: f64 = if (alignment == .justify and space_count > 0 and extra_space > 0)
+            extra_space / @as(f64, @floatFromInt(space_count))
+        else
+            0;
+
+        // Calculate x position based on alignment (content starts at x + padding.left)
+        const content_x = region.x + region.padding.left;
+        const x = switch (alignment) {
+            .left => content_x + indent,
+            .center => content_x + indent + (available_width - text_width) / 2,
+            .right => content_x + content_width - text_width,
+            .justify => content_x + indent,
+        };
+
+        // Calculate y position based on vertical alignment
+        const content_y = region.y + region.padding.top;
+        const leading = line_height - self.font_size;
+        const y = switch (valign) {
+            // Baseline at content_y + cursor_y + font_size (simple)
+            .top => content_y + region.cursor_y + self.font_size,
+            // Baseline centered: subtract leading/2 (fpdf2 compatible)
+            .middle => content_y + region.cursor_y + self.font_size - leading / 2,
+            // Baseline at bottom of line height
+            .bottom => content_y + region.cursor_y + line_height,
+        };
+
+        // Render text (with word spacing if justified)
+        if (word_spacing > 0) {
+            try self.writeWithWordSpacing(x, y, str, word_spacing);
+        } else {
+            try self.writeAt(x, y, str);
+        }
+
+        // Advance cursor
+        region.cursor_y += line_height;
+
+        return .{
+            .lines_written = 1,
+            .overflow = null,
+        };
+    }
+
+    /// Find a soft-hyphen break point in a word that fits within max_width.
+    /// Soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) marks optional break points.
+    /// Returns the byte position where to break (soft-hyphen will be replaced with visible hyphen).
+    pub fn findSoftHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
+        var best_break: ?usize = null;
+        var i: usize = 0;
+        while (i + 1 < word.len) {
+            // Soft-hyphen in UTF-8 is 0xC2 0xAD
+            if (word[i] == 0xC2 and word[i + 1] == 0xAD) {
+                // Found a soft-hyphen - measure prefix with a visible hyphen substituted
+                const prefix = word[0..i];
+                const prefix_width = self.getTextWidth(prefix) + self.getTextWidth("-");
+                if (prefix_width <= max_width) {
+                    best_break = i; // Position of the soft-hyphen
+                } else {
+                    break; // Prefix too wide, no point checking further
+                }
+                i += 2; // Skip the 2-byte soft-hyphen
+            } else {
+                i += 1;
+            }
+        }
+        return best_break;
+    }
+
+    /// Find a regular hyphen break point in a word that fits within max_width.
+    /// Regular hyphens stay visible; we break AFTER the hyphen (e.g., "state-" / "of-the-art").
+    /// Returns the byte position after the hyphen where to split.
+    pub fn findHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
+        var best_break: ?usize = null;
+        for (word, 0..) |c, i| {
+            if (c == '-' and i > 0 and i + 1 < word.len) {
+                // Found a hyphen - measure prefix including the hyphen
+                const prefix = word[0 .. i + 1];
+                const prefix_width = self.getTextWidth(prefix);
+                if (prefix_width <= max_width) {
+                    best_break = i + 1; // Position after the hyphen
+                } else {
+                    break; // Prefix too wide, no point checking further
+                }
+            }
+        }
+        return best_break;
+    }
+
+    /// Find a character break point in a word that fits within max_width.
+    /// This is a last resort when no hyphen or soft-hyphen breaks are available.
+    /// Returns the byte position where to break (respecting UTF-8 boundaries).
+    fn findCharacterBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
+        var best_break: ?usize = null;
+        var current_width: f64 = 0;
+        var i: usize = 0;
+
+        while (i < word.len) {
+            // Find the end of the current UTF-8 character
+            const char_len = std.unicode.utf8ByteSequenceLength(word[i]) catch 1;
+            const char_end = @min(i + char_len, word.len);
+
+            // Measure width including this character
+            const prefix_width = self.getTextWidth(word[0..char_end]);
+
+            if (prefix_width <= max_width) {
+                best_break = char_end;
+                current_width = prefix_width;
+                i = char_end;
+            } else {
+                break;
+            }
+        }
+
+        // Only return if we found at least one character that fits
+        if (best_break) |pos| {
+            if (pos > 0 and pos < word.len) {
+                return pos;
+            }
+        }
+        return null;
+    }
+
+    /// Word info for optimal line breaking.
+    const WordInfo = struct {
+        start: usize, // Byte offset in original text
+        end: usize, // Byte offset (exclusive)
+        width: f64, // Width in points
+        force_break: bool, // Must break after this word (newline follows)
+    };
+
+    fn computeOptimalBreaks(
+        self: *Document,
+        text: []const u8,
+        line_width: f64,
+        first_line_width: f64,
+    ) ![]usize {
+        const allocator = self.allocator;
+        const space_width = self.getTextWidth(" ");
+
+        // Parse text into words, tracking forced breaks (newlines)
+        var words = std.ArrayListUnmanaged(WordInfo){};
+        defer words.deinit(allocator);
+
+        var i: usize = 0;
+        while (i < text.len) {
+            // Skip whitespace (but track if we see a newline)
+            while (i < text.len and (text[i] == ' ' or text[i] == '\t' or text[i] == '\n')) {
+                i += 1;
+            }
+            if (i >= text.len) break;
+
+            // Find word end
+            const word_start = i;
+            while (i < text.len and text[i] != ' ' and text[i] != '\t' and text[i] != '\n') {
+                i += 1;
+            }
+            const word_end = i;
+
+            // Check if a newline follows this word (forced break)
+            var force_break = false;
+            var j = i;
+            while (j < text.len and (text[j] == ' ' or text[j] == '\t')) {
+                j += 1;
+            }
+            if (j < text.len and text[j] == '\n') {
+                force_break = true;
+            }
+
+            try words.append(allocator, .{
+                .start = word_start,
+                .end = word_end,
+                .width = self.getTextWidth(text[word_start..word_end]),
+                .force_break = force_break,
+            });
+        }
+
+        if (words.items.len == 0) {
+            return allocator.alloc(usize, 0);
+        }
+
+        const n = words.items.len;
+        const INFINITY: f64 = 1e18;
+
+        // dp[i] = minimum total badness to typeset words 0..i-1 (i words)
+        // prev[i] = which word index starts the line ending at word i-1
+        var dp = try allocator.alloc(f64, n + 1);
+        defer allocator.free(dp);
+        var prev = try allocator.alloc(usize, n + 1);
+        defer allocator.free(prev);
+
+        dp[0] = 0;
+        prev[0] = 0;
+
+        // For each ending position
+        for (1..n + 1) |j| {
+            dp[j] = INFINITY;
+            prev[j] = 0;
+
+            // Try each starting position for this line
+            var line_w: f64 = 0;
+            var start_i = j;
+            while (start_i > 0) {
+                start_i -= 1;
+                const word = words.items[start_i];
+
+                // If this word has force_break but isn't the last word of the line,
+                // this configuration is invalid (word must be at line end)
+                if (word.force_break and start_i + 1 < j) {
+                    break;
+                }
+
+                // Add word width (and space if not first word on line)
+                if (start_i + 1 < j) {
+                    line_w += space_width;
+                }
+                line_w += word.width;
+
+                // Get the line width for this line (first line may be different)
+                const this_line_width = if (start_i == 0) first_line_width else line_width;
+
+                // Line too wide - no point trying earlier start positions
+                if (line_w > this_line_width + 0.01) break;
+
+                // Compute badness for this line configuration
+                const slack = this_line_width - line_w;
+                const is_last_line = (j == n);
+
+                // Lines ending with forced break: no penalty (will be left-aligned)
+                // Last line: no penalty for short lines (left-aligned)
+                // Other lines: penalize based on slack squared
+                const is_forced = words.items[j - 1].force_break;
+                const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
+
+                const total = dp[start_i] + badness;
+                if (total < dp[j]) {
+                    dp[j] = total;
+                    prev[j] = start_i;
+                }
+            }
+        }
+
+        // Backtrack to find break points
+        var breaks = std.ArrayListUnmanaged(usize){};
+        errdefer breaks.deinit(allocator);
+
+        var pos = n;
+        while (pos > 0) {
+            const line_start = prev[pos];
+            // Line contains words[line_start..pos], ends at word pos-1
+            const last_word = words.items[pos - 1];
+            try breaks.append(allocator, last_word.end);
+            pos = line_start;
+        }
+
+        // Reverse to get breaks in order
+        std.mem.reverse(usize, breaks.items);
+
+        return breaks.toOwnedSlice(allocator);
+    }
+
+    /// Writes wrapped text into a region.
+    /// Supports word wrapping, soft-hyphen breaking, and optional hyphenated word breaking.
+    pub fn writeParagraph(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
+        const line_height = self.getLineHeightPts();
+        const space_width = self.getTextWidth(" ");
+        var lines_written: usize = 0;
+        var is_first_line = true;
+
+        // Use optimal (Knuth-Plass) line breaking if requested
+        if (opts.line_breaking == .optimal) {
+            return self.writeParagraphOptimal(region, str, opts);
+        }
+
+        // Greedy algorithm: process text word by word
+        var remaining = str;
+        while (remaining.len > 0) {
+            // Check if we have room for another line
+            if (region.remainingHeight() < line_height) {
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = remaining,
+                };
+            }
+
+            // Calculate available width for this line (respects padding)
+            const indent = if (is_first_line) opts.first_indent else 0;
+            const line_width = region.contentWidth() - indent;
+
+            // Build a line by collecting words
+            var line_end: usize = 0;
+            var current_width: f64 = 0;
+            var word_start: usize = 0;
+            var in_word = false;
+            var soft_hyphen_break = false;
+            var forced_break = false; // Line ended due to explicit newline
+
+            for (remaining, 0..) |c, i| {
+                const is_space = c == ' ' or c == '\t' or c == '\n';
+
+                if (is_space and in_word) {
+                    // End of word - check if it fits (with small tolerance for floating point)
+                    const word = remaining[word_start..i];
+                    const word_width = self.getTextWidth(word);
+
+                    if (current_width + word_width <= line_width + 0.01) {
+                        // Word fits
+                        current_width += word_width + space_width;
+                        line_end = i;
+                    } else if (line_end == 0) {
+                        // First word doesn't fit on empty line - try breaking at hyphens
+                        if (opts.break_on_hyphens) {
+                            if (self.findHyphenBreak(word, line_width)) |break_pos| {
+                                line_end = word_start + break_pos;
+                                break;
+                            }
+                        }
+                        // Try soft-hyphen break as fallback
+                        if (self.findSoftHyphenBreak(word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                            soft_hyphen_break = true;
+                        } else if (self.findCharacterBreak(word, line_width)) |break_pos| {
+                            // Last resort: character-level break
+                            line_end = word_start + break_pos;
+                        } else {
+                            // Nothing fits, include word anyway (will overflow)
+                            line_end = i;
+                        }
+                        break;
+                    } else {
+                        // Word doesn't fit, wrap to next line (keep word intact)
+                        break;
+                    }
+                    in_word = false;
+
+                    // Handle newline as line break
+                    if (c == '\n') {
+                        line_end = i;
+                        forced_break = true;
+                        break;
+                    }
+                } else if (!is_space and !in_word) {
+                    // Start of word
+                    word_start = i;
+                    in_word = true;
+                }
+            }
+
+            // Handle last word if we're still in one
+            if (in_word) {
+                const word = remaining[word_start..];
+                const word_width = self.getTextWidth(word);
+
+                if (current_width + word_width <= line_width + 0.01) {
+                    line_end = remaining.len;
+                } else if (line_end == 0) {
+                    // First word doesn't fit - try breaking at hyphens
+                    if (opts.break_on_hyphens) {
+                        if (self.findHyphenBreak(word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                        }
+                    }
+                    // Try soft-hyphen break as fallback
+                    if (line_end == 0) {
+                        if (self.findSoftHyphenBreak(word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                            soft_hyphen_break = true;
+                        } else if (self.findCharacterBreak(word, line_width)) |break_pos| {
+                            // Last resort: character-level break
+                            line_end = word_start + break_pos;
+                        } else {
+                            line_end = remaining.len; // Nothing fits, include anyway
+                        }
+                    }
+                }
+                // else: word doesn't fit, leave line_end as is (wrap word to next line)
+            }
+
+            // Handle empty remaining (shouldn't happen but safety)
+            if (line_end == 0) {
+                break;
+            }
+
+            // Get the line text and trim trailing spaces
+            var line = remaining[0..line_end];
+            while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t')) {
+                line = line[0 .. line.len - 1];
+            }
+
+            // Determine if this is the last line (for justify: don't justify last line)
+            const is_last_line = blk: {
+                // Calculate what remaining would be after this line
+                var next_remaining = if (soft_hyphen_break)
+                    remaining[line_end + 2 ..]
+                else
+                    remaining[line_end..];
+                // Skip whitespace
+                while (next_remaining.len > 0 and (next_remaining[0] == ' ' or next_remaining[0] == '\t' or next_remaining[0] == '\n')) {
+                    next_remaining = next_remaining[1..];
+                }
+                break :blk next_remaining.len == 0;
+            };
+
+            // For justify alignment, use left alignment on last line or forced breaks (standard typography)
+            const line_alignment = if (opts.alignment == .justify and (is_last_line or forced_break))
+                Align.left
+            else
+                opts.alignment;
+
+            // Render the line (with visible hyphen if breaking at soft-hyphen)
+            if (soft_hyphen_break) {
+                // Append visible hyphen for soft-hyphen break
+                var buf: [4096]u8 = undefined;
+                if (line.len < buf.len - 1) {
+                    @memcpy(buf[0..line.len], line);
+                    buf[line.len] = '-';
+                    _ = try self.writeLineInternal(region, buf[0 .. line.len + 1], line_alignment, opts.valign, indent);
+                } else {
+                    // Line too long for buffer, render without hyphen (fallback)
+                    _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+                }
+            } else {
+                _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+            }
+            lines_written += 1;
+            is_first_line = false;
+
+            // Skip past rendered text
+            if (soft_hyphen_break) {
+                // Skip the 2-byte soft-hyphen (0xC2 0xAD)
+                remaining = remaining[line_end + 2 ..];
+            } else {
+                remaining = remaining[line_end..];
+            }
+            // Skip any following whitespace
+            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
+                remaining = remaining[1..];
+            }
+        }
+
+        return .{
+            .lines_written = lines_written,
+            .overflow = null,
+        };
+    }
+
+    /// Write paragraph using pre-computed optimal line breaks.
+    fn writeParagraphOptimal(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
+        const line_height = self.getLineHeightPts();
+        const line_width = region.contentWidth() - opts.first_indent;
+        const first_line_width = region.contentWidth() - opts.first_indent;
+
+        // Compute optimal break points
+        const breaks = try self.computeOptimalBreaks(str, line_width, first_line_width);
+        defer self.allocator.free(breaks);
+
+        if (breaks.len == 0) {
+            return .{ .lines_written = 0, .overflow = null };
+        }
+
+        var lines_written: usize = 0;
+        var line_start: usize = 0;
+
+        for (breaks, 0..) |break_pos, line_idx| {
+            // Check if we have room for another line
+            if (region.remainingHeight() < line_height) {
+                // Find the byte position of overflow (skip leading whitespace)
+                var overflow_start = line_start;
+                while (overflow_start < str.len and
+                    (str[overflow_start] == ' ' or str[overflow_start] == '\t' or str[overflow_start] == '\n'))
+                {
+                    overflow_start += 1;
+                }
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = if (overflow_start < str.len) str[overflow_start..] else null,
+                };
+            }
+
+            // Get line text and trim whitespace
+            var line = str[line_start..break_pos];
+            // Trim leading whitespace
+            while (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) {
+                line = line[1..];
+            }
+            // Trim trailing whitespace
+            while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t')) {
+                line = line[0 .. line.len - 1];
+            }
+
+            // Determine if this is the last line or ends at a paragraph break
+            const is_last_line = (line_idx == breaks.len - 1);
+            // Check if this line ends at a newline (forced paragraph break)
+            // Need to scan past spaces to find if there's a newline
+            var forced_break = false;
+            {
+                var scan = break_pos;
+                while (scan < str.len and (str[scan] == ' ' or str[scan] == '\t')) {
+                    scan += 1;
+                }
+                if (scan < str.len and str[scan] == '\n') {
+                    forced_break = true;
+                }
+            }
+
+            // For justify alignment, use left alignment on last line or forced breaks
+            const line_alignment = if (opts.alignment == .justify and (is_last_line or forced_break))
+                Align.left
+            else
+                opts.alignment;
+
+            // Calculate indent (only first line)
+            const indent = if (line_idx == 0) opts.first_indent else 0;
+
+            // Render the line
+            _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+            lines_written += 1;
+
+            // Move past break point and any whitespace
+            line_start = break_pos;
+            while (line_start < str.len and
+                (str[line_start] == ' ' or str[line_start] == '\t' or str[line_start] == '\n'))
+            {
+                line_start += 1;
+            }
+        }
+
+        return .{ .lines_written = lines_written, .overflow = null };
+    }
+
+    /// Write text with automatic pagination.
+    /// Creates new pages as needed to fit all text.
+    pub fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !usize {
+        if (text.len == 0) return 0;
+
+        var total_lines: usize = 0;
+        var remaining: ?[]const u8 = text;
+
+        while (remaining) |text_to_write| {
+            if (text_to_write.len == 0) break;
+
+            var region = self.getPageRegion();
+            const result = try self.writeParagraph(&region, text_to_write, .{
+                .alignment = opts.alignment,
+                .valign = opts.valign,
+                .first_indent = if (total_lines == 0) opts.first_indent else 0,
+            });
+
+            total_lines += result.lines_written;
+
+            if (result.overflow) |overflow| {
+                // Need a new page
+                try self.addPage();
+                remaining = overflow;
+            } else {
+                remaining = null;
+            }
+        }
+
+        return total_lines;
+    }
+
+    /// Draws a region's border and fill (without text).
+    pub fn drawRegion(self: *Document, region: Region) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+
+        // Convert from top-left coordinates to PDF coordinates (bottom-left origin)
+        const pdf_y = self.page_size.height - region.y - region.height;
+
+        // Build raw PDF commands for the region
+        // Use q/Q (save/restore) to isolate graphics state changes (colors, etc.)
+        var buf: [512]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Fill if specified
+        if (region.fill) |fill_color| {
+            // Write fill color command
+            var color_buf: [64]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&color_buf);
+            fill_color.writeFill(fbs.writer()) catch unreachable;
+            const color_str = fbs.getWritten();
+            @memcpy(buf[len .. len + color_str.len], color_str);
+            len += color_str.len;
+
+            len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ region.x, pdf_y, region.width, region.height }) catch unreachable).len;
+        }
+
+        // Draw border if specified
+        if (region.border.top or region.border.bottom or region.border.left or region.border.right) {
+            // Set line width to 0.567pt (fpdf2 default: 0.2mm)
+            len += (std.fmt.bufPrint(buf[len..], "0.567 w\n", .{}) catch unreachable).len;
+            // Set stroke color to black
+            len += (std.fmt.bufPrint(buf[len..], "0 0 0 RG\n", .{}) catch unreachable).len;
+
+            if (region.border.top) {
+                const y_top = pdf_y + region.height;
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, y_top, region.x + region.width, y_top }) catch unreachable).len;
+            }
+            if (region.border.bottom) {
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, pdf_y, region.x + region.width, pdf_y }) catch unreachable).len;
+            }
+            if (region.border.left) {
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, pdf_y, region.x, pdf_y + region.height }) catch unreachable).len;
+            }
+            if (region.border.right) {
+                const x_right = region.x + region.width;
+                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ x_right, pdf_y, x_right, pdf_y + region.height }) catch unreachable).len;
+            }
+        }
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        if (len > 0) {
+            // Allocated on page arena - freed when page is destroyed
+            const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
+            try page.commands.append(self.allocator, .{ .raw = raw_copy });
+        }
+    }
+
+    /// Render deferred commands to page content bytes
+    /// Called after subsetting so glyph IDs are properly remapped
+    pub fn renderPageCommands(self: *Document, page: *Page) !void {
+        var cw = page.writer(self.allocator);
+
+        for (page.commands.items) |cmd| {
+            switch (cmd) {
+                .text => |t| {
+                    // Begin text block
+                    try cw.append("BT\n");
+                    // Ensure black text color (0 g)
+                    try cw.append("0 g\n");
+
+                    switch (t.font) {
+                        .embedded => |emb| {
+                            const idx = self.getEmbeddedFontIndex(emb) orelse continue;
+                            try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
+
+                            if (t.char_spacing != 0) {
+                                try cw.print("{d:.2} Tc\n", .{t.char_spacing});
+                            }
+                            // Always emit Tw to ensure correct word spacing (state persists across text blocks)
+                            try cw.print("{d:.2} Tw\n", .{t.word_spacing});
+
+                            if (emb.encoding == .identity) {
+                                // CID mode: output with ligatures, kerning, and mark positioning
+                                // Pass absolute position for Tm-based mark positioning
+                                // Use cached glyphs if available (avoids duplicate OpenType shaping)
+                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y);
+                            } else {
+                                try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
+                                // WinAnsi mode
+                                try cw.append("(");
+                                try cw.appendEscaped(t.text_data);
+                                try cw.append(") Tj\n");
+                            }
+                        },
+                        .standard => |font| {
+                            try cw.print("/{s} {d:.2} Tf\n", .{ fontResourceName(font), t.font_size });
+
+                            if (t.char_spacing != 0) {
+                                try cw.print("{d:.2} Tc\n", .{t.char_spacing});
+                            }
+                            // Always emit Tw to ensure correct word spacing (state persists across text blocks)
+                            try cw.print("{d:.2} Tw\n", .{t.word_spacing});
+
+                            try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
+                            try cw.append("(");
+                            try cw.appendEscaped(t.text_data);
+                            try cw.append(") Tj\n");
+                        },
+                    }
+
+                    try cw.append("ET\n");
+                },
+                .raw => |data| {
+                    try cw.append(data);
+                },
+            }
+        }
+    }
+
+    /// Output timing information for performance analysis.
+    pub const OutputTiming = struct {
+        subset_ms: i64 = 0,
+        render_ms: i64 = 0,
+        font_write_ms: i64 = 0,
+        page_write_ms: i64 = 0,
+        finish_ms: i64 = 0,
+    };
+
+    /// Last output timing (for performance debugging).
+    pub var last_output_timing: OutputTiming = .{};
+
+    /// Generate PDF output
+    pub fn output(self: *Document) ![]u8 {
+        last_output_timing = .{};
+
+        var w = Writer.init(self.allocator);
+        defer w.deinit();
+
+        // Reserve object IDs:
+        // 1: Catalog
+        // 2: Pages root
+        // 3+: Standard fonts (one per used font)
+        // Then: Embedded fonts (4-5 objects each)
+        // Then: Pages (2 objects each: page dict + content stream)
+        const catalog_id: ObjectId = 1;
+        const pages_root_id: ObjectId = 2;
+
+        // Build list of used standard fonts
+        var font_list = std.ArrayListUnmanaged(StandardFont){};
+        defer font_list.deinit(self.allocator);
+        var font_iter = self.used_fonts.keyIterator();
+        while (font_iter.next()) |font| {
+            try font_list.append(self.allocator, font.*);
+        }
+
+        const first_std_font_id: ObjectId = 3;
+        var next_id: ObjectId = first_std_font_id + @as(ObjectId, @intCast(font_list.items.len));
+
+        // Reserve IDs for embedded fonts
+        // CID fonts need: Type0 + CIDFont + FontDescriptor + FontFile + ToUnicode = 5 objects
+        // WinAnsi fonts need: Font + FontDescriptor + FontFile + ToUnicode = 4 objects
+        var emb_font_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        defer emb_font_base_ids.deinit(self.allocator);
+        for (self.embedded_fonts.items) |emb_font| {
+            try emb_font_base_ids.append(self.allocator, next_id);
+            if (emb_font.encoding == .identity) {
+                next_id += 5; // CID font objects
+            } else {
+                next_id += 4; // WinAnsi font objects
+            }
+        }
+
+        const first_page_id = next_id;
+
+        // Write header
+        try w.writeHeader();
+
+        // Write catalog
+        try w.beginObject(catalog_id);
+        var catalog_dict = Dict.init(self.allocator);
+        defer catalog_dict.deinit();
+        try catalog_dict.put("Type", Value.name("Catalog"));
+        try catalog_dict.put("Pages", Value.ref(.{ .id = pages_root_id }));
+        try w.writeDict(catalog_dict);
+        try w.endObject();
+
+        // Write pages root
+        try w.beginObject(pages_root_id);
+        var pages_dict = Dict.init(self.allocator);
+        defer pages_dict.deinit();
+        try pages_dict.put("Type", Value.name("Pages"));
+        try pages_dict.put("Count", Value.int(@intCast(self.pages.items.len)));
+
+        // Build Kids array
+        var kids = Array.init(self.allocator);
+        defer kids.deinit();
+        var page_id = first_page_id;
+        for (self.pages.items) |_| {
+            try kids.append(Value.ref(.{ .id = page_id }));
+            page_id += 2;
+        }
+        try pages_dict.put("Kids", .{ .array_val = &kids });
+
+        try w.writeDict(pages_dict);
+        try w.endObject();
+
+        // Write standard font dictionaries
+        for (font_list.items, 0..) |font, idx| {
+            const font_id = first_std_font_id + @as(ObjectId, @intCast(idx));
+            try w.beginObject(font_id);
+            var font_dict = Dict.init(self.allocator);
+            defer font_dict.deinit();
+            try font_dict.put("Type", Value.name("Font"));
+            try font_dict.put("Subtype", Value.name("Type1"));
+            try font_dict.put("BaseFont", Value.name(font.pdfName()));
+            try w.writeDict(font_dict);
+            try w.endObject();
+        }
+
+        // Generate font subsets (only include used glyphs)
+        // This also populates gid_remap for compact CFF subsetting
+        const subset_start = std.time.milliTimestamp();
+        for (self.embedded_fonts.items) |emb_font| {
+            try emb_font.generateSubset();
+        }
+        last_output_timing.subset_ms = std.time.milliTimestamp() - subset_start;
+
+        // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
+        const render_start = std.time.milliTimestamp();
+        for (self.pages.items) |*page| {
+            try self.renderPageCommands(page);
+        }
+        last_output_timing.render_ms = std.time.milliTimestamp() - render_start;
+
+        // Write embedded font objects
+        const font_write_start = std.time.milliTimestamp();
+        for (self.embedded_fonts.items, 0..) |emb_font, i| {
+            const base_id = emb_font_base_ids.items[i];
+
+            if (emb_font.encoding == .identity) {
+                // CID font: Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode (5 objects)
+                const type0_id = base_id;
+                const cidfont_id = base_id + 1;
+                const descriptor_id = base_id + 2;
+                const fontfile_id = base_id + 3;
+                const tounicode_id = base_id + 4;
+
+                // Generate ToUnicode CMap for CID
+                const tounicode_cmap = try emb_font.generateCIDToUnicodeCMap();
+                defer self.allocator.free(tounicode_cmap);
+
+                // Generate /W width array
+                const w_array = try emb_font.generateWidthArray();
+                defer self.allocator.free(w_array);
+
+                // 1. Type0 (composite) font
+                try w.beginObject(type0_id);
+                {
+                    var font_dict = Dict.init(self.allocator);
+                    defer font_dict.deinit();
+                    try font_dict.put("Type", Value.name("Font"));
+                    try font_dict.put("Subtype", Value.name("Type0"));
+                    try font_dict.put("BaseFont", Value.name(emb_font.name));
+                    try font_dict.put("Encoding", Value.name("Identity-H"));
+                    try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
+
+                    // DescendantFonts array with single CIDFont reference
+                    var descendants = Array.init(self.allocator);
+                    defer descendants.deinit();
+                    try descendants.append(Value.ref(.{ .id = cidfont_id }));
+                    try font_dict.put("DescendantFonts", .{ .array_val = &descendants });
+
+                    try w.writeDict(font_dict);
+                }
+                try w.endObject();
+
+                // 2. CIDFont (CIDFontType2 for TrueType, CIDFontType0 for CFF)
+                const is_cff = emb_font.font.isCFF();
+                try w.beginObject(cidfont_id);
+                {
+                    var cid_dict = Dict.init(self.allocator);
+                    defer cid_dict.deinit();
+                    try cid_dict.put("Type", Value.name("Font"));
+                    if (is_cff) {
+                        try cid_dict.put("Subtype", Value.name("CIDFontType0"));
+                    } else {
+                        try cid_dict.put("Subtype", Value.name("CIDFontType2"));
+                    }
+                    try cid_dict.put("BaseFont", Value.name(emb_font.name));
+                    try cid_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
+                    try cid_dict.put("DW", Value.int(emb_font.getDefaultWidth()));
+
+                    // CIDSystemInfo dictionary
+                    var cidsysinfo = Dict.init(self.allocator);
+                    defer cidsysinfo.deinit();
+                    try cidsysinfo.put("Registry", Value.string("Adobe"));
+                    try cidsysinfo.put("Ordering", Value.string("Identity"));
+                    try cidsysinfo.put("Supplement", Value.int(0));
+                    try cid_dict.put("CIDSystemInfo", .{ .dict_val = &cidsysinfo });
+
+                    // /W array as raw literal (already formatted)
+                    try cid_dict.put("W", Value.literal(w_array));
+
+                    // CIDToGIDMap - Identity mapping (only for TrueType, not CFF)
+                    if (!is_cff) {
+                        try cid_dict.put("CIDToGIDMap", Value.name("Identity"));
+                    }
+
+                    try w.writeDict(cid_dict);
+                }
+                try w.endObject();
+
+                // 3. FontDescriptor
+                try w.beginObject(descriptor_id);
+                {
+                    var desc_dict = Dict.init(self.allocator);
+                    defer desc_dict.deinit();
+                    try desc_dict.put("Type", Value.name("FontDescriptor"));
+                    try desc_dict.put("FontName", Value.name(emb_font.name));
+                    try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
+                    try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
+                    try desc_dict.put("Ascent", Value.int(emb_font.ascent));
+                    try desc_dict.put("Descent", Value.int(emb_font.descent));
+                    try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
+                    try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
+
+                    // CFF fonts use FontFile3, TrueType uses FontFile2
+                    if (is_cff) {
+                        try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
+                    } else {
+                        try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+                    }
+
+                    var bbox_array = Array.init(self.allocator);
+                    defer bbox_array.deinit();
+                    for (emb_font.bbox) |val| {
+                        try bbox_array.append(Value.int(val));
+                    }
+                    try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+
+                    try w.writeDict(desc_dict);
+                }
+                try w.endObject();
+
+                // 4. FontFile stream (FontFile2 for TTF, FontFile3 for CFF)
+                try w.beginObject(fontfile_id);
+                {
+                    const font_data = emb_font.getFontData();
+                    var stream_dict = Dict.init(self.allocator);
+                    defer stream_dict.deinit();
+
+                    if (is_cff) {
+                        // CFF requires Subtype
+                        try stream_dict.put("Subtype", Value.name("CIDFontType0C"));
+                    } else {
+                        try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
+                    }
+                    try w.writeStreamCompressed(&stream_dict, font_data);
+                }
+                try w.endObject();
+
+                // 5. ToUnicode CMap stream
+                try w.beginObject(tounicode_id);
+                {
+                    var tounicode_dict = Dict.init(self.allocator);
+                    defer tounicode_dict.deinit();
+                    try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
+                }
+                try w.endObject();
+            } else {
+                // WinAnsi font: Font, FontDescriptor, FontFile2, ToUnicode (4 objects)
+                const font_dict_id = base_id;
+                const descriptor_id = base_id + 1;
+                const fontfile_id = base_id + 2;
+                const tounicode_id = base_id + 3;
+
+                // Generate ToUnicode CMap
+                const tounicode_cmap = try emb_font.generateToUnicodeCMap();
+                defer self.allocator.free(tounicode_cmap);
+
+                // 1. Font dictionary
+                try w.beginObject(font_dict_id);
+                {
+                    var font_dict = Dict.init(self.allocator);
+                    defer font_dict.deinit();
+                    try font_dict.put("Type", Value.name("Font"));
+                    try font_dict.put("Subtype", Value.name("TrueType"));
+                    try font_dict.put("BaseFont", Value.name(emb_font.name));
+                    try font_dict.put("FirstChar", Value.int(0));
+                    try font_dict.put("LastChar", Value.int(255));
+                    try font_dict.put("FontDescriptor", Value.ref(.{ .id = descriptor_id }));
+                    try font_dict.put("Encoding", Value.name("WinAnsiEncoding"));
+                    try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
+
+                    // Widths array
+                    var widths_array = Array.init(self.allocator);
+                    defer widths_array.deinit();
+                    for (emb_font.widths) |width| {
+                        try widths_array.append(Value.int(@intCast(width)));
+                    }
+                    try font_dict.put("Widths", .{ .array_val = &widths_array });
+
+                    try w.writeDict(font_dict);
+                }
+                try w.endObject();
+
+                // 2. FontDescriptor
+                const is_cff_wa = emb_font.font.isCFF();
+                try w.beginObject(descriptor_id);
+                {
+                    var desc_dict = Dict.init(self.allocator);
+                    defer desc_dict.deinit();
+                    try desc_dict.put("Type", Value.name("FontDescriptor"));
+                    try desc_dict.put("FontName", Value.name(emb_font.name));
+                    try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
+                    try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
+                    try desc_dict.put("Ascent", Value.int(emb_font.ascent));
+                    try desc_dict.put("Descent", Value.int(emb_font.descent));
+                    try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
+                    try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
+
+                    if (is_cff_wa) {
+                        try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
+                    } else {
+                        try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+                    }
+
+                    var bbox_array = Array.init(self.allocator);
+                    defer bbox_array.deinit();
+                    for (emb_font.bbox) |val| {
+                        try bbox_array.append(Value.int(val));
+                    }
+                    try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+
+                    try w.writeDict(desc_dict);
+                }
+                try w.endObject();
+
+                // 3. FontFile stream
+                try w.beginObject(fontfile_id);
+                {
+                    const font_data = emb_font.getFontData();
+                    var stream_dict = Dict.init(self.allocator);
+                    defer stream_dict.deinit();
+
+                    if (is_cff_wa) {
+                        try stream_dict.put("Subtype", Value.name("Type1C"));
+                    } else {
+                        try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
+                    }
+                    try w.writeStreamCompressed(&stream_dict, font_data);
+                }
+                try w.endObject();
+
+                // 4. ToUnicode CMap stream
+                try w.beginObject(tounicode_id);
+                {
+                    var tounicode_dict = Dict.init(self.allocator);
+                    defer tounicode_dict.deinit();
+                    try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
+                }
+                try w.endObject();
+            }
+        }
+        last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
+
+        // Write each page
+        const page_write_start = std.time.milliTimestamp();
+        next_id = first_page_id;
+        for (self.pages.items) |page| {
+            const pg_id = next_id;
+            const content_id = next_id + 1;
+            next_id += 2;
+
+            // Page dictionary
+            try w.beginObject(pg_id);
+            var page_dict = Dict.init(self.allocator);
+            defer page_dict.deinit();
+            try page_dict.put("Type", Value.name("Page"));
+            try page_dict.put("Parent", Value.ref(.{ .id = pages_root_id }));
+
+            // MediaBox
+            var media_box = Array.init(self.allocator);
+            defer media_box.deinit();
+            try media_box.append(Value.int(0));
+            try media_box.append(Value.int(0));
+            try media_box.append(Value.real(self.page_size.width));
+            try media_box.append(Value.real(self.page_size.height));
+            try page_dict.put("MediaBox", .{ .array_val = &media_box });
+
+            try page_dict.put("Contents", Value.ref(.{ .id = content_id }));
+
+            // Font resources (must stay in scope until writeDict completes)
+            var font_res = Dict.init(self.allocator);
+            defer font_res.deinit();
+            var resources = Dict.init(self.allocator);
+            defer resources.deinit();
+
+            var has_fonts = false;
+
+            // Add standard font resources
+            for (font_list.items, 0..) |font, idx| {
+                if (page.used_fonts.contains(font)) {
+                    const font_obj_id = first_std_font_id + @as(ObjectId, @intCast(idx));
+                    try font_res.put(fontResourceName(font), Value.ref(.{ .id = font_obj_id }));
+                    has_fonts = true;
+                }
+            }
+
+            // Add embedded font resources
+            for (page.used_embedded.items) |emb_font| {
+                // Find index of this font
+                for (self.embedded_fonts.items, 0..) |doc_font, idx| {
+                    if (doc_font == emb_font) {
+                        // Use pre-calculated base ID for this font
+                        const font_obj_id = emb_font_base_ids.items[idx];
+                        const res_name = embeddedFontResourceName(idx);
+                        try font_res.put(res_name, Value.ref(.{ .id = font_obj_id }));
+                        has_fonts = true;
+                        break;
+                    }
+                }
+            }
+
+            if (has_fonts) {
+                try resources.put("Font", .{ .dict_val = &font_res });
+                try page_dict.put("Resources", .{ .dict_val = &resources });
+            }
+
+            try w.writeDict(page_dict);
+            try w.endObject();
+
+            // Content stream (compressed)
+            try w.beginObject(content_id);
+            var content_dict = Dict.init(self.allocator);
+            defer content_dict.deinit();
+            try w.writeStreamCompressed(&content_dict, page.content.items);
+            try w.endObject();
+        }
+        last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
+
+        // Finish with xref and trailer
+        const finish_start = std.time.milliTimestamp();
+        const result = try w.finish(.{ .id = catalog_id });
+        last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
+        return result;
+    }
+};
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Strip soft-hyphens (U+00AD) from text.
+/// Soft-hyphens are invisible formatting characters that only appear as visible
+/// hyphens when text breaks at that point. Returns allocated copy without soft-hyphens.
+fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
+    // Fast path: check if any soft-hyphens exist (0xC2 0xAD in UTF-8)
+    // Most strings don't have soft-hyphens, so avoid the byte-by-byte scan
+    if (std.mem.indexOf(u8, str, "\xC2\xAD") == null) {
+        return allocator.dupe(u8, str);
+    }
+
+    // Slow path: count non-soft-hyphen bytes
+    var count: usize = 0;
+    var i: usize = 0;
+    while (i < str.len) {
+        if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+            i += 2; // Skip soft-hyphen
+        } else {
+            count += 1;
+            i += 1;
+        }
+    }
+
+    // Copy without soft-hyphens
+    const result = try allocator.alloc(u8, count);
+    var j: usize = 0;
+    i = 0;
+    while (i < str.len) {
+        if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+            i += 2; // Skip soft-hyphen
+        } else {
+            result[j] = str[i];
+            j += 1;
+            i += 1;
+        }
+    }
+    return result;
+}
+
+/// Check if text contains any soft-hyphens.
+fn containsSoftHyphens(str: []const u8) bool {
+    var i: usize = 0;
+    while (i + 1 < str.len) : (i += 1) {
+        if (str[i] == 0xC2 and str[i + 1] == 0xAD) {
+            return true;
+        }
+    }
+    return false;
+}
