@@ -1,7 +1,18 @@
 # zpdf Context
 
 ## Current Focus
-OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk working. **calt disabled by default** (chain context has a bug at scale). Ready for graphics support. API docs now generated via `zig build docs`.
+OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk, **calt** all working and enabled by default. Ready for graphics support. API docs now generated via `zig build docs`.
+
+## What We Did (Session 2026-01-20 #33) [COMPLETE]
+- **Fixed calt (contextual alternates) bug at scale**:
+  - Root cause 1: same codepoint can produce different glyphs in different contexts
+  - Added `glyph_to_codepoint` map to track ALL glyphs for ToUnicode (not just first per codepoint)
+  - Root cause 2: chain context rules referenced nested lookups that weren't being parsed
+  - Added post-processing in `parseGSUBFeature` to parse nested lookups from chain context rules
+  - Now correctly handles `<-` → arrowleft (nested ligature lookup from chain context)
+- **Enabled calt by default**: `FeatureFlags.calt = true` in opentype.zig
+- **Updated inter_fonts test**: Added calt ON/OFF comparison (-> => <- <=> 3*9 12:34 3–8 +8+x)
+- All 156 tests pass
 
 ## What We Did (Session 2026-01-19 #32) [COMPLETE]
 - **Added static HTML API documentation build step**:

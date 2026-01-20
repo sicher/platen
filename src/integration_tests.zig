@@ -300,6 +300,11 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_no_mark.setFeature(.mark, false);
     inter_no_mark.setFeature(.mkmk, false);
 
+    // Contextual alternates comparison (calt is ON by default now)
+    const inter_no_calt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_no_calt.encoding = .identity;
+    inter_no_calt.setFeature(.calt, false);
+
     try doc.addPage();
     var y: f64 = 32;
 
@@ -366,11 +371,18 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(380, y, "s\xcc\xa7\xcc\x81 c\xcc\xa7\xcc\x82 t\xcc\xa7\xcc\x83");
     y += 22;
 
-    // --- Contextual Alternates (calt) - TODO ---
+    // --- Contextual Alternates (calt) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Contextual Alternates (calt)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(210, y, "[TODO: -> => <-> !== arrow ligatures]");
+    y += 14;
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(50, y, "OFF:");
+    try doc.setEmbeddedFont(inter_no_calt, 12);
+    try doc.writeAt(78, y, "-> => <- <=> 3*9 12:34 3\xe2\x80\x938 +8+x");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(310, y, "ON:");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(332, y, "-> => <- <=> 3*9 12:34 3\xe2\x80\x938 +8+x");
     y += 18;
 
     // --- Discretionary Ligatures (dlig) - TODO ---

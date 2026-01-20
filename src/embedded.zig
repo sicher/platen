@@ -158,6 +158,11 @@ pub const EmbeddedFont = struct {
     cid_used_glyphs: std.AutoArrayHashMapUnmanaged(u21, u16) = .{},
     cid_glyph_widths: std.AutoArrayHashMapUnmanaged(u16, u16) = .{}, // GID → width in 1/1000 em
 
+    // Glyph → codepoint mapping for ToUnicode (handles calt contextual variants)
+    // Key: glyph ID, Value: Unicode codepoint that produced this glyph
+    // Needed because calt can produce different glyphs for the same codepoint in different contexts
+    glyph_to_codepoint: std.AutoArrayHashMapUnmanaged(u16, u21) = .{},
+
     // Glyph ID remapping for compact CFF subsets (original GID → new compact GID)
     // Only populated for CFF fonts with subsetting enabled
     gid_remap: std.AutoArrayHashMapUnmanaged(u16, u16) = .{},
@@ -273,6 +278,7 @@ pub const EmbeddedFont = struct {
         // Free CID mode hash maps
         self.cid_used_glyphs.deinit(self.allocator);
         self.cid_glyph_widths.deinit(self.allocator);
+        self.glyph_to_codepoint.deinit(self.allocator);
         self.gid_remap.deinit(self.allocator);
         // Free OpenType features
         if (self.ot_features) |ot| {
@@ -397,9 +403,13 @@ pub const EmbeddedFont = struct {
 
         // No ligatures - just track the base glyphs
         for (codepoints.items, base_glyphs.items) |cp, gid| {
-            if (self.cid_used_glyphs.contains(cp)) continue;
-
-            try self.cid_used_glyphs.put(self.allocator, cp, gid);
+            if (!self.cid_used_glyphs.contains(cp)) {
+                try self.cid_used_glyphs.put(self.allocator, cp, gid);
+            }
+            // Track glyph→codepoint for ToUnicode
+            if (!self.glyph_to_codepoint.contains(gid)) {
+                try self.glyph_to_codepoint.put(self.allocator, gid, cp);
+            }
             if (!self.cid_glyph_widths.contains(gid)) {
                 if (self.font.getGlyphWidth(gid)) |w| {
                     const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
@@ -445,9 +455,22 @@ pub const EmbeddedFont = struct {
                 outer: for (lookup_arrays) |lookups| {
                     for (lookups) |lookup| {
                         if (lookup.findLigature(base_glyphs, src_pos, ot.ligature_sets.items, ot.ligature_structs.items)) |match| {
+                            // Check if output glyph matches the ligature directly
+                            // OR if the ligature was further substituted by chain context
                             if (match.lig_glyph == gid) {
                                 consumed = match.consumed;
                                 break :outer;
+                            }
+                            // Check if chain context substituted the ligature glyph to the output glyph
+                            if (self.feature_flags.calt) {
+                                for (ot.single_lookups.items) |single| {
+                                    if (single.substitute(match.lig_glyph)) |subst_glyph| {
+                                        if (subst_glyph == gid) {
+                                            consumed = match.consumed;
+                                            break :outer;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -479,6 +502,10 @@ pub const EmbeddedFont = struct {
                     if (!self.cid_used_glyphs.contains(cp)) {
                         try self.cid_used_glyphs.put(self.allocator, cp, gid);
                     }
+                    // Track glyph→codepoint for ToUnicode (handles calt variants)
+                    if (!self.glyph_to_codepoint.contains(gid)) {
+                        try self.glyph_to_codepoint.put(self.allocator, gid, cp);
+                    }
                 }
 
                 // Track width for this glyph
@@ -495,11 +522,15 @@ pub const EmbeddedFont = struct {
                 const cp = codepoints[src_pos];
                 if (!self.cid_used_glyphs.contains(cp)) {
                     try self.cid_used_glyphs.put(self.allocator, cp, gid);
-                    if (!self.cid_glyph_widths.contains(gid)) {
-                        if (self.font.getGlyphWidth(gid)) |w| {
-                            const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
-                            try self.cid_glyph_widths.put(self.allocator, gid, width);
-                        }
+                }
+                // Track glyph→codepoint for ToUnicode
+                if (!self.glyph_to_codepoint.contains(gid)) {
+                    try self.glyph_to_codepoint.put(self.allocator, gid, cp);
+                }
+                if (!self.cid_glyph_widths.contains(gid)) {
+                    if (self.font.getGlyphWidth(gid)) |w| {
+                        const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+                        try self.cid_glyph_widths.put(self.allocator, gid, width);
                     }
                 }
                 src_pos += 1;
@@ -753,7 +784,8 @@ pub const EmbeddedFont = struct {
         );
 
         // Count entries: regular glyphs + ligature glyphs
-        const regular_count = self.cid_used_glyphs.count();
+        // Use glyph_to_codepoint for regular glyphs (handles calt variants where same codepoint → different glyphs)
+        const regular_count = self.glyph_to_codepoint.count();
         const ligature_count = self.ligature_codepoints.count();
         const total_count = regular_count + ligature_count;
 
@@ -765,11 +797,11 @@ pub const EmbeddedFont = struct {
 
             const has_remap = self.gid_remap.count() > 0;
 
-            // Regular glyphs: codepoint → single Unicode
-            var iter = self.cid_used_glyphs.iterator();
+            // Regular glyphs: glyph → single Unicode codepoint
+            var iter = self.glyph_to_codepoint.iterator();
             while (iter.next()) |entry| {
-                const codepoint = entry.key_ptr.*;
-                const orig_gid = entry.value_ptr.*;
+                const orig_gid = entry.key_ptr.*;
+                const codepoint = entry.value_ptr.*;
                 const gid = if (has_remap) self.gid_remap.get(orig_gid) orelse 0 else orig_gid;
                 var entry_buf: [48]u8 = undefined;
 
@@ -1579,17 +1611,20 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const loca_format = head.index_to_loc_format;
 
     // Collect used glyph IDs
+    // Use cid_glyph_widths instead of cid_used_glyphs because calt substitutions
+    // can produce different glyphs for the same codepoint depending on context.
+    // cid_glyph_widths tracks ALL glyphs that have been used, regardless of codepoint.
     var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
     defer glyph_set.deinit(allocator);
 
     try glyph_set.put(allocator, 0, {}); // .notdef
 
-    var cid_iter = emb.cid_used_glyphs.iterator();
-    while (cid_iter.next()) |entry| {
-        try glyph_set.put(allocator, entry.value_ptr.*, {});
+    // Add all glyphs that have width entries (includes contextual variants)
+    for (emb.cid_glyph_widths.keys()) |gid| {
+        try glyph_set.put(allocator, gid, {});
     }
 
-    // Add ligature glyph IDs (they don't have single codepoints so aren't in cid_used_glyphs)
+    // Add ligature glyph IDs (they might not have width entries if not used directly)
     var lig_iter = emb.ligature_codepoints.iterator();
     while (lig_iter.next()) |entry| {
         try glyph_set.put(allocator, entry.key_ptr.*, {});

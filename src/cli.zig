@@ -71,6 +71,12 @@ pub fn main() !void {
         const output_path = if (args.len > 3) args[3] else "mark_test.pdf";
         try generateMarkTestPdf(allocator, font_path, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "calt-test")) {
+        // Test contextual alternates (GSUB calt)
+        const font_path = if (args.len > 2) args[2] else "test/fonts/Inter/Inter-Regular.ttf";
+        const output_path = if (args.len > 3) args[3] else "calt_test.pdf";
+        try generateCaltTestPdf(allocator, font_path, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -99,6 +105,7 @@ fn printUsage() !void {
         \\  font-info <ttf>      Show TrueType font information
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
         \\  mark-test [ttf] [out]   Test GPOS mark positioning (diacritics)
+        \\  calt-test [ttf] [out]   Test GSUB contextual alternates (arrows, ligatures)
         \\
     ;
     try stdout.writeAll(usage);
@@ -420,6 +427,108 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
         try print("GPOS stats:\n", .{});
         try print("  Mark-to-Base lookups: {}\n", .{ot.mark_base_lookups.items.len});
         try print("  Mark-to-Mark lookups: {}\n", .{ot.mark_mark_lookups.items.len});
+    }
+}
+
+fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    const font = doc.loadFont(font_path) catch |err| {
+        try print("Error loading font '{s}': {}\n", .{ font_path, err });
+        return;
+    };
+    font.encoding = .identity;
+    // Enable calt feature
+    font.setFeature(.calt, true);
+
+    // Also load a version without calt for comparison
+    const font_no_calt = doc.loadFont(font_path) catch |err| {
+        try print("Error loading font '{s}': {}\n", .{ font_path, err });
+        return;
+    };
+    font_no_calt.encoding = .identity;
+    font_no_calt.setFeature(.calt, false);
+
+    try doc.addPage();
+    var y: f64 = 30;
+
+    try doc.setEmbeddedFont(font, 24);
+    try doc.writeAt(50, y, "Contextual Alternates (calt) Test");
+    y += 30;
+
+    try doc.setEmbeddedFont(font, 12);
+    try doc.writeAt(50, y, "Inter font: GSUB calt feature for programming ligatures");
+    y += 24;
+
+    // Test arrow sequences
+    try doc.setEmbeddedFont(font, 10);
+    try doc.writeAt(50, y, "calt OFF:");
+    try doc.setEmbeddedFont(font_no_calt, 16);
+    try doc.writeAt(120, y, "-> => <- <=> !== ===");
+    y += 22;
+
+    try doc.setEmbeddedFont(font, 10);
+    try doc.writeAt(50, y, "calt ON:");
+    try doc.setEmbeddedFont(font, 16);
+    try doc.writeAt(120, y, "-> => <- <=> !== ===");
+    y += 30;
+
+    // Test in context
+    try doc.setEmbeddedFont(font, 10);
+    try doc.writeAt(50, y, "In context (calt ON):");
+    y += 16;
+    try doc.setEmbeddedFont(font, 14);
+    try doc.writeAt(50, y, "function arrow() { return x => x + 1; }");
+    y += 20;
+    try doc.writeAt(50, y, "if (a !== b && c <= d) { return a <=> b; }");
+    y += 20;
+    try doc.writeAt(50, y, "const diff = a -> b -> c;");
+    y += 30;
+
+    // Test ASCII line (the problematic one from integration tests)
+    try doc.setEmbeddedFont(font, 10);
+    try doc.writeAt(50, y, "Full ASCII (calt ON):");
+    y += 16;
+    try doc.setEmbeddedFont(font, 11);
+    try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@");
+    y += 16;
+    try doc.writeAt(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
+    y += 16;
+    try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
+    y += 24;
+
+    // Same without calt for comparison
+    try doc.setEmbeddedFont(font, 10);
+    try doc.writeAt(50, y, "Full ASCII (calt OFF):");
+    y += 16;
+    try doc.setEmbeddedFont(font_no_calt, 11);
+    try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@");
+    y += 16;
+    try doc.writeAt(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
+    y += 16;
+    try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
+    y += 24;
+
+    // Regular text should be unchanged
+    try doc.setEmbeddedFont(font, 10);
+    try doc.writeAt(50, y, "Regular text (should be identical with/without calt):");
+    y += 16;
+    try doc.setEmbeddedFont(font, 12);
+    try doc.writeAt(50, y, "The quick brown fox jumps over the lazy dog.");
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+
+    // Show calt lookup stats
+    if (font.ot_features) |ot| {
+        try print("GSUB calt stats:\n", .{});
+        try print("  Calt ligature lookups: {}\n", .{ot.calt_liga_lookups.items.len});
+        try print("  Chain context lookups: {}\n", .{ot.chain_context_lookups.items.len});
     }
 }
 

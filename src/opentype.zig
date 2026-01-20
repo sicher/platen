@@ -46,7 +46,7 @@ pub const FeatureFlags = struct {
     clig: bool = false,
     dlig: bool = false,
     hlig: bool = false,
-    calt: bool = false, // Contextual alternates off by default (chain context needs debugging)
+    calt: bool = true, // Contextual alternates on by default
     mark: bool = true, // Mark positioning on by default
     mkmk: bool = true, // Mark-to-mark on by default
 };
@@ -694,6 +694,18 @@ pub const OpenTypeFeatures = struct {
                 try self.parseGSUBLookup(data, lookup_list_offset, lookup_index, feature);
             }
         }
+
+        // Parse nested lookups referenced by chain context rules
+        // These lookups might not be part of any feature directly
+        if (feature == .calt) {
+            for (self.chain_context_lookups.items) |chain| {
+                for (chain.subst_records) |rec| {
+                    if (!self.gsub_lookup_map.contains(rec.lookup_index)) {
+                        try self.parseGSUBLookup(data, lookup_list_offset, rec.lookup_index, .calt);
+                    }
+                }
+            }
+        }
     }
 
     fn parseGSUBLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16, feature: ?Feature) !void {
@@ -1320,6 +1332,7 @@ pub const OpenTypeFeatures = struct {
             .lookahead_coverages = lookahead_coverages,
             .subst_records = subst_records,
         });
+
     }
 
     /// Parse GPOS Type 4: Mark-to-Base Attachment subtable
