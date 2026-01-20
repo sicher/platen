@@ -1,7 +1,50 @@
 # zpdf Context
 
 ## Current Focus
-Major performance milestone: 75% overall speedup (4x faster). 2600ms → 654ms for 100-page PDF. Performance is now well-optimized. Next: graphics support or additional features.
+Major refactoring complete: Split large zpdf.zig into document.zig + document_test.zig + facade. All 171 tests pass. Next: graphics support or remaining text features (underline, rotation, etc).
+
+## What We Did (Session 2026-01-20 #45) [COMPLETE]
+- **Fixed refactoring regressions** - 3 failing tests (`all_fonts`, `justify`, `optimal_breaks`):
+  - Word spacing (`Tw`): Now always emitted (PDF state persists across text blocks)
+  - Standard fonts: Removed incorrect `WinAnsiEncoding` (Symbol/ZapfDingbats use special encodings)
+  - Greedy line breaking: Restored original word-by-word algorithm in `writeParagraph`
+  - Optimal line breaking: Restored original DP algorithm in `computeOptimalBreaks`
+  - `drawRegion`: Added `q`/`Q` graphics state, line width `0.567 w`, black stroke
+  - `renderPageCommands`: Added `0 g` for black text in BT blocks
+  - Font subsetting: Restored missing `generateSubset()` call in `output()`
+  - Added `subset_ms` timing field to `OutputTiming`
+- All 171 tests pass, PDF output matches reference files exactly
+
+## What We Did (Session 2026-01-20 #44) [COMPLETE]
+- **Major zpdf.zig refactoring** (3415 → ~3800 lines across 5 modules):
+  - Created `document.zig` (~2000 lines): Document struct + internal types (Page, ContentWriter, etc.)
+  - Created `document_test.zig` (1403 lines): All Document tests moved here
+  - Created `color.zig` (159 lines): Color types
+  - Created `layout.zig` (147 lines): Layout types (Region, Margins, etc.)
+  - Updated `zpdf.zig` (100 lines): Now a thin facade that re-exports from document.zig
+  - Made `findSoftHyphenBreak`, `findHyphenBreak`, `renderPageCommands` public for testing
+- **Fixed memory leak in Document.output()**: Added `defer w.deinit()` for Writer cleanup
+
+## What We Did (Session 2026-01-20 #43) [COMPLETE]
+- **Conducted Text API gap analysis** - wrote TEXT_API_REPORT.md
+- **Implemented Color support**:
+  - Created `color.zig` module with tagged union `Color` type
+  - Supports grayscale (g/G), RGB (rg/RG), and CMYK (k/K) color spaces
+  - Added `setTextColor()`, `setFillColor()`, `setDrawColor()` to Document
+  - Text color emitted in PDF content stream per text command
+  - Updated `drawRegion()` to use new Color API
+  - Helper functions: `Color.grayscale()`, `Color.fromRgb()`, `Color.fromRgb255()`, `Color.fromCmyk()`
+- **Implemented Font Metrics API**:
+  - Added `FontMetrics` struct with ascender, descender, cap_height, x_height, font_size, units_per_em
+  - Added `getFontMetrics()` to Document - returns metrics scaled to current font size
+  - Standard fonts use hardcoded AFM-derived values (Helvetica, Times, Courier families)
+  - Embedded fonts use actual metrics from TTF/OTF file
+- **Refactored zpdf.zig** (3615 → 3415 lines, -200):
+  - Created `layout.zig` (147 lines): Border, Align, VAlign, Margins, Padding, Region, PageSize, *Options
+  - Moved `FontMetrics`, `StandardFontMetrics`, `getStandardFontMetrics` to `metrics.zig`
+  - zpdf.zig now re-exports layout types for API compatibility
+- **Added tests** for all new APIs (color stored in commands, font metrics scaling)
+- All 171 tests pass
 
 ## What We Did (Session 2026-01-20 #42) [COMPLETE]
 - **Added ASCII fast path for UTF-8 decoding - ~1% improvement**:
