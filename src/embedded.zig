@@ -171,9 +171,17 @@ pub const EmbeddedFont = struct {
     ot_features: ?*opentype.OpenTypeFeatures = null,
     feature_flags: opentype.FeatureFlags = .{}, // liga=on, kern=on by default
 
+    // Cached flags for fast render-time checks (set by initOpenTypeFeatures)
+    has_kern_data: bool = false, // True if font has ANY kerning pairs
+    has_mark_data: bool = false, // True if font has ANY mark positioning
+
     // Ligature glyph → original codepoints mapping for ToUnicode CMap
     // Key: ligature glyph ID (original), Value: array of codepoints that form it
     ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .{},
+
+    // Scratch buffers for shaping (reused across calls to avoid allocations)
+    scratch_codepoints: std.ArrayListUnmanaged(u21) = .{},
+    scratch_glyphs: std.ArrayListUnmanaged(u16) = .{},
 
     /// Load and parse a TTF font from file
     pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
@@ -290,6 +298,9 @@ pub const EmbeddedFont = struct {
             self.allocator.free(codepoints);
         }
         self.ligature_codepoints.deinit(self.allocator);
+        // Free scratch buffers
+        self.scratch_codepoints.deinit(self.allocator);
+        self.scratch_glyphs.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -331,6 +342,10 @@ pub const EmbeddedFont = struct {
         }
 
         self.ot_features = ot;
+
+        // Cache flags for fast render-time checks
+        self.has_kern_data = ot.kern_lookups.items.len > 0;
+        self.has_mark_data = ot.mark_base_lookups.items.len > 0 or ot.mark_mark_lookups.items.len > 0;
     }
 
     /// Set OpenType feature flag
@@ -356,14 +371,22 @@ pub const EmbeddedFont = struct {
     /// Mark Unicode codepoints as used (CID mode)
     /// Parses UTF-8 text and records Unicode→GlyphID mappings
     /// Applies ligature substitution if enabled
-    pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8) !void {
+    /// Mark Unicode characters as used for subsetting and return the computed glyph sequence.
+    /// Returns the final glyph sequence (caller owns the memory) for caching.
+    /// Mark unicode chars as used for subsetting and return glyph IDs.
+    /// output_allocator: allocator for the returned glyph slice (if null, uses self.allocator)
+    pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8, output_allocator: ?std.mem.Allocator) ![]u16 {
+        const out_alloc = output_allocator orelse self.allocator;
         const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
 
         // First pass: decode text into codepoints and map to glyph IDs
-        var codepoints = std.ArrayListUnmanaged(u21){};
-        defer codepoints.deinit(self.allocator);
-        var base_glyphs = std.ArrayListUnmanaged(u16){};
-        defer base_glyphs.deinit(self.allocator);
+        // Use scratch buffers to avoid allocations on repeated calls
+        self.scratch_codepoints.clearRetainingCapacity();
+        self.scratch_glyphs.clearRetainingCapacity();
+
+        // Estimate capacity needed (worst case: all ASCII = text.len chars)
+        try self.scratch_codepoints.ensureTotalCapacity(self.allocator, text.len);
+        try self.scratch_glyphs.ensureTotalCapacity(self.allocator, text.len);
 
         var i: usize = 0;
         while (i < text.len) {
@@ -375,12 +398,16 @@ pub const EmbeddedFont = struct {
                 continue;
             };
 
-            try codepoints.append(self.allocator, codepoint);
+            self.scratch_codepoints.appendAssumeCapacity(codepoint);
             const gid = self.font.getGlyphId(codepoint) orelse 0;
-            try base_glyphs.append(self.allocator, gid);
+            self.scratch_glyphs.appendAssumeCapacity(gid);
 
             i += len;
         }
+
+        // Use local references for cleaner code
+        const codepoints = &self.scratch_codepoints;
+        const base_glyphs = &self.scratch_glyphs;
 
         // Initialize OpenType features if any GSUB/GPOS feature is enabled
         const needs_ot = self.feature_flags.liga or self.feature_flags.dlig or
@@ -411,14 +438,13 @@ pub const EmbeddedFont = struct {
                 if (has_calt or has_liga or has_dlig or has_clig or has_hlig or
                     has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss01)
                 {
-                    // Apply GSUB substitutions and track results
-                    try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale);
-                    return;
+                    // Apply GSUB substitutions, track results, and return glyphs
+                    return try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale, out_alloc);
                 }
             }
         }
 
-        // No ligatures - just track the base glyphs
+        // No GSUB - just track the base glyphs
         for (codepoints.items, base_glyphs.items) |cp, gid| {
             if (!self.cid_used_glyphs.contains(cp)) {
                 try self.cid_used_glyphs.put(self.allocator, cp, gid);
@@ -434,15 +460,19 @@ pub const EmbeddedFont = struct {
                 }
             }
         }
+
+        // Return copy of base glyphs
+        return try out_alloc.dupe(u16, base_glyphs.items);
     }
 
-    /// Apply GSUB substitutions (calt and/or ligatures) and track all resulting glyphs
-    fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, base_glyphs: []const u16, scale: f64) !void {
-        const ot = self.ot_features orelse return;
+    /// Apply GSUB substitutions (calt and/or ligatures) and track all resulting glyphs.
+    /// Returns the final glyph sequence (caller owns the memory, allocated with out_alloc).
+    fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, base_glyphs: []const u16, scale: f64, out_alloc: std.mem.Allocator) ![]u16 {
+        const ot = self.ot_features orelse return try out_alloc.dupe(u16, base_glyphs);
 
         // Apply GSUB substitutions to get final glyph sequence
         const final_glyphs = try ot.applyGSUBWithFlags(base_glyphs, self.feature_flags);
-        defer self.allocator.free(final_glyphs);
+        errdefer self.allocator.free(final_glyphs);
 
         // Track all glyphs in the final sequence
         // We need to handle cases where substitutions occurred (ligatures/calt changes)
@@ -497,13 +527,8 @@ pub const EmbeddedFont = struct {
                     // Ligature: track codepoints for ToUnicode mapping
                     // But skip if this glyph is already mapped to a single codepoint
                     // (e.g., Inter has ⇔ as both a direct glyph AND a <=> ligature)
-                    const already_single = blk: {
-                        var iter = self.cid_used_glyphs.iterator();
-                        while (iter.next()) |entry| {
-                            if (entry.value_ptr.* == gid) break :blk true;
-                        }
-                        break :blk false;
-                    };
+                    // Use glyph_to_codepoint for O(1) lookup instead of O(n) iteration
+                    const already_single = self.glyph_to_codepoint.contains(gid);
                     if (!already_single and !self.ligature_codepoints.contains(gid)) {
                         const lig_cps = try self.allocator.alloc(u21, consumed);
                         for (0..consumed) |j| {
@@ -555,6 +580,11 @@ pub const EmbeddedFont = struct {
 
             dst_pos += 1;
         }
+
+        // Dupe to output allocator and free the OT-allocated version
+        const result = try out_alloc.dupe(u16, final_glyphs);
+        self.allocator.free(final_glyphs);
+        return result;
     }
 
     /// Get glyph sequence for text with ligature substitution applied
@@ -2881,7 +2911,8 @@ test "compact TTF subsetting creates valid font" {
     emb.encoding = .identity;
 
     // Mark some Unicode characters
-    try emb.markUnicodeCharsUsed("Hello");
+    const glyphs = try emb.markUnicodeCharsUsed("Hello", null);
+    emb.allocator.free(glyphs);
 
     // Generate subset (should use compact TTF)
     try emb.generateSubset();
@@ -2910,7 +2941,8 @@ test "compact TTF glyph ID remapping" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    try emb.markUnicodeCharsUsed("AB");
+    const glyphs_ab = try emb.markUnicodeCharsUsed("AB", null);
+    emb.allocator.free(glyphs_ab);
 
     try emb.generateSubset();
 
@@ -2938,7 +2970,8 @@ test "compact TTF smaller than sparse TTF" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    try emb.markUnicodeCharsUsed("Test");
+    const glyphs_test = try emb.markUnicodeCharsUsed("Test", null);
+    emb.allocator.free(glyphs_test);
 
     try emb.generateSubset();
 
@@ -3039,7 +3072,8 @@ test "CFF subsetting creates valid font" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    try emb.markUnicodeCharsUsed("Hello");
+    const glyphs = try emb.markUnicodeCharsUsed("Hello", null);
+    emb.allocator.free(glyphs);
 
     try emb.generateSubset();
 
@@ -3064,7 +3098,8 @@ test "CFF desubroutinization reduces size" {
     const orig_size = orig_cff.?.len;
 
     emb.encoding = .identity;
-    try emb.markUnicodeCharsUsed("ABC");
+    const glyphs_abc = try emb.markUnicodeCharsUsed("ABC", null);
+    emb.allocator.free(glyphs_abc);
 
     try emb.generateSubset();
 
@@ -3081,7 +3116,8 @@ test "CFF glyph ID remapping works" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    try emb.markUnicodeCharsUsed("XY");
+    const glyphs_xy = try emb.markUnicodeCharsUsed("XY", null);
+    emb.allocator.free(glyphs_xy);
 
     try emb.generateSubset();
 
@@ -3109,7 +3145,8 @@ test "CID font with TTF renders correctly" {
     emb.encoding = .identity;
 
     // Mark various characters
-    try emb.markUnicodeCharsUsed("Hello World! 123");
+    const glyphs_hw = try emb.markUnicodeCharsUsed("Hello World! 123", null);
+    emb.allocator.free(glyphs_hw);
 
     try emb.generateSubset();
 
@@ -3135,7 +3172,8 @@ test "CID font with OTF renders correctly" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    try emb.markUnicodeCharsUsed("Test 456");
+    const glyphs_t456 = try emb.markUnicodeCharsUsed("Test 456", null);
+    emb.allocator.free(glyphs_t456);
 
     try emb.generateSubset();
 
@@ -3163,8 +3201,10 @@ test "mixed font types in same document" {
     ttf_font.encoding = .identity;
     otf_font.encoding = .identity;
 
-    try ttf_font.markUnicodeCharsUsed("Regular");
-    try otf_font.markUnicodeCharsUsed("Bold");
+    const glyphs_reg = try ttf_font.markUnicodeCharsUsed("Regular", null);
+    ttf_font.allocator.free(glyphs_reg);
+    const glyphs_bold = try otf_font.markUnicodeCharsUsed("Bold", null);
+    otf_font.allocator.free(glyphs_bold);
 
     try ttf_font.generateSubset();
     try otf_font.generateSubset();
@@ -3203,12 +3243,13 @@ test "OpenType features initialization" {
 }
 
 test "OpenType kerning applied in text rendering" {
-    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    var font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
     defer font.deinit();
     font.encoding = .identity;
 
     // Text with common kerning pairs
-    try font.markUnicodeCharsUsed("AVATAR");
+    const glyphs_avatar = try font.markUnicodeCharsUsed("AVATAR", null);
+    font.allocator.free(glyphs_avatar);
 
     // OpenType features should now be initialized
     try std.testing.expect(font.ot_features != null);
@@ -3250,12 +3291,13 @@ test "setFeature disables kerning" {
 }
 
 test "Satoshi ligature codepoint tracking" {
-    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf");
+    var font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf");
     defer font.deinit();
     font.encoding = .identity;
 
     // Mark text with ligatures
-    try font.markUnicodeCharsUsed("fi fl ft");
+    const glyphs_ligas = try font.markUnicodeCharsUsed("fi fl ft", null);
+    font.allocator.free(glyphs_ligas);
 
     // Check ligature codepoints were tracked
     std.debug.print("\nLigature codepoints tracked: {d}\n", .{font.ligature_codepoints.count()});

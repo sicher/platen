@@ -28,6 +28,17 @@ pub const Font = fonts.Font;
 pub const TextMetrics = metrics.TextMetrics;
 pub const TextStyle = metrics.TextStyle;
 pub const EmbeddedFont = embedded.EmbeddedFont;
+
+// Fast hex conversion lookup table
+const hex_chars = "0123456789ABCDEF";
+
+/// Fast conversion of u16 to 4-character hex string
+fn writeHex4(buf: *[4]u8, val: u16) void {
+    buf[0] = hex_chars[(val >> 12) & 0xF];
+    buf[1] = hex_chars[(val >> 8) & 0xF];
+    buf[2] = hex_chars[(val >> 4) & 0xF];
+    buf[3] = hex_chars[val & 0xF];
+}
 pub const opentype = embedded.opentype;
 
 /// Handle to a loaded font (either standard or embedded)
@@ -245,6 +256,8 @@ const TextCommand = struct {
     word_spacing: f64, // Extra space added between words for justification
     text_data: []const u8, // Owned copy of text
     font: FontRef,
+    /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
+    cached_glyphs: ?[]const u16 = null,
 };
 
 /// Content command for deferred rendering (enables glyph ID remapping)
@@ -262,27 +275,34 @@ const Page = struct {
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void),
     used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
 
-    fn init() Page {
+    // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
+    // All page allocations freed at once in deinit - no individual free() calls
+    arena: std.heap.ArenaAllocator,
+
+    fn init(backing_allocator: std.mem.Allocator) Page {
         return .{
             .content = .{},
             .commands = .{},
             .used_fonts = .{},
             .used_embedded = .{},
+            .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };
     }
 
-    fn deinit(self: *Page, allocator: std.mem.Allocator) void {
-        // Free owned text data in commands
-        for (self.commands.items) |cmd| {
-            switch (cmd) {
-                .text => |t| allocator.free(t.text_data),
-                .raw => |r| allocator.free(r),
-            }
-        }
-        self.commands.deinit(allocator);
-        self.content.deinit(allocator);
-        self.used_fonts.deinit(allocator);
-        self.used_embedded.deinit(allocator);
+    /// Get the arena allocator for page-local allocations
+    fn pageAllocator(self: *Page) std.mem.Allocator {
+        return self.arena.allocator();
+    }
+
+    fn deinit(self: *Page, backing_allocator: std.mem.Allocator) void {
+        // Arena frees all text_data, cached_glyphs, etc. in one operation
+        self.arena.deinit();
+
+        // These use the backing allocator, not the arena
+        self.commands.deinit(backing_allocator);
+        self.content.deinit(backing_allocator);
+        self.used_fonts.deinit(backing_allocator);
+        self.used_embedded.deinit(backing_allocator);
     }
 
     fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
@@ -419,7 +439,7 @@ pub const Document = struct {
 
     /// Add a new page
     pub fn addPage(self: *Document) !void {
-        try self.pages.append(self.allocator, Page.init());
+        try self.pages.append(self.allocator, Page.init(self.allocator));
         // Reset position to top-left (PDF coordinates: origin at bottom-left)
         self.x = 0;
         self.y = self.page_size.height;
@@ -556,15 +576,23 @@ pub const Document = struct {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
+        const page_alloc = page.pageAllocator();
 
-        // Determine font reference and mark as used
+        // Create owned copy of text, stripping soft-hyphens (U+00AD)
+        // Soft-hyphens are invisible unless used as break points
+        // Allocated on page arena - freed when page is destroyed
+        const text_copy = try stripSoftHyphens(page_alloc, str);
+
+        // Determine font reference, mark as used, and cache glyphs
+        var cached_glyphs: ?[]const u16 = null;
+
         const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
             try page.markEmbeddedUsed(self.allocator, emb);
-            // Mark chars/glyphs as used for subsetting
+            // Mark chars/glyphs as used for subsetting and cache glyphs
             if (emb.encoding == .identity) {
-                try emb.markUnicodeCharsUsed(str);
+                cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
             } else {
-                emb.markCharsUsed(str);
+                emb.markCharsUsed(text_copy);
             }
             break :blk .{ .embedded = emb };
         } else if (self.current_font) |font| blk: {
@@ -574,12 +602,7 @@ pub const Document = struct {
             return error.NoFont;
         };
 
-        // Create owned copy of text, stripping soft-hyphens (U+00AD)
-        // Soft-hyphens are invisible unless used as break points
-        const text_copy = try stripSoftHyphens(self.allocator, str);
-        errdefer self.allocator.free(text_copy);
-
-        // Store deferred command
+        // Store deferred command with cached glyphs
         try page.commands.append(self.allocator, .{
             .text = .{
                 .x = self.x,
@@ -589,6 +612,7 @@ pub const Document = struct {
                 .word_spacing = 0,
                 .text_data = text_copy,
                 .font = font_ref,
+                .cached_glyphs = cached_glyphs,
             },
         });
     }
@@ -598,14 +622,21 @@ pub const Document = struct {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
+        const page_alloc = page.pageAllocator();
 
-        // Determine font reference and mark as used
+        // Create owned copy of text, stripping soft-hyphens
+        // Allocated on page arena - freed when page is destroyed
+        const text_copy = try stripSoftHyphens(page_alloc, str);
+
+        // Determine font reference, mark as used, and cache glyphs
+        var cached_glyphs: ?[]const u16 = null;
+
         const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
             try page.markEmbeddedUsed(self.allocator, emb);
             if (emb.encoding == .identity) {
-                try emb.markUnicodeCharsUsed(str);
+                cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
             } else {
-                emb.markCharsUsed(str);
+                emb.markCharsUsed(text_copy);
             }
             break :blk .{ .embedded = emb };
         } else if (self.current_font) |font| blk: {
@@ -615,11 +646,7 @@ pub const Document = struct {
             return error.NoFont;
         };
 
-        // Create owned copy of text, stripping soft-hyphens
-        const text_copy = try stripSoftHyphens(self.allocator, str);
-        errdefer self.allocator.free(text_copy);
-
-        // Store deferred command with word spacing
+        // Store deferred command with word spacing and cached glyphs
         // Convert Y from top-left to PDF coordinates (bottom-left origin)
         try page.commands.append(self.allocator, .{
             .text = .{
@@ -630,6 +657,7 @@ pub const Document = struct {
                 .word_spacing = word_spacing,
                 .text_data = text_copy,
                 .font = font_ref,
+                .cached_glyphs = cached_glyphs,
             },
         });
     }
@@ -637,11 +665,13 @@ pub const Document = struct {
     /// Render CID text with ligatures, kerning, and mark positioning
     /// Returns true if advanced positioning was used (kerning or marks)
     /// start_x, start_y are absolute page coordinates for Tm-based mark positioning
-    fn renderCIDTextWithKerning(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8, font_size: f64, start_x: f64, start_y: f64) !bool {
+    /// If cached_glyphs is provided, uses those instead of computing from str
+    fn renderCIDTextWithKerning(self: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8, cached_glyphs: ?[]const u16, font_size: f64, start_x: f64, start_y: f64) !bool {
         _ = self;
-        // Get glyph sequence with ligatures applied
-        const glyphs = try emb.getGlyphsForText(str);
-        defer emb.allocator.free(glyphs);
+        // Use cached glyphs if available, otherwise compute
+        const glyphs_to_free: ?[]u16 = if (cached_glyphs == null) try emb.getGlyphsForText(str) else null;
+        defer if (glyphs_to_free) |g| emb.allocator.free(g);
+        const glyphs = cached_glyphs orelse glyphs_to_free.?;
 
         if (glyphs.len == 0) return false;
 
@@ -649,19 +679,21 @@ pub const Document = struct {
         const units_per_em = emb.font.head.?.units_per_em;
 
         // Check if we have any kerning or mark positioning
+        // Fast path: skip check loop if font has no kerning/mark data at all
         var has_kerning = false;
         var has_marks = false;
-        if (emb.feature_flags.kern or emb.feature_flags.mark or emb.feature_flags.mkmk) {
-            for (0..glyphs.len) |i| {
-                if (i + 1 < glyphs.len) {
-                    if (emb.feature_flags.kern and emb.getKerning(glyphs[i], glyphs[i + 1]) != 0) {
-                        has_kerning = true;
-                    }
-                    if ((emb.feature_flags.mark or emb.feature_flags.mkmk) and
-                        emb.getMarkOffset(glyphs[i], glyphs[i + 1]) != null)
-                    {
-                        has_marks = true;
-                    }
+        const check_kern = emb.feature_flags.kern and emb.has_kern_data;
+        const check_marks = (emb.feature_flags.mark or emb.feature_flags.mkmk) and emb.has_mark_data;
+        if (check_kern or check_marks) {
+            // Early exit once both are found (or we know we won't find the other)
+            for (0..glyphs.len -| 1) |i| {
+                if (!has_kerning and check_kern and emb.getKerning(glyphs[i], glyphs[i + 1]) != 0) {
+                    has_kerning = true;
+                    if (!check_marks or has_marks) break;
+                }
+                if (!has_marks and check_marks and emb.getMarkOffset(glyphs[i], glyphs[i + 1]) != null) {
+                    has_marks = true;
+                    if (!check_kern or has_kerning) break;
                 }
             }
         }
@@ -677,10 +709,10 @@ pub const Document = struct {
         if (!has_kerning) {
             // No kerning - use simple hex string
             try cw.append("<");
+            var hex_buf: [4]u8 = undefined;
             for (glyphs) |gid| {
                 const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
-                var hex_buf: [4]u8 = undefined;
-                _ = std.fmt.bufPrint(&hex_buf, "{X:0>4}", .{final_gid}) catch unreachable;
+                writeHex4(&hex_buf, final_gid);
                 try cw.append(&hex_buf);
             }
             try cw.append("> Tj\n");
@@ -690,11 +722,11 @@ pub const Document = struct {
         // Use TJ operator with kerning adjustments
         // Format: [<HexGlyphs> kern <HexGlyphs> kern ...] TJ
         try cw.append("[<");
+        var hex_buf: [4]u8 = undefined;
 
         for (glyphs, 0..) |gid, i| {
             const final_gid = if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid;
-            var hex_buf: [4]u8 = undefined;
-            _ = std.fmt.bufPrint(&hex_buf, "{X:0>4}", .{final_gid}) catch unreachable;
+            writeHex4(&hex_buf, final_gid);
             try cw.append(&hex_buf);
 
             // Add kerning adjustment before next glyph
@@ -1019,7 +1051,13 @@ pub const Document = struct {
     /// Soft-hyphens are invisible formatting characters that only appear as visible
     /// hyphens when text breaks at that point. Returns allocated copy without soft-hyphens.
     fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
-        // Count non-soft-hyphen bytes
+        // Fast path: check if any soft-hyphens exist (0xC2 0xAD in UTF-8)
+        // Most strings don't have soft-hyphens, so avoid the byte-by-byte scan
+        if (std.mem.indexOf(u8, str, "\xC2\xAD") == null) {
+            return allocator.dupe(u8, str);
+        }
+
+        // Slow path: count non-soft-hyphen bytes
         var count: usize = 0;
         var i: usize = 0;
         while (i < str.len) {
@@ -1029,11 +1067,6 @@ pub const Document = struct {
                 count += 1;
                 i += 1;
             }
-        }
-
-        // If no soft-hyphens, just duplicate
-        if (count == str.len) {
-            return allocator.dupe(u8, str);
         }
 
         // Copy without soft-hyphens
@@ -1541,8 +1574,8 @@ pub const Document = struct {
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
 
         if (len > 0) {
-            const raw_copy = try self.allocator.dupe(u8, buf[0..len]);
-            errdefer self.allocator.free(raw_copy);
+            // Allocated on page arena - freed when page is destroyed
+            const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
             try page.commands.append(self.allocator, .{ .raw = raw_copy });
         }
     }
@@ -1572,7 +1605,8 @@ pub const Document = struct {
                             if (emb.encoding == .identity) {
                                 // CID mode: output with ligatures, kerning, and mark positioning
                                 // Pass absolute position for Tm-based mark positioning
-                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data, t.font_size, t.x, t.y);
+                                // Use cached glyphs if available (avoids duplicate OpenType shaping)
+                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y);
                             } else {
                                 try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                 // WinAnsi mode
@@ -1608,6 +1642,16 @@ pub const Document = struct {
 
     /// Output the PDF document as bytes
     /// Caller owns the returned memory and must free it with the document's allocator
+    /// Timing breakdown from last output() call (for profiling)
+    pub const OutputTiming = struct {
+        subset_ms: i64 = 0,
+        render_ms: i64 = 0,
+        font_write_ms: i64 = 0,
+        page_write_ms: i64 = 0,
+        finish_ms: i64 = 0,
+    };
+    pub var last_output_timing: OutputTiming = .{};
+
     pub fn output(self: *Document) ![]u8 {
         // Ensure at least one page
         if (self.pages.items.len == 0) {
@@ -1697,16 +1741,21 @@ pub const Document = struct {
 
         // Generate font subsets (only include used glyphs)
         // This also populates gid_remap for compact CFF subsetting
+        const subset_start = std.time.milliTimestamp();
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font.generateSubset();
         }
+        last_output_timing.subset_ms = std.time.milliTimestamp() - subset_start;
 
         // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
+        const render_start = std.time.milliTimestamp();
         for (self.pages.items) |*page| {
             try self.renderPageCommands(page);
         }
+        last_output_timing.render_ms = std.time.milliTimestamp() - render_start;
 
         // Write embedded font objects
+        const font_write_start = std.time.milliTimestamp();
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
             const base_id = emb_font_base_ids.items[i];
 
@@ -1935,8 +1984,10 @@ pub const Document = struct {
                 try w.endObject();
             }
         }
+        last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
 
         // Write each page
+        const page_write_start = std.time.milliTimestamp();
         next_id = first_page_id;
         for (self.pages.items) |page| {
             const page_id = next_id;
@@ -2008,9 +2059,13 @@ pub const Document = struct {
             try w.writeStreamCompressed(&content_dict, page.content.items);
             try w.endObject();
         }
+        last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
 
         // Finish with xref and trailer
-        return try w.finish(.{ .id = catalog_id });
+        const finish_start = std.time.milliTimestamp();
+        const result = try w.finish(.{ .id = catalog_id });
+        last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
+        return result;
     }
 };
 

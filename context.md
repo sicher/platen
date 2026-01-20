@@ -1,7 +1,92 @@
 # zpdf Context
 
 ## Current Focus
-OpenType features all working: liga, dlig (with chain context), clig, hlig, kern, mark, mkmk, calt, tnum, pnum, frac, zero, case, ss01. Ready for graphics support or more stylistic sets (ss02-08).
+Major performance milestone: 71% overall speedup (3.5x faster). Performance is now well-optimized. Next: graphics support or additional features.
+
+## What We Did (Session 2026-01-20 #40) [COMPLETE]
+- **Implemented arena allocator per page - ~4% overall improvement**:
+  - Added `arena` field to `Page` struct (zpdf.zig:280)
+  - Updated `Page.init()` to take backing allocator
+  - Added `pageAllocator()` method for page-local allocations
+  - All per-command allocations (text_data, cached_glyphs, raw content) now use page arena
+  - Batch-freed when page is destroyed via `arena.deinit()`
+- **Modified `markUnicodeCharsUsed` signature** (embedded.zig:378):
+  - Added optional `output_allocator` parameter
+  - Allows caller to control where glyph arrays are allocated
+  - Internal scratch buffers still use font's allocator
+- **Performance results**:
+  - Total: 784ms → 752ms (~4% faster)
+  - Simplified memory management (removed individual errdefers)
+- **Updated PERFORMANCE.md** with optimization #12 details
+- All 156 tests pass
+
+## What We Did (Session 2026-01-20 #39) [COMPLETE]
+- **Implemented chain context rule index - 51% faster OpenType shaping**:
+  - Added `calt_rule_index` hash map to OpenTypeFeatures (opentype.zig:637-640)
+  - Maps glyph_id → list of rule indices that can match at that glyph
+  - Built at parse time by enumerating each rule's first input coverage
+  - At runtime, lookup applicable rules by current glyph (O(1)) instead of checking all 65 rules
+- **Added CoverageTable iteration methods** (opentype.zig:136-191):
+  - `getGlyphCount()` - total glyphs in coverage
+  - `getGlyphAt(index)` - get glyph at given coverage index
+  - Supports both Format 1 (list) and Format 2 (ranges)
+- **Performance results**:
+  - OpenType heavy: 487ms → 236ms (51% faster, 2x speedup)
+  - Unicode/marks: 174ms → 115ms (34% faster)
+  - Total: 1097ms → 784ms (29% faster)
+  - Overall from start: 2600ms → 784ms (70% faster, 3.3x speedup)
+- **Updated PERFORMANCE.md** with new findings
+- All 156 tests pass
+
+## What We Did (Session 2026-01-20 #38) [COMPLETE]
+- **Implemented lazy kerning cache - 61% faster page rendering**:
+  - Added `kern_cache` hash map to OpenTypeFeatures (opentype.zig:589-590)
+  - Key: `(glyph1 << 16) | glyph2`, Value: kern adjustment (i16)
+  - Lazy population: first lookup does full search and caches; subsequent lookups are O(1)
+  - High cache hit rate due to repeated glyph pairs across text commands
+- **Performance results**:
+  - Page rendering: 395ms → 154ms (61% faster, 2.5x speedup)
+  - PDF output: 518ms → 277ms (47% faster)
+  - Total: 1336ms → 1097ms (18% faster)
+  - Overall from start: 2600ms → 1097ms (58% faster)
+- **Updated PERFORMANCE.md** with new findings
+- All 156 tests pass
+
+## What We Did (Session 2026-01-20 #37) [COMPLETE]
+- **Profiled and optimized PDF output - 24% faster**:
+  - Added timing instrumentation to `output()` function (subset, render, font_write, page_write, finish)
+  - Added timing breakdown display to perf_test
+  - **Key finding**: Page rendering was 553ms (81% of output), not compression!
+- **Optimizations implemented**:
+  1. **Early exit from kerning/mark check loop** (zpdf.zig:666-684) - exit once both flags determined
+  2. **Cached `has_kern_data`/`has_mark_data` flags** (embedded.zig:174-176) - skip check loop for fonts without GPOS data
+  3. **Fast hex conversion** (zpdf.zig:32-41) - lookup table instead of `std.fmt.bufPrint`
+- **Performance results**:
+  - Page rendering: 553ms → 395ms (28% faster)
+  - PDF output: 680ms → 518ms (24% faster)
+  - Total: ~1480ms → ~1336ms (10% faster)
+- **Updated PERFORMANCE.md** with new findings and output breakdown
+- All 156 tests pass
+
+## What We Did (Session 2026-01-20 #36) [COMPLETE]
+- **Performance optimization - 2.5x speedup for text shaping**:
+  - Created `src/perf_test.zig` - comprehensive performance test suite
+  - Added shaping microbenchmark to isolate OpenType costs
+  - OpenType heavy: 1244ms → 484ms (2.5x faster)
+  - Total 100-page PDF: ~2600ms → ~1480ms (43% faster)
+- **Key optimizations**:
+  1. Fast-path first coverage check in `ChainContextSubstF3.match()` - check first input glyph before backtrack/lookahead
+  2. Pre-allocated ArrayLists with `ensureTotalCapacity` + `appendAssumeCapacity`
+  3. Scratch buffers in `OpenTypeFeatures` (scratch_a, scratch_b, scratch_c) - ping-pong buffers for feature application
+  4. Scratch buffers in `EmbeddedFont` (scratch_codepoints, scratch_glyphs) - reused across shaping calls
+  5. O(1) glyph lookup replacing O(n) hashmap iteration in `applyGSUBAndTrack`
+  6. Fast soft-hyphen check using `std.mem.indexOf`
+- **Created PERFORMANCE.md** - detailed performance report with findings and suggestions
+- **Remaining bottlenecks identified**:
+  - PDF output: 666ms (45%) - needs profiling
+  - Per-call allocation overhead in writeAt: ~0.20ms
+  - Chain context rule iteration (65 rules in Inter)
+- All 156 tests pass
 
 ## What We Did (Session 2026-01-20 #35) [COMPLETE]
 - **Improved inter_fonts test layout**:

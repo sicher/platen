@@ -132,6 +132,63 @@ pub const CoverageTable = struct {
         }
         return null;
     }
+
+    /// Get the number of glyphs in this coverage
+    pub fn getGlyphCount(self: CoverageTable) u16 {
+        if (self.data.len < 4) return 0;
+        return switch (self.format) {
+            1 => readU16(self.data, 2), // Format 1: glyph count at offset 2
+            2 => blk: {
+                // Format 2: sum of all range sizes
+                const range_count = readU16(self.data, 2);
+                var total: u16 = 0;
+                var i: u16 = 0;
+                while (i < range_count) : (i += 1) {
+                    const offset = 4 + @as(usize, i) * 6;
+                    if (offset + 6 > self.data.len) break;
+                    const start_glyph = readU16(self.data, offset);
+                    const end_glyph = readU16(self.data, offset + 2);
+                    total += end_glyph - start_glyph + 1;
+                }
+                break :blk total;
+            },
+            else => 0,
+        };
+    }
+
+    /// Get glyph ID at a given coverage index
+    pub fn getGlyphAt(self: CoverageTable, index: u16) ?u16 {
+        if (self.data.len < 4) return null;
+        return switch (self.format) {
+            1 => blk: {
+                // Format 1: direct array lookup
+                const glyph_count = readU16(self.data, 2);
+                if (index >= glyph_count) break :blk null;
+                const offset = 4 + @as(usize, index) * 2;
+                if (offset + 2 > self.data.len) break :blk null;
+                break :blk readU16(self.data, offset);
+            },
+            2 => blk: {
+                // Format 2: iterate through ranges
+                const range_count = readU16(self.data, 2);
+                var current_index: u16 = 0;
+                var i: u16 = 0;
+                while (i < range_count) : (i += 1) {
+                    const offset = 4 + @as(usize, i) * 6;
+                    if (offset + 6 > self.data.len) break :blk null;
+                    const start_glyph = readU16(self.data, offset);
+                    const end_glyph = readU16(self.data, offset + 2);
+                    const range_size = end_glyph - start_glyph + 1;
+                    if (index < current_index + range_size) {
+                        break :blk start_glyph + (index - current_index);
+                    }
+                    current_index += range_size;
+                }
+                break :blk null;
+            },
+            else => null,
+        };
+    }
 };
 
 /// Ligature - replacement glyph and component sequence
@@ -243,6 +300,10 @@ pub const ChainContextSubstF3 = struct {
         if (self.input_coverages.len == 0) return null;
         if (pos + self.input_coverages.len > glyphs.len) return null;
 
+        // FAST PATH: Check FIRST input coverage immediately - this rejects most non-matches
+        // This is the glyph at current position and is usually the most selective
+        if (self.input_coverages[0].getCoverageIndex(glyphs[pos]) == null) return null;
+
         // Check backtrack glyphs (in reverse order from pos-1)
         for (self.backtrack_coverages, 0..) |cov, i| {
             if (i >= pos) return null; // Not enough backtrack glyphs
@@ -250,9 +311,9 @@ pub const ChainContextSubstF3 = struct {
             if (cov.getCoverageIndex(backtrack_glyph) == null) return null;
         }
 
-        // Check input glyphs (starting at pos)
-        for (self.input_coverages, 0..) |cov, i| {
-            const input_glyph = glyphs[pos + i];
+        // Check remaining input glyphs (starting at pos+1, since we already checked pos)
+        for (self.input_coverages[1..], 0..) |cov, i| {
+            const input_glyph = glyphs[pos + 1 + i];
             if (cov.getCoverageIndex(input_glyph) == null) return null;
         }
 
@@ -573,6 +634,11 @@ pub const OpenTypeFeatures = struct {
     dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (dlig)
     frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (frac)
 
+    // Chain context rule index: glyph_id -> list of rule indices that can match at that glyph
+    // This avoids iterating all 65+ rules for each position - only check rules that could match
+    calt_rule_index: std.AutoHashMapUnmanaged(u16, []const usize) = .{},
+    calt_rule_index_storage: std.ArrayListUnmanaged([]const usize) = .{}, // Storage for index slices
+
     // Lookup index map: maps original lookup index -> lookup reference
     gsub_lookup_map: std.AutoHashMapUnmanaged(u16, GSUBLookupRef) = .{},
 
@@ -581,6 +647,9 @@ pub const OpenTypeFeatures = struct {
     kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .{},
     mark_base_lookups: std.ArrayListUnmanaged(MarkBasePos) = .{}, // Type 4
     mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .{}, // Type 6
+
+    // Kerning cache: (glyph1 << 16 | glyph2) -> kern value for O(1) lookup
+    kern_cache: std.AutoHashMapUnmanaged(u32, i16) = .{},
 
     // Allocated memory for ligature data
     ligature_memory: std.ArrayListUnmanaged([]const u16) = .{},
@@ -598,8 +667,20 @@ pub const OpenTypeFeatures = struct {
     // Allocated memory for mark records
     mark_record_memory: std.ArrayListUnmanaged([]const MarkRecord) = .{},
 
+    // Scratch buffers for shaping (reused across calls to avoid allocations)
+    scratch_a: std.ArrayListUnmanaged(u16) = .{},
+    scratch_b: std.ArrayListUnmanaged(u16) = .{},
+    scratch_c: std.ArrayListUnmanaged(u16) = .{}, // For calt intermediate results
+
     pub fn init(allocator: std.mem.Allocator) OpenTypeFeatures {
         return .{ .allocator = allocator };
+    }
+
+    /// Ensure scratch buffers have at least the given capacity
+    fn ensureScratchCapacity(self: *OpenTypeFeatures, capacity: usize) !void {
+        try self.scratch_a.ensureTotalCapacity(self.allocator, capacity);
+        try self.scratch_b.ensureTotalCapacity(self.allocator, capacity);
+        try self.scratch_c.ensureTotalCapacity(self.allocator, capacity);
     }
 
     pub fn deinit(self: *OpenTypeFeatures) void {
@@ -643,6 +724,13 @@ pub const OpenTypeFeatures = struct {
         self.dlig_chain_lookups.deinit(self.allocator);
         self.frac_chain_lookups.deinit(self.allocator);
 
+        // Free calt rule index
+        for (self.calt_rule_index_storage.items) |slice| {
+            self.allocator.free(slice);
+        }
+        self.calt_rule_index_storage.deinit(self.allocator);
+        self.calt_rule_index.deinit(self.allocator);
+
         // Free mark record memory
         for (self.mark_record_memory.items) |slice| {
             self.allocator.free(slice);
@@ -650,9 +738,15 @@ pub const OpenTypeFeatures = struct {
         self.mark_record_memory.deinit(self.allocator);
         self.mark_base_lookups.deinit(self.allocator);
         self.mark_mark_lookups.deinit(self.allocator);
+        self.kern_cache.deinit(self.allocator);
 
         // Free lookup map
         self.gsub_lookup_map.deinit(self.allocator);
+
+        // Free scratch buffers
+        self.scratch_a.deinit(self.allocator);
+        self.scratch_b.deinit(self.allocator);
+        self.scratch_c.deinit(self.allocator);
     }
 
     /// Parse GSUB table from font data
@@ -672,6 +766,55 @@ pub const OpenTypeFeatures = struct {
         try self.parseGSUBFeature(gsub_data, Feature.ss01);
         // Then parse ALL lookups to enable nested lookup dispatch from calt
         try self.parseAllGSUBLookups(gsub_data);
+        // Build rule index for fast chain context lookup
+        try self.buildCaltRuleIndex();
+    }
+
+    /// Build index mapping glyph_id -> list of chain context rules that can match at that glyph
+    /// This avoids iterating all rules for each position - only check applicable rules
+    fn buildCaltRuleIndex(self: *OpenTypeFeatures) !void {
+        if (self.chain_context_lookups.items.len == 0) return;
+
+        // Step 1: Build temporary map of glyph -> list of rule indices
+        var temp_map = std.AutoHashMapUnmanaged(u16, std.ArrayListUnmanaged(usize)){};
+        defer {
+            var iter = temp_map.valueIterator();
+            while (iter.next()) |list| {
+                list.deinit(self.allocator);
+            }
+            temp_map.deinit(self.allocator);
+        }
+
+        for (self.chain_context_lookups.items, 0..) |rule, rule_idx| {
+            if (rule.input_coverages.len == 0) continue;
+            const first_coverage = rule.input_coverages[0];
+            const glyph_count = first_coverage.getGlyphCount();
+
+            // Add this rule index to each glyph's list
+            var i: u16 = 0;
+            while (i < glyph_count) : (i += 1) {
+                if (first_coverage.getGlyphAt(i)) |glyph_id| {
+                    const gop = try temp_map.getOrPut(self.allocator, glyph_id);
+                    if (!gop.found_existing) {
+                        gop.value_ptr.* = .{};
+                    }
+                    try gop.value_ptr.append(self.allocator, rule_idx);
+                }
+            }
+        }
+
+        // Step 2: Convert to permanent storage (slices)
+        var iter = temp_map.iterator();
+        while (iter.next()) |entry| {
+            const glyph_id = entry.key_ptr.*;
+            const rule_list = entry.value_ptr.*;
+
+            // Allocate permanent slice and copy
+            const slice = try self.allocator.alloc(usize, rule_list.items.len);
+            @memcpy(slice, rule_list.items);
+            try self.calt_rule_index_storage.append(self.allocator, slice);
+            try self.calt_rule_index.put(self.allocator, glyph_id, slice);
+        }
     }
 
     /// Parse ALL lookups in the GSUB lookup list
@@ -1623,9 +1766,12 @@ pub const OpenTypeFeatures = struct {
             return try self.allocator.dupe(u16, glyphs);
         }
 
+        // Pre-allocate result (ligatures can only shrink, never grow)
         var result = std.ArrayListUnmanaged(u16){};
         errdefer result.deinit(self.allocator);
+        try result.ensureTotalCapacity(self.allocator, glyphs.len);
 
+        var any_change = false;
         var pos: usize = 0;
         while (pos < glyphs.len) {
             var matched = false;
@@ -1633,17 +1779,24 @@ pub const OpenTypeFeatures = struct {
             // Try each ligature lookup
             for (self.liga_lookups.items) |lookup| {
                 if (lookup.findLigature(glyphs, pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
-                    try result.append(self.allocator, match.lig_glyph);
+                    result.appendAssumeCapacity(match.lig_glyph);
                     pos += match.consumed;
                     matched = true;
+                    any_change = true;
                     break;
                 }
             }
 
             if (!matched) {
-                try result.append(self.allocator, glyphs[pos]);
+                result.appendAssumeCapacity(glyphs[pos]);
                 pos += 1;
             }
+        }
+
+        // If no changes, just return a dupe
+        if (!any_change) {
+            result.deinit(self.allocator);
+            return try self.allocator.dupe(u16, glyphs);
         }
 
         return result.toOwnedSlice(self.allocator);
@@ -1655,9 +1808,12 @@ pub const OpenTypeFeatures = struct {
             return try self.allocator.dupe(u16, glyphs);
         }
 
+        // Pre-allocate result (ligatures can only shrink, never grow)
         var result = std.ArrayListUnmanaged(u16){};
         errdefer result.deinit(self.allocator);
+        try result.ensureTotalCapacity(self.allocator, glyphs.len);
 
+        var any_change = false;
         var pos: usize = 0;
         while (pos < glyphs.len) {
             var matched = false;
@@ -1665,17 +1821,24 @@ pub const OpenTypeFeatures = struct {
             // Try each ligature lookup
             for (lookups) |lookup| {
                 if (lookup.findLigature(glyphs, pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
-                    try result.append(self.allocator, match.lig_glyph);
+                    result.appendAssumeCapacity(match.lig_glyph);
                     pos += match.consumed;
                     matched = true;
+                    any_change = true;
                     break;
                 }
             }
 
             if (!matched) {
-                try result.append(self.allocator, glyphs[pos]);
+                result.appendAssumeCapacity(glyphs[pos]);
                 pos += 1;
             }
+        }
+
+        // If no changes, just return a dupe (avoids building result for common case)
+        if (!any_change) {
+            result.deinit(self.allocator);
+            return try self.allocator.dupe(u16, glyphs);
         }
 
         return result.toOwnedSlice(self.allocator);
@@ -1687,9 +1850,11 @@ pub const OpenTypeFeatures = struct {
             return try self.allocator.dupe(u16, glyphs);
         }
 
+        // Pre-allocate to avoid incremental growth
         var result = std.ArrayListUnmanaged(u16){};
         errdefer result.deinit(self.allocator);
-        try result.appendSlice(self.allocator, glyphs);
+        try result.ensureTotalCapacity(self.allocator, glyphs.len);
+        result.appendSliceAssumeCapacity(glyphs);
 
         // Process each position
         var pos: usize = 0;
@@ -1861,13 +2026,24 @@ pub const OpenTypeFeatures = struct {
         return result;
     }
 
-    /// Get kerning adjustment between two glyphs
+    /// Get kerning adjustment between two glyphs (O(1) with lazy caching)
     pub fn getKerning(self: *OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
-        for (self.kern_lookups.items) |lookup| {
-            const kern = lookup.getKerning(glyph1, glyph2);
-            if (kern != 0) return kern;
+        // O(1) cache lookup
+        const key = (@as(u32, glyph1) << 16) | @as(u32, glyph2);
+        if (self.kern_cache.get(key)) |cached| {
+            return cached;
         }
-        return 0;
+
+        // Cache miss - do the full lookup
+        var kern: i16 = 0;
+        for (self.kern_lookups.items) |lookup| {
+            kern = lookup.getKerning(glyph1, glyph2);
+            if (kern != 0) break;
+        }
+
+        // Cache the result (even if 0, to avoid repeated lookups)
+        self.kern_cache.put(self.allocator, key, kern) catch {};
+        return kern;
     }
 
     /// Apply contextual alternates (calt) substitution to a glyph sequence
@@ -1901,9 +2077,11 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Work with a mutable copy for chain context processing
+        // Pre-allocate to avoid incremental growth
         var result = std.ArrayListUnmanaged(u16){};
         errdefer result.deinit(self.allocator);
-        try result.appendSlice(self.allocator, intermediate);
+        try result.ensureTotalCapacity(self.allocator, intermediate.len);
+        result.appendSliceAssumeCapacity(intermediate);
 
         // Process each position
         var pos: usize = 0;
@@ -2028,90 +2206,316 @@ pub const OpenTypeFeatures = struct {
     }
 
     /// Apply all GSUB substitutions with explicit feature flags
+    /// Uses internal scratch buffers to minimize allocations
     pub fn applyGSUBWithFlags(self: *OpenTypeFeatures, glyphs: []const u16, flags: FeatureFlags) ![]u16 {
-        var current = try self.allocator.dupe(u16, glyphs);
-        errdefer self.allocator.free(current);
+        // Ensure scratch buffers have enough capacity
+        try self.ensureScratchCapacity(glyphs.len);
+
+        // Use scratch buffers as ping-pong buffers
+        // current points to the buffer with current data, next is where we write
+        self.scratch_a.clearRetainingCapacity();
+        self.scratch_b.clearRetainingCapacity();
+        self.scratch_a.appendSliceAssumeCapacity(glyphs);
+
+        var current = &self.scratch_a;
+        var next = &self.scratch_b;
 
         // Apply calt first (contextual alternates)
         const has_calt = self.calt_liga_lookups.items.len > 0 or self.chain_context_lookups.items.len > 0;
         if (flags.calt and has_calt) {
-            const next = try self.applyCalt(current);
-            self.allocator.free(current);
+            try self.applyCaltInto(current.items, next);
+            const tmp = current;
             current = next;
+            next = tmp;
         }
 
         // Apply standard ligatures (liga)
         if (flags.liga and self.liga_lookups.items.len > 0) {
-            const next = try self.applyLigatures(current);
-            self.allocator.free(current);
+            try self.applyLigaturesInto(current.items, next, self.liga_lookups.items);
+            const tmp = current;
             current = next;
+            next = tmp;
         }
 
         // Apply discretionary ligatures (dlig)
         const has_dlig = self.dlig_lookups.items.len > 0 or self.dlig_chain_lookups.items.len > 0;
         if (flags.dlig and has_dlig) {
-            const next = try self.applyDlig(current);
-            self.allocator.free(current);
+            try self.applyDligInto(current.items, next);
+            const tmp = current;
             current = next;
+            next = tmp;
         }
 
         // Apply contextual ligatures (clig)
         if (flags.clig and self.clig_lookups.items.len > 0) {
-            const next = try self.applyClig(current);
-            self.allocator.free(current);
+            try self.applyLigaturesInto(current.items, next, self.clig_lookups.items);
+            const tmp = current;
             current = next;
+            next = tmp;
         }
 
         // Apply historical ligatures (hlig)
         if (flags.hlig and self.hlig_lookups.items.len > 0) {
-            const next = try self.applyHlig(current);
-            self.allocator.free(current);
+            try self.applyLigaturesInto(current.items, next, self.hlig_lookups.items);
+            const tmp = current;
             current = next;
+            next = tmp;
         }
 
         // Apply tabular figures (tnum) - mutually exclusive with pnum
         if (flags.tnum and self.tnum_lookups.items.len > 0) {
-            const next = try self.applySingleSubstFeature(current, self.tnum_lookups.items);
-            self.allocator.free(current);
-            current = next;
+            self.applySingleSubstInPlace(current.items, self.tnum_lookups.items);
         }
 
         // Apply proportional figures (pnum) - mutually exclusive with tnum
         if (flags.pnum and self.pnum_lookups.items.len > 0) {
-            const next = try self.applySingleSubstFeature(current, self.pnum_lookups.items);
-            self.allocator.free(current);
-            current = next;
+            self.applySingleSubstInPlace(current.items, self.pnum_lookups.items);
         }
 
         // Apply slashed zero (zero)
         if (flags.zero and self.zero_lookups.items.len > 0) {
-            const next = try self.applySingleSubstFeature(current, self.zero_lookups.items);
-            self.allocator.free(current);
-            current = next;
+            self.applySingleSubstInPlace(current.items, self.zero_lookups.items);
         }
 
         // Apply case-sensitive forms (case)
         if (flags.case and self.case_lookups.items.len > 0) {
-            const next = try self.applySingleSubstFeature(current, self.case_lookups.items);
-            self.allocator.free(current);
-            current = next;
+            self.applySingleSubstInPlace(current.items, self.case_lookups.items);
         }
 
         // Apply stylistic set 1 (ss01)
         if (flags.ss01 and self.ss01_lookups.items.len > 0) {
-            const next = try self.applySingleSubstFeature(current, self.ss01_lookups.items);
-            self.allocator.free(current);
-            current = next;
+            self.applySingleSubstInPlace(current.items, self.ss01_lookups.items);
         }
 
         // Apply fractions (frac)
         if (flags.frac and self.frac_chain_lookups.items.len > 0) {
-            const next = try self.applyChainContext(current, self.frac_chain_lookups.items);
-            self.allocator.free(current);
+            try self.applyChainContextInto(current.items, next, self.frac_chain_lookups.items);
+            const tmp = current;
             current = next;
+            next = tmp;
         }
 
-        return current;
+        // Return a copy of the final result (caller owns it)
+        return try self.allocator.dupe(u16, current.items);
+    }
+
+    /// Apply ligatures, writing result to output buffer
+    fn applyLigaturesInto(self: *OpenTypeFeatures, glyphs: []const u16, output: *std.ArrayListUnmanaged(u16), lookups: []const LigatureSubst) !void {
+        output.clearRetainingCapacity();
+        try output.ensureTotalCapacity(self.allocator, glyphs.len);
+
+        var pos: usize = 0;
+        while (pos < glyphs.len) {
+            var matched = false;
+            for (lookups) |lookup| {
+                if (lookup.findLigature(glyphs, pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
+                    output.appendAssumeCapacity(match.lig_glyph);
+                    pos += match.consumed;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                output.appendAssumeCapacity(glyphs[pos]);
+                pos += 1;
+            }
+        }
+    }
+
+    /// Apply calt (contextual alternates), writing result to output buffer
+    fn applyCaltInto(self: *OpenTypeFeatures, glyphs: []const u16, output: *std.ArrayListUnmanaged(u16)) !void {
+        output.clearRetainingCapacity();
+        try output.ensureTotalCapacity(self.allocator, glyphs.len);
+
+        // First apply calt's direct ligatures if any
+        var intermediate: []const u16 = glyphs;
+
+        if (self.calt_liga_lookups.items.len > 0) {
+            // Use scratch_c for calt ligatures intermediate result
+            try self.applyLigaturesInto(glyphs, &self.scratch_c, self.calt_liga_lookups.items);
+            intermediate = self.scratch_c.items;
+        }
+
+        // If no chain context, just copy
+        if (self.chain_context_lookups.items.len == 0) {
+            output.appendSliceAssumeCapacity(intermediate);
+            return;
+        }
+
+        // Process chain context rules using indexed lookup
+        output.appendSliceAssumeCapacity(intermediate);
+
+        var pos: usize = 0;
+        while (pos < output.items.len) {
+            const current_glyph = output.items[pos];
+
+            // Use rule index to only check applicable rules (O(1) lookup + small iteration)
+            if (self.calt_rule_index.get(current_glyph)) |rule_indices| {
+                for (rule_indices) |rule_idx| {
+                    const chain_lookup = self.chain_context_lookups.items[rule_idx];
+                    if (chain_lookup.match(output.items, pos)) |subst_records| {
+                        for (subst_records) |rec| {
+                            const target_pos = pos + rec.sequence_index;
+                            if (target_pos >= output.items.len) continue;
+
+                            if (self.gsub_lookup_map.get(rec.lookup_index)) |lookup_ref| {
+                                self.applyLookupRefAt(output, target_pos, lookup_ref);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            pos += 1;
+        }
+    }
+
+    /// Apply dlig (discretionary ligatures), writing result to output buffer
+    fn applyDligInto(self: *OpenTypeFeatures, glyphs: []const u16, output: *std.ArrayListUnmanaged(u16)) !void {
+        output.clearRetainingCapacity();
+        try output.ensureTotalCapacity(self.allocator, glyphs.len);
+
+        // First apply direct dlig ligatures
+        try self.applyLigaturesInto(glyphs, output, self.dlig_lookups.items);
+
+        // Then apply chain context rules if any
+        if (self.dlig_chain_lookups.items.len > 0) {
+            var pos: usize = 0;
+            while (pos < output.items.len) {
+                for (self.dlig_chain_lookups.items) |chain_lookup| {
+                    if (chain_lookup.match(output.items, pos)) |subst_records| {
+                        for (subst_records) |rec| {
+                            const target_pos = pos + rec.sequence_index;
+                            if (target_pos >= output.items.len) continue;
+
+                            if (self.gsub_lookup_map.get(rec.lookup_index)) |lookup_ref| {
+                                self.applyLookupRefAt(output, target_pos, lookup_ref);
+                            }
+                        }
+                        break;
+                    }
+                }
+                pos += 1;
+            }
+        }
+    }
+
+    /// Apply chain context substitution, writing result to output buffer
+    fn applyChainContextInto(self: *OpenTypeFeatures, glyphs: []const u16, output: *std.ArrayListUnmanaged(u16), chain_lookups: []const ChainContextSubstF3) !void {
+        output.clearRetainingCapacity();
+        try output.ensureTotalCapacity(self.allocator, glyphs.len);
+        output.appendSliceAssumeCapacity(glyphs);
+
+        var pos: usize = 0;
+        while (pos < output.items.len) {
+            for (chain_lookups) |chain_lookup| {
+                if (chain_lookup.match(output.items, pos)) |subst_records| {
+                    for (subst_records) |rec| {
+                        const target_pos = pos + rec.sequence_index;
+                        if (target_pos >= output.items.len) continue;
+
+                        if (self.gsub_lookup_map.get(rec.lookup_index)) |lookup_ref| {
+                            self.applyLookupRefAt(output, target_pos, lookup_ref);
+                        }
+                    }
+                    break;
+                }
+            }
+            pos += 1;
+        }
+    }
+
+    /// Apply single substitution in-place (no length change)
+    fn applySingleSubstInPlace(self: *OpenTypeFeatures, glyphs: []u16, lookups: []const SingleSubst) void {
+        _ = self;
+        for (glyphs) |*glyph| {
+            for (lookups) |lookup| {
+                if (lookup.substitute(glyph.*)) |new_glyph| {
+                    glyph.* = new_glyph;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Apply a lookup reference at a specific position in the output buffer
+    fn applyLookupRefAt(self: *OpenTypeFeatures, output: *std.ArrayListUnmanaged(u16), target_pos: usize, lookup_ref: GSUBLookupRef) void {
+        switch (lookup_ref) {
+            .single => |idx| {
+                if (idx < self.single_lookups.items.len) {
+                    const single = self.single_lookups.items[idx];
+                    if (single.substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .liga, .dlig, .clig, .hlig, .calt_liga => |idx| {
+                const lookups = switch (lookup_ref) {
+                    .liga => self.liga_lookups.items,
+                    .dlig => self.dlig_lookups.items,
+                    .clig => self.clig_lookups.items,
+                    .hlig => self.hlig_lookups.items,
+                    .calt_liga => self.calt_liga_lookups.items,
+                    else => unreachable,
+                };
+                if (idx < lookups.len) {
+                    const liga = lookups[idx];
+                    if (liga.findLigature(output.items, target_pos, self.ligature_sets.items, self.ligature_structs.items)) |match| {
+                        output.items[target_pos] = match.lig_glyph;
+                        if (match.consumed > 1) {
+                            const remove_count = match.consumed - 1;
+                            const remove_start = target_pos + 1;
+                            if (remove_start + remove_count <= output.items.len) {
+                                std.mem.copyForwards(
+                                    u16,
+                                    output.items[remove_start..],
+                                    output.items[remove_start + remove_count .. output.items.len],
+                                );
+                                output.shrinkRetainingCapacity(output.items.len - remove_count);
+                            }
+                        }
+                    }
+                }
+            },
+            .tnum => |idx| {
+                if (idx < self.tnum_lookups.items.len) {
+                    if (self.tnum_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .pnum => |idx| {
+                if (idx < self.pnum_lookups.items.len) {
+                    if (self.pnum_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .zero => |idx| {
+                if (idx < self.zero_lookups.items.len) {
+                    if (self.zero_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .case => |idx| {
+                if (idx < self.case_lookups.items.len) {
+                    if (self.case_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .ss01 => |idx| {
+                if (idx < self.ss01_lookups.items.len) {
+                    if (self.ss01_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .chain_context, .frac => {
+                // Skip nested chain context to avoid recursion
+            },
+        }
     }
 
     /// Get mark positioning offset for a mark glyph following a base glyph
