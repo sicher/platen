@@ -1,7 +1,21 @@
 # zpdf Context
 
 ## Current Focus
-OpenType features: liga, dlig, clig, hlig, kern, mark, mkmk, **calt** all working and enabled by default. Ready for graphics support. API docs now generated via `zig build docs`.
+OpenType features all working: liga, dlig (with chain context), clig, hlig, kern, mark, mkmk, calt, tnum, pnum, frac, zero, case, ss01. Ready for graphics support or more stylistic sets (ss02-08).
+
+## What We Did (Session 2026-01-20 #34) [COMPLETE]
+- **Added OpenType figure/number features to inter_fonts test**:
+  - dlig: Added chain context support for f/t variants (ff fi ffi ft tt tf rf rt vf wt), interrobangs (!? → ‽)
+  - tnum/pnum: Tabular vs proportional figures side-by-side comparison
+  - frac: Fractions feature with fraction slash (1⁄2 3⁄4 5⁄8 7⁄16)
+  - zero: Slashed zero for distinguishing 0 from O
+  - case: Case-sensitive forms for punctuation with uppercase (A@B 3+9≈12*1)
+  - ss01: Stylistic Set 1 with alternate digits (3 4 6 9 a g)
+- **Refactored OpenType parsing**:
+  - Created `applySingleSubstFeature` helper for tnum/pnum/zero/case/ss01
+  - Created `applyChainContext` helper for frac and dlig chain context rules
+  - Added dedicated `*_lookups` storage for each feature
+  - Proper nested lookup dispatch in chain context for all new features
 
 ## What We Did (Session 2026-01-20 #33) [COMPLETE]
 - **Fixed calt (contextual alternates) bug at scale**:
