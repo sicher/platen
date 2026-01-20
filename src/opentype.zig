@@ -667,6 +667,9 @@ pub const OpenTypeFeatures = struct {
         try self.parseGSUBFeature(gsub_data, Feature.tnum);
         try self.parseGSUBFeature(gsub_data, Feature.pnum);
         try self.parseGSUBFeature(gsub_data, Feature.frac);
+        try self.parseGSUBFeature(gsub_data, Feature.zero);
+        try self.parseGSUBFeature(gsub_data, Feature.case);
+        try self.parseGSUBFeature(gsub_data, Feature.ss01);
         // Then parse ALL lookups to enable nested lookup dispatch from calt
         try self.parseAllGSUBLookups(gsub_data);
     }
@@ -2478,6 +2481,9 @@ test "Parse Inter calt feature (Type 1 and Type 6)" {
     std.debug.print("  Dlig lookups: {d}\n", .{features.dlig_lookups.items.len});
     std.debug.print("  Clig lookups: {d}\n", .{features.clig_lookups.items.len});
     std.debug.print("  Hlig lookups: {d}\n", .{features.hlig_lookups.items.len});
+    std.debug.print("  Zero lookups: {d}\n", .{features.zero_lookups.items.len});
+    std.debug.print("  Case lookups: {d}\n", .{features.case_lookups.items.len});
+    std.debug.print("  SS01 lookups: {d}\n", .{features.ss01_lookups.items.len});
 
     // Inter has extensive calt feature with arrow ligatures etc.
     // We should have some Type 1 or Type 6 lookups

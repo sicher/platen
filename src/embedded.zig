@@ -385,21 +385,32 @@ pub const EmbeddedFont = struct {
         // Initialize OpenType features if any GSUB/GPOS feature is enabled
         const needs_ot = self.feature_flags.liga or self.feature_flags.dlig or
             self.feature_flags.clig or self.feature_flags.hlig or
-            self.feature_flags.calt or self.feature_flags.kern;
+            self.feature_flags.calt or self.feature_flags.kern or
+            self.feature_flags.tnum or self.feature_flags.pnum or
+            self.feature_flags.frac or self.feature_flags.zero or
+            self.feature_flags.case or self.feature_flags.ss01;
         if (needs_ot) {
             try self.initOpenTypeFeatures();
         }
 
-        // Apply GSUB substitutions if enabled (calt and/or ligatures)
+        // Apply GSUB substitutions if enabled (any substitution feature)
         if (base_glyphs.items.len > 0) {
             if (self.ot_features) |ot| {
                 const has_calt = self.feature_flags.calt and ot.chain_context_lookups.items.len > 0;
                 const has_liga = self.feature_flags.liga and ot.liga_lookups.items.len > 0;
-                const has_dlig = self.feature_flags.dlig and ot.dlig_lookups.items.len > 0;
+                const has_dlig = self.feature_flags.dlig and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0);
                 const has_clig = self.feature_flags.clig and ot.clig_lookups.items.len > 0;
                 const has_hlig = self.feature_flags.hlig and ot.hlig_lookups.items.len > 0;
+                const has_tnum = self.feature_flags.tnum and ot.tnum_lookups.items.len > 0;
+                const has_pnum = self.feature_flags.pnum and ot.pnum_lookups.items.len > 0;
+                const has_frac = self.feature_flags.frac and ot.frac_chain_lookups.items.len > 0;
+                const has_zero = self.feature_flags.zero and ot.zero_lookups.items.len > 0;
+                const has_case = self.feature_flags.case and ot.case_lookups.items.len > 0;
+                const has_ss01 = self.feature_flags.ss01 and ot.ss01_lookups.items.len > 0;
 
-                if (has_calt or has_liga or has_dlig or has_clig or has_hlig) {
+                if (has_calt or has_liga or has_dlig or has_clig or has_hlig or
+                    has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss01)
+                {
                     // Apply GSUB substitutions and track results
                     try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale);
                     return;
@@ -571,9 +582,15 @@ pub const EmbeddedFont = struct {
         if (self.ot_features) |ot| {
             const has_gsub = (self.feature_flags.calt and (ot.calt_liga_lookups.items.len > 0 or ot.chain_context_lookups.items.len > 0)) or
                 (self.feature_flags.liga and ot.liga_lookups.items.len > 0) or
-                (self.feature_flags.dlig and ot.dlig_lookups.items.len > 0) or
+                (self.feature_flags.dlig and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0)) or
                 (self.feature_flags.clig and ot.clig_lookups.items.len > 0) or
-                (self.feature_flags.hlig and ot.hlig_lookups.items.len > 0);
+                (self.feature_flags.hlig and ot.hlig_lookups.items.len > 0) or
+                (self.feature_flags.tnum and ot.tnum_lookups.items.len > 0) or
+                (self.feature_flags.pnum and ot.pnum_lookups.items.len > 0) or
+                (self.feature_flags.frac and ot.frac_chain_lookups.items.len > 0) or
+                (self.feature_flags.zero and ot.zero_lookups.items.len > 0) or
+                (self.feature_flags.case and ot.case_lookups.items.len > 0) or
+                (self.feature_flags.ss01 and ot.ss01_lookups.items.len > 0);
 
             if (has_gsub) {
                 return ot.applyGSUBWithFlags(base_glyphs.items, self.feature_flags);
