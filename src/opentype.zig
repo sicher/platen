@@ -22,6 +22,7 @@ pub const Feature = enum(u32) {
     tnum = tag("tnum"), // Tabular Figures
     pnum = tag("pnum"), // Proportional Figures
     frac = tag("frac"), // Fractions
+    zero = tag("zero"), // Slashed Zero
 
     fn tag(comptime s: *const [4]u8) u32 {
         return std.mem.readInt(u32, s, .big);
@@ -40,6 +41,7 @@ pub const Feature = enum(u32) {
             tag("tnum") => .tnum,
             tag("pnum") => .pnum,
             tag("frac") => .frac,
+            tag("zero") => .zero,
             else => null,
         };
     }
@@ -58,6 +60,7 @@ pub const FeatureFlags = struct {
     tnum: bool = false, // Tabular figures off by default (proportional is default)
     pnum: bool = false, // Proportional figures off by default (already default)
     frac: bool = false, // Fractions off by default
+    zero: bool = false, // Slashed zero off by default
 };
 
 /// Coverage table - maps glyph IDs to coverage indices
@@ -537,6 +540,7 @@ pub const GSUBLookupRef = union(enum) {
     chain_context: usize, // Index into chain_context_lookups
     tnum: usize, // Index into tnum_lookups
     pnum: usize, // Index into pnum_lookups
+    zero: usize, // Index into zero_lookups
     frac: usize, // Index into frac_chain_lookups
 };
 
@@ -554,6 +558,7 @@ pub const OpenTypeFeatures = struct {
     single_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (generic)
     tnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (tabular figures)
     pnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (proportional figures)
+    zero_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (slashed zero)
     chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (calt)
     dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (dlig)
     frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (frac)
@@ -611,6 +616,7 @@ pub const OpenTypeFeatures = struct {
         self.single_lookups.deinit(self.allocator);
         self.tnum_lookups.deinit(self.allocator);
         self.pnum_lookups.deinit(self.allocator);
+        self.zero_lookups.deinit(self.allocator);
 
         // Free chain context memory
         for (self.chain_coverage_memory.items) |slice| {
@@ -754,6 +760,7 @@ pub const OpenTypeFeatures = struct {
         const single_start = self.single_lookups.items.len;
         const tnum_start = self.tnum_lookups.items.len;
         const pnum_start = self.pnum_lookups.items.len;
+        const zero_start = self.zero_lookups.items.len;
         const liga_start = self.liga_lookups.items.len;
         const dlig_start = self.dlig_lookups.items.len;
         const clig_start = self.clig_lookups.items.len;
@@ -778,6 +785,7 @@ pub const OpenTypeFeatures = struct {
                             switch (f) {
                                 .tnum => try self.tnum_lookups.append(self.allocator, single_subst),
                                 .pnum => try self.pnum_lookups.append(self.allocator, single_subst),
+                                .zero => try self.zero_lookups.append(self.allocator, single_subst),
                                 else => try self.single_lookups.append(self.allocator, single_subst),
                             }
                         } else {
@@ -829,6 +837,10 @@ pub const OpenTypeFeatures = struct {
                             null,
                         .pnum => break :blk if (self.pnum_lookups.items.len > pnum_start)
                             GSUBLookupRef{ .pnum = pnum_start }
+                        else
+                            null,
+                        .zero => break :blk if (self.zero_lookups.items.len > zero_start)
+                            GSUBLookupRef{ .zero = zero_start }
                         else
                             null,
                         else => break :blk if (self.single_lookups.items.len > single_start)
@@ -1726,6 +1738,14 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
+                                .zero => |idx| {
+                                    if (idx < self.zero_lookups.items.len) {
+                                        const single = self.zero_lookups.items[idx];
+                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
                                 .frac => {
                                     // Nested frac chain context - skip to avoid recursion
                                 },
@@ -1917,6 +1937,14 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
+                                .zero => |idx| {
+                                    if (idx < self.zero_lookups.items.len) {
+                                        const single = self.zero_lookups.items[idx];
+                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
                                 .frac => {
                                     // Nested frac chain context - skip to avoid recursion
                                 },
@@ -1992,6 +2020,13 @@ pub const OpenTypeFeatures = struct {
         // Apply proportional figures (pnum) - mutually exclusive with tnum
         if (flags.pnum and self.pnum_lookups.items.len > 0) {
             const next = try self.applySingleSubstFeature(current, self.pnum_lookups.items);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        // Apply slashed zero (zero)
+        if (flags.zero and self.zero_lookups.items.len > 0) {
+            const next = try self.applySingleSubstFeature(current, self.zero_lookups.items);
             self.allocator.free(current);
             current = next;
         }

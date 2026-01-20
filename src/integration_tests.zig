@@ -320,6 +320,11 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_frac.encoding = .identity;
     inter_frac.setFeature(.frac, true);
 
+    // Slashed zero comparison (zero is OFF by default)
+    const inter_zero = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_zero.encoding = .identity;
+    inter_zero.setFeature(.zero, true);
+
     try doc.addPage();
     var y: f64 = 32;
 
@@ -470,11 +475,17 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(242, y, "1\xe2\x81\x842 3\xe2\x81\x844 5\xe2\x81\x848 7\xe2\x81\x8416"); // fraction slash U+2044
     y += 20;
 
-    // --- Slashed Zero (zero) - TODO ---
+    // --- Slashed Zero (zero) ---
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Slashed Zero (zero)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(175, y, "[TODO: 0 vs slashed zero for code/data]");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(175, y, "OFF:");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(200, y, "0 10 20 100");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(295, y, "ON:");
+    try doc.setEmbeddedFont(inter_zero, 12);
+    try doc.writeAt(316, y, "0 10 20 100");
     y += 18;
 
     // --- Case-Sensitive Forms (case) - TODO ---
