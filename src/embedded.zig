@@ -390,7 +390,20 @@ pub const EmbeddedFont = struct {
 
         var i: usize = 0;
         while (i < text.len) {
-            const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+            const byte = text[i];
+
+            // ASCII fast path: byte < 128 means single-byte UTF-8, codepoint == byte
+            if (byte < 128) {
+                self.scratch_codepoints.appendAssumeCapacity(byte);
+                // Use cached ASCII glyph directly (already looked up at font load)
+                const gid = if (self.font.has_ascii_cache) self.font.ascii_glyphs[byte] else self.font.getGlyphId(byte) orelse 0;
+                self.scratch_glyphs.appendAssumeCapacity(gid);
+                i += 1;
+                continue;
+            }
+
+            // Multi-byte UTF-8 path
+            const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
             if (i + len > text.len) break;
 
             const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
@@ -595,7 +608,18 @@ pub const EmbeddedFont = struct {
 
         var i: usize = 0;
         while (i < text.len) {
-            const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+            const byte = text[i];
+
+            // ASCII fast path
+            if (byte < 128) {
+                const gid = if (self.font.has_ascii_cache) self.font.ascii_glyphs[byte] else self.font.getGlyphId(byte) orelse 0;
+                try base_glyphs.append(self.allocator, gid);
+                i += 1;
+                continue;
+            }
+
+            // Multi-byte UTF-8 path
+            const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
             if (i + len > text.len) break;
 
             const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
