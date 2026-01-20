@@ -349,6 +349,7 @@ pub const EmbeddedFont = struct {
             .frac => self.feature_flags.frac = enabled,
             .zero => self.feature_flags.zero = enabled,
             .case => self.feature_flags.case = enabled,
+            .ss01 => self.feature_flags.ss01 = enabled,
         }
     }
 

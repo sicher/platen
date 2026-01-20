@@ -330,6 +330,11 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_case.encoding = .identity;
     inter_case.setFeature(.case, true);
 
+    // Stylistic set 1 comparison (ss01 is OFF by default)
+    const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    inter_ss01.encoding = .identity;
+    inter_ss01.setFeature(.ss01, true);
+
     try doc.addPage();
     var y: f64 = 32;
 
@@ -497,20 +502,26 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.setEmbeddedFont(inter_bold, 10);
     try doc.writeAt(50, y, "Case-Sensitive (case)");
     try doc.setEmbeddedFont(inter, 8);
-    try doc.writeAt(180, y, "OFF:");
+    try doc.writeAt(175, y, "OFF:");
     try doc.setEmbeddedFont(inter, 12);
-    try doc.writeAt(206, y, "(HELLO) [WORD]");
+    try doc.writeAt(200, y, "A@B 3+9\xe2\x89\x8812*1"); // ≈ is U+2248 = E2 89 88
     try doc.setEmbeddedFont(inter, 8);
     try doc.writeAt(320, y, "ON:");
     try doc.setEmbeddedFont(inter_case, 12);
-    try doc.writeAt(340, y, "(HELLO) [WORD]");
+    try doc.writeAt(340, y, "A@B 3+9\xe2\x89\x8812*1");
     y += 18;
 
-    // --- Stylistic Sets (ss01-08) - TODO ---
+    // --- Stylistic Set 1 (ss01) ---
     try doc.setEmbeddedFont(inter_bold, 10);
-    try doc.writeAt(50, y, "Stylistic Sets (ss01-08)");
-    try doc.setEmbeddedFont(inter, 9);
-    try doc.writeAt(195, y, "[TODO: alternate glyph designs per set]");
+    try doc.writeAt(50, y, "Stylistic Set 1 (ss01)");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(175, y, "OFF:");
+    try doc.setEmbeddedFont(inter, 12);
+    try doc.writeAt(200, y, "3 4 6 9 a g");
+    try doc.setEmbeddedFont(inter, 8);
+    try doc.writeAt(295, y, "ON:");
+    try doc.setEmbeddedFont(inter_ss01, 12);
+    try doc.writeAt(316, y, "3 4 6 9 a g");
     y += 22;
 
     // ===== Unicode Coverage =====

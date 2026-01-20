@@ -24,6 +24,7 @@ pub const Feature = enum(u32) {
     frac = tag("frac"), // Fractions
     zero = tag("zero"), // Slashed Zero
     case = tag("case"), // Case-Sensitive Forms
+    ss01 = tag("ss01"), // Stylistic Set 1
 
     fn tag(comptime s: *const [4]u8) u32 {
         return std.mem.readInt(u32, s, .big);
@@ -44,6 +45,7 @@ pub const Feature = enum(u32) {
             tag("frac") => .frac,
             tag("zero") => .zero,
             tag("case") => .case,
+            tag("ss01") => .ss01,
             else => null,
         };
     }
@@ -64,6 +66,7 @@ pub const FeatureFlags = struct {
     frac: bool = false, // Fractions off by default
     zero: bool = false, // Slashed zero off by default
     case: bool = false, // Case-sensitive forms off by default
+    ss01: bool = false, // Stylistic Set 1 off by default
 };
 
 /// Coverage table - maps glyph IDs to coverage indices
@@ -545,6 +548,7 @@ pub const GSUBLookupRef = union(enum) {
     pnum: usize, // Index into pnum_lookups
     zero: usize, // Index into zero_lookups
     case: usize, // Index into case_lookups
+    ss01: usize, // Index into ss01_lookups
     frac: usize, // Index into frac_chain_lookups
 };
 
@@ -564,6 +568,7 @@ pub const OpenTypeFeatures = struct {
     pnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (proportional figures)
     zero_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (slashed zero)
     case_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (case-sensitive forms)
+    ss01_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (stylistic set 1)
     chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (calt)
     dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (dlig)
     frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (frac)
@@ -623,6 +628,7 @@ pub const OpenTypeFeatures = struct {
         self.pnum_lookups.deinit(self.allocator);
         self.zero_lookups.deinit(self.allocator);
         self.case_lookups.deinit(self.allocator);
+        self.ss01_lookups.deinit(self.allocator);
 
         // Free chain context memory
         for (self.chain_coverage_memory.items) |slice| {
@@ -768,6 +774,7 @@ pub const OpenTypeFeatures = struct {
         const pnum_start = self.pnum_lookups.items.len;
         const zero_start = self.zero_lookups.items.len;
         const case_start = self.case_lookups.items.len;
+        const ss01_start = self.ss01_lookups.items.len;
         const liga_start = self.liga_lookups.items.len;
         const dlig_start = self.dlig_lookups.items.len;
         const clig_start = self.clig_lookups.items.len;
@@ -794,6 +801,7 @@ pub const OpenTypeFeatures = struct {
                                 .pnum => try self.pnum_lookups.append(self.allocator, single_subst),
                                 .zero => try self.zero_lookups.append(self.allocator, single_subst),
                                 .case => try self.case_lookups.append(self.allocator, single_subst),
+                                .ss01 => try self.ss01_lookups.append(self.allocator, single_subst),
                                 else => try self.single_lookups.append(self.allocator, single_subst),
                             }
                         } else {
@@ -853,6 +861,10 @@ pub const OpenTypeFeatures = struct {
                             null,
                         .case => break :blk if (self.case_lookups.items.len > case_start)
                             GSUBLookupRef{ .case = case_start }
+                        else
+                            null,
+                        .ss01 => break :blk if (self.ss01_lookups.items.len > ss01_start)
+                            GSUBLookupRef{ .ss01 = ss01_start }
                         else
                             null,
                         else => break :blk if (self.single_lookups.items.len > single_start)
@@ -1766,6 +1778,14 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
+                                .ss01 => |idx| {
+                                    if (idx < self.ss01_lookups.items.len) {
+                                        const single = self.ss01_lookups.items[idx];
+                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
                                 .frac => {
                                     // Nested frac chain context - skip to avoid recursion
                                 },
@@ -1973,6 +1993,14 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
+                                .ss01 => |idx| {
+                                    if (idx < self.ss01_lookups.items.len) {
+                                        const single = self.ss01_lookups.items[idx];
+                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
                                 .frac => {
                                     // Nested frac chain context - skip to avoid recursion
                                 },
@@ -2062,6 +2090,13 @@ pub const OpenTypeFeatures = struct {
         // Apply case-sensitive forms (case)
         if (flags.case and self.case_lookups.items.len > 0) {
             const next = try self.applySingleSubstFeature(current, self.case_lookups.items);
+            self.allocator.free(current);
+            current = next;
+        }
+
+        // Apply stylistic set 1 (ss01)
+        if (flags.ss01 and self.ss01_lookups.items.len > 0) {
+            const next = try self.applySingleSubstFeature(current, self.ss01_lookups.items);
             self.allocator.free(current);
             current = next;
         }
