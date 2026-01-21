@@ -92,8 +92,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 |---------|-------|------|-------|
 | Simple text at position | `text()` | ✅ `writeAt()` | |
 | Write text (flowing) | `write()` | ✅ `write()` | |
-| **Cell** | `cell()` | ❌ | **GAP** - no bordered cell |
-| **Multi-cell** | `multi_cell()` | ⚠️ | `writeParagraph` similar but no cell border |
+| Cell | `cell()` | ⚠️ | `Region` with `border`/`fill` + `writeLine` |
+| Multi-cell | `multi_cell()` | ✅ | `Region` with `border`/`fill` + `writeParagraph` |
 | Word wrapping | ✅ | ✅ | |
 | Character wrapping | `wrapmode="CHAR"` | ✅ | fallback for long words |
 | Text alignment (L/C/R/J) | ✅ | ✅ | |
@@ -349,32 +349,28 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 ## Summary of Gaps
 
 ### High Priority (Common Features)
-1. **Document metadata** - title, author, subject, keywords, dates
-2. **Links** - hyperlinks (external URLs, internal page links)
-3. **Cell/multi_cell** - bordered cells for tables/forms
-4. **Table API** - structured table creation
-5. **Document outline/bookmarks** - navigation structure
-6. **Auto page break** - automatic page breaks with callbacks
-7. **Page number** - `page_no()` equivalent
-8. **Header/footer callbacks** - repeated content per page
+1. **Links** - hyperlinks (external URLs, internal page links)
+2. **Table API** - structured table creation
+3. **Document outline/bookmarks** - navigation structure
+4. **Auto page break** - automatic page breaks with callbacks
+5. **Header/footer callbacks** - repeated content per page
 
 ### Medium Priority (Useful Features)
-9. **Annotations** - text annotations, highlights, attachments
-10. **Rounded rectangles** - common UI element
-11. **Arc/pie shapes** - charts and diagrams
-12. **Multi-column text** - magazine/newspaper layouts
-13. **HTML rendering** - `write_html()` subset
-14. **Underline/strikethrough** - text decoration
-15. **Image clipping** - circular avatars, etc.
+6. **Annotations** - text annotations, highlights, attachments
+7. **Arc/pie shapes** - charts and diagrams
+8. **Multi-column text** - magazine/newspaper layouts
+9. **HTML rendering** - `write_html()` subset
+10. **Underline/strikethrough** - text decoration
+11. **Image clipping** - circular avatars, etc.
 
 ### Lower Priority (Specialized)
-16. **Encryption** - password protection, permissions
-17. **PDF/A compliance** - archival standards
-18. **Barcodes** - Code39, QR, etc. (can use external libs + image)
-19. **Digital signatures** - document signing
-20. **Display/viewer settings** - zoom, layout preferences
-21. **Presentation mode** - slide transitions
-22. **Pattern fills** - repeated patterns
+12. **Encryption** - password protection, permissions
+13. **PDF/A compliance** - archival standards
+14. **Barcodes** - Code39, QR, etc. (can use external libs + image)
+15. **Digital signatures** - document signing
+16. **Display/viewer settings** - zoom, layout preferences
+17. **Presentation mode** - slide transitions
+18. **Pattern fills** - repeated patterns
 23. **Blend modes** - image compositing
 
 ### zpdf Advantages (Features NOT in fpdf2)
@@ -388,36 +384,31 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 ## Recommended Implementation Order
 
-### Phase 1: Essential Document Features
-1. Document metadata (`setTitle`, `setAuthor`, etc.)
-2. Page number getter (`pageNo()`)
-3. Auto page break with margin
-4. Header/footer callbacks
+### Phase 1: Links & Navigation
+1. External hyperlinks
+2. Internal links (page references)
+3. Document outline/bookmarks
 
-### Phase 2: Links & Navigation
-5. External hyperlinks
-6. Internal links (page references)
-7. Document outline/bookmarks
+### Phase 2: Page Flow
+4. Auto page break with margin
+5. Header/footer callbacks
 
 ### Phase 3: Enhanced Text
-8. Cell with border/background
-9. Multi-cell (like cell but multi-line)
-10. Underline/strikethrough text styles
+6. Underline/strikethrough text styles
 
 ### Phase 4: Tables
-11. Basic table API
-12. Column spanning
-13. Row spanning
-14. Header row repetition
+7. Basic table API
+8. Column spanning
+9. Row spanning
+10. Header row repetition
 
 ### Phase 5: Additional Graphics
-15. Rounded rectangles
-16. Arc and solid_arc
-17. Regular polygon helper
-18. Polyline
+11. Arc and solid_arc
+12. Regular polygon helper
+13. Polyline
 
 ### Phase 6: Advanced Features
-19. Text annotations
-20. Highlight annotations
-21. File attachments
-22. Encryption (basic)
+14. Text annotations
+15. Highlight annotations
+16. File attachments
+17. Encryption (basic)
