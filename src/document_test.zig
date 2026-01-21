@@ -1832,89 +1832,41 @@ test "drawPath without page returns error" {
     try std.testing.expectError(error.NoPage, doc.drawPath(&path, .stroke));
 }
 
-test "setLineWidth stores value" {
+test "setDrawStyle sets all values" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    // Default line width is 0.567 (fpdf2 default)
-    try std.testing.expectApproxEqAbs(@as(f64, 0.567), doc.line_width, 0.001);
+    doc.setDrawStyle(.{
+        .line_width = 2.5,
+        .line_cap = .round,
+        .line_join = .bevel,
+        .dash_pattern = .{ .dash = 5, .gap = 3, .phase = 1 },
+        .stroke_color = Color.red,
+        .fill_color = Color.blue,
+    });
 
-    doc.setLineWidth(5.0);
-    try std.testing.expectApproxEqAbs(@as(f64, 5.0), doc.line_width, 0.001);
-}
-
-test "setDashPattern stores values" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    // Default is solid line (all zeros)
-    try std.testing.expectApproxEqAbs(@as(f64, 0), doc.dash_pattern.dash, 0.001);
-
-    doc.setDashPattern(3, 2, 1);
-    try std.testing.expectApproxEqAbs(@as(f64, 3), doc.dash_pattern.dash, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f64, 2), doc.dash_pattern.gap, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f64, 1), doc.dash_pattern.phase, 0.001);
-}
-
-test "setSolidLine clears dash pattern" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    doc.setDashPattern(3, 2, 0);
-    doc.setSolidLine();
-
-    try std.testing.expectApproxEqAbs(@as(f64, 0), doc.dash_pattern.dash, 0.001);
-    try std.testing.expectApproxEqAbs(@as(f64, 0), doc.dash_pattern.gap, 0.001);
-}
-
-test "setLineCap stores value" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    // Default is square (matches fpdf2)
-    try std.testing.expectEqual(document.LineCap.square, doc.line_cap);
-
-    doc.setLineCap(.round);
+    try std.testing.expectEqual(@as(f64, 2.5), doc.line_width);
     try std.testing.expectEqual(document.LineCap.round, doc.line_cap);
-
-    doc.setLineCap(.butt);
-    try std.testing.expectEqual(document.LineCap.butt, doc.line_cap);
-}
-
-test "setLineJoin stores value" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    // Default is miter
-    try std.testing.expectEqual(document.LineJoin.miter, doc.line_join);
-
-    doc.setLineJoin(.round);
-    try std.testing.expectEqual(document.LineJoin.round, doc.line_join);
-
-    doc.setLineJoin(.bevel);
     try std.testing.expectEqual(document.LineJoin.bevel, doc.line_join);
-}
-
-test "setDrawColor stores value" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    // Default is black
-    try std.testing.expectEqual(Color.black, doc.draw_color);
-
-    doc.setDrawColor(Color.red);
+    try std.testing.expectEqual(@as(f64, 5), doc.dash_pattern.dash);
+    try std.testing.expectEqual(@as(f64, 3), doc.dash_pattern.gap);
+    try std.testing.expectEqual(@as(f64, 1), doc.dash_pattern.phase);
     try std.testing.expectEqual(Color.red, doc.draw_color);
+    try std.testing.expectEqual(Color.blue, doc.fill_color);
 }
 
-test "setFillColor stores value" {
+test "setDrawStyle with partial values uses defaults" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    // Default is black
-    try std.testing.expectEqual(Color.black, doc.fill_color);
+    // Set only line_width, everything else uses defaults
+    doc.setDrawStyle(.{ .line_width = 3.0 });
 
-    doc.setFillColor(Color.blue);
-    try std.testing.expectEqual(Color.blue, doc.fill_color);
+    try std.testing.expectEqual(@as(f64, 3.0), doc.line_width);
+    try std.testing.expectEqual(document.LineCap.square, doc.line_cap); // default
+    try std.testing.expectEqual(document.LineJoin.miter, doc.line_join); // default
+    try std.testing.expectEqual(Color.black, doc.draw_color); // default
+    try std.testing.expectEqual(Color.black, doc.fill_color); // default
 }
 
 test "graphics state used in output" {
@@ -1923,12 +1875,14 @@ test "graphics state used in output" {
     defer doc.deinit();
 
     try doc.addPage();
-    doc.setLineWidth(3.0);
-    doc.setDashPattern(5, 3, 0);
-    doc.setLineCap(.round);
-    doc.setLineJoin(.bevel);
-    doc.setDrawColor(Color.red);
-    doc.setFillColor(Color.blue);
+    doc.setDrawStyle(.{
+        .line_width = 3.0,
+        .dash_pattern = .{ .dash = 5, .gap = 3 },
+        .line_cap = .round,
+        .line_join = .bevel,
+        .stroke_color = Color.red,
+        .fill_color = Color.blue,
+    });
 
     try doc.drawRect(50, 50, 100, 80, .fill_stroke);
 

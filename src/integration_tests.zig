@@ -1280,32 +1280,27 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     // Simple line
-    doc.setDrawColor(zpdf.Color.black);
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{});
     try doc.drawLine(50, y, 150, y);
     y += 10;
 
     // Thick line
-    doc.setLineWidth(3);
+    doc.setDrawStyle(.{ .line_width = 3 });
     try doc.drawLine(50, y, 150, y);
     y += 10;
 
     // Colored line
-    doc.setDrawColor(zpdf.Color.red);
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{ .stroke_color = zpdf.Color.red, .line_width = 2 });
     try doc.drawLine(50, y, 150, y);
     y += 10;
 
     // Dashed line
-    doc.setDrawColor(zpdf.Color.blue);
-    doc.setDashPattern(5, 3, 0);
+    doc.setDrawStyle(.{ .stroke_color = zpdf.Color.blue, .dash_pattern = .{ .dash = 5, .gap = 3 } });
     try doc.drawLine(50, y, 150, y);
-    doc.setSolidLine();
     y += 20;
 
     // Reset
-    doc.setDrawColor(zpdf.Color.black);
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{});
 
     // === Rectangles ===
     try doc.setFont(.helvetica_bold, 12);
@@ -1316,19 +1311,20 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawRect(50, y, 60, 30, .stroke);
 
     // Fill only
-    doc.setFillColor(zpdf.Color.fromRgb255(200, 200, 255)); // Light blue
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(200, 200, 255) });
     try doc.drawRect(130, y, 60, 30, .fill);
 
     // Fill and stroke
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 200)); // Light red
-    doc.setDrawColor(zpdf.Color.red);
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .fill_color = zpdf.Color.fromRgb255(255, 200, 200),
+        .stroke_color = zpdf.Color.red,
+        .line_width = 2,
+    });
     try doc.drawRect(210, y, 60, 30, .fill_stroke);
     y += 45;
 
     // Reset
-    doc.setDrawColor(zpdf.Color.black);
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{});
 
     // === Rounded Rectangles ===
     try doc.setFont(.helvetica_bold, 12);
@@ -1339,19 +1335,20 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawRoundedRect(50, y, 60, 30, 5, .stroke);
 
     // Medium radius
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 230, 200)); // Light orange
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(255, 230, 200) });
     try doc.drawRoundedRect(130, y, 60, 30, 10, .fill);
 
     // Large radius (pill shape) - use 14 not 15 to avoid fpdf2 edge case bug
-    doc.setFillColor(zpdf.Color.fromRgb255(200, 230, 255)); // Light blue
-    doc.setDrawColor(zpdf.Color.blue);
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .fill_color = zpdf.Color.fromRgb255(200, 230, 255),
+        .stroke_color = zpdf.Color.blue,
+        .line_width = 2,
+    });
     try doc.drawRoundedRect(210, y, 80, 30, 14, .fill_stroke);
     y += 45;
 
     // Reset
-    doc.setDrawColor(zpdf.Color.black);
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{});
 
     // === Circles ===
     try doc.setFont(.helvetica_bold, 12);
@@ -1359,22 +1356,24 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     // Stroke circle
+    doc.setDrawStyle(.{});
     try doc.drawCircle(80, y + 25, 25, .stroke);
 
     // Filled circle
-    doc.setFillColor(zpdf.Color.fromRgb255(200, 255, 200)); // Light green
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(200, 255, 200) });
     try doc.drawCircle(160, y + 25, 25, .fill);
 
     // Fill and stroke
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 255, 200)); // Light yellow
-    doc.setDrawColor(zpdf.Color.fromRgb255(0, 128, 0)); // Dark green
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .fill_color = zpdf.Color.fromRgb255(255, 255, 200),
+        .stroke_color = zpdf.Color.fromRgb255(0, 128, 0),
+        .line_width = 2,
+    });
     try doc.drawCircle(240, y + 25, 25, .fill_stroke);
     y += 65;
 
     // Reset
-    doc.setDrawColor(zpdf.Color.black);
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{});
 
     // === Ellipses ===
     try doc.setFont(.helvetica_bold, 12);
@@ -1386,11 +1385,11 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawEllipse(80, y + 20, 40, 20, .stroke);
 
     // Vertical ellipse
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 255)); // Light magenta
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(255, 200, 255) });
     try doc.drawEllipse(180, y + 20, 20, 30, .fill_stroke);
 
     // Large ellipse
-    doc.setFillColor(zpdf.Color.fromRgb255(200, 255, 255)); // Light cyan
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(200, 255, 255) });
     try doc.drawEllipse(280, y + 20, 50, 20, .fill);
     y += 55;
 
@@ -1400,7 +1399,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     // Triangle
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     const triangle = [_]zpdf.Point{
         .{ .x = 80, .y = y },
         .{ .x = 50, .y = y + 40 },
@@ -1409,7 +1408,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawPolygon(&triangle, .stroke);
 
     // Square
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 220, 180)); // Light orange
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(255, 220, 180) });
     const square = [_]zpdf.Point{
         .{ .x = 140, .y = y },
         .{ .x = 180, .y = y },
@@ -1431,9 +1430,11 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
             .y = cy - r * @sin(angle),
         };
     }
-    doc.setFillColor(zpdf.Color.fromRgb255(220, 220, 255)); // Light purple
-    doc.setDrawColor(zpdf.Color.fromRgb255(100, 100, 200));
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .fill_color = zpdf.Color.fromRgb255(220, 220, 255),
+        .stroke_color = zpdf.Color.fromRgb255(100, 100, 200),
+        .line_width = 2,
+    });
     try doc.drawPolygon(&pentagon, .fill_stroke);
 
     return doc.output();
@@ -1526,9 +1527,11 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.fromRgb255(0, 0, 255));
-    doc.setFillColor(zpdf.Color.fromRgb255(200, 200, 255));
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.fromRgb255(0, 0, 255),
+        .fill_color = zpdf.Color.fromRgb255(200, 200, 255),
+        .line_width = 2,
+    });
     var path = doc.createPath();
     defer path.deinit();
     try path.moveTo(100, y);
@@ -1540,13 +1543,15 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Cubic Bezier curve
     try doc.setFont(.helvetica, 10);
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.fromRgb255(255, 0, 0));
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 200));
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.fromRgb255(255, 0, 0),
+        .fill_color = zpdf.Color.fromRgb255(255, 200, 200),
+        .line_width = 2,
+    });
     var bezier = doc.createPath();
     defer bezier.deinit();
     try bezier.moveTo(50, y + 50);
@@ -1556,13 +1561,14 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Heart shape using bezier curves
     try doc.setFont(.helvetica, 10);
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     try doc.writeAt(50, y, "Heart shape (bezier curves):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.fromRgb255(200, 0, 0));
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 0, 0));
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.fromRgb255(200, 0, 0),
+        .fill_color = zpdf.Color.fromRgb255(255, 0, 0),
+    });
     const hx: f64 = 140;
     const hy: f64 = y + 30;
 
@@ -1583,12 +1589,14 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Zigzag stroke
     try doc.setFont(.helvetica, 10);
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     try doc.writeAt(50, y, "Stroke only (zigzag):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.fromRgb255(0, 128, 0));
-    doc.setLineWidth(3);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.fromRgb255(0, 128, 0),
+        .line_width = 3,
+    });
     var zigzag = doc.createPath();
     defer zigzag.deinit();
     try zigzag.moveTo(50, y);

@@ -161,9 +161,12 @@ if (metrics.fitsInHeight(region.remainingHeight())) {
 ```zig
 try doc.addPage();
 
-// Set colors
-doc.setDrawColor(zpdf.Color.fromRgb(0, 0, 0));      // black stroke
-doc.setFillColor(zpdf.Color.fromRgb(0.9, 0.9, 0.9)); // light gray fill
+// Set drawing style (stroke color, fill color, line width, etc.)
+doc.setDrawStyle(.{
+    .stroke_color = zpdf.Color.fromRgb(0, 0, 0),      // black stroke
+    .fill_color = zpdf.Color.fromRgb(0.9, 0.9, 0.9),  // light gray fill
+    .line_width = 1.5,
+});
 
 // Line
 try doc.drawLine(50, 100, 200, 100);
@@ -337,13 +340,8 @@ doc.setMetadata(.{
 
 | Method | Description |
 |--------|-------------|
-| `setDrawColor(color)` | Stroke color |
-| `setFillColor(color)` | Fill color |
+| `setDrawStyle(opts)` | Set drawing style (stroke/fill colors, line width, cap, join, dash) |
 | `setTextColor(color)` | Text color |
-| `setLineWidth(width)` | Line thickness |
-| `setLineCap(cap)` | Line end style |
-| `setLineJoin(join)` | Line corner style |
-| `setDashPattern(dash, gap, phase)` | Dashed lines |
 
 ## Requirements
 

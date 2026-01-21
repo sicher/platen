@@ -231,3 +231,19 @@ pub const DashPattern = struct {
     /// Solid line (no dashing).
     pub const solid = DashPattern{};
 };
+
+/// Options for configuring drawing style (lines and fills).
+pub const DrawStyleOptions = struct {
+    /// Line width in points.
+    line_width: f64 = 0.567,
+    /// Line cap style.
+    line_cap: LineCap = .square,
+    /// Line join style.
+    line_join: LineJoin = .miter,
+    /// Dash pattern for stroked lines.
+    dash_pattern: DashPattern = .solid,
+    /// Stroke (outline) color.
+    stroke_color: Color = Color.black,
+    /// Fill color.
+    fill_color: Color = Color.black,
+};

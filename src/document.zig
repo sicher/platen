@@ -62,6 +62,7 @@ pub const DrawStyle = layout.DrawStyle;
 pub const LineCap = layout.LineCap;
 pub const LineJoin = layout.LineJoin;
 pub const DashPattern = layout.DashPattern;
+pub const DrawStyleOptions = layout.DrawStyleOptions;
 
 pub const opentype = embedded.opentype;
 
@@ -692,39 +693,14 @@ pub const Document = struct {
         self.text_color = c;
     }
 
-    /// Set fill color (for shapes and backgrounds).
-    pub fn setFillColor(self: *Document, c: Color) void {
-        self.fill_color = c;
-    }
-
-    /// Set draw/stroke color (for lines and borders).
-    pub fn setDrawColor(self: *Document, c: Color) void {
-        self.draw_color = c;
-    }
-
-    /// Set line width for strokes (in points).
-    pub fn setLineWidth(self: *Document, width: f64) void {
-        self.line_width = width;
-    }
-
-    /// Set dash pattern for stroked lines.
-    pub fn setDashPattern(self: *Document, dash: f64, gap: f64, phase: f64) void {
-        self.dash_pattern = .{ .dash = dash, .gap = gap, .phase = phase };
-    }
-
-    /// Reset to solid line (no dashing).
-    pub fn setSolidLine(self: *Document) void {
-        self.dash_pattern = .{};
-    }
-
-    /// Set line cap style.
-    pub fn setLineCap(self: *Document, cap: LineCap) void {
-        self.line_cap = cap;
-    }
-
-    /// Set line join style.
-    pub fn setLineJoin(self: *Document, join: LineJoin) void {
-        self.line_join = join;
+    /// Set drawing style (stroke/fill colors, line width, cap, join, dash pattern).
+    pub fn setDrawStyle(self: *Document, opts: layout.DrawStyleOptions) void {
+        self.line_width = opts.line_width;
+        self.line_cap = opts.line_cap;
+        self.line_join = opts.line_join;
+        self.dash_pattern = opts.dash_pattern;
+        self.draw_color = opts.stroke_color;
+        self.fill_color = opts.fill_color;
     }
 
     /// Set document margins.

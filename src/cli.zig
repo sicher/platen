@@ -566,9 +566,11 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.blue);
-    doc.setFillColor(zpdf.Color.fromRgb255(200, 200, 255));
-    doc.setLineWidth(2);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.blue,
+        .fill_color = zpdf.Color.fromRgb255(200, 200, 255),
+        .line_width = 2,
+    });
 
     var triangle = doc.createPath();
     defer triangle.deinit();
@@ -581,12 +583,14 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     // Bezier curve
     try doc.setFont(.helvetica, 10);
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.red);
-    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 200));
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.red,
+        .fill_color = zpdf.Color.fromRgb255(255, 200, 200),
+    });
 
     var bezier = doc.createPath();
     defer bezier.deinit();
@@ -600,13 +604,14 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     // Heart shape using curves
     try doc.setFont(.helvetica, 10);
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     try doc.writeAt(50, y, "Heart shape (multiple curveTo):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.fromRgb255(200, 0, 0));
-    doc.setFillColor(zpdf.Color.red);
-    doc.setLineWidth(1);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.fromRgb255(200, 0, 0),
+        .fill_color = zpdf.Color.red,
+    });
 
     var heart = doc.createPath();
     defer heart.deinit();
@@ -620,12 +625,14 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     // Stroke only path
     try doc.setFont(.helvetica, 10);
-    doc.setDrawColor(zpdf.Color.black);
+    doc.setDrawStyle(.{});
     try doc.writeAt(50, y, "Stroke only (zigzag):");
     y += 15;
 
-    doc.setDrawColor(zpdf.Color.fromRgb255(0, 128, 0));
-    doc.setLineWidth(3);
+    doc.setDrawStyle(.{
+        .stroke_color = zpdf.Color.fromRgb255(0, 128, 0),
+        .line_width = 3,
+    });
 
     var zigzag = doc.createPath();
     defer zigzag.deinit();
