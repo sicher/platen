@@ -3,11 +3,25 @@
 ## Architecture
 
 ### Modules
-- `zpdf.zig` - Main library entry, Document API
+- `zpdf.zig` - Main library facade, re-exports from document.zig
+- `document.zig` - Document struct, text/graphics rendering, PDF output
 - `objects.zig` - PDF object types (Dict, Array, Value, Ref, Name)
 - `fonts.zig` - Standard PDF fonts (Base 14)
 - `metrics.zig` - Font metrics, text measurement, spacing
 - `writer.zig` - PDF serialization (header, objects, xref, trailer)
+- `ttf.zig` - TrueType/OpenType font parser
+- `embedded.zig` - Font embedding, subsetting, CID fonts
+- `opentype.zig` - OpenType GSUB/GPOS (ligatures, kerning, marks)
+- `ttf_subset.zig` - TTF subsetting helpers
+- `cff_subset.zig` - CFF subsetting helpers
+- `images.zig` - JPEG/PNG parsing and embedding
+- `svg.zig` - SVG parsing and Form XObject generation
+- `xml.zig` - Minimal XML parser for SVG
+- `path.zig` - Path builder API
+- `gradient.zig` - Linear/radial gradient support
+- `color.zig` - Color types (grayscale, RGB, CMYK)
+- `layout.zig` - Layout types (Region, Margins, Padding)
+- `zlib.zig` - FlateDecode compression via C zlib
 - `cli.zig` - Command line tool
 
 ### PDF Structure
@@ -138,8 +152,7 @@ endstream
 - ToUnicode CMap: enables copy/paste and text extraction
 
 **Current limitations:**
-- No stream compression (Zig 0.15 std.compress.flate has incomplete implementation)
-- WinAnsiEncoding only (no full Unicode/CJK support yet)
+- WinAnsiEncoding mode for simple text (use CID mode for full Unicode)
 
 **Subsetting implementation** (`createSubsetTTF` in embedded.zig):
 - Tracks used chars via `used_chars[256]` bitmap
@@ -154,10 +167,11 @@ endstream
 - Only includes mappings for used characters
 - Format: single-byte codespace, bfchar entries
 
-**Future enhancements:**
-1. FlateDecode compression for FontFile2 stream (when Zig std lib ready or via C zlib)
+**Implemented features:**
+1. FlateDecode compression for all streams (via bundled C zlib)
 2. CIDFont (Type0) support for full Unicode text (CJK, emoji, etc.)
-3. OpenType CFF font support
+3. OpenType CFF font support (CIDFontType0C)
+4. OpenType GSUB/GPOS (ligatures, kerning, mark positioning)
 
 ### Memory Management
 Uses `ArrayListUnmanaged` throughout - allocator passed to each operation.
@@ -185,12 +199,29 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 **CLI commands:**
 - `zpdf check-refs` - Run semantic comparison, generate HTML report
 
-**Test cases:**
-- `minimal.pdf` - Empty page
-- `hello_world.pdf` - Single text
-- `multi_font.pdf` - Multiple font families
-- `all_fonts.pdf` - All 14 standard fonts
-- `multi_page.pdf` - Multi-page document
+**Test cases (22 integration tests):**
+- `minimal` - Empty page
+- `hello_world` - Single text
+- `multi_font` - Multiple font families
+- `all_fonts` - All 14 standard fonts
+- `multi_page` - Multi-page document
+- `embedded_fonts` - TrueType font embedding
+- `cid_fonts` - CID/Unicode fonts (TTF + OTF)
+- `inter_fonts` - OpenType features (liga, kern, mark, calt, dlig, etc.)
+- `gentium_diacritics` - Mark positioning showcase
+- `opentype_features` - OpenType feature comparison
+- `text_flow` - Regions, word wrapping, padding
+- `justify` - Justified text alignment
+- `optimal_breaks` - Knuth-Plass line breaking
+- `colored_text` - Text colors (grayscale, RGB, CMYK)
+- `shapes` - Drawing primitives (line, rect, circle, ellipse, polygon)
+- `images` - JPEG and PNG embedding
+- `svg` - SVG embedding (basic shapes, tiger.svg)
+- `svg_text` - SVG text elements
+- `svg_use_defs` - SVG `<use>` and `<defs>` elements
+- `svg_equation` - MathJax equation rendering
+- `paths` - Path API (moveTo, lineTo, curveTo, closePath)
+- `gradients` - Linear and radial gradients
 
 ## Text API
 
@@ -427,43 +458,97 @@ _ = try doc.writeParagraph(&region, text, .{ .valign = .middle });
 6. **Layered API** - Simple (`writeFlow`) to powerful (`writeParagraph` + manual regions)
 7. **Explicit over magic** - VAlign provides control; no hidden adjustments
 
-## Graphics Support (Planned)
+## Graphics Support
 
 ### Image Embedding
+
+```zig
+// Load and draw images
+const img = try doc.loadImage("photo.jpg");  // or .png
+try doc.drawImage(img, x, y, width, height);
+
+// Auto aspect ratio (specify 0 for width or height)
+try doc.drawImage(img, x, y, 200, 0);  // width=200, height auto
+```
+
 | Format | Implementation | Use Case |
 |--------|---------------|----------|
 | JPEG | Embed raw bytes, DCTDecode filter | Photos |
-| PNG | Decode, FlateDecode, alpha as soft mask | Screenshots, diagrams |
+| PNG | Decode, FlateDecode, alpha as SMask | Screenshots, diagrams |
 
-**Vector figures:** Use SVG embedding (already supported) - matplotlib, Inkscape, Illustrator, R/ggplot2 all export SVG.
+### SVG Embedding
 
-### Drawing Primitives
-PDF content stream operators for programmatic drawing:
-
-**Shapes:**
-- `line(x1, y1, x2, y2)` - single line
-- `rect(x, y, w, h, mode)` - rectangle (stroke/fill/both)
-- `circle(cx, cy, r, mode)` - circle
-- `ellipse(cx, cy, rx, ry, mode)` - ellipse
-
-**Path API:**
 ```zig
-doc.path()
-   .moveTo(x, y)
-   .lineTo(x2, y2)
-   .curveTo(cp1x, cp1y, cp2x, cp2y, x3, y3)  // cubic Bézier
-   .closePath()
-   .stroke();  // or .fill() or .fillStroke()
+// Load and draw SVG as Form XObject
+const svg = try doc.loadSvg("diagram.svg");
+try doc.drawSvg(svg, x, y, width, height);
 ```
 
-**Styling:**
+**Supported SVG features:**
+- Basic shapes: rect, circle, ellipse, line, polyline, polygon
+- Paths: full d-attribute (M, L, H, V, C, S, Q, T, A, Z commands)
+- Text elements with font families (serif, sans-serif, monospace)
+- Transforms: translate, scale, rotate, skewX, skewY, matrix
+- Styling: fill, stroke, stroke-width, opacity, stroke-linecap/linejoin
+- Colors: hex (#RGB, #RRGGBB), rgb(), rgba(), named colors
+- Gradients: linearGradient, radialGradient with stops
+- Reuse: `<defs>` and `<use>` elements with href/xlink:href
+
+**Use cases:** matplotlib, Inkscape, Illustrator, R/ggplot2, MathJax equations.
+
+### Drawing Primitives
+
 ```zig
-doc.setStrokeColor(r, g, b);
-doc.setFillColor(r, g, b);
+// Lines
+try doc.drawLine(x1, y1, x2, y2);
+
+// Shapes (stroke, fill, or fill_stroke)
+try doc.drawRect(x, y, w, h, .fill_stroke);
+try doc.drawCircle(cx, cy, radius, .fill);
+try doc.drawEllipse(x, y, w, h, .stroke);
+try doc.drawPolygon(&points, .fill_stroke);
+```
+
+### Path API
+
+```zig
+// Create path with builder pattern
+var path = doc.createPath();
+defer path.deinit();
+
+try path.moveTo(100, 100);
+try path.lineTo(200, 100);
+try path.curveTo(250, 100, 250, 200, 200, 200);  // cubic Bézier
+try path.quadTo(150, 250, 100, 200);              // quadratic Bézier
+try path.closePath();
+
+try doc.drawPath(&path, .fill_stroke);
+```
+
+### Gradients
+
+```zig
+// Linear gradient
+var gradient = zpdf.LinearGradient.init(x1, y1, x2, y2);
+gradient.addStop(0.0, zpdf.Color.fromRgb(1, 0, 0));  // red at start
+gradient.addStop(1.0, zpdf.Color.fromRgb(0, 0, 1));  // blue at end
+try doc.drawLinearGradient(&gradient, x, y, w, h);
+
+// Radial gradient
+var radial = zpdf.RadialGradient.init(cx, cy, r);
+try doc.drawRadialGradient(&radial, x, y, w, h);
+```
+
+### Styling
+
+```zig
+doc.setDrawColor(zpdf.Color.fromRgb(0, 0, 0));
+doc.setFillColor(zpdf.Color.fromRgb(0.9, 0.9, 0.9));
 doc.setLineWidth(1.5);
-doc.setLineCap(.round);
-doc.setLineJoin(.miter);
-doc.setDash(&.{4, 2}, 0);  // dash pattern
+doc.setLineCap(.round);    // .butt, .round, .square
+doc.setLineJoin(.miter);   // .miter, .round, .bevel
+doc.setDashPattern(4, 2, 0);  // dash, gap, phase
+doc.setSolidLine();           // reset to solid
 ```
 
 ## Zig 0.15 Compatibility Notes

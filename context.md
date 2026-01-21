@@ -1,7 +1,7 @@
 # zpdf Context
 
 ## Current Focus
-SVG `<use>`/`<defs>` support complete. All 227 unit tests + 21 integration tests pass. MathJax equation SVGs with xlink:href work.
+SVG `<use>`/`<defs>` support complete. All 228 unit tests + 22 integration tests pass. MathJax equation SVGs with xlink:href work.
 
 **Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
 
@@ -16,17 +16,16 @@ SVG `<use>`/`<defs>` support complete. All 227 unit tests + 21 integration tests
     - All shape parse functions now accept optional defs parameter for ID extraction
   - Parser now tracks `defs_depth` to handle `<defs>` blocks
   - Skips `<style>` elements (CSS not supported)
-- **Added integration test**:
-  - Created `test/images/use-defs.svg` with reusable boxes, circles, arrows
-  - Added `gen_svg_use_defs()` to `scripts/gen_references.py`
-  - Added `generateSvgUseDefsPdf` test in `integration_tests.zig`
+- **Added integration tests**:
+  - `svg_use_defs`: use-defs.svg with directional shapes (boxes, triangles, arrows)
+  - `svg_equation`: MathJax quadratic formula (reference bootstrapped from zpdf)
 - **Added unit tests**:
   - `test "parse defs and use"` - basic defs/use parsing
   - `test "use element clones paths properly"` - verifies deep cloning
   - `test "parse MathJax equation SVG with xlink:href"` - real-world MathJax test
   - `test "use-defs.svg element counts"` - validates all elements parsed
 - **Fixed transform order bug**: `<use x=".." y=".." transform="..">` now correctly applies translate(x,y) before the transform attribute (outer to inner)
-- All 227 unit tests + 21 integration tests pass
+- All 228 unit tests + 22 integration tests pass
 
 ## What We Did (Session 2026-01-21 #51) [COMPLETE]
 - **Implemented SVG text element support**:
@@ -471,7 +470,7 @@ SVG `<use>`/`<defs>` support complete. All 227 unit tests + 21 integration tests
 - All 152 tests pass
 
 ## Remaining Work
-- **Graphics support**: Path API (moveTo, lineTo, curveTo), PDF embedding
+- None - all planned features complete
 
 ## What We Did (Session 2026-01-18 #25) [COMPLETE]
 - **Implemented mark positioning in PDF rendering**:
@@ -1099,19 +1098,24 @@ SVG `<use>`/`<defs>` support complete. All 227 unit tests + 21 integration tests
 ## Open Issues
 - None currently
 
-## Next Steps
+## Completed Features
 
-### Priority 1: Graphics Import (DONE: Images)
-1. ~~**JPEG embedding** - trivial, embed raw bytes with DCTDecode~~ ✓ DONE
-2. ~~**PNG embedding** - decode, handle alpha as soft mask~~ ✓ DONE
-3. **PDF embedding** - parse external PDF, embed as Form XObject
+### Graphics
+- ✓ JPEG/PNG embedding with alpha support
+- ✓ SVG embedding (shapes, paths, text, gradients, use/defs)
+- ✓ Basic shapes: line, rect, circle, ellipse, polygon
+- ✓ Path API: moveTo, lineTo, curveTo, quadTo, closePath
+- ✓ Gradients: linear and radial
+- ✓ Styling: colors, line width, dash patterns, caps, joins
 
-### Priority 2: Advanced Drawing (DONE: Basic Shapes, Images)
-4. ~~Basic shapes: line, rect, circle, ellipse, polygon~~ ✓ DONE
-5. ~~**Image embedding** - JPEG (DCTDecode) and PNG (FlateDecode + SMask)~~ ✓ DONE
-6. Path API: moveTo, lineTo, curveTo, closePath, stroke, fill
-7. ~~Styling: stroke/fill color, line width, dash patterns~~ ✓ DONE
+### Text
+- ✓ Standard fonts (Base 14)
+- ✓ TrueType/OpenType font embedding with subsetting
+- ✓ CID fonts for full Unicode support
+- ✓ OpenType features: liga, kern, mark, mkmk, calt, dlig, tnum, pnum, frac, zero, case, ss01
+- ✓ Text flow: regions, word wrapping, justify, optimal line breaking
 
-### Priority 3: Text Flow Enhancements
-7. measureWrappedText (measure without rendering)
-8. Hyphenation dictionary support for optimal line breaking
+### Possible Future Enhancements
+- PDF embedding (parse external PDF, embed as Form XObject)
+- measureWrappedText (measure without rendering)
+- Hyphenation dictionary support
