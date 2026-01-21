@@ -1430,6 +1430,203 @@ def gen_gradients():
     print("  gradients.pdf")
 
 
+def gen_colors():
+    """Generate color swatches reference with all 148 CSS named colors."""
+    from fpdf import FPDF
+
+    # Use pt units to match zpdf coordinates
+    pdf = FPDF(unit="pt", format="A4")
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, 25, "CSS Named Colors")
+
+    # All 148 CSS named colors (excluding aliases: grey variants, aqua, fuchsia)
+    colors = [
+        # Blacks and Grays (12)
+        ("black", (0, 0, 0)),
+        ("white", (255, 255, 255)),
+        ("gray", (128, 128, 128)),
+        ("silver", (192, 192, 192)),
+        ("darkgray", (169, 169, 169)),
+        ("dimgray", (105, 105, 105)),
+        ("lightgray", (211, 211, 211)),
+        ("gainsboro", (220, 220, 220)),
+        ("whitesmoke", (245, 245, 245)),
+        ("slategray", (112, 128, 144)),
+        ("lightslategray", (119, 136, 153)),
+        ("darkslategray", (47, 79, 79)),
+        # Reds (7)
+        ("red", (255, 0, 0)),
+        ("darkred", (139, 0, 0)),
+        ("firebrick", (178, 34, 34)),
+        ("indianred", (205, 92, 92)),
+        ("lightcoral", (240, 128, 128)),
+        ("crimson", (220, 20, 60)),
+        ("maroon", (128, 0, 0)),
+        # Pinks (6)
+        ("pink", (255, 192, 203)),
+        ("lightpink", (255, 182, 193)),
+        ("hotpink", (255, 105, 180)),
+        ("deeppink", (255, 20, 147)),
+        ("palevioletred", (219, 112, 147)),
+        ("mediumvioletred", (199, 21, 133)),
+        # Oranges (5)
+        ("orange", (255, 165, 0)),
+        ("darkorange", (255, 140, 0)),
+        ("orangered", (255, 69, 0)),
+        ("tomato", (255, 99, 71)),
+        ("coral", (255, 127, 80)),
+        # Yellows (11)
+        ("yellow", (255, 255, 0)),
+        ("lightyellow", (255, 255, 224)),
+        ("lemonchiffon", (255, 250, 205)),
+        ("lightgoldenrodyellow", (250, 250, 210)),
+        ("papayawhip", (255, 239, 213)),
+        ("moccasin", (255, 228, 181)),
+        ("peachpuff", (255, 218, 185)),
+        ("palegoldenrod", (238, 232, 170)),
+        ("khaki", (240, 230, 140)),
+        ("darkkhaki", (189, 183, 107)),
+        ("gold", (255, 215, 0)),
+        # Browns (11)
+        ("brown", (165, 42, 42)),
+        ("saddlebrown", (139, 69, 19)),
+        ("sienna", (160, 82, 45)),
+        ("chocolate", (210, 105, 30)),
+        ("peru", (205, 133, 63)),
+        ("sandybrown", (244, 164, 96)),
+        ("burlywood", (222, 184, 135)),
+        ("tan", (210, 180, 140)),
+        ("rosybrown", (188, 143, 143)),
+        ("goldenrod", (218, 165, 32)),
+        ("darkgoldenrod", (184, 134, 11)),
+        # Greens (21)
+        ("green", (0, 128, 0)),
+        ("lime", (0, 255, 0)),
+        ("limegreen", (50, 205, 50)),
+        ("lightgreen", (144, 238, 144)),
+        ("palegreen", (152, 251, 152)),
+        ("darkgreen", (0, 100, 0)),
+        ("forestgreen", (34, 139, 34)),
+        ("seagreen", (46, 139, 87)),
+        ("mediumseagreen", (60, 179, 113)),
+        ("springgreen", (0, 255, 127)),
+        ("mediumspringgreen", (0, 250, 154)),
+        ("mediumaquamarine", (102, 205, 170)),
+        ("aquamarine", (127, 255, 212)),
+        ("darkseagreen", (143, 188, 143)),
+        ("yellowgreen", (154, 205, 50)),
+        ("greenyellow", (173, 255, 47)),
+        ("chartreuse", (127, 255, 0)),
+        ("lawngreen", (124, 252, 0)),
+        ("olive", (128, 128, 0)),
+        ("olivedrab", (107, 142, 35)),
+        ("darkolivegreen", (85, 107, 47)),
+        # Cyans (10)
+        ("cyan", (0, 255, 255)),
+        ("lightcyan", (224, 255, 255)),
+        ("paleturquoise", (175, 238, 238)),
+        ("turquoise", (64, 224, 208)),
+        ("mediumturquoise", (72, 209, 204)),
+        ("darkturquoise", (0, 206, 209)),
+        ("darkcyan", (0, 139, 139)),
+        ("teal", (0, 128, 128)),
+        ("lightseagreen", (32, 178, 170)),
+        ("cadetblue", (95, 158, 160)),
+        # Blues (16)
+        ("blue", (0, 0, 255)),
+        ("navy", (0, 0, 128)),
+        ("darkblue", (0, 0, 139)),
+        ("mediumblue", (0, 0, 205)),
+        ("midnightblue", (25, 25, 112)),
+        ("royalblue", (65, 105, 225)),
+        ("steelblue", (70, 130, 180)),
+        ("dodgerblue", (30, 144, 255)),
+        ("deepskyblue", (0, 191, 255)),
+        ("cornflowerblue", (100, 149, 237)),
+        ("skyblue", (135, 206, 235)),
+        ("lightskyblue", (135, 206, 250)),
+        ("lightblue", (173, 216, 230)),
+        ("lightsteelblue", (176, 196, 222)),
+        ("powderblue", (176, 224, 230)),
+        ("aliceblue", (240, 248, 255)),
+        # Purples (18)
+        ("purple", (128, 0, 128)),
+        ("magenta", (255, 0, 255)),
+        ("darkmagenta", (139, 0, 139)),
+        ("indigo", (75, 0, 130)),
+        ("darkslateblue", (72, 61, 139)),
+        ("slateblue", (106, 90, 205)),
+        ("mediumslateblue", (123, 104, 238)),
+        ("mediumpurple", (147, 112, 219)),
+        ("blueviolet", (138, 43, 226)),
+        ("darkviolet", (148, 0, 211)),
+        ("darkorchid", (153, 50, 204)),
+        ("mediumorchid", (186, 85, 211)),
+        ("orchid", (218, 112, 214)),
+        ("violet", (238, 130, 238)),
+        ("plum", (221, 160, 221)),
+        ("thistle", (216, 191, 216)),
+        ("lavender", (230, 230, 250)),
+        ("rebeccapurple", (102, 51, 153)),
+        # Whites and off-whites (19)
+        ("snow", (255, 250, 250)),
+        ("honeydew", (240, 255, 240)),
+        ("mintcream", (245, 255, 250)),
+        ("azure", (240, 255, 255)),
+        ("ghostwhite", (248, 248, 255)),
+        ("floralwhite", (255, 250, 240)),
+        ("ivory", (255, 255, 240)),
+        ("beige", (245, 245, 220)),
+        ("linen", (250, 240, 230)),
+        ("oldlace", (253, 245, 230)),
+        ("antiquewhite", (250, 235, 215)),
+        ("bisque", (255, 228, 196)),
+        ("blanchedalmond", (255, 235, 205)),
+        ("navajowhite", (255, 222, 173)),
+        ("wheat", (245, 222, 179)),
+        ("cornsilk", (255, 248, 220)),
+        ("seashell", (255, 245, 238)),
+        ("lavenderblush", (255, 240, 245)),
+        ("mistyrose", (255, 228, 225)),
+        # Salmons (3)
+        ("salmon", (250, 128, 114)),
+        ("lightsalmon", (255, 160, 122)),
+        ("darksalmon", (233, 150, 122)),
+    ]
+
+    # Layout: 8 columns to fit all colors on one page
+    swatch_w = 65
+    swatch_h = 18
+    cols = 8
+    start_x = 20
+    start_y = 45
+    gap_x = 6
+    gap_y = 14
+
+    pdf.set_font("Helvetica", size=5)
+    pdf.set_line_width(0.25)
+
+    for i, (name, rgb) in enumerate(colors):
+        col = i % cols
+        row = i // cols
+        x = start_x + col * (swatch_w + gap_x)
+        y = start_y + row * (swatch_h + gap_y)
+
+        # Draw swatch
+        pdf.set_fill_color(*rgb)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.rect(x, y, swatch_w, swatch_h, style="FD")
+
+        # Draw label below swatch (offset by font size since PDF text uses baseline)
+        pdf.text(x + 1, y + swatch_h + 6, name)
+
+    pdf.output(OUTPUT_DIR / "colors.pdf")
+    print("  colors.pdf")
+
+
 GENERATORS = {
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,
@@ -1451,6 +1648,7 @@ GENERATORS = {
     "paths": gen_paths,
     "gradients": gen_gradients,
     "landscape": gen_landscape,
+    "colors": gen_colors,
 }
 
 

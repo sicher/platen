@@ -156,6 +156,33 @@ if (metrics.fitsInHeight(region.remainingHeight())) {
 }
 ```
 
+### Colors
+
+```zig
+// Named color presets
+const color1 = zpdf.Color.red;
+const color2 = zpdf.Color.navy;
+const color3 = zpdf.Color.coral;
+
+// From RGB (0-1 range)
+const color4 = zpdf.Color.fromRgb(0.5, 0.25, 0.75);
+
+// From RGB (0-255 range)
+const color5 = zpdf.Color.fromRgb255(128, 64, 192);
+
+// From hex string
+const color6 = zpdf.Color.fromHex("#FF6600").?;
+const color7 = zpdf.Color.fromHex("F60").?;  // short form
+
+// Grayscale (0 = black, 1 = white)
+const color8 = zpdf.Color.grayscale(0.5);
+
+// CMYK for print
+const color9 = zpdf.Color.fromCmyk(1, 0, 0, 0);  // cyan
+```
+
+Available presets: `black`, `white`, `red`, `green`, `blue`, `cyan`, `magenta`, `yellow`, `orange`, `pink`, `purple`, `brown`, `navy`, `teal`, `coral`, `salmon`, `gold`, `silver`, `maroon`, `olive`, `lime`, `indigo`, `violet`, `turquoise`, `skyblue`, `forestgreen`, and many more.
+
 ### Drawing Shapes
 
 ```zig
@@ -163,8 +190,8 @@ try doc.addPage();
 
 // Set drawing style (stroke color, fill color, line width, etc.)
 doc.setDrawStyle(.{
-    .stroke_color = zpdf.Color.fromRgb(0, 0, 0),      // black stroke
-    .fill_color = zpdf.Color.fromRgb(0.9, 0.9, 0.9),  // light gray fill
+    .stroke_color = zpdf.Color.black,
+    .fill_color = zpdf.Color.lightgray,
     .line_width = 1.5,
 });
 

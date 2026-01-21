@@ -40,6 +40,7 @@ const test_cases = [_]TestCase{
     .{ .name = "paths", .generate = generatePathsPdf },
     .{ .name = "gradients", .generate = generateGradientsPdf },
     .{ .name = "landscape", .generate = generateLandscapePdf },
+    .{ .name = "colors", .generate = generateColorSwatchesPdf },
 };
 
 // ============================================================================
@@ -1759,6 +1760,204 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 14);
+    try doc.writeAt(50, 25, "CSS Named Colors");
+
+    // All 148 CSS named colors (excluding aliases: grey variants, aqua, fuchsia)
+    const ColorDef = struct { name: []const u8, color: zpdf.Color };
+    const colors = [_]ColorDef{
+        // Blacks and Grays (11)
+        .{ .name = "black", .color = zpdf.Color.black },
+        .{ .name = "white", .color = zpdf.Color.white },
+        .{ .name = "gray", .color = zpdf.Color.gray },
+        .{ .name = "silver", .color = zpdf.Color.silver },
+        .{ .name = "darkgray", .color = zpdf.Color.darkgray },
+        .{ .name = "dimgray", .color = zpdf.Color.dimgray },
+        .{ .name = "lightgray", .color = zpdf.Color.lightgray },
+        .{ .name = "gainsboro", .color = zpdf.Color.gainsboro },
+        .{ .name = "whitesmoke", .color = zpdf.Color.whitesmoke },
+        .{ .name = "slategray", .color = zpdf.Color.slategray },
+        .{ .name = "lightslategray", .color = zpdf.Color.lightslategray },
+        .{ .name = "darkslategray", .color = zpdf.Color.darkslategray },
+        // Reds (7)
+        .{ .name = "red", .color = zpdf.Color.red },
+        .{ .name = "darkred", .color = zpdf.Color.darkred },
+        .{ .name = "firebrick", .color = zpdf.Color.firebrick },
+        .{ .name = "indianred", .color = zpdf.Color.indianred },
+        .{ .name = "lightcoral", .color = zpdf.Color.lightcoral },
+        .{ .name = "crimson", .color = zpdf.Color.crimson },
+        .{ .name = "maroon", .color = zpdf.Color.maroon },
+        // Pinks (6)
+        .{ .name = "pink", .color = zpdf.Color.pink },
+        .{ .name = "lightpink", .color = zpdf.Color.lightpink },
+        .{ .name = "hotpink", .color = zpdf.Color.hotpink },
+        .{ .name = "deeppink", .color = zpdf.Color.deeppink },
+        .{ .name = "palevioletred", .color = zpdf.Color.palevioletred },
+        .{ .name = "mediumvioletred", .color = zpdf.Color.mediumvioletred },
+        // Oranges (5)
+        .{ .name = "orange", .color = zpdf.Color.orange },
+        .{ .name = "darkorange", .color = zpdf.Color.darkorange },
+        .{ .name = "orangered", .color = zpdf.Color.orangered },
+        .{ .name = "tomato", .color = zpdf.Color.tomato },
+        .{ .name = "coral", .color = zpdf.Color.coral },
+        // Yellows (11)
+        .{ .name = "yellow", .color = zpdf.Color.yellow },
+        .{ .name = "lightyellow", .color = zpdf.Color.lightyellow },
+        .{ .name = "lemonchiffon", .color = zpdf.Color.lemonchiffon },
+        .{ .name = "lightgoldenrodyellow", .color = zpdf.Color.lightgoldenrodyellow },
+        .{ .name = "papayawhip", .color = zpdf.Color.papayawhip },
+        .{ .name = "moccasin", .color = zpdf.Color.moccasin },
+        .{ .name = "peachpuff", .color = zpdf.Color.peachpuff },
+        .{ .name = "palegoldenrod", .color = zpdf.Color.palegoldenrod },
+        .{ .name = "khaki", .color = zpdf.Color.khaki },
+        .{ .name = "darkkhaki", .color = zpdf.Color.darkkhaki },
+        .{ .name = "gold", .color = zpdf.Color.gold },
+        // Browns (11)
+        .{ .name = "brown", .color = zpdf.Color.brown },
+        .{ .name = "saddlebrown", .color = zpdf.Color.saddlebrown },
+        .{ .name = "sienna", .color = zpdf.Color.sienna },
+        .{ .name = "chocolate", .color = zpdf.Color.chocolate },
+        .{ .name = "peru", .color = zpdf.Color.peru },
+        .{ .name = "sandybrown", .color = zpdf.Color.sandybrown },
+        .{ .name = "burlywood", .color = zpdf.Color.burlywood },
+        .{ .name = "tan", .color = zpdf.Color.tan },
+        .{ .name = "rosybrown", .color = zpdf.Color.rosybrown },
+        .{ .name = "goldenrod", .color = zpdf.Color.goldenrod },
+        .{ .name = "darkgoldenrod", .color = zpdf.Color.darkgoldenrod },
+        // Greens (21)
+        .{ .name = "green", .color = zpdf.Color.green },
+        .{ .name = "lime", .color = zpdf.Color.lime },
+        .{ .name = "limegreen", .color = zpdf.Color.limegreen },
+        .{ .name = "lightgreen", .color = zpdf.Color.lightgreen },
+        .{ .name = "palegreen", .color = zpdf.Color.palegreen },
+        .{ .name = "darkgreen", .color = zpdf.Color.darkgreen },
+        .{ .name = "forestgreen", .color = zpdf.Color.forestgreen },
+        .{ .name = "seagreen", .color = zpdf.Color.seagreen },
+        .{ .name = "mediumseagreen", .color = zpdf.Color.mediumseagreen },
+        .{ .name = "springgreen", .color = zpdf.Color.springgreen },
+        .{ .name = "mediumspringgreen", .color = zpdf.Color.mediumspringgreen },
+        .{ .name = "mediumaquamarine", .color = zpdf.Color.mediumaquamarine },
+        .{ .name = "aquamarine", .color = zpdf.Color.aquamarine },
+        .{ .name = "darkseagreen", .color = zpdf.Color.darkseagreen },
+        .{ .name = "yellowgreen", .color = zpdf.Color.yellowgreen },
+        .{ .name = "greenyellow", .color = zpdf.Color.greenyellow },
+        .{ .name = "chartreuse", .color = zpdf.Color.chartreuse },
+        .{ .name = "lawngreen", .color = zpdf.Color.lawngreen },
+        .{ .name = "olive", .color = zpdf.Color.olive },
+        .{ .name = "olivedrab", .color = zpdf.Color.olivedrab },
+        .{ .name = "darkolivegreen", .color = zpdf.Color.darkolivegreen },
+        // Cyans (11)
+        .{ .name = "cyan", .color = zpdf.Color.cyan },
+        .{ .name = "lightcyan", .color = zpdf.Color.lightcyan },
+        .{ .name = "paleturquoise", .color = zpdf.Color.paleturquoise },
+        .{ .name = "turquoise", .color = zpdf.Color.turquoise },
+        .{ .name = "mediumturquoise", .color = zpdf.Color.mediumturquoise },
+        .{ .name = "darkturquoise", .color = zpdf.Color.darkturquoise },
+        .{ .name = "darkcyan", .color = zpdf.Color.darkcyan },
+        .{ .name = "teal", .color = zpdf.Color.teal },
+        .{ .name = "lightseagreen", .color = zpdf.Color.lightseagreen },
+        .{ .name = "cadetblue", .color = zpdf.Color.cadetblue },
+        // Blues (16)
+        .{ .name = "blue", .color = zpdf.Color.blue },
+        .{ .name = "navy", .color = zpdf.Color.navy },
+        .{ .name = "darkblue", .color = zpdf.Color.darkblue },
+        .{ .name = "mediumblue", .color = zpdf.Color.mediumblue },
+        .{ .name = "midnightblue", .color = zpdf.Color.midnightblue },
+        .{ .name = "royalblue", .color = zpdf.Color.royalblue },
+        .{ .name = "steelblue", .color = zpdf.Color.steelblue },
+        .{ .name = "dodgerblue", .color = zpdf.Color.dodgerblue },
+        .{ .name = "deepskyblue", .color = zpdf.Color.deepskyblue },
+        .{ .name = "cornflowerblue", .color = zpdf.Color.cornflowerblue },
+        .{ .name = "skyblue", .color = zpdf.Color.skyblue },
+        .{ .name = "lightskyblue", .color = zpdf.Color.lightskyblue },
+        .{ .name = "lightblue", .color = zpdf.Color.lightblue },
+        .{ .name = "lightsteelblue", .color = zpdf.Color.lightsteelblue },
+        .{ .name = "powderblue", .color = zpdf.Color.powderblue },
+        .{ .name = "aliceblue", .color = zpdf.Color.aliceblue },
+        // Purples (18)
+        .{ .name = "purple", .color = zpdf.Color.purple },
+        .{ .name = "magenta", .color = zpdf.Color.magenta },
+        .{ .name = "darkmagenta", .color = zpdf.Color.darkmagenta },
+        .{ .name = "indigo", .color = zpdf.Color.indigo },
+        .{ .name = "darkslateblue", .color = zpdf.Color.darkslateblue },
+        .{ .name = "slateblue", .color = zpdf.Color.slateblue },
+        .{ .name = "mediumslateblue", .color = zpdf.Color.mediumslateblue },
+        .{ .name = "mediumpurple", .color = zpdf.Color.mediumpurple },
+        .{ .name = "blueviolet", .color = zpdf.Color.blueviolet },
+        .{ .name = "darkviolet", .color = zpdf.Color.darkviolet },
+        .{ .name = "darkorchid", .color = zpdf.Color.darkorchid },
+        .{ .name = "mediumorchid", .color = zpdf.Color.mediumorchid },
+        .{ .name = "orchid", .color = zpdf.Color.orchid },
+        .{ .name = "violet", .color = zpdf.Color.violet },
+        .{ .name = "plum", .color = zpdf.Color.plum },
+        .{ .name = "thistle", .color = zpdf.Color.thistle },
+        .{ .name = "lavender", .color = zpdf.Color.lavender },
+        .{ .name = "rebeccapurple", .color = zpdf.Color.rebeccapurple },
+        // Whites and off-whites (19)
+        .{ .name = "snow", .color = zpdf.Color.snow },
+        .{ .name = "honeydew", .color = zpdf.Color.honeydew },
+        .{ .name = "mintcream", .color = zpdf.Color.mintcream },
+        .{ .name = "azure", .color = zpdf.Color.azure },
+        .{ .name = "ghostwhite", .color = zpdf.Color.ghostwhite },
+        .{ .name = "floralwhite", .color = zpdf.Color.floralwhite },
+        .{ .name = "ivory", .color = zpdf.Color.ivory },
+        .{ .name = "beige", .color = zpdf.Color.beige },
+        .{ .name = "linen", .color = zpdf.Color.linen },
+        .{ .name = "oldlace", .color = zpdf.Color.oldlace },
+        .{ .name = "antiquewhite", .color = zpdf.Color.antiquewhite },
+        .{ .name = "bisque", .color = zpdf.Color.bisque },
+        .{ .name = "blanchedalmond", .color = zpdf.Color.blanchedalmond },
+        .{ .name = "navajowhite", .color = zpdf.Color.navajowhite },
+        .{ .name = "wheat", .color = zpdf.Color.wheat },
+        .{ .name = "cornsilk", .color = zpdf.Color.cornsilk },
+        .{ .name = "seashell", .color = zpdf.Color.seashell },
+        .{ .name = "lavenderblush", .color = zpdf.Color.lavenderblush },
+        .{ .name = "mistyrose", .color = zpdf.Color.mistyrose },
+        // Salmons (3)
+        .{ .name = "salmon", .color = zpdf.Color.salmon },
+        .{ .name = "lightsalmon", .color = zpdf.Color.lightsalmon },
+        .{ .name = "darksalmon", .color = zpdf.Color.darksalmon },
+    };
+
+    // Layout: 8 columns to fit 134 colors on one page
+    const swatch_w: f64 = 65;
+    const swatch_h: f64 = 18;
+    const cols: usize = 8;
+    const start_x: f64 = 20;
+    const start_y: f64 = 45;
+    const gap_x: f64 = 6;
+    const gap_y: f64 = 14;
+
+    try doc.setFont(.helvetica, 5);
+
+    for (colors, 0..) |cdef, i| {
+        const col = i % cols;
+        const row = i / cols;
+        const x = start_x + @as(f64, @floatFromInt(col)) * (swatch_w + gap_x);
+        const y = start_y + @as(f64, @floatFromInt(row)) * (swatch_h + gap_y);
+
+        // Draw swatch
+        doc.setDrawStyle(.{
+            .fill_color = cdef.color,
+            .stroke_color = zpdf.Color.black,
+            .line_width = 0.25,
+        });
+        try doc.drawRect(x, y, swatch_w, swatch_h, .fill_stroke);
+
+        // Draw label below swatch (offset by font size since PDF text uses baseline)
+        try doc.writeAt(x + 1, y + swatch_h + 6, cdef.name);
+    }
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -1943,6 +2142,10 @@ test "integration: svg_equation PDF" {
 test "integration: landscape PDF" {
     // Tests page sizes: A4, Letter, landscape orientations, custom sizes
     try runIntegrationTest("landscape", generateLandscapePdf);
+}
+
+test "integration: colors PDF" {
+    try runIntegrationTest("colors", generateColorSwatchesPdf);
 }
 
 const TestOptions = struct {
