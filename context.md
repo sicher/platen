@@ -1,9 +1,32 @@
 # zpdf Context
 
 ## Current Focus
-All planned features complete. 239 unit tests + 23 integration tests pass.
+Filling API gaps vs fpdf2. 246 unit tests + 23 integration tests pass.
 
 **Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+
+## What We Did (Session 2026-01-21 #55) [COMPLETE]
+- **Created API_COMPARISON.md**: Comprehensive comparison of zpdf vs fpdf2 APIs
+  - Identified all functional gaps organized by category
+  - Prioritized gaps: High (metadata, links, tables), Medium (annotations, shapes), Lower (encryption, PDF/A)
+  - Noted zpdf advantages: Knuth-Plass line breaking, measureWrappedText, more OpenType features
+- **Implemented document metadata (Info dictionary)**:
+  - Added `DocumentMetadata` struct with optional fields: title, author, subject, keywords, creator, producer, creation_date, mod_date
+  - Added `metadata` field to Document struct
+  - Added `setMetadata()` method to set all metadata at once (Zig-idiomatic struct-based API)
+  - Updated `Writer.finish()` to accept `FinishOptions` with optional `info_ref`
+  - Info dictionary written to PDF only when metadata fields are set
+  - Auto-generates CreationDate and ModDate (UTC) when not explicitly set
+  - Date format: `D:YYYYMMDDHHmmSSZ` (PDF standard)
+  - Fixed PDF string escaping in `objects.zig` (was TODO) - now properly escapes `\`, `(`, `)`
+- **Added CLI `metadata-test` command** for generating demo PDF with metadata
+- **Added 7 unit tests for metadata**:
+  - `DocumentMetadata.hasAnyField()` behavior
+  - `setMetadata()` stores values correctly
+  - Metadata written to PDF Info dictionary
+  - Special characters escaped
+  - No Info dict when metadata empty
+- All 246 unit tests + 23 integration tests pass
 
 ## What We Did (Session 2026-01-21 #54) [COMPLETE]
 - **Added page size API**:

@@ -128,7 +128,15 @@ pub const Value = union(enum) {
             .real_val => |r| try writer.print("{d:.4}", .{r}),
             .string_val => |s| {
                 try writer.writeByte('(');
-                try writer.writeAll(s); // TODO: escape special chars
+                // Escape special PDF string characters: \, (, )
+                for (s) |c| {
+                    switch (c) {
+                        '\\' => try writer.writeAll("\\\\"),
+                        '(' => try writer.writeAll("\\("),
+                        ')' => try writer.writeAll("\\)"),
+                        else => try writer.writeByte(c),
+                    }
+                }
                 try writer.writeByte(')');
             },
             .name_val => |n| try n.format(writer),

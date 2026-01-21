@@ -1872,3 +1872,110 @@ test "graphics state used in output" {
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
 }
+
+// ============================================================================
+// Document Metadata Tests
+// ============================================================================
+
+const DocumentMetadata = document.DocumentMetadata;
+
+test "DocumentMetadata hasAnyField default" {
+    const meta = DocumentMetadata{};
+    // Default producer is set, so hasAnyField should return true
+    try std.testing.expect(meta.hasAnyField());
+}
+
+test "DocumentMetadata hasAnyField all null" {
+    const meta = DocumentMetadata{ .producer = null };
+    try std.testing.expect(!meta.hasAnyField());
+}
+
+test "DocumentMetadata hasAnyField with title" {
+    const meta = DocumentMetadata{ .title = "Test", .producer = null };
+    try std.testing.expect(meta.hasAnyField());
+}
+
+test "setMetadata stores metadata" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setMetadata(.{
+        .title = "My Document",
+        .author = "Test Author",
+    });
+
+    try std.testing.expectEqualStrings("My Document", doc.metadata.title.?);
+    try std.testing.expectEqualStrings("Test Author", doc.metadata.author.?);
+    try std.testing.expectEqualStrings("zpdf", doc.metadata.producer.?);
+}
+
+test "metadata written to PDF Info dictionary" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setMetadata(.{
+        .title = "Test Title",
+        .author = "Test Author",
+        .subject = "Test Subject",
+        .keywords = "test, pdf, zig",
+        .creator = "Test App",
+    });
+
+    try doc.addPage();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check that Info dictionary fields appear in PDF
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Title (Test Title)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Author (Test Author)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subject (Test Subject)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Keywords (test, pdf, zig)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Creator (Test App)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Producer (zpdf)") != null);
+    // Check auto-generated dates are present (format: D:YYYYMMDDHHmmSSZ)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CreationDate (D:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ModDate (D:") != null);
+    // Check trailer references Info dictionary
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Info") != null);
+}
+
+test "metadata with special characters escaped" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setMetadata(.{
+        .title = "Test (with parens) and \\backslash",
+    });
+
+    try doc.addPage();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check that special chars are escaped in PDF string
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Title (Test \\(with parens\\) and \\\\backslash)") != null);
+}
+
+test "no Info dictionary when metadata empty" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Clear default producer
+    doc.setMetadata(.{ .producer = null });
+
+    try doc.addPage();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check that no /Info key in trailer
+    // Find the trailer section
+    const trailer_start = std.mem.indexOf(u8, pdf, "trailer");
+    try std.testing.expect(trailer_start != null);
+    const trailer = pdf[trailer_start.?..];
+    const trailer_end = std.mem.indexOf(u8, trailer, ">>");
+    try std.testing.expect(trailer_end != null);
+    const trailer_dict = trailer[0..trailer_end.?];
+    try std.testing.expect(std.mem.indexOf(u8, trailer_dict, "/Info") == null);
+}

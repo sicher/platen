@@ -26,6 +26,9 @@ pub const integration_tests = @import("integration_tests.zig");
 // Re-export Document as the primary type
 pub const Document = document.Document;
 
+// Re-export metadata type
+pub const DocumentMetadata = document.DocumentMetadata;
+
 // Re-export font types
 pub const StandardFont = document.StandardFont;
 pub const Font = document.Font;

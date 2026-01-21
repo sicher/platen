@@ -66,6 +66,45 @@ pub const DashPattern = layout.DashPattern;
 pub const opentype = embedded.opentype;
 
 // ============================================================================
+// Document Metadata
+// ============================================================================
+
+/// PDF document metadata (Info dictionary fields).
+/// All fields are optional - only non-null values are written to the PDF.
+pub const DocumentMetadata = struct {
+    /// Document title.
+    title: ?[]const u8 = null,
+    /// Document author.
+    author: ?[]const u8 = null,
+    /// Subject/description of the document.
+    subject: ?[]const u8 = null,
+    /// Keywords associated with the document (comma-separated).
+    keywords: ?[]const u8 = null,
+    /// Application that created the original document content.
+    creator: ?[]const u8 = null,
+    /// Application that produced the PDF (defaults to "zpdf").
+    producer: ?[]const u8 = "zpdf",
+    /// Creation date in PDF format (D:YYYYMMDDHHmmSS).
+    /// If null, current time is used automatically.
+    creation_date: ?[]const u8 = null,
+    /// Modification date in PDF format (D:YYYYMMDDHHmmSS).
+    /// If null, same as creation_date.
+    mod_date: ?[]const u8 = null,
+
+    /// Check if any metadata field is set.
+    pub fn hasAnyField(self: DocumentMetadata) bool {
+        return self.title != null or
+            self.author != null or
+            self.subject != null or
+            self.keywords != null or
+            self.creator != null or
+            self.producer != null or
+            self.creation_date != null or
+            self.mod_date != null;
+    }
+};
+
+// ============================================================================
 // Internal Types
 // ============================================================================
 
@@ -394,6 +433,8 @@ pub const Document = struct {
     loaded_svgs: std.ArrayListUnmanaged(*Svg) = .{},
     // Track gradients used in document
     gradients: std.ArrayListUnmanaged(GradientDef) = .{},
+    /// Document metadata (title, author, etc.)
+    metadata: DocumentMetadata = .{},
 
     pub fn init(allocator: std.mem.Allocator) Document {
         return .{
@@ -428,6 +469,12 @@ pub const Document = struct {
         self.loaded_svgs.deinit(self.allocator);
         // Clean up gradients
         self.gradients.deinit(self.allocator);
+    }
+
+    /// Set document metadata (title, author, subject, etc.).
+    /// Only non-null fields are written to the PDF Info dictionary.
+    pub fn setMetadata(self: *Document, meta: DocumentMetadata) void {
+        self.metadata = meta;
     }
 
     /// Set the default page size for subsequent addPage() calls.
@@ -3075,9 +3122,61 @@ pub const Document = struct {
         }
         last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
 
+        // Write Info dictionary if metadata is set
+        var info_id: ?ObjectId = null;
+        if (self.metadata.hasAnyField()) {
+            info_id = next_id;
+            next_id += 1;
+
+            try w.beginObject(info_id.?);
+            var info_dict = Dict.init(self.allocator);
+            defer info_dict.deinit();
+
+            if (self.metadata.title) |title| {
+                try info_dict.put("Title", Value.string(title));
+            }
+            if (self.metadata.author) |author| {
+                try info_dict.put("Author", Value.string(author));
+            }
+            if (self.metadata.subject) |subject| {
+                try info_dict.put("Subject", Value.string(subject));
+            }
+            if (self.metadata.keywords) |keywords| {
+                try info_dict.put("Keywords", Value.string(keywords));
+            }
+            if (self.metadata.creator) |creator| {
+                try info_dict.put("Creator", Value.string(creator));
+            }
+            if (self.metadata.producer) |producer| {
+                try info_dict.put("Producer", Value.string(producer));
+            }
+
+            // Auto-generate dates if not explicitly set
+            var date_buf: [24]u8 = undefined; // "D:YYYYMMDDHHmmSS+00'00'"
+            const date_str = if (self.metadata.creation_date) |date|
+                date
+            else
+                formatPdfDate(&date_buf);
+
+            try info_dict.put("CreationDate", Value.string(date_str));
+
+            const mod_date_str = if (self.metadata.mod_date) |date|
+                date
+            else
+                date_str; // Same as creation date if not set
+
+            try info_dict.put("ModDate", Value.string(mod_date_str));
+
+            try w.writeDict(info_dict);
+            try w.endObject();
+        }
+
         // Finish with xref and trailer
         const finish_start = std.time.milliTimestamp();
-        const result = try w.finish(.{ .id = catalog_id });
+        const result = try w.finish(.{
+            .catalog_ref = .{ .id = catalog_id },
+            .info_ref = if (info_id) |id| .{ .id = id } else null,
+        });
         last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
         return result;
     }
@@ -3086,6 +3185,29 @@ pub const Document = struct {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Format current UTC time as PDF date string: D:YYYYMMDDHHmmSSZ
+/// Returns a slice into the provided buffer.
+fn formatPdfDate(buf: *[24]u8) []const u8 {
+    const timestamp = std.time.timestamp();
+    const epoch_secs: u64 = @intCast(timestamp);
+    const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
+    const day = epoch.getEpochDay();
+    const year_day = day.calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = epoch.getDaySeconds();
+
+    _ = std.fmt.bufPrint(buf, "D:{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_secs.getHoursIntoDay(),
+        day_secs.getMinutesIntoHour(),
+        day_secs.getSecondsIntoMinute(),
+    }) catch unreachable;
+
+    return buf[0..17]; // "D:YYYYMMDDHHmmSSZ"
+}
 
 /// Strip soft-hyphens (U+00AD) from text.
 /// Soft-hyphens are invisible formatting characters that only appear as visible

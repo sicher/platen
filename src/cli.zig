@@ -87,6 +87,11 @@ pub fn main() !void {
         const output_path = if (args.len > 2) args[2] else "gradient_test.pdf";
         try generateGradientTestPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "metadata-test")) {
+        // Test document metadata
+        const output_path = if (args.len > 2) args[2] else "metadata_test.pdf";
+        try generateMetadataTestPdf(allocator, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -730,6 +735,77 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .stops = &rad_stops,
     });
     try doc.fillRectGradient(50, y, 200, 80, grad4);
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+}
+
+fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Set document metadata
+    doc.setMetadata(.{
+        .title = "zpdf Metadata Demo",
+        .author = "zpdf Library",
+        .subject = "Demonstrating PDF metadata support",
+        .keywords = "pdf, zig, metadata, demo",
+        .creator = "zpdf CLI tool",
+    });
+
+    try doc.addPage();
+
+    try doc.setFont(.helvetica_bold, 24);
+    try doc.writeAt(50, 50, "Document with Metadata");
+
+    try doc.setFont(.helvetica, 12);
+    var y: f64 = 100;
+
+    try doc.writeAt(50, y, "This PDF has the following metadata set in the Info dictionary:");
+    y += 30;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Title:");
+    try doc.setFont(.helvetica, 11);
+    try doc.writeAt(120, y, "zpdf Metadata Demo");
+    y += 18;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Author:");
+    try doc.setFont(.helvetica, 11);
+    try doc.writeAt(120, y, "zpdf Library");
+    y += 18;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Subject:");
+    try doc.setFont(.helvetica, 11);
+    try doc.writeAt(120, y, "Demonstrating PDF metadata support");
+    y += 18;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Keywords:");
+    try doc.setFont(.helvetica, 11);
+    try doc.writeAt(120, y, "pdf, zig, metadata, demo");
+    y += 18;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Creator:");
+    try doc.setFont(.helvetica, 11);
+    try doc.writeAt(120, y, "zpdf CLI tool");
+    y += 18;
+
+    try doc.setFont(.helvetica_bold, 11);
+    try doc.writeAt(50, y, "Producer:");
+    try doc.setFont(.helvetica, 11);
+    try doc.writeAt(120, y, "zpdf (default)");
+    y += 40;
+
+    try doc.setFont(.helvetica_oblique, 10);
+    try doc.writeAt(50, y, "Use 'pdfinfo' or your PDF viewer's document properties to verify.");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

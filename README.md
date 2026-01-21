@@ -14,6 +14,7 @@ A fast PDF rendering library for Zig, inspired by [fpdf2](https://github.com/py-
 - **Images**: JPEG and PNG embedding (with alpha channel support)
 - **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`
 - **Gradients**: linear and radial
+- **Document metadata**: title, author, subject, keywords
 - **Compression**: FlateDecode for smaller file sizes
 
 ## Quick Start
@@ -266,6 +267,21 @@ try doc.addPageWithSize(zpdf.PageSize.Letter.landscape());
 try doc.addPageWithSize(.{ .width = 500, .height = 700 });
 ```
 
+### Document Metadata
+
+```zig
+// Set document properties (all fields optional)
+doc.setMetadata(.{
+    .title = "Annual Report 2026",
+    .author = "Finance Department",
+    .subject = "Q4 Financial Results",
+    .keywords = "finance, report, 2026, quarterly",
+    .creator = "MyApp v1.0",
+    // .producer defaults to "zpdf"
+    // .creation_date and .mod_date auto-generated if not set
+});
+```
+
 ## API Reference
 
 ### Document
@@ -274,6 +290,7 @@ try doc.addPageWithSize(.{ .width = 500, .height = 700 });
 |--------|-------------|
 | `init(allocator)` | Create new document |
 | `deinit()` | Free resources |
+| `setMetadata(meta)` | Set document metadata (title, author, etc.) |
 | `setDefaultPageSize(size)` | Set default for addPage() |
 | `addPage()` | Add page (default size) |
 | `addPageWithSize(size)` | Add page with specific size |

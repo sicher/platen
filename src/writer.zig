@@ -111,9 +111,15 @@ pub const Writer = struct {
         }
     }
 
+    /// Options for finishing the PDF
+    pub const FinishOptions = struct {
+        catalog_ref: Ref,
+        info_ref: ?Ref = null,
+    };
+
     /// Write xref table and trailer, return the final PDF bytes
     /// Caller owns the returned memory
-    pub fn finish(self: *Writer, catalog_ref: Ref) ![]u8 {
+    pub fn finish(self: *Writer, opts: FinishOptions) ![]u8 {
         const xref_offset = self.output.items.len;
 
         // Sort offsets by object ID
@@ -159,8 +165,12 @@ pub const Writer = struct {
         try self.output.appendSlice(self.allocator, "trailer\n<<\n");
         header = std.fmt.bufPrint(&buf, "/Size {d}\n", .{max_id + 1}) catch unreachable;
         try self.output.appendSlice(self.allocator, header);
-        header = std.fmt.bufPrint(&buf, "/Root {d} 0 R\n", .{catalog_ref.id}) catch unreachable;
+        header = std.fmt.bufPrint(&buf, "/Root {d} 0 R\n", .{opts.catalog_ref.id}) catch unreachable;
         try self.output.appendSlice(self.allocator, header);
+        if (opts.info_ref) |info| {
+            header = std.fmt.bufPrint(&buf, "/Info {d} 0 R\n", .{info.id}) catch unreachable;
+            try self.output.appendSlice(self.allocator, header);
+        }
         try self.output.appendSlice(self.allocator, ">>\n");
 
         // Write startxref

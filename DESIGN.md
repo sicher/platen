@@ -274,6 +274,25 @@ var region = doc.getPageRegion();
 
 Margins don't magically affect `writeAt()` - they only define what `getPageRegion()` returns.
 
+### Document Metadata
+
+Set document properties like title, author, and subject via the Info dictionary:
+
+```zig
+doc.setMetadata(.{
+    .title = "Annual Report 2026",
+    .author = "Finance Department",
+    .subject = "Q4 Financial Results",
+    .keywords = "finance, report, 2026",
+    .creator = "MyApp v1.0",    // Application that created the content
+    .producer = "zpdf",         // Default - PDF producer
+    .creation_date = "D:20260121120000",  // Optional - auto-generated if null
+});
+```
+
+All fields are optional. Only non-null fields are written to the PDF Info dictionary.
+The PDF trailer includes `/Info` reference when any metadata is set.
+
 ### Core Types
 
 ```zig
