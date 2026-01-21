@@ -1213,6 +1213,24 @@ def gen_svg_text():
     print("  svg_text.pdf")
 
 
+def gen_svg_use_defs():
+    """Test SVG <use> and <defs> elements."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "SVG Use/Defs Test")
+
+    # Use/Defs test SVG
+    pdf.set_font("Helvetica", "B", size=10)
+    pdf.text(50, 60, "Reusable symbols via <use> and <defs>:")
+    pdf.image("test/images/use-defs.svg", x=50, y=75, w=300, h=200)
+
+    pdf.output(OUTPUT_DIR / "svg_use_defs.pdf")
+    print("  svg_use_defs.pdf")
+
+
 def gen_paths():
     """Test path API: moveTo, lineTo, curveTo using fpdf2 drawing module."""
     pdf = make_pdf()
@@ -1357,6 +1375,7 @@ GENERATORS = {
     "images": gen_images,
     "svg": gen_svg,
     "svg_text": gen_svg_text,
+    "svg_use_defs": gen_svg_use_defs,
     "paths": gen_paths,
     "gradients": gen_gradients,
 }

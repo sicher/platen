@@ -302,6 +302,66 @@ pub const SvgElement = union(enum) {
         transform: Transform = .{},
     },
 
+    /// Clone an element (deep copy for elements with allocated memory)
+    pub fn clone(self: SvgElement, allocator: std.mem.Allocator) !SvgElement {
+        return switch (self) {
+            .rect => |r| .{ .rect = r },
+            .circle => |c| .{ .circle = c },
+            .ellipse => |e| .{ .ellipse = e },
+            .line => |l| .{ .line = l },
+            .polyline => |p| blk: {
+                var points = std.ArrayListUnmanaged(Point){};
+                try points.appendSlice(allocator, p.points.items);
+                break :blk .{ .polyline = .{
+                    .points = points,
+                    .style = p.style,
+                    .transform = p.transform,
+                } };
+            },
+            .polygon => |p| blk: {
+                var points = std.ArrayListUnmanaged(Point){};
+                try points.appendSlice(allocator, p.points.items);
+                break :blk .{ .polygon = .{
+                    .points = points,
+                    .style = p.style,
+                    .transform = p.transform,
+                } };
+            },
+            .path => |p| blk: {
+                var commands = std.ArrayListUnmanaged(PathCommand){};
+                try commands.appendSlice(allocator, p.commands.items);
+                break :blk .{ .path = .{
+                    .commands = commands,
+                    .style = p.style,
+                    .transform = p.transform,
+                } };
+            },
+            .group => |g| blk: {
+                var children = std.ArrayListUnmanaged(SvgElement){};
+                for (g.children.items) |child| {
+                    try children.append(allocator, try child.clone(allocator));
+                }
+                break :blk .{ .group = .{
+                    .children = children,
+                    .style = g.style,
+                    .transform = g.transform,
+                } };
+            },
+            .text => |t| .{ .text = .{
+                .x = t.x,
+                .y = t.y,
+                .content = try allocator.dupe(u8, t.content),
+                .font_family = t.font_family,
+                .font_size = t.font_size,
+                .font_weight = t.font_weight,
+                .font_style = t.font_style,
+                .text_anchor = t.text_anchor,
+                .style = t.style,
+                .transform = t.transform,
+            } },
+        };
+    }
+
     pub fn deinit(self: *SvgElement, allocator: std.mem.Allocator) void {
         switch (self.*) {
             .polyline => |*p| p.points.deinit(allocator),
@@ -388,6 +448,7 @@ pub const Svg = struct {
     elements: std.ArrayListUnmanaged(SvgElement),
     opacity_states: std.ArrayListUnmanaged(OpacityState) = .{},
     used_fonts: std.ArrayListUnmanaged(UsedFont) = .{},
+    defs: std.StringHashMapUnmanaged(SvgElement) = .{}, // Elements defined in <defs> by ID
 
     pub fn init(allocator: std.mem.Allocator) Svg {
         return .{
@@ -397,6 +458,7 @@ pub const Svg = struct {
             .elements = .{},
             .opacity_states = .{},
             .used_fonts = .{},
+            .defs = .{},
         };
     }
 
@@ -407,6 +469,13 @@ pub const Svg = struct {
         self.elements.deinit(self.allocator);
         self.opacity_states.deinit(self.allocator);
         self.used_fonts.deinit(self.allocator);
+        // Free defs keys and elements
+        var it = self.defs.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.defs.deinit(self.allocator);
     }
 
     /// Get or add an opacity state, returns index for naming (GS1, GS2, etc.)
@@ -473,8 +542,16 @@ pub const Svg = struct {
         defer transform_stack.deinit(self.allocator);
         try transform_stack.append(self.allocator, Transform.identity);
 
+        // Track when inside <defs> block
+        var defs_depth: usize = 0;
+
         while (parser.nextElement()) |elem| {
             if (elem.is_end_tag) {
+                // Track defs end
+                if (std.mem.eql(u8, elem.tag, "defs")) {
+                    if (defs_depth > 0) defs_depth -= 1;
+                    continue;
+                }
                 // Pop style/transform on group end
                 if (std.mem.eql(u8, elem.tag, "g")) {
                     if (transform_stack.items.len > 1) {
@@ -487,27 +564,45 @@ pub const Svg = struct {
                 continue;
             }
 
+            // Track defs start
+            if (std.mem.eql(u8, elem.tag, "defs")) {
+                defs_depth += 1;
+                continue;
+            }
+
+            // Skip style elements inside defs (CSS not supported)
+            if (std.mem.eql(u8, elem.tag, "style")) {
+                continue;
+            }
+
             const current_style = style_stack.getLast();
             const current_transform = transform_stack.getLast();
+            const in_defs = defs_depth > 0;
 
             if (std.mem.eql(u8, elem.tag, "svg")) {
                 try self.parseSvgElement(elem);
             } else if (std.mem.eql(u8, elem.tag, "rect")) {
-                try self.parseRect(elem, current_style, current_transform);
+                try self.parseRect(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "circle")) {
-                try self.parseCircle(elem, current_style, current_transform);
+                try self.parseCircle(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "ellipse")) {
-                try self.parseEllipse(elem, current_style, current_transform);
+                try self.parseEllipse(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "line")) {
-                try self.parseLine(elem, current_style, current_transform);
+                try self.parseLine(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "polyline")) {
-                try self.parsePolyline(elem, current_style, current_transform);
+                try self.parsePolyline(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "polygon")) {
-                try self.parsePolygon(elem, current_style, current_transform);
+                try self.parsePolygon(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "path")) {
-                try self.parsePath(elem, current_style, current_transform);
+                try self.parsePath(elem, current_style, current_transform, if (in_defs) &self.defs else null);
             } else if (std.mem.eql(u8, elem.tag, "text")) {
-                try self.parseText(&parser, elem, current_style, current_transform);
+                if (!in_defs) {
+                    try self.parseText(&parser, elem, current_style, current_transform);
+                }
+            } else if (std.mem.eql(u8, elem.tag, "use")) {
+                if (!in_defs) {
+                    try self.parseUse(elem, current_style, current_transform);
+                }
             } else if (std.mem.eql(u8, elem.tag, "g")) {
                 // Group - push transform and style
                 var group_transform = current_transform;
@@ -558,14 +653,37 @@ pub const Svg = struct {
         }
     }
 
-    fn parseRect(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    /// Store an element either in defs (by id) or in elements list
+    fn storeElement(
+        self: *Svg,
+        element: SvgElement,
+        id: ?[]const u8,
+        defs: ?*std.StringHashMapUnmanaged(SvgElement),
+    ) !void {
+        if (defs) |d| {
+            if (id) |elem_id| {
+                // Store in defs by id (duplicate key for owned storage)
+                const owned_id = try self.allocator.dupe(u8, elem_id);
+                errdefer self.allocator.free(owned_id);
+                try d.put(self.allocator, owned_id, element);
+            }
+            // If no id, element is discarded (can't be referenced)
+        } else {
+            try self.elements.append(self.allocator, element);
+        }
+    }
+
+    fn parseRect(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var rect = SvgElement{ .rect = .{ .width = 0, .height = 0 } };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "x")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "x")) {
                 rect.rect.x = parseFloat(attr.value);
             } else if (std.mem.eql(u8, attr.name, "y")) {
                 rect.rect.y = parseFloat(attr.value);
@@ -586,17 +704,20 @@ pub const Svg = struct {
 
         rect.rect.style = parent_style.merge(local_style);
         rect.rect.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, rect);
+        try self.storeElement(rect, id, defs);
     }
 
-    fn parseCircle(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    fn parseCircle(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var circle = SvgElement{ .circle = .{ .r = 0 } };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "cx")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "cx")) {
                 circle.circle.cx = parseFloat(attr.value);
             } else if (std.mem.eql(u8, attr.name, "cy")) {
                 circle.circle.cy = parseFloat(attr.value);
@@ -611,17 +732,20 @@ pub const Svg = struct {
 
         circle.circle.style = parent_style.merge(local_style);
         circle.circle.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, circle);
+        try self.storeElement(circle, id, defs);
     }
 
-    fn parseEllipse(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    fn parseEllipse(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var ellipse = SvgElement{ .ellipse = .{ .rx = 0, .ry = 0 } };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "cx")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "cx")) {
                 ellipse.ellipse.cx = parseFloat(attr.value);
             } else if (std.mem.eql(u8, attr.name, "cy")) {
                 ellipse.ellipse.cy = parseFloat(attr.value);
@@ -638,17 +762,20 @@ pub const Svg = struct {
 
         ellipse.ellipse.style = parent_style.merge(local_style);
         ellipse.ellipse.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, ellipse);
+        try self.storeElement(ellipse, id, defs);
     }
 
-    fn parseLine(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    fn parseLine(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var line = SvgElement{ .line = .{} };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "x1")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "x1")) {
                 line.line.x1 = parseFloat(attr.value);
             } else if (std.mem.eql(u8, attr.name, "y1")) {
                 line.line.y1 = parseFloat(attr.value);
@@ -665,17 +792,20 @@ pub const Svg = struct {
 
         line.line.style = parent_style.merge(local_style);
         line.line.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, line);
+        try self.storeElement(line, id, defs);
     }
 
-    fn parsePolyline(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    fn parsePolyline(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var polyline = SvgElement{ .polyline = .{ .points = .{} } };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "points")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "points")) {
                 try parsePointsList(self.allocator, attr.value, &polyline.polyline.points);
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
@@ -686,17 +816,20 @@ pub const Svg = struct {
 
         polyline.polyline.style = parent_style.merge(local_style);
         polyline.polyline.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, polyline);
+        try self.storeElement(polyline, id, defs);
     }
 
-    fn parsePolygon(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    fn parsePolygon(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var polygon = SvgElement{ .polygon = .{ .points = .{} } };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "points")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "points")) {
                 try parsePointsList(self.allocator, attr.value, &polygon.polygon.points);
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
@@ -707,17 +840,20 @@ pub const Svg = struct {
 
         polygon.polygon.style = parent_style.merge(local_style);
         polygon.polygon.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, polygon);
+        try self.storeElement(polygon, id, defs);
     }
 
-    fn parsePath(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+    fn parsePath(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var path = SvgElement{ .path = .{ .commands = .{} } };
         var local_transform = Transform.identity;
         var local_style = Style{};
+        var id: ?[]const u8 = null;
 
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
-            if (std.mem.eql(u8, attr.name, "d")) {
+            if (std.mem.eql(u8, attr.name, "id")) {
+                id = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "d")) {
                 try parsePathData(self.allocator, attr.value, &path.path.commands);
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
@@ -728,7 +864,7 @@ pub const Svg = struct {
 
         path.path.style = parent_style.merge(local_style);
         path.path.transform = parent_transform.multiply(local_transform);
-        try self.elements.append(self.allocator, path);
+        try self.storeElement(path, id, defs);
     }
 
     fn parseText(self: *Svg, parser: *xml.XmlParser, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
@@ -778,6 +914,102 @@ pub const Svg = struct {
         text_elem.text.style = parent_style.merge(local_style);
         text_elem.text.transform = parent_transform.multiply(local_transform);
         try self.elements.append(self.allocator, text_elem);
+    }
+
+    /// Parse <use> element - reference a defined element
+    fn parseUse(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+        var href: ?[]const u8 = null;
+        var x: f64 = 0;
+        var y: f64 = 0;
+        var local_transform = Transform.identity;
+        var local_style = Style{};
+
+        var attrs = elem.attributes();
+        while (attrs.next()) |attr| {
+            if (std.mem.eql(u8, attr.name, "href") or std.mem.eql(u8, attr.name, "xlink:href")) {
+                href = attr.value;
+            } else if (std.mem.eql(u8, attr.name, "x")) {
+                x = parseFloat(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "y")) {
+                y = parseFloat(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "transform")) {
+                local_transform = parseTransform(attr.value);
+            } else {
+                parseStyleAttribute(attr.name, attr.value, &local_style);
+            }
+        }
+
+        // Get the referenced element id (strip leading #)
+        const ref_id = blk: {
+            const h = href orelse return; // No href, nothing to do
+            if (h.len > 0 and h[0] == '#') {
+                break :blk h[1..];
+            }
+            break :blk h;
+        };
+
+        // Look up the element in defs
+        const def_elem = self.defs.get(ref_id) orelse return; // Element not found
+
+        // Clone the element
+        var cloned = try def_elem.clone(self.allocator);
+        errdefer cloned.deinit(self.allocator);
+
+        // Build the combined transform: parent * translate(x,y) * use_local
+        // SVG spec: x,y translate is applied before (outer to) the transform attribute
+        // In matrix terms: parent * translate(x,y) * local_transform
+        var use_transform = parent_transform;
+        if (x != 0 or y != 0) {
+            use_transform = use_transform.multiply(Transform.translate(x, y));
+        }
+        use_transform = use_transform.multiply(local_transform);
+
+        // Apply transform and style to the cloned element
+        applyTransformAndStyle(&cloned, use_transform, parent_style.merge(local_style));
+
+        try self.elements.append(self.allocator, cloned);
+    }
+
+    /// Apply transform and style to an element (for use element processing)
+    fn applyTransformAndStyle(element: *SvgElement, transform: Transform, style: Style) void {
+        switch (element.*) {
+            .rect => |*r| {
+                r.transform = transform.multiply(r.transform);
+                r.style = style.merge(r.style);
+            },
+            .circle => |*c| {
+                c.transform = transform.multiply(c.transform);
+                c.style = style.merge(c.style);
+            },
+            .ellipse => |*e| {
+                e.transform = transform.multiply(e.transform);
+                e.style = style.merge(e.style);
+            },
+            .line => |*l| {
+                l.transform = transform.multiply(l.transform);
+                l.style = style.merge(l.style);
+            },
+            .polyline => |*p| {
+                p.transform = transform.multiply(p.transform);
+                p.style = style.merge(p.style);
+            },
+            .polygon => |*p| {
+                p.transform = transform.multiply(p.transform);
+                p.style = style.merge(p.style);
+            },
+            .path => |*p| {
+                p.transform = transform.multiply(p.transform);
+                p.style = style.merge(p.style);
+            },
+            .group => |*g| {
+                g.transform = transform.multiply(g.transform);
+                g.style = style.merge(g.style);
+            },
+            .text => |*t| {
+                t.transform = transform.multiply(t.transform);
+                t.style = style.merge(t.style);
+            },
+        }
     }
 
     /// Generate PDF content stream for this SVG
@@ -2098,4 +2330,128 @@ test "generate PDF content" {
     try std.testing.expect(std.mem.indexOf(u8, content, "1 0 0 -1 0 100") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "re") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "f") != null);
+}
+
+test "parse defs and use" {
+    const allocator = std.testing.allocator;
+
+    const svg_data =
+        \\<svg width="100" height="100" xmlns:xlink="http://www.w3.org/1999/xlink">
+        \\  <defs>
+        \\    <path id="myPath" d="M0 0 L10 10" stroke="black" />
+        \\    <rect id="myRect" width="20" height="20" fill="blue" />
+        \\  </defs>
+        \\  <use xlink:href="#myPath" transform="translate(10, 10)" />
+        \\  <use xlink:href="#myRect" x="50" y="50" />
+        \\</svg>
+    ;
+
+    const svg = try Svg.fromMemory(allocator, svg_data);
+    defer {
+        svg.deinit();
+        allocator.destroy(svg);
+    }
+
+    // Defs should have 2 elements
+    try std.testing.expectEqual(@as(usize, 2), svg.defs.count());
+
+    // Elements (from use) should have 2 elements
+    try std.testing.expectEqual(@as(usize, 2), svg.elements.items.len);
+
+    // First element should be a path with transform applied
+    const path_elem = svg.elements.items[0];
+    try std.testing.expect(path_elem == .path);
+    try std.testing.expectEqual(@as(f64, 10), path_elem.path.transform.e); // translate x
+    try std.testing.expectEqual(@as(f64, 10), path_elem.path.transform.f); // translate y
+
+    // Second element should be a rect with x,y offset as transform
+    const rect_elem = svg.elements.items[1];
+    try std.testing.expect(rect_elem == .rect);
+    try std.testing.expectEqual(@as(f64, 50), rect_elem.rect.transform.e); // translate x from use x
+    try std.testing.expectEqual(@as(f64, 50), rect_elem.rect.transform.f); // translate y from use y
+}
+
+test "use-defs.svg element counts" {
+    const allocator = std.testing.allocator;
+
+    const svg = try Svg.fromFile(allocator, "test/images/use-defs.svg");
+    defer {
+        svg.deinit();
+        allocator.destroy(svg);
+    }
+
+    // 4 defs: box, tri, arrow-r, arrow-l (all paths)
+    try std.testing.expectEqual(@as(usize, 4), svg.defs.count());
+
+    // 9 elements from use: 3 boxes + 3 triangles + 3 arrows
+    try std.testing.expectEqual(@as(usize, 9), svg.elements.items.len);
+
+    // All elements should be paths
+    for (svg.elements.items) |elem| {
+        try std.testing.expect(elem == .path);
+    }
+}
+
+test "use element clones paths properly" {
+    const allocator = std.testing.allocator;
+
+    // Simple SVG with a path in defs and a use referencing it
+    const svg_data =
+        \\<svg width="100" height="100">
+        \\  <defs>
+        \\    <path id="arrow" d="M0 0 L10 0 L7 3 M10 0 L7 -3" stroke="black" fill="none" />
+        \\  </defs>
+        \\  <use href="#arrow" />
+        \\</svg>
+    ;
+
+    const svg = try Svg.fromMemory(allocator, svg_data);
+    defer {
+        svg.deinit();
+        allocator.destroy(svg);
+    }
+
+    // Should have 1 def and 1 element (from use)
+    try std.testing.expectEqual(@as(usize, 1), svg.defs.count());
+    try std.testing.expectEqual(@as(usize, 1), svg.elements.items.len);
+
+    // The element should be a path with the same commands
+    const elem = svg.elements.items[0];
+    try std.testing.expect(elem == .path);
+    try std.testing.expect(elem.path.commands.items.len > 0);
+}
+
+test "parse MathJax equation SVG with xlink:href" {
+    const allocator = std.testing.allocator;
+
+    // Load the equation.svg file which uses xlink:href in <use> elements
+    const svg = try Svg.fromFile(allocator, "test/images/equation.svg");
+    defer {
+        svg.deinit();
+        allocator.destroy(svg);
+    }
+
+    // The SVG has 11 path definitions in <defs> (style element is skipped)
+    try std.testing.expectEqual(@as(usize, 11), svg.defs.count());
+
+    // Many <use> elements reference those paths + 2 rects for fraction lines
+    try std.testing.expect(svg.elements.items.len > 0);
+
+    // Count paths and rects (should have paths from use + rect for fraction lines)
+    var path_count: usize = 0;
+    var rect_count: usize = 0;
+    for (svg.elements.items) |elem| {
+        switch (elem) {
+            .path => path_count += 1,
+            .rect => rect_count += 1,
+            else => {},
+        }
+    }
+    try std.testing.expect(path_count > 10); // Multiple use references to paths
+    try std.testing.expectEqual(@as(usize, 2), rect_count); // 2 fraction line rects
+
+    // Generate PDF content to verify rendering works
+    const content = try svg.toPdfContent(allocator);
+    defer allocator.free(content);
+    try std.testing.expect(content.len > 0);
 }

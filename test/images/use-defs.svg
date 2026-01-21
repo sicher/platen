@@ -1,0 +1,24 @@
+<svg width="300" height="200" viewBox="0 0 300 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Box with notch in top-right corner to show orientation -->
+    <path id="box" d="M0 0 L40 0 L40 10 L50 10 L50 50 L0 50 Z" fill="blue"/>
+    <!-- Triangle pointing right -->
+    <path id="tri" d="M0 0 L20 10 L0 20 Z" fill="red"/>
+    <!-- Arrow pointing right -->
+    <path id="arrow-r" d="M0 5 L15 5 L15 0 L25 10 L15 20 L15 15 L0 15 Z" fill="green"/>
+    <!-- Arrow pointing left (pre-rotated) -->
+    <path id="arrow-l" d="M25 5 L10 5 L10 0 L0 10 L10 20 L10 15 L25 15 Z" fill="green"/>
+  </defs>
+  <!-- Row of boxes (notch should be top-right) -->
+  <use href="#box" x="20" y="20"/>
+  <use href="#box" x="100" y="20"/>
+  <use href="#box" x="180" y="20"/>
+  <!-- Row of triangles (pointing right) -->
+  <use href="#tri" x="35" y="110"/>
+  <use href="#tri" x="115" y="110"/>
+  <use href="#tri" x="195" y="110"/>
+  <!-- Arrows: right, left, right -->
+  <use href="#arrow-r" x="260" y="30"/>
+  <use href="#arrow-l" x="260" y="80"/>
+  <use href="#arrow-r" x="260" y="140"/>
+</svg>

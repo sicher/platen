@@ -434,18 +434,8 @@ _ = try doc.writeParagraph(&region, text, .{ .valign = .middle });
 |--------|---------------|----------|
 | JPEG | Embed raw bytes, DCTDecode filter | Photos |
 | PNG | Decode, FlateDecode, alpha as soft mask | Screenshots, diagrams |
-| PDF | Parse & embed as Form XObject | Vector figures, graphs |
 
-**PDF embedding** is the key feature for technical documents:
-- Figures from matplotlib, R, gnuplot export as PDF
-- Diagrams from Illustrator, Inkscape export as PDF
-- Preserves vectors, fonts, colors perfectly
-- Scalable and repositionable
-
-```zig
-const fig = try doc.loadPdf("plot.pdf");
-doc.drawPdf(fig, x, y, .{ .scale = 0.5 });
-```
+**Vector figures:** Use SVG embedding (already supported) - matplotlib, Inkscape, Illustrator, R/ggplot2 all export SVG.
 
 ### Drawing Primitives
 PDF content stream operators for programmatic drawing:

@@ -1,7 +1,32 @@
 # zpdf Context
 
 ## Current Focus
-SVG text elements complete. All 211 unit tests + 20 integration tests pass. Path API, gradients, and text elements all done. Next: PDF embedding, SVG `<use>`/`<defs>` elements, or other features.
+SVG `<use>`/`<defs>` support complete. All 227 unit tests + 21 integration tests pass. MathJax equation SVGs with xlink:href work.
+
+**Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+
+## What We Did (Session 2026-01-21 #52) [COMPLETE]
+- **Implemented SVG `<use>` and `<defs>` support**:
+  - Added to `src/svg.zig`:
+    - `defs: StringHashMapUnmanaged(SvgElement)` - stores defined elements by ID
+    - `SvgElement.clone()` - deep copy for elements with allocated memory
+    - `storeElement()` - helper to store in defs or elements list
+    - `parseUse()` - parses `<use>` elements with href/xlink:href
+    - `applyTransformAndStyle()` - applies inherited transform and style to cloned elements
+    - All shape parse functions now accept optional defs parameter for ID extraction
+  - Parser now tracks `defs_depth` to handle `<defs>` blocks
+  - Skips `<style>` elements (CSS not supported)
+- **Added integration test**:
+  - Created `test/images/use-defs.svg` with reusable boxes, circles, arrows
+  - Added `gen_svg_use_defs()` to `scripts/gen_references.py`
+  - Added `generateSvgUseDefsPdf` test in `integration_tests.zig`
+- **Added unit tests**:
+  - `test "parse defs and use"` - basic defs/use parsing
+  - `test "use element clones paths properly"` - verifies deep cloning
+  - `test "parse MathJax equation SVG with xlink:href"` - real-world MathJax test
+  - `test "use-defs.svg element counts"` - validates all elements parsed
+- **Fixed transform order bug**: `<use x=".." y=".." transform="..">` now correctly applies translate(x,y) before the transform attribute (outer to inner)
+- All 227 unit tests + 21 integration tests pass
 
 ## What We Did (Session 2026-01-21 #51) [COMPLETE]
 - **Implemented SVG text element support**:
