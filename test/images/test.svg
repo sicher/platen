@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Basic shapes test -->
+  <rect x="10" y="10" width="50" height="30" fill="red" />
+  <circle cx="100" cy="50" r="25" fill="blue" />
+  <ellipse cx="160" cy="50" rx="30" ry="20" fill="green" />
+
+  <!-- Line and polygon -->
+  <line x1="10" y1="100" x2="90" y2="100" stroke="black" stroke-width="2" />
+  <polygon points="100,80 130,120 70,120" fill="orange" />
+
+  <!-- Path with curves -->
+  <path d="M 150 80 C 180 60 190 100 160 120 Z" fill="purple" />
+
+  <!-- Styled rect with stroke -->
+  <rect x="10" y="140" width="60" height="40" fill="yellow" stroke="black" stroke-width="2" />
+
+  <!-- Transform group -->
+  <g transform="translate(100, 140)">
+    <rect x="0" y="0" width="30" height="30" fill="cyan" />
+    <circle cx="50" cy="15" r="15" fill="magenta" />
+  </g>
+</svg>

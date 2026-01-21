@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect x="0" y="0" width="200" height="200" fill="#f0f0f0" />
+
+  <!-- Overlapping circles with different opacities -->
+  <circle cx="60" cy="80" r="50" fill="red" fill-opacity="0.5" />
+  <circle cx="100" cy="80" r="50" fill="green" fill-opacity="0.5" />
+  <circle cx="140" cy="80" r="50" fill="blue" fill-opacity="0.5" />
+
+  <!-- Rectangle with stroke opacity -->
+  <rect x="20" y="130" width="60" height="40" fill="yellow" fill-opacity="0.7"
+        stroke="black" stroke-width="3" stroke-opacity="0.5" />
+
+  <!-- Using general opacity attribute -->
+  <rect x="120" y="130" width="60" height="40" fill="purple" opacity="0.4"
+        stroke="orange" stroke-width="3" />
+
+  <!-- RGBA color -->
+  <circle cx="100" cy="180" r="15" fill="rgba(255, 0, 0, 0.3)" />
+</svg>

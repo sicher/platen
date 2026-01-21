@@ -17,6 +17,9 @@ pub const color = @import("color.zig");
 pub const layout = @import("layout.zig");
 pub const Writer = @import("writer.zig").Writer;
 pub const zlib = @import("zlib.zig");
+pub const images = @import("images.zig");
+pub const svg = @import("svg.zig");
+pub const xml = @import("xml.zig");
 pub const testing = @import("testing.zig");
 pub const integration_tests = @import("integration_tests.zig");
 
@@ -36,6 +39,14 @@ pub const FontMetrics = document.FontMetrics;
 
 // Re-export color
 pub const Color = document.Color;
+
+// Re-export image types
+pub const Image = document.Image;
+pub const ImageFormat = images.ImageFormat;
+pub const ImageColorSpace = images.ColorSpace;
+
+// Re-export SVG types
+pub const Svg = document.Svg;
 
 // Re-export layout types
 pub const Border = document.Border;
@@ -100,6 +111,9 @@ test {
     _ = metrics;
     _ = ttf;
     _ = embedded;
+    _ = images;
+    _ = xml;
+    _ = svg;
     _ = @import("writer.zig");
     _ = @import("testing.zig");
     _ = @import("integration_tests.zig");

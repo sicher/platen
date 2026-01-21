@@ -15,6 +15,8 @@ pub const color = @import("color.zig");
 pub const layout = @import("layout.zig");
 pub const Writer = @import("writer.zig").Writer;
 pub const zlib = @import("zlib.zig");
+pub const images = @import("images.zig");
+pub const svg = @import("svg.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -30,6 +32,8 @@ pub const TextStyle = metrics.TextStyle;
 pub const FontMetrics = metrics.FontMetrics;
 pub const EmbeddedFont = embedded.EmbeddedFont;
 pub const Color = color.Color;
+pub const Image = images.Image;
+pub const Svg = svg.Svg;
 
 // Layout types
 pub const Border = layout.Border;
@@ -116,6 +120,8 @@ const Page = struct {
     commands: std.ArrayListUnmanaged(ContentCommand), // Deferred commands
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void),
     used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
+    used_images: std.ArrayListUnmanaged(*Image),
+    used_svgs: std.ArrayListUnmanaged(*Svg),
 
     // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
     // All page allocations freed at once in deinit - no individual free() calls
@@ -127,6 +133,8 @@ const Page = struct {
             .commands = .{},
             .used_fonts = .{},
             .used_embedded = .{},
+            .used_images = .{},
+            .used_svgs = .{},
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };
     }
@@ -145,6 +153,8 @@ const Page = struct {
         self.content.deinit(backing_allocator);
         self.used_fonts.deinit(backing_allocator);
         self.used_embedded.deinit(backing_allocator);
+        self.used_images.deinit(backing_allocator);
+        self.used_svgs.deinit(backing_allocator);
     }
 
     fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
@@ -157,6 +167,22 @@ const Page = struct {
             if (f == font) return;
         }
         try self.used_embedded.append(allocator, font);
+    }
+
+    fn markImageUsed(self: *Page, allocator: std.mem.Allocator, image: *Image) !void {
+        // Check if already in list
+        for (self.used_images.items) |img| {
+            if (img == image) return;
+        }
+        try self.used_images.append(allocator, image);
+    }
+
+    fn markSvgUsed(self: *Page, allocator: std.mem.Allocator, s: *Svg) !void {
+        // Check if already in list
+        for (self.used_svgs.items) |existing| {
+            if (existing == s) return;
+        }
+        try self.used_svgs.append(allocator, s);
     }
 
     fn writer(self: *Page, allocator: std.mem.Allocator) ContentWriter {
@@ -246,6 +272,51 @@ fn embeddedFontResourceName(idx: usize) []const u8 {
     return "E99";
 }
 
+// Static image resource names to avoid dangling pointer issues
+const image_names = [_][]const u8{
+    "Im1",  "Im2",  "Im3",  "Im4",  "Im5",  "Im6",  "Im7",  "Im8",
+    "Im9",  "Im10", "Im11", "Im12", "Im13", "Im14", "Im15", "Im16",
+    "Im17", "Im18", "Im19", "Im20", "Im21", "Im22", "Im23", "Im24",
+    "Im25", "Im26", "Im27", "Im28", "Im29", "Im30", "Im31", "Im32",
+};
+
+fn imageResourceName(idx: usize) []const u8 {
+    if (idx < image_names.len) {
+        return image_names[idx];
+    }
+    return "Im99";
+}
+
+// Static SVG resource names (Form XObjects)
+const svg_names = [_][]const u8{
+    "Sv1",  "Sv2",  "Sv3",  "Sv4",  "Sv5",  "Sv6",  "Sv7",  "Sv8",
+    "Sv9",  "Sv10", "Sv11", "Sv12", "Sv13", "Sv14", "Sv15", "Sv16",
+    "Sv17", "Sv18", "Sv19", "Sv20", "Sv21", "Sv22", "Sv23", "Sv24",
+    "Sv25", "Sv26", "Sv27", "Sv28", "Sv29", "Sv30", "Sv31", "Sv32",
+};
+
+fn svgResourceName(idx: usize) []const u8 {
+    if (idx < svg_names.len) {
+        return svg_names[idx];
+    }
+    return "Sv99";
+}
+
+// Static ExtGState names for SVG transparency
+const extgstate_names = [_][]const u8{
+    "GS1",  "GS2",  "GS3",  "GS4",  "GS5",  "GS6",  "GS7",  "GS8",
+    "GS9",  "GS10", "GS11", "GS12", "GS13", "GS14", "GS15", "GS16",
+    "GS17", "GS18", "GS19", "GS20", "GS21", "GS22", "GS23", "GS24",
+    "GS25", "GS26", "GS27", "GS28", "GS29", "GS30", "GS31", "GS32",
+};
+
+fn extgstateResourceName(idx: usize) []const u8 {
+    if (idx < extgstate_names.len) {
+        return extgstate_names[idx];
+    }
+    return "GS99";
+}
+
 // ============================================================================
 // Document
 // ============================================================================
@@ -285,6 +356,10 @@ pub const Document = struct {
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
     // Track all embedded fonts
     embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .{},
+    // Track all loaded images
+    loaded_images: std.ArrayListUnmanaged(*Image) = .{},
+    // Track all loaded SVGs
+    loaded_svgs: std.ArrayListUnmanaged(*Svg) = .{},
 
     pub fn init(allocator: std.mem.Allocator) Document {
         return .{
@@ -305,6 +380,18 @@ pub const Document = struct {
             font.deinit();
         }
         self.embedded_fonts.deinit(self.allocator);
+        // Clean up loaded images
+        for (self.loaded_images.items) |image| {
+            image.deinit();
+            self.allocator.destroy(image);
+        }
+        self.loaded_images.deinit(self.allocator);
+        // Clean up loaded SVGs
+        for (self.loaded_svgs.items) |s| {
+            s.deinit();
+            self.allocator.destroy(s);
+        }
+        self.loaded_svgs.deinit(self.allocator);
     }
 
     /// Add a new page
@@ -348,6 +435,152 @@ pub const Document = struct {
             if (f == font) return i;
         }
         return null;
+    }
+
+    /// Load an image from file (JPEG or PNG).
+    /// Returns a handle that can be used with drawImage().
+    pub fn loadImage(self: *Document, path: []const u8) !*Image {
+        const image = try Image.fromFile(self.allocator, path);
+        try self.loaded_images.append(self.allocator, image);
+        return image;
+    }
+
+    /// Get index of image (for resource naming)
+    fn getImageIndex(self: *Document, image: *Image) ?usize {
+        for (self.loaded_images.items, 0..) |img, i| {
+            if (img == image) return i;
+        }
+        return null;
+    }
+
+    /// Draw an image at the specified position.
+    /// If w or h is 0, the original dimension is used (maintaining aspect ratio if one is specified).
+    /// Coordinates are from top-left origin.
+    pub fn drawImage(self: *Document, image: *Image, x: f64, y: f64, w: f64, h: f64) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Calculate display dimensions
+        var display_w = w;
+        var display_h = h;
+
+        if (display_w == 0 and display_h == 0) {
+            // Use original dimensions (1 pixel = 1 point)
+            display_w = @floatFromInt(image.width);
+            display_h = @floatFromInt(image.height);
+        } else if (display_w == 0) {
+            // Calculate width from height, maintaining aspect ratio
+            const aspect = @as(f64, @floatFromInt(image.width)) / @as(f64, @floatFromInt(image.height));
+            display_w = display_h * aspect;
+        } else if (display_h == 0) {
+            // Calculate height from width, maintaining aspect ratio
+            const aspect = @as(f64, @floatFromInt(image.height)) / @as(f64, @floatFromInt(image.width));
+            display_h = display_w * aspect;
+        }
+
+        // Convert from top-left to PDF coordinates (bottom-left origin)
+        // y is the top of the image, PDF needs the bottom
+        const pdf_y = page_height - y - display_h;
+
+        // Get image resource name
+        const img_idx = self.getImageIndex(image) orelse {
+            // Image not in document, add it
+            try self.loaded_images.append(self.allocator, image);
+            return self.drawImage(image, x, y, w, h);
+        };
+
+        // Mark image as used on this page
+        try page.markImageUsed(self.allocator, image);
+
+        // Generate PDF content: q cm /Im Do Q
+        // The cm operator sets a transformation matrix for scaling and positioning
+        var buf: [256]u8 = undefined;
+        const content = std.fmt.bufPrint(&buf, "q\n{d:.2} 0 0 {d:.2} {d:.2} {d:.2} cm\n/Im{d} Do\nQ\n", .{
+            display_w,
+            display_h,
+            x,
+            pdf_y,
+            img_idx + 1, // 1-indexed resource names
+        }) catch unreachable;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, content);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+    }
+
+    /// Load an SVG from file.
+    /// Returns a handle that can be used with drawSvg().
+    pub fn loadSvg(self: *Document, path: []const u8) !*Svg {
+        const s = try Svg.fromFile(self.allocator, path);
+        try self.loaded_svgs.append(self.allocator, s);
+        return s;
+    }
+
+    /// Get index of SVG (for resource naming)
+    fn getSvgIndex(self: *Document, s: *Svg) ?usize {
+        for (self.loaded_svgs.items, 0..) |existing, i| {
+            if (existing == s) return i;
+        }
+        return null;
+    }
+
+    /// Draw an SVG at the specified position.
+    /// If w or h is 0, the original dimension is used (maintaining aspect ratio if one is specified).
+    /// Coordinates are from top-left origin.
+    pub fn drawSvg(self: *Document, s: *Svg, x: f64, y: f64, w: f64, h: f64) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Calculate display dimensions
+        var display_w = w;
+        var display_h = h;
+
+        if (display_w == 0 and display_h == 0) {
+            // Use original dimensions
+            display_w = s.width;
+            display_h = s.height;
+        } else if (display_w == 0) {
+            // Calculate width from height, maintaining aspect ratio
+            const aspect = s.width / s.height;
+            display_w = display_h * aspect;
+        } else if (display_h == 0) {
+            // Calculate height from width, maintaining aspect ratio
+            const aspect = s.height / s.width;
+            display_h = display_w * aspect;
+        }
+
+        // Convert from top-left to PDF coordinates (bottom-left origin)
+        const pdf_y = page_height - y - display_h;
+
+        // Get SVG resource name
+        const svg_idx = self.getSvgIndex(s) orelse {
+            // SVG not in document, add it
+            try self.loaded_svgs.append(self.allocator, s);
+            return self.drawSvg(s, x, y, w, h);
+        };
+
+        // Mark SVG as used on this page
+        try page.markSvgUsed(self.allocator, s);
+
+        // Generate PDF content: q cm /SvN Do Q
+        // Scale from SVG dimensions to display dimensions
+        const scale_x = display_w / s.width;
+        const scale_y = display_h / s.height;
+
+        var buf: [256]u8 = undefined;
+        const content = std.fmt.bufPrint(&buf, "q\n{d:.4} 0 0 {d:.4} {d:.2} {d:.2} cm\n/{s} Do\nQ\n", .{
+            scale_x,
+            scale_y,
+            x,
+            pdf_y,
+            svgResourceName(svg_idx),
+        }) catch unreachable;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, content);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
     }
 
     /// Set character spacing (extra space between characters, in points)
@@ -1890,6 +2123,41 @@ pub const Document = struct {
             }
         }
 
+        // Reserve IDs for images
+        // Each image needs: XObject stream (1 object)
+        // PNG with alpha needs: +1 for SMask stream
+        // Images with ICC profile need: +1 for ICC profile stream
+        var image_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        defer image_base_ids.deinit(self.allocator);
+        var image_smask_ids = std.ArrayListUnmanaged(?ObjectId){};
+        defer image_smask_ids.deinit(self.allocator);
+        var image_icc_ids = std.ArrayListUnmanaged(?ObjectId){};
+        defer image_icc_ids.deinit(self.allocator);
+        for (self.loaded_images.items) |image| {
+            try image_base_ids.append(self.allocator, next_id);
+            next_id += 1;
+            if (image.alpha_data != null) {
+                try image_smask_ids.append(self.allocator, next_id);
+                next_id += 1;
+            } else {
+                try image_smask_ids.append(self.allocator, null);
+            }
+            if (image.icc_profile != null) {
+                try image_icc_ids.append(self.allocator, next_id);
+                next_id += 1;
+            } else {
+                try image_icc_ids.append(self.allocator, null);
+            }
+        }
+
+        // Reserve IDs for SVGs (Form XObjects - 1 object each)
+        var svg_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        defer svg_base_ids.deinit(self.allocator);
+        for (self.loaded_svgs.items) |_| {
+            try svg_base_ids.append(self.allocator, next_id);
+            next_id += 1;
+        }
+
         const first_page_id = next_id;
 
         // Write header
@@ -2184,6 +2452,144 @@ pub const Document = struct {
         }
         last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
 
+        // Write image XObjects
+        for (self.loaded_images.items, 0..) |image, i| {
+            const img_id = image_base_ids.items[i];
+            const smask_id = image_smask_ids.items[i];
+            const icc_id = image_icc_ids.items[i];
+
+            // Write ICC profile stream if present
+            if (icc_id) |iid| {
+                try w.beginObject(iid);
+                var icc_dict = Dict.init(self.allocator);
+                defer icc_dict.deinit();
+                // N = number of color components (3 for RGB, 1 for Gray, 4 for CMYK)
+                try icc_dict.put("N", Value.int(image.color_space.components()));
+                try icc_dict.put("Alternate", Value.name(image.color_space.pdfName()));
+                try w.writeStreamCompressed(&icc_dict, image.icc_profile.?);
+                try w.endObject();
+            }
+
+            // Write SMask first if present (PNG with alpha)
+            if (smask_id) |sid| {
+                try w.beginObject(sid);
+                var smask_dict = Dict.init(self.allocator);
+                defer smask_dict.deinit();
+                try smask_dict.put("Type", Value.name("XObject"));
+                try smask_dict.put("Subtype", Value.name("Image"));
+                try smask_dict.put("Width", Value.int(@intCast(image.width)));
+                try smask_dict.put("Height", Value.int(@intCast(image.height)));
+                try smask_dict.put("ColorSpace", Value.name("DeviceGray"));
+                try smask_dict.put("BitsPerComponent", Value.int(8));
+                // Alpha data is already compressed
+                try smask_dict.put("Filter", Value.name("FlateDecode"));
+                try w.writeStream(&smask_dict, image.alpha_data.?);
+                try w.endObject();
+            }
+
+            // Write main image XObject
+            try w.beginObject(img_id);
+            var img_dict = Dict.init(self.allocator);
+            defer img_dict.deinit();
+            try img_dict.put("Type", Value.name("XObject"));
+            try img_dict.put("Subtype", Value.name("Image"));
+            try img_dict.put("Width", Value.int(@intCast(image.width)));
+            try img_dict.put("Height", Value.int(@intCast(image.height)));
+
+            // Color space array for ICCBased (must stay in scope until writeStream)
+            var cs_array = Array.init(self.allocator);
+            defer cs_array.deinit();
+
+            // Color space: use ICCBased if we have an ICC profile, otherwise use device color space
+            if (icc_id) |iid| {
+                // ICCBased color space: [/ICCBased <ref>]
+                try cs_array.append(Value.name("ICCBased"));
+                try cs_array.append(Value.ref(.{ .id = iid }));
+                try img_dict.put("ColorSpace", .{ .array_val = &cs_array });
+            } else {
+                try img_dict.put("ColorSpace", Value.name(image.color_space.pdfName()));
+            }
+            try img_dict.put("BitsPerComponent", Value.int(image.bits_per_component));
+
+            // Filter and data handling
+            switch (image.format) {
+                .jpeg => {
+                    try img_dict.put("Filter", Value.name("DCTDecode"));
+                    // JPEG data is embedded directly
+                    try w.writeStream(&img_dict, image.data);
+                },
+                .png => {
+                    try img_dict.put("Filter", Value.name("FlateDecode"));
+                    // PNG data is already re-compressed
+                    if (smask_id) |sid| {
+                        try img_dict.put("SMask", Value.ref(.{ .id = sid }));
+                    }
+                    try w.writeStream(&img_dict, image.data);
+                },
+            }
+            try w.endObject();
+        }
+
+        // Write SVG Form XObjects
+        for (self.loaded_svgs.items, 0..) |s, i| {
+            const svg_id = svg_base_ids.items[i];
+
+            // Generate PDF content stream from SVG
+            const svg_content = try s.toPdfContent(self.allocator);
+            defer self.allocator.free(svg_content);
+
+            try w.beginObject(svg_id);
+            var form_dict = Dict.init(self.allocator);
+            defer form_dict.deinit();
+            try form_dict.put("Type", Value.name("XObject"));
+            try form_dict.put("Subtype", Value.name("Form"));
+
+            // BBox: [0 0 width height]
+            var bbox = Array.init(self.allocator);
+            defer bbox.deinit();
+            try bbox.append(Value.int(0));
+            try bbox.append(Value.int(0));
+            try bbox.append(Value.real(s.width));
+            try bbox.append(Value.real(s.height));
+            try form_dict.put("BBox", .{ .array_val = &bbox });
+
+            // Add ExtGState resources if SVG uses transparency
+            if (s.opacity_states.items.len > 0) {
+                var resources = Dict.init(self.allocator);
+                defer resources.deinit();
+
+                var extgstate = Dict.init(self.allocator);
+                defer extgstate.deinit();
+
+                // Create inline ExtGState dictionaries for each opacity state
+                var gs_dicts = try self.allocator.alloc(Dict, s.opacity_states.items.len);
+                defer {
+                    for (gs_dicts) |*d| d.deinit();
+                    self.allocator.free(gs_dicts);
+                }
+
+                for (s.opacity_states.items, 0..) |state, idx| {
+                    gs_dicts[idx] = Dict.init(self.allocator);
+                    try gs_dicts[idx].put("Type", Value.name("ExtGState"));
+                    try gs_dicts[idx].put("ca", Value.real(state.fill_opacity));
+                    try gs_dicts[idx].put("CA", Value.real(state.stroke_opacity));
+
+                    const gs_name = extgstateResourceName(idx);
+                    try extgstate.put(gs_name, .{ .dict_val = &gs_dicts[idx] });
+                }
+
+                try resources.put("ExtGState", .{ .dict_val = &extgstate });
+                try form_dict.put("Resources", .{ .dict_val = &resources });
+
+                // Write inside if block so nested dicts are still alive
+                try w.writeStreamCompressed(&form_dict, svg_content);
+            } else {
+                // No transparency - write without ExtGState resources
+                try w.writeStreamCompressed(&form_dict, svg_content);
+            }
+            try w.endObject();
+        }
+
         // Write each page
         const page_write_start = std.time.milliTimestamp();
         next_id = first_page_id;
@@ -2213,10 +2619,13 @@ pub const Document = struct {
             // Font resources (must stay in scope until writeDict completes)
             var font_res = Dict.init(self.allocator);
             defer font_res.deinit();
+            var xobject_res = Dict.init(self.allocator);
+            defer xobject_res.deinit();
             var resources = Dict.init(self.allocator);
             defer resources.deinit();
 
             var has_fonts = false;
+            var has_xobjects = false;
 
             // Add standard font resources
             for (font_list.items, 0..) |font, idx| {
@@ -2242,8 +2651,39 @@ pub const Document = struct {
                 }
             }
 
-            if (has_fonts) {
-                try resources.put("Font", .{ .dict_val = &font_res });
+            // Add image XObject resources
+            for (page.used_images.items) |img| {
+                // Find index of this image
+                for (self.loaded_images.items, 0..) |doc_img, idx| {
+                    if (doc_img == img) {
+                        const img_obj_id = image_base_ids.items[idx];
+                        try xobject_res.put(imageResourceName(idx), Value.ref(.{ .id = img_obj_id }));
+                        has_xobjects = true;
+                        break;
+                    }
+                }
+            }
+
+            // Add SVG XObject resources
+            for (page.used_svgs.items) |s| {
+                // Find index of this SVG
+                for (self.loaded_svgs.items, 0..) |doc_svg, idx| {
+                    if (doc_svg == s) {
+                        const svg_obj_id = svg_base_ids.items[idx];
+                        try xobject_res.put(svgResourceName(idx), Value.ref(.{ .id = svg_obj_id }));
+                        has_xobjects = true;
+                        break;
+                    }
+                }
+            }
+
+            if (has_fonts or has_xobjects) {
+                if (has_fonts) {
+                    try resources.put("Font", .{ .dict_val = &font_res });
+                }
+                if (has_xobjects) {
+                    try resources.put("XObject", .{ .dict_val = &xobject_res });
+                }
                 try page_dict.put("Resources", .{ .dict_val = &resources });
             }
 

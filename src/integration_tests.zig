@@ -31,6 +31,8 @@ const test_cases = [_]TestCase{
     .{ .name = "optimal_breaks", .generate = generateOptimalBreaksPdf },
     .{ .name = "colored_text", .generate = generateColoredTextPdf },
     .{ .name = "shapes", .generate = generateShapesPdf },
+    .{ .name = "images", .generate = generateImagesPdf },
+    .{ .name = "svg", .generate = generateSvgPdf },
 };
 
 // ============================================================================
@@ -1407,6 +1409,85 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "Image Embedding Test");
+
+    // Load images
+    const jpeg_img = try doc.loadImage("test/images/madonna_and_child_1939.1.256.jpg");
+    const png_img = try doc.loadImage("test/images/robot.png");
+
+    // Left column: JPEG
+    try doc.setFont(.helvetica_bold, 10);
+    try doc.writeAt(50, 50, "JPEG (100x140):");
+    try doc.drawImage(jpeg_img, 50, 55, 100, 140);
+
+    try doc.writeAt(50, 210, "JPEG w=80 (h auto):");
+    try doc.drawImage(jpeg_img, 50, 215, 80, 0);
+
+    // Right column: PNG with alpha
+    try doc.writeAt(200, 50, "PNG with alpha (80x120):");
+    try doc.drawImage(png_img, 200, 55, 80, 120);
+
+    try doc.writeAt(200, 190, "PNG h=100 (w auto):");
+    try doc.drawImage(png_img, 200, 195, 0, 100);
+
+    return doc.output();
+}
+
+fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "SVG Embedding Test");
+
+    // Load test SVG
+    const test_svg = try doc.loadSvg("test/images/test.svg");
+
+    // Row 1: Test SVG samples
+    try doc.setFont(.helvetica_bold, 10);
+    try doc.writeAt(50, 50, "Original (200x200):");
+    try doc.drawSvg(test_svg, 50, 55, 0, 0);
+
+    try doc.writeAt(280, 50, "Scaled (100x100):");
+    try doc.drawSvg(test_svg, 280, 55, 100, 100);
+
+    try doc.writeAt(420, 50, "Width=80:");
+    try doc.drawSvg(test_svg, 420, 55, 80, 0);
+
+    // Row 2: Opacity test SVG
+    if (doc.loadSvg("test/images/opacity_test.svg")) |opacity_svg| {
+        try doc.writeAt(50, 265, "Opacity Test (transparency):");
+        try doc.drawSvg(opacity_svg, 50, 280, 200, 200);
+
+        try doc.writeAt(280, 265, "Opacity Test (scaled 150x150):");
+        try doc.drawSvg(opacity_svg, 280, 280, 150, 150);
+    } else |_| {
+        // Opacity test SVG not available, skip
+    }
+
+    // Row 3: Large tiger SVG (centered)
+    if (doc.loadSvg("test/images/tiger.svg")) |tiger_svg| {
+        try doc.writeAt(50, 490, "Tiger SVG (300x300):");
+        // Center on page
+        try doc.drawSvg(tiger_svg, 147, 505, 300, 300);
+    } else |_| {
+        // Tiger SVG not available, skip
+    }
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -1478,6 +1559,16 @@ test "integration: colored_text PDF" {
 test "integration: shapes PDF" {
     // Tests graphics primitives: lines, rectangles, circles, ellipses, polygons
     try runIntegrationTest("shapes", generateShapesPdf);
+}
+
+test "integration: images PDF" {
+    // Tests image embedding: JPEG and PNG with various sizes and positions
+    try runIntegrationTest("images", generateImagesPdf);
+}
+
+test "integration: svg PDF" {
+    // Tests SVG embedding as Form XObjects
+    try runIntegrationTest("svg", generateSvgPdf);
 }
 
 fn runIntegrationTest(
