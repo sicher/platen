@@ -1126,6 +1126,67 @@ def gen_shapes():
     print("  shapes.pdf")
 
 
+def gen_images():
+    """Test image embedding: JPEG and PNG with various sizes and positions."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "Image Embedding Test")
+
+    # Left column: JPEG
+    pdf.set_font("Helvetica", "B", size=10)
+    pdf.text(50, 50, "JPEG (100x140):")
+    pdf.image("test/images/madonna_and_child_1939.1.256.jpg", x=50, y=55, w=100, h=140)
+
+    pdf.text(50, 210, "JPEG w=80 (h auto):")
+    pdf.image("test/images/madonna_and_child_1939.1.256.jpg", x=50, y=215, w=80)
+
+    # Right column: PNG with alpha
+    pdf.text(200, 50, "PNG with alpha (80x120):")
+    pdf.image("test/images/robot.png", x=200, y=55, w=80, h=120)
+
+    pdf.text(200, 190, "PNG h=100 (w auto):")
+    pdf.image("test/images/robot.png", x=200, y=195, h=100)
+
+    pdf.output(OUTPUT_DIR / "images.pdf")
+    print("  images.pdf")
+
+
+def gen_svg():
+    """Test SVG embedding as Form XObjects."""
+    from fpdf.svg import SVGImage
+
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "SVG Embedding Test")
+
+    # Row 1: Test SVG samples
+    pdf.set_font("Helvetica", "B", size=10)
+    pdf.text(50, 50, "Original (200x200):")
+    pdf.image("test/images/test.svg", x=50, y=55, w=200, h=200)
+
+    pdf.text(280, 50, "Scaled (100x100):")
+    pdf.image("test/images/test.svg", x=280, y=55, w=100, h=100)
+
+    pdf.text(420, 50, "Width=80:")
+    pdf.image("test/images/test.svg", x=420, y=55, w=80)
+
+    # Row 2: Large tiger SVG (centered)
+    import os
+    if os.path.exists("test/images/tiger.svg"):
+        pdf.text(50, 280, "Tiger SVG (400x400):")
+        # Center on page: (595 - 400) / 2 = 97.5
+        pdf.image("test/images/tiger.svg", x=97, y=295, w=400, h=400)
+
+    pdf.output(OUTPUT_DIR / "svg.pdf")
+    print("  svg.pdf")
+
+
 GENERATORS = {
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,
@@ -1140,6 +1201,8 @@ GENERATORS = {
     "justify": gen_justify,
     "colored_text": gen_colored_text,
     "shapes": gen_shapes,
+    "images": gen_images,
+    "svg": gen_svg,
 }
 
 
