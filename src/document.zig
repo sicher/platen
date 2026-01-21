@@ -50,9 +50,11 @@ pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
 pub const Region = layout.Region;
 pub const WriteResult = layout.WriteResult;
+pub const WrappedTextMetrics = layout.WrappedTextMetrics;
 pub const LineOptions = layout.LineOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const FlowOptions = layout.FlowOptions;
+pub const MeasureOptions = layout.MeasureOptions;
 pub const PageSize = layout.PageSize;
 
 // Graphics types
@@ -1405,6 +1407,154 @@ pub const Document = struct {
         std.mem.reverse(usize, breaks.items);
 
         return breaks.toOwnedSlice(allocator);
+    }
+
+    /// Measures how wrapped text would be laid out without rendering.
+    /// Returns total height, line count, and max line width.
+    /// Useful for calculating layout before rendering, checking if text fits, etc.
+    pub fn measureWrappedText(self: *Document, str: []const u8, opts: MeasureOptions) WrappedTextMetrics {
+        const line_height = self.getLineHeightPts();
+        const space_width = self.getTextWidth(" ");
+        var line_count: usize = 0;
+        var max_line_width: f64 = 0;
+        var is_first_line = true;
+
+        // Handle empty text
+        if (str.len == 0) {
+            return .{ .height = 0, .line_count = 0, .max_line_width = 0 };
+        }
+
+        // Greedy algorithm: process text word by word (same as writeParagraph)
+        var remaining = str;
+        while (remaining.len > 0) {
+            // Calculate available width for this line
+            const indent = if (is_first_line) opts.first_indent else 0;
+            const line_width = opts.width - indent;
+
+            // Build a line by collecting words
+            var line_end: usize = 0;
+            var current_width: f64 = 0;
+            var word_start: usize = 0;
+            var in_word = false;
+            var actual_line_width: f64 = 0;
+
+            for (remaining, 0..) |c, i| {
+                const is_space = c == ' ' or c == '\t' or c == '\n';
+
+                if (is_space and in_word) {
+                    // End of word - check if it fits
+                    const word = remaining[word_start..i];
+                    const word_width = self.getTextWidth(word);
+
+                    if (current_width + word_width <= line_width + 0.01) {
+                        // Word fits
+                        actual_line_width = current_width + word_width;
+                        current_width += word_width + space_width;
+                        line_end = i;
+                    } else if (line_end == 0) {
+                        // First word doesn't fit - try breaking
+                        if (opts.break_on_hyphens) {
+                            if (self.findHyphenBreak(word, line_width)) |break_pos| {
+                                const broken = remaining[word_start .. word_start + break_pos];
+                                actual_line_width = self.getTextWidth(broken);
+                                line_end = word_start + break_pos;
+                                break;
+                            }
+                        }
+                        if (self.findSoftHyphenBreak(word, line_width)) |break_pos| {
+                            const broken = remaining[word_start .. word_start + break_pos];
+                            actual_line_width = self.getTextWidth(broken) + self.getTextWidth("-");
+                            line_end = word_start + break_pos;
+                        } else if (self.findCharacterBreak(word, line_width)) |break_pos| {
+                            const broken = remaining[word_start .. word_start + break_pos];
+                            actual_line_width = self.getTextWidth(broken);
+                            line_end = word_start + break_pos;
+                        } else {
+                            actual_line_width = word_width;
+                            line_end = i;
+                        }
+                        break;
+                    } else {
+                        // Word doesn't fit, wrap to next line
+                        break;
+                    }
+                    in_word = false;
+
+                    if (c == '\n') {
+                        line_end = i;
+                        break;
+                    }
+                } else if (!is_space and !in_word) {
+                    word_start = i;
+                    in_word = true;
+                }
+            }
+
+            // Handle last word if still in one
+            if (in_word) {
+                const word = remaining[word_start..];
+                const word_width = self.getTextWidth(word);
+
+                if (current_width + word_width <= line_width + 0.01) {
+                    actual_line_width = current_width + word_width;
+                    line_end = remaining.len;
+                } else if (line_end == 0) {
+                    if (opts.break_on_hyphens) {
+                        if (self.findHyphenBreak(word, line_width)) |break_pos| {
+                            const broken = remaining[word_start .. word_start + break_pos];
+                            actual_line_width = self.getTextWidth(broken);
+                            line_end = word_start + break_pos;
+                        }
+                    }
+                    if (line_end == 0) {
+                        if (self.findSoftHyphenBreak(word, line_width)) |break_pos| {
+                            const broken = remaining[word_start .. word_start + break_pos];
+                            actual_line_width = self.getTextWidth(broken) + self.getTextWidth("-");
+                            line_end = word_start + break_pos;
+                        } else if (self.findCharacterBreak(word, line_width)) |break_pos| {
+                            const broken = remaining[word_start .. word_start + break_pos];
+                            actual_line_width = self.getTextWidth(broken);
+                            line_end = word_start + break_pos;
+                        } else {
+                            actual_line_width = word_width;
+                            line_end = remaining.len;
+                        }
+                    }
+                }
+            }
+
+            if (line_end == 0) break;
+
+            // Count this line
+            line_count += 1;
+            if (actual_line_width > max_line_width) {
+                max_line_width = actual_line_width;
+            }
+
+            // Check for soft-hyphen break (0xC2 0xAD in UTF-8)
+            const soft_hyphen_break = line_end >= 2 and
+                remaining[line_end - 2] == 0xC2 and remaining[line_end - 1] == 0xAD;
+
+            // Advance past the line
+            if (soft_hyphen_break) {
+                remaining = remaining[@min(line_end + 2, remaining.len)..];
+            } else {
+                remaining = remaining[line_end..];
+            }
+
+            // Skip leading whitespace for next line
+            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
+                remaining = remaining[1..];
+            }
+
+            is_first_line = false;
+        }
+
+        return .{
+            .height = @as(f64, @floatFromInt(line_count)) * line_height,
+            .line_count = line_count,
+            .max_line_width = max_line_width,
+        };
     }
 
     /// Writes wrapped text into a region.

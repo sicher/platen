@@ -1200,6 +1200,125 @@ test "writeParagraph optimal vs greedy produces different breaks" {
     try std.testing.expect(!std.mem.eql(u8, greedy_lines.items[1], optimal_lines.items[1]));
 }
 
+// ============================================================================
+// measureWrappedText tests
+// ============================================================================
+
+test "measureWrappedText basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const text = "Hello world";
+    const result = doc.measureWrappedText(text, .{ .width = 200 });
+
+    try std.testing.expectEqual(@as(usize, 1), result.line_count);
+    try std.testing.expect(result.height > 0);
+    try std.testing.expect(result.max_line_width > 0);
+    try std.testing.expect(result.max_line_width <= 200);
+}
+
+test "measureWrappedText multiple lines" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.courier, 12);
+
+    // Courier at 12pt: each char is 7.2pt wide
+    // "AAAA BBBB" = 9 chars = 64.8pt, so 50pt width should wrap
+    const text = "AAAA BBBB CCCC";
+    const result = doc.measureWrappedText(text, .{ .width = 50 });
+
+    try std.testing.expect(result.line_count > 1);
+}
+
+test "measureWrappedText empty text" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const result = doc.measureWrappedText("", .{ .width = 200 });
+
+    try std.testing.expectEqual(@as(usize, 0), result.line_count);
+    try std.testing.expectEqual(@as(f64, 0), result.height);
+    try std.testing.expectEqual(@as(f64, 0), result.max_line_width);
+}
+
+test "measureWrappedText matches writeParagraph line count" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const text = "The quick brown fox jumps over the lazy dog. This is a longer text that should wrap across multiple lines when rendered in a narrow region.";
+    const width: f64 = 150;
+
+    // Measure
+    const metrics = doc.measureWrappedText(text, .{ .width = width });
+
+    // Actually render
+    var region = Region{ .x = 0, .y = 0, .width = width, .height = 1000 };
+    const result = try doc.writeParagraph(&region, text, .{});
+
+    try std.testing.expectEqual(result.lines_written, metrics.line_count);
+}
+
+test "measureWrappedText first_indent reduces first line" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.courier, 12);
+
+    // Text that fits on one line at width 100
+    const text = "AAAA BBBB CCCC";
+    const width: f64 = 110;
+
+    // Without indent - should fit on one line
+    const no_indent = doc.measureWrappedText(text, .{ .width = width });
+
+    // With large indent - should wrap
+    const with_indent = doc.measureWrappedText(text, .{ .width = width, .first_indent = 50 });
+
+    try std.testing.expect(with_indent.line_count > no_indent.line_count);
+}
+
+test "measureWrappedText fitsInHeight" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const text = "Line one. Line two. Line three.";
+    const metrics = doc.measureWrappedText(text, .{ .width = 50 });
+
+    // Should fit in large height
+    try std.testing.expect(metrics.fitsInHeight(500));
+
+    // Should not fit in tiny height
+    try std.testing.expect(!metrics.fitsInHeight(5));
+}
+
+test "measureWrappedText with newlines" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    const text = "Line one\nLine two\nLine three";
+    const metrics = doc.measureWrappedText(text, .{ .width = 500 }); // Wide enough for no wrapping
+
+    try std.testing.expectEqual(@as(usize, 3), metrics.line_count);
+}
+
 test "mark positioning with Tm absolute coordinates" {
     // This test verifies Tm-based absolute positioning for mark glyphs.
     // Each glyph gets: "1 0 0 1 x y Tm <glyph> Tj"

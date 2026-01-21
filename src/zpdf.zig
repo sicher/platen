@@ -57,9 +57,11 @@ pub const Margins = document.Margins;
 pub const Padding = document.Padding;
 pub const Region = document.Region;
 pub const WriteResult = document.WriteResult;
+pub const WrappedTextMetrics = document.WrappedTextMetrics;
 pub const LineOptions = document.LineOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
 pub const FlowOptions = document.FlowOptions;
+pub const MeasureOptions = document.MeasureOptions;
 pub const PageSize = document.PageSize;
 
 // Re-export graphics types

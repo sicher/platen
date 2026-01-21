@@ -104,6 +104,33 @@ pub const WriteResult = struct {
     overflow: ?[]const u8,
 };
 
+/// Result of measuring wrapped text without rendering.
+pub const WrappedTextMetrics = struct {
+    /// Total height needed (line_count * line_height).
+    height: f64,
+    /// Number of lines the text would occupy.
+    line_count: usize,
+    /// Width of the widest line (useful for centering blocks).
+    max_line_width: f64,
+
+    /// Check if text would fit in given height.
+    pub fn fitsInHeight(self: WrappedTextMetrics, available_height: f64) bool {
+        return self.height <= available_height;
+    }
+};
+
+/// Options for measureWrappedText.
+pub const MeasureOptions = struct {
+    /// Available width for text wrapping (required).
+    width: f64,
+    /// First line indent in points.
+    first_indent: f64 = 0,
+    /// Allow breaking after regular hyphens in compound words.
+    break_on_hyphens: bool = true,
+    /// Line breaking algorithm.
+    line_breaking: LineBreaking = .greedy,
+};
+
 /// Options for writeLine (single line, no wrap).
 pub const LineOptions = struct {
     /// Horizontal text alignment.

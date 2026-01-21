@@ -236,6 +236,29 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 | `writeLine(&region, opts)` | Single line in region, no wrap, advances cursor |
 | `writeParagraph(&region, opts)` | Wrapped text in region, returns overflow |
 | `writeFlow(str, opts)` | Convenience: auto-adds pages on overflow |
+| `measureWrappedText(str, opts)` | Measure text layout without rendering |
+
+### Text Measurement
+
+Measure how wrapped text would be laid out without actually rendering it.
+Useful for calculating layout, checking if text fits, reserving space, etc.
+
+```zig
+const metrics = doc.measureWrappedText(text, .{
+    .width = 200,           // Available width for wrapping
+    .first_indent = 20,     // First line indent (optional)
+    .break_on_hyphens = true, // Break at hyphens (optional)
+});
+
+// metrics.height      - Total height needed (line_count * line_height)
+// metrics.line_count  - Number of lines
+// metrics.max_line_width - Width of widest line
+
+// Check if text would fit in a region
+if (metrics.fitsInHeight(region.remainingHeight())) {
+    _ = try doc.writeParagraph(&region, text, .{});
+}
+```
 
 ### Margins and Page Regions
 

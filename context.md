@@ -1,9 +1,27 @@
 # zpdf Context
 
 ## Current Focus
-SVG `<use>`/`<defs>` support complete. All 228 unit tests + 22 integration tests pass. MathJax equation SVGs with xlink:href work.
+All planned features complete. 235 unit tests + 22 integration tests pass.
 
 **Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+
+## What We Did (Session 2026-01-21 #53) [COMPLETE]
+- **Implemented `measureWrappedText`** - measure text layout without rendering:
+  - Added `WrappedTextMetrics` struct to `layout.zig`: height, line_count, max_line_width
+  - Added `MeasureOptions` struct: width, first_indent, break_on_hyphens, line_breaking
+  - Added `measureWrappedText()` to Document - uses same algorithm as `writeParagraph`
+  - `fitsInHeight()` helper method for checking if text fits in available space
+  - Exported types in `zpdf.zig`
+- **Added 7 unit tests** for measureWrappedText:
+  - Basic usage, multiple lines, empty text
+  - Verifies line count matches `writeParagraph`
+  - First indent reduces first line width
+  - `fitsInHeight` helper
+  - Newlines force line breaks
+- **Updated documentation**:
+  - DESIGN.md: Updated Path API as complete, added Text Measurement section
+  - context.md: Marked all planned features complete
+- All 235 unit tests pass
 
 ## What We Did (Session 2026-01-21 #52) [COMPLETE]
 - **Implemented SVG `<use>` and `<defs>` support**:
@@ -1117,5 +1135,4 @@ SVG `<use>`/`<defs>` support complete. All 228 unit tests + 22 integration tests
 
 ### Possible Future Enhancements
 - PDF embedding (parse external PDF, embed as Form XObject)
-- measureWrappedText (measure without rendering)
 - Hyphenation dictionary support
