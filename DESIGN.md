@@ -199,7 +199,7 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 **CLI commands:**
 - `zpdf check-refs` - Run semantic comparison, generate HTML report
 
-**Test cases (22 integration tests):**
+**Test cases (23 integration tests):**
 - `minimal` - Empty page
 - `hello_world` - Single text
 - `multi_font` - Multiple font families
@@ -222,6 +222,7 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - `svg_equation` - MathJax equation rendering
 - `paths` - Path API (moveTo, lineTo, curveTo, closePath)
 - `gradients` - Linear and radial gradients
+- `landscape` - Page sizes and orientations (A4, Letter, landscape, custom)
 
 ## Text API
 

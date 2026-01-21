@@ -131,12 +131,13 @@ const Page = struct {
     used_images: std.ArrayListUnmanaged(*Image),
     used_svgs: std.ArrayListUnmanaged(*Svg),
     used_gradients: std.AutoHashMapUnmanaged(usize, void),
+    size: PageSize, // Page dimensions
 
     // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
     // All page allocations freed at once in deinit - no individual free() calls
     arena: std.heap.ArenaAllocator,
 
-    fn init(backing_allocator: std.mem.Allocator) Page {
+    fn init(backing_allocator: std.mem.Allocator, size: PageSize) Page {
         return .{
             .content = .{},
             .commands = .{},
@@ -145,6 +146,7 @@ const Page = struct {
             .used_images = .{},
             .used_svgs = .{},
             .used_gradients = .{},
+            .size = size,
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };
     }
@@ -428,12 +430,23 @@ pub const Document = struct {
         self.gradients.deinit(self.allocator);
     }
 
-    /// Add a new page
+    /// Set the default page size for subsequent addPage() calls.
+    pub fn setDefaultPageSize(self: *Document, size: PageSize) void {
+        self.page_size = size;
+    }
+
+    /// Add a new page using the default page size.
     pub fn addPage(self: *Document) !void {
-        try self.pages.append(self.allocator, Page.init(self.allocator));
-        // Reset position to top-left (PDF coordinates: origin at bottom-left)
+        try self.addPageWithSize(self.page_size);
+    }
+
+    /// Add a new page with a specific size (overrides default for this page).
+    pub fn addPageWithSize(self: *Document, size: PageSize) !void {
+        self.page_size = size; // Update current size for coordinate calculations
+        try self.pages.append(self.allocator, Page.init(self.allocator, size));
+        // Reset position to top-left
         self.x = 0;
-        self.y = self.page_size.height;
+        self.y = size.height;
     }
 
     /// Set the current font and size (standard font)
@@ -2903,13 +2916,13 @@ pub const Document = struct {
             try page_dict.put("Type", Value.name("Page"));
             try page_dict.put("Parent", Value.ref(.{ .id = pages_root_id }));
 
-            // MediaBox
+            // MediaBox (use page's own size)
             var media_box = Array.init(self.allocator);
             defer media_box.deinit();
             try media_box.append(Value.int(0));
             try media_box.append(Value.int(0));
-            try media_box.append(Value.real(self.page_size.width));
-            try media_box.append(Value.real(self.page_size.height));
+            try media_box.append(Value.real(page.size.width));
+            try media_box.append(Value.real(page.size.height));
             try page_dict.put("MediaBox", .{ .array_val = &media_box });
 
             try page_dict.put("Contents", Value.ref(.{ .id = content_id }));

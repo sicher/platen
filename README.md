@@ -244,17 +244,26 @@ radial.addStop(1.0, zpdf.Color.fromRgb(1, 0, 0));     // red edge
 try doc.drawRadialGradient(&radial, 50, 200, 100, 100);
 ```
 
-### Multi-Page Documents
+### Page Sizes
 
 ```zig
-try doc.addPage();
-try doc.writeAt(50, 50, "Page 1");
+// Available sizes: A3, A4, A5, Letter, Legal, Tabloid
+// Default is A4
 
-try doc.addPage();
-try doc.writeAt(50, 50, "Page 2");
+// Set default page size for the document
+doc.setDefaultPageSize(zpdf.PageSize.Letter);
 
-try doc.addPage(.{ .width = 842, .height = 595 });  // landscape A4
-try doc.writeAt(50, 50, "Page 3 (landscape)");
+try doc.addPage();  // Letter
+try doc.addPage();  // Letter
+
+// One-off different size
+try doc.addPageWithSize(zpdf.PageSize.A4);
+
+// Landscape orientation
+try doc.addPageWithSize(zpdf.PageSize.Letter.landscape());
+
+// Custom size
+try doc.addPageWithSize(.{ .width = 500, .height = 700 });
 ```
 
 ## API Reference
@@ -265,8 +274,9 @@ try doc.writeAt(50, 50, "Page 3 (landscape)");
 |--------|-------------|
 | `init(allocator)` | Create new document |
 | `deinit()` | Free resources |
-| `addPage()` | Add A4 page |
-| `addPage(size)` | Add page with custom size |
+| `setDefaultPageSize(size)` | Set default for addPage() |
+| `addPage()` | Add page (default size) |
+| `addPageWithSize(size)` | Add page with specific size |
 | `output()` | Generate PDF bytes |
 | `setFont(font, size)` | Set standard font |
 | `setEmbeddedFont(font, size)` | Set custom font |

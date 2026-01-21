@@ -169,8 +169,20 @@ pub const PageSize = struct {
     width: f64,
     height: f64,
 
+    // ISO A series
+    pub const A3 = PageSize{ .width = 841.89, .height = 1190.55 };
     pub const A4 = PageSize{ .width = 595.28, .height = 841.89 };
+    pub const A5 = PageSize{ .width = 419.53, .height = 595.28 };
+
+    // US sizes
     pub const Letter = PageSize{ .width = 612, .height = 792 };
+    pub const Legal = PageSize{ .width = 612, .height = 1008 };
+    pub const Tabloid = PageSize{ .width = 792, .height = 1224 };
+
+    /// Return landscape orientation (swap width and height)
+    pub fn landscape(self: PageSize) PageSize {
+        return .{ .width = self.height, .height = self.width };
+    }
 };
 
 // ============================================================================

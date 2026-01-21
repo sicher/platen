@@ -1,9 +1,21 @@
 # zpdf Context
 
 ## Current Focus
-All planned features complete. 235 unit tests + 22 integration tests pass.
+All planned features complete. 239 unit tests + 23 integration tests pass.
 
 **Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+
+## What We Did (Session 2026-01-21 #54) [COMPLETE]
+- **Added page size API**:
+  - New PageSize constants: A3, A5, Legal, Tabloid (already had A4, Letter)
+  - `PageSize.landscape()` method to swap width/height
+  - `setDefaultPageSize(size)` - set default for subsequent addPage() calls
+  - `addPageWithSize(size)` - add page with specific size (one-off override)
+  - Page struct now stores its own size for per-page MediaBox
+- **Added 3 unit tests**: landscape, setDefaultPageSize, addPageWithSize
+- **Added landscape integration test**: A4/Letter portrait/landscape, custom size
+- **Created README.md**: full documentation with examples for all features
+- All 239 unit tests + 23 integration tests pass
 
 ## What We Did (Session 2026-01-21 #53) [COMPLETE]
 - **Implemented `measureWrappedText`** - measure text layout without rendering:

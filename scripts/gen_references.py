@@ -1302,6 +1302,55 @@ def gen_paths():
     print("  paths.pdf")
 
 
+def gen_landscape():
+    """Test page sizes and orientations."""
+    # Page 1: A4 portrait (default)
+    pdf = FPDF(unit="pt", format="A4")
+    pdf.set_margins(0, 0, 0)
+    pdf.set_auto_page_break(False)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 50, "Page 1: A4 Portrait (595 x 842)")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, f"Width: {pdf.w:.2f} pt")
+    pdf.text(50, 100, f"Height: {pdf.h:.2f} pt")
+
+    # Page 2: A4 landscape
+    pdf.add_page(orientation="L")
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 50, "Page 2: A4 Landscape (842 x 595)")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, f"Width: {pdf.w:.2f} pt")
+    pdf.text(50, 100, f"Height: {pdf.h:.2f} pt")
+
+    # Page 3: Letter portrait
+    pdf.add_page(orientation="P", format="Letter")
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 50, "Page 3: Letter Portrait (612 x 792)")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, f"Width: {pdf.w:.2f} pt")
+    pdf.text(50, 100, f"Height: {pdf.h:.2f} pt")
+
+    # Page 4: Letter landscape
+    pdf.add_page(orientation="L", format="Letter")
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 50, "Page 4: Letter Landscape (792 x 612)")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, f"Width: {pdf.w:.2f} pt")
+    pdf.text(50, 100, f"Height: {pdf.h:.2f} pt")
+
+    # Page 5: Custom size
+    pdf.add_page(orientation="P", format=(400, 300))
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 50, "Page 5: Custom (400 x 300)")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, f"Width: {pdf.w:.2f} pt")
+    pdf.text(50, 100, f"Height: {pdf.h:.2f} pt")
+
+    pdf.output(OUTPUT_DIR / "landscape.pdf")
+    print("  landscape.pdf")
+
+
 def gen_gradients():
     """Test gradient API: linear and radial gradients."""
     from fpdf.pattern import LinearGradient, RadialGradient
@@ -1378,6 +1427,7 @@ GENERATORS = {
     "svg_use_defs": gen_svg_use_defs,
     "paths": gen_paths,
     "gradients": gen_gradients,
+    "landscape": gen_landscape,
 }
 
 

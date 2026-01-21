@@ -71,6 +71,45 @@ test "page format Letter" {
     try std.testing.expectApproxEqAbs(@as(f64, 792), PageSize.Letter.height, 0.01);
 }
 
+test "page format landscape" {
+    const landscape_a4 = PageSize.A4.landscape();
+    try std.testing.expectApproxEqAbs(@as(f64, 841.89), landscape_a4.width, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f64, 595.28), landscape_a4.height, 0.01);
+}
+
+test "setDefaultPageSize" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is A4
+    try std.testing.expectApproxEqAbs(@as(f64, 595.28), doc.page_size.width, 0.01);
+
+    // Change to Letter
+    doc.setDefaultPageSize(PageSize.Letter);
+    try std.testing.expectApproxEqAbs(@as(f64, 612), doc.page_size.width, 0.01);
+
+    // addPage uses the new default
+    try doc.addPage();
+    try std.testing.expectApproxEqAbs(@as(f64, 612), doc.page_size.width, 0.01);
+}
+
+test "addPageWithSize overrides default" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default is A4
+    doc.setDefaultPageSize(PageSize.A4);
+    try doc.addPage(); // A4
+
+    // Add one page with Letter size
+    try doc.addPageWithSize(PageSize.Letter);
+    try std.testing.expectApproxEqAbs(@as(f64, 612), doc.page_size.width, 0.01);
+
+    // Back to A4
+    try doc.addPageWithSize(PageSize.A4);
+    try std.testing.expectApproxEqAbs(@as(f64, 595.28), doc.page_size.width, 0.01);
+}
+
 test "text without font returns error" {
     // fpdf2: test_text_no_font_set
     var doc = Document.init(std.testing.allocator);
