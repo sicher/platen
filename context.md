@@ -1,7 +1,107 @@
 # zpdf Context
 
 ## Current Focus
-Graphics primitives implemented. All tests pass. Next: images (JPEG/PNG embedding), advanced drawing (Path API), or remaining text features.
+SVG embedding with transparency support complete. All 211 tests pass. Next: Path API (moveTo, lineTo, curveTo), gradients, text elements, or PDF embedding.
+
+## What We Did (Session 2026-01-21 #50) [COMPLETE]
+- **Fixed SVG style inheritance bug** - tiger.svg was rendering all black:
+  - Changed Style field defaults from `Color.black` to `null` (meaning "unspecified")
+  - Added getter methods: `getFill()`, `getStroke()`, `getStrokeWidth()`, etc.
+  - Fixed merge logic so child elements properly inherit from parents
+  - Child explicit values override parent; unspecified values inherit
+- **Added opacity/transparency support**:
+  - New Style fields: `opacity`, `fill_opacity`, `stroke_opacity` (all optional f64)
+  - Parse `opacity`, `fill-opacity`, `stroke-opacity` attributes
+  - Parse `rgba(r, g, b, a)` color format
+  - `getFillOpacity()` and `getStrokeOpacity()` compute effective opacity (base * specific)
+  - `hasTransparency()` method to check if style uses transparency
+- **PDF ExtGState generation for transparency**:
+  - Added `OpacityState` struct tracking unique (fill_op, stroke_op) pairs
+  - SVG tracks opacity states during `toPdfContent()` via `getOrAddOpacityState()`
+  - Form XObjects include `/Resources << /ExtGState << /GS1 << /ca X /CA Y >> >> >>`
+  - Content stream emits `gs /GSn` operators when opacity < 1.0
+  - Fixed use-after-free bug: write stream inside if block before defer cleanup
+- Created `test/images/opacity_test.svg` with:
+  - Overlapping semi-transparent circles (red, green, blue at 50%)
+  - Rectangle with different fill/stroke opacity
+  - Rectangle with overall `opacity` attribute
+  - RGBA color example
+
+## What We Did (Session 2026-01-21 #49) [COMPLETE]
+- **Implemented SVG embedding as Form XObjects**:
+  - Created `src/xml.zig` (~280 lines):
+    - Minimal XML pull-parser for SVG parsing
+    - `XmlParser` struct with `nextElement()` method
+    - `Element` struct with tag, attributes, is_self_closing, is_end_tag
+    - `AttributeIterator` for parsing attribute name/value pairs
+    - Handles comments, XML declarations, DOCTYPE (skips them)
+  - Created `src/svg.zig` (~1660 lines):
+    - `Svg` struct with width, height, viewBox, elements list
+    - `SvgElement` union: rect, circle, ellipse, line, polyline, polygon, path, group
+    - Basic shapes: rect (with rounded corners), circle, ellipse, line
+    - Polygon/polyline: parses points attribute
+    - Path: full d-attribute parsing (M, L, H, V, C, S, Q, T, A, Z commands)
+    - Arc-to-bezier conversion for SVG A command (no PDF equivalent)
+    - Color parsing: hex (#RGB, #RRGGBB), rgb(), named colors (20+ colors)
+    - Style parsing: fill, stroke, stroke-width, stroke-linecap, stroke-linejoin
+    - Transform parsing: translate, scale, rotate, skewX, skewY, matrix
+    - `toPdfContent()`: converts SVG to PDF drawing operators
+    - Coordinate flip: SVG Y-down to PDF Y-up via `1 0 0 -1 0 height cm`
+    - ViewBox support with proper scaling
+  - Updated `src/document.zig`:
+    - Added `loaded_svgs` list to Document
+    - Added `used_svgs` list to Page
+    - Added `loadSvg(path)` method - loads and parses SVG file
+    - Added `drawSvg(svg, x, y, w, h)` method - draws SVG with scaling
+    - Auto aspect ratio: if w=0 or h=0, calculates from SVG dimensions
+    - PDF content: uses `q cm /SvN Do Q` operators for SVG placement
+  - Updated `output()` in document.zig:
+    - Reserve object IDs for SVGs (1 per SVG)
+    - Write Form XObjects with proper dictionaries:
+      - `/Type /XObject`, `/Subtype /Form`
+      - `/BBox [0 0 width height]`
+      - `/Filter /FlateDecode`, compressed content stream
+    - Add XObject resources to page resource dictionaries
+  - Re-exported types in `zpdf.zig`: `Svg`, `svg`, `xml` modules
+- **Added integration test** (`generateSvgPdf` in `integration_tests.zig`):
+  - Tests basic shapes, paths, colors, transforms
+  - Tests auto aspect ratio calculation
+  - Includes tiger.svg complex test (730 lines)
+- Created test SVG files: `test/images/test.svg` (basic shapes), using existing `tiger.svg`
+- All 211 tests pass (13 new XML/SVG tests + 1 integration test)
+
+## What We Did (Session 2026-01-20 #48) [COMPLETE]
+- **Implemented image embedding** (JPEG and PNG with alpha channel support):
+  - Created `src/images.zig` (~625 lines):
+    - `Image` struct with format, dimensions, color space, data, alpha_data
+    - `ImageFormat` enum (jpeg, png)
+    - `ColorSpace` enum (device_rgb, device_gray, device_cmyk)
+    - JPEG parser: extracts dimensions from SOF markers, embeds raw DCT data
+    - PNG parser: extracts IHDR, collects IDAT chunks, decompresses, unfilters, separates alpha
+    - PNG filter support: None, Sub, Up, Average, Paeth predictor
+  - Updated `document.zig`:
+    - Added `loaded_images` list to Document
+    - Added `used_images` list to Page (tracks images per page for resources)
+    - Added `loadImage(path)` method - loads and parses image file
+    - Added `drawImage(image, x, y, w, h)` method - draws image with scaling
+    - Auto aspect ratio: if w=0 or h=0, calculates from image dimensions
+    - PDF content: uses `q cm /ImN Do Q` operators for image placement
+  - Updated `output()` in document.zig:
+    - Reserve object IDs for images (1 per image, +1 for SMask if PNG with alpha)
+    - Write image XObjects with proper dictionaries:
+      - JPEG: `/Filter /DCTDecode`, raw JPEG data
+      - PNG: `/Filter /FlateDecode`, re-compressed pixel data
+      - PNG with alpha: separate SMask XObject for transparency
+    - Add XObject resources to page resource dictionaries
+  - Re-exported types in `zpdf.zig`: `Image`, `ImageFormat`, `ImageColorSpace`
+- **Added fpdf2 reference generator** (`gen_images()` in `gen_references.py`):
+  - Page 1: JPEG and PNG images at fixed sizes
+  - Page 2: Aspect ratio tests (width-only, height-only specified)
+- **Added integration test** (`generateImagesPdf` in `integration_tests.zig`):
+  - Tests both JPEG and PNG image embedding
+  - Tests auto aspect ratio calculation
+  - Compares against fpdf2 reference
+- All 197 tests pass (196 + 1 new integration test)
 
 ## What We Did (Session 2026-01-20 #47) [COMPLETE]
 - **Fixed drawCircle coordinate handling** in `document.zig`:
@@ -316,7 +416,7 @@ Graphics primitives implemented. All tests pass. Next: images (JPEG/PNG embeddin
 - All 152 tests pass
 
 ## Remaining Work
-- **Graphics support**: Images (JPEG/PNG embedding), Path API (moveTo, lineTo, curveTo)
+- **Graphics support**: Path API (moveTo, lineTo, curveTo), PDF embedding
 
 ## What We Did (Session 2026-01-18 #25) [COMPLETE]
 - **Implemented mark positioning in PDF rendering**:
@@ -919,7 +1019,11 @@ Graphics primitives implemented. All tests pass. Next: images (JPEG/PNG embeddin
 - Ported tests from fpdf2: page format, positioning, error handling, font tests
 
 ## Files of Interest
-- `src/zpdf.zig` - Main library, Document struct, text rendering, font embedding
+- `src/zpdf.zig` - Main library facade, re-exports from document.zig
+- `src/document.zig` - Document struct, text rendering, image/SVG drawing, PDF output
+- `src/images.zig` - JPEG/PNG parsing and image handling
+- `src/svg.zig` - SVG parsing and Form XObject generation
+- `src/xml.zig` - Minimal XML parser for SVG
 - `src/embedded.zig` - EmbeddedFont type, WinAnsiEncoding, font embedding logic
 - `src/opentype.zig` - OpenType GSUB/GPOS parsing for ligatures and kerning
 - `src/ttf_subset.zig` - TTF subsetting helpers (hmtx, cmap, assembly, composite glyphs)
@@ -942,15 +1046,16 @@ Graphics primitives implemented. All tests pass. Next: images (JPEG/PNG embeddin
 
 ## Next Steps
 
-### Priority 1: Graphics Import
-1. **JPEG embedding** - trivial, embed raw bytes with DCTDecode
-2. **PNG embedding** - decode, handle alpha as soft mask
+### Priority 1: Graphics Import (DONE: Images)
+1. ~~**JPEG embedding** - trivial, embed raw bytes with DCTDecode~~ ✓ DONE
+2. ~~**PNG embedding** - decode, handle alpha as soft mask~~ ✓ DONE
 3. **PDF embedding** - parse external PDF, embed as Form XObject
 
-### Priority 2: Advanced Drawing (DONE: Basic Shapes)
+### Priority 2: Advanced Drawing (DONE: Basic Shapes, Images)
 4. ~~Basic shapes: line, rect, circle, ellipse, polygon~~ ✓ DONE
-5. Path API: moveTo, lineTo, curveTo, closePath, stroke, fill
-6. ~~Styling: stroke/fill color, line width, dash patterns~~ ✓ DONE
+5. ~~**Image embedding** - JPEG (DCTDecode) and PNG (FlateDecode + SMask)~~ ✓ DONE
+6. Path API: moveTo, lineTo, curveTo, closePath, stroke, fill
+7. ~~Styling: stroke/fill color, line width, dash patterns~~ ✓ DONE
 
 ### Priority 3: Text Flow Enhancements
 7. measureWrappedText (measure without rendering)
