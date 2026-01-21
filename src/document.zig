@@ -853,6 +853,12 @@ pub const Document = struct {
         return self.page_size.height - self.y;
     }
 
+    /// Get current page number (1-based).
+    /// Returns 0 if no pages have been added.
+    pub fn pageNo(self: *Document) usize {
+        return self.pages.items.len;
+    }
+
     /// Writes text at the current cursor position.
     pub fn write(self: *Document, str: []const u8) !void {
         if (self.pages.items.len == 0) return error.NoPage;
@@ -2091,6 +2097,96 @@ pub const Document = struct {
         const op = getPathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
+
+        // Restore graphics state
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+    }
+
+    /// Draw a rectangle with rounded corners.
+    /// Parameters: (x, y) is upper-left corner, (w, h) is width/height, r is corner radius.
+    /// If radius is 0 or larger than half the smallest dimension, falls back to regular rect.
+    /// Coordinates are from top-left origin.
+    pub fn drawRoundedRect(self: *Document, x: f64, y: f64, w: f64, h: f64, r: f64, style: DrawStyle) !void {
+        // Clamp radius to half of smallest dimension
+        const max_r = @min(w, h) / 2.0;
+        const radius = @min(r, max_r);
+
+        // If radius is effectively 0, use regular rectangle
+        if (radius < 0.01) {
+            return self.drawRect(x, y, w, h, style);
+        }
+
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Convert from top-left to PDF coordinates (bottom-left origin)
+        const pdf_y = page_height - y - h;
+
+        // Kappa constant for approximating quarter circles with cubic Bezier curves
+        const KAPPA: f64 = 0.5522847498307936;
+        const k = radius * KAPPA;
+
+        var buf: [1024]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+
+        // Graphics state
+        len += self.writeGraphicsState(buf[len..], style);
+
+        // Build path: start at top-left corner, after the rounded part
+        // Move to start point (top edge, after top-left corner)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ x + radius, pdf_y + h }) catch unreachable).len;
+
+        // Top edge (left to right)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + w - radius, pdf_y + h }) catch unreachable).len;
+
+        // Top-right corner (curve)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            x + w - radius + k, pdf_y + h,
+            x + w,              pdf_y + h - radius + k,
+            x + w,              pdf_y + h - radius,
+        }) catch unreachable).len;
+
+        // Right edge (top to bottom)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + w, pdf_y + radius }) catch unreachable).len;
+
+        // Bottom-right corner (curve)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            x + w,              pdf_y + radius - k,
+            x + w - radius + k, pdf_y,
+            x + w - radius,     pdf_y,
+        }) catch unreachable).len;
+
+        // Bottom edge (right to left)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + radius, pdf_y }) catch unreachable).len;
+
+        // Bottom-left corner (curve)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            x + radius - k, pdf_y,
+            x,              pdf_y + radius - k,
+            x,              pdf_y + radius,
+        }) catch unreachable).len;
+
+        // Left edge (bottom to top)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x, pdf_y + h - radius }) catch unreachable).len;
+
+        // Top-left corner (curve)
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
+            x,              pdf_y + h - radius + k,
+            x + radius - k, pdf_y + h,
+            x + radius,     pdf_y + h,
+        }) catch unreachable).len;
+
+        // Close path and apply style
+        const op = getPathOperator(style);
+        len += (std.fmt.bufPrint(buf[len..], "h {s}", .{op}) catch unreachable).len;
 
         // Restore graphics state
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;

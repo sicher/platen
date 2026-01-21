@@ -77,6 +77,26 @@ test "page format landscape" {
     try std.testing.expectApproxEqAbs(@as(f64, 595.28), landscape_a4.height, 0.01);
 }
 
+test "pageNo returns current page number" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // No pages yet
+    try std.testing.expectEqual(@as(usize, 0), doc.pageNo());
+
+    // Add first page
+    try doc.addPage();
+    try std.testing.expectEqual(@as(usize, 1), doc.pageNo());
+
+    // Add second page
+    try doc.addPage();
+    try std.testing.expectEqual(@as(usize, 2), doc.pageNo());
+
+    // Add third page
+    try doc.addPage();
+    try std.testing.expectEqual(@as(usize, 3), doc.pageNo());
+}
+
 test "setDefaultPageSize" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
@@ -1625,6 +1645,53 @@ test "drawRect fill_stroke" {
     defer doc.allocator.free(pdf);
 
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawRoundedRect basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.drawRoundedRect(50, 50, 100, 80, 10, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify valid PDF output (content is compressed)
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
+}
+
+test "drawRoundedRect zero radius falls back to rect" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    // Zero radius should use regular rect (re command)
+    try doc.drawRoundedRect(50, 50, 100, 80, 0, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify valid PDF output
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
+}
+
+test "drawRoundedRect radius clamped to half min dimension" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    // Radius 100 is larger than half of min(100, 80) = 40, so clamped to 40
+    try doc.drawRoundedRect(50, 50, 100, 80, 100, .fill);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify valid PDF output
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Contents") != null);
 }
 
 test "drawCircle basic" {

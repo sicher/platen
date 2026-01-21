@@ -171,6 +171,9 @@ try doc.drawLine(50, 100, 200, 100);
 // Rectangle (stroke, fill, or fill_stroke)
 try doc.drawRect(50, 120, 100, 50, .fill_stroke);
 
+// Rounded rectangle
+try doc.drawRoundedRect(50, 180, 100, 50, 10, .fill_stroke);
+
 // Circle
 try doc.drawCircle(200, 200, 30, .fill);
 
@@ -294,6 +297,7 @@ doc.setMetadata(.{
 | `setDefaultPageSize(size)` | Set default for addPage() |
 | `addPage()` | Add page (default size) |
 | `addPageWithSize(size)` | Add page with specific size |
+| `pageNo()` | Get current page count |
 | `output()` | Generate PDF bytes |
 | `setFont(font, size)` | Set standard font |
 | `setEmbeddedFont(font, size)` | Set custom font |
@@ -319,6 +323,7 @@ doc.setMetadata(.{
 |--------|-------------|
 | `drawLine(x1, y1, x2, y2)` | Draw line |
 | `drawRect(x, y, w, h, style)` | Draw rectangle |
+| `drawRoundedRect(x, y, w, h, r, style)` | Draw rounded rectangle |
 | `drawCircle(x, y, r, style)` | Draw circle |
 | `drawEllipse(x, y, w, h, style)` | Draw ellipse |
 | `drawPolygon(points, style)` | Draw polygon |

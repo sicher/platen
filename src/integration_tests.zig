@@ -1330,6 +1330,29 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     doc.setDrawColor(zpdf.Color.black);
     doc.setLineWidth(1);
 
+    // === Rounded Rectangles ===
+    try doc.setFont(.helvetica_bold, 12);
+    try doc.writeAt(50, y, "Rounded Rectangles:");
+    y += 15;
+
+    // Small radius
+    try doc.drawRoundedRect(50, y, 60, 30, 5, .stroke);
+
+    // Medium radius
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 230, 200)); // Light orange
+    try doc.drawRoundedRect(130, y, 60, 30, 10, .fill);
+
+    // Large radius (pill shape) - use 14 not 15 to avoid fpdf2 edge case bug
+    doc.setFillColor(zpdf.Color.fromRgb255(200, 230, 255)); // Light blue
+    doc.setDrawColor(zpdf.Color.blue);
+    doc.setLineWidth(2);
+    try doc.drawRoundedRect(210, y, 80, 30, 14, .fill_stroke);
+    y += 45;
+
+    // Reset
+    doc.setDrawColor(zpdf.Color.black);
+    doc.setLineWidth(1);
+
     // === Circles ===
     try doc.setFont(.helvetica_bold, 12);
     try doc.writeAt(50, y, "Circles:");

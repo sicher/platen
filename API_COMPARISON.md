@@ -18,13 +18,13 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Custom page sizes | tuple `(w, h)` | ✅ `PageSize{.width, .height}` | |
 | Landscape orientation | `orientation="landscape"` | ✅ `PageSize.landscape()` | |
 | Per-page orientation | `add_page(orientation=)` | ✅ `addPageWithSize()` | |
-| **Document title** | `set_title()` | ❌ | **GAP** |
-| **Document author** | `set_author()` | ❌ | **GAP** |
-| **Document subject** | `set_subject()` | ❌ | **GAP** |
-| **Document keywords** | `set_keywords()` | ❌ | **GAP** |
-| **Document creator** | `set_creator()` | ❌ | **GAP** |
-| **Document producer** | `set_producer()` | ❌ | **GAP** |
-| **Creation date** | `set_creation_date()` | ❌ | **GAP** |
+| Document title | `set_title()` | ✅ `setMetadata()` | |
+| Document author | `set_author()` | ✅ `setMetadata()` | |
+| Document subject | `set_subject()` | ✅ `setMetadata()` | |
+| Document keywords | `set_keywords()` | ✅ `setMetadata()` | |
+| Document creator | `set_creator()` | ✅ `setMetadata()` | |
+| Document producer | `set_producer()` | ✅ `setMetadata()` | zpdf default |
+| Creation date | `set_creation_date()` | ✅ auto-generated | |
 | **XMP metadata** | `set_xmp_metadata()` | ❌ | **GAP** |
 | **Document language** | `set_lang()` | ❌ | **GAP** |
 
@@ -42,7 +42,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | **Auto page break** | `set_auto_page_break()` | ❌ | **GAP** - zpdf has manual `writeFlow` |
 | **Page background** | `set_page_background()` | ❌ | **GAP** |
 | **Alias for total pages** | `alias_nb_pages()` | ❌ | **GAP** - "{nb}" placeholder |
-| **Page number** | `page_no()` | ❌ | **GAP** |
+| Page number | `page_no()` | ✅ `pageNo()` | |
 | **Page labels** | `set_page_label()`, `get_page_label()` | ❌ | **GAP** |
 
 ---
@@ -153,7 +153,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Ellipse | `ellipse()` | ✅ `drawEllipse()` | |
 | Polygon | `polygon()` | ✅ `drawPolygon()` | |
 | **Polyline** | `polyline()` | ❌ | **GAP** - use Path |
-| **Rounded rectangle** | `rect(round_corners=)` | ❌ | **GAP** |
+| Rounded rectangle | `rect(round_corners=)` | ✅ `drawRoundedRect()` | |
 | **Regular polygon** | `regular_polygon()` | ❌ | **GAP** - use drawPolygon manually |
 | **Star** | `star()` | ❌ | **GAP** |
 | **Arc** | `arc()` | ❌ | **GAP** |

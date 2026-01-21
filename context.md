@@ -1,9 +1,21 @@
 # zpdf Context
 
 ## Current Focus
-Filling API gaps vs fpdf2. 246 unit tests + 23 integration tests pass.
+Filling API gaps vs fpdf2. 249 unit tests + 23 integration tests pass.
 
 **Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+
+## What We Did (Session 2026-01-21 #56) [COMPLETE]
+- **Implemented quick wins from API gap analysis**:
+  - **pageNo()**: Returns current page count (`pages.items.len`)
+  - **drawRoundedRect()**: Rounded rectangles using Bezier curves (KAPPA constant)
+    - Parameters: x, y, width, height, corner_radius, style
+    - Handles small radii (clamps to half min dimension)
+- **Added unit tests**: 1 for pageNo(), 3 for rounded rectangles
+- **Updated integration test**: Added rounded rectangles to shapes test
+- **Regenerated fpdf2 reference**: Updated gen_references.py with round_corners=True
+- **Updated documentation**: README (example + API table), API_COMPARISON.md
+- All 249 unit tests + 23 integration tests pass
 
 ## What We Did (Session 2026-01-21 #55) [COMPLETE]
 - **Created API_COMPARISON.md**: Comprehensive comparison of zpdf vs fpdf2 APIs

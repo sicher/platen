@@ -1055,6 +1055,29 @@ def gen_shapes():
     pdf.set_draw_color(0, 0, 0)
     pdf.set_line_width(1)
 
+    # === Rounded Rectangles ===
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.text(50, y, "Rounded Rectangles:")
+    y += 15
+
+    # Small radius
+    pdf.rect(50, y, 60, 30, style="D", round_corners=True, corner_radius=5)
+
+    # Medium radius
+    pdf.set_fill_color(255, 230, 200)  # Light orange
+    pdf.rect(130, y, 60, 30, style="F", round_corners=True, corner_radius=10)
+
+    # Large radius (pill shape) - use 14 not 15 to avoid fpdf2 edge case bug
+    pdf.set_fill_color(200, 230, 255)  # Light blue
+    pdf.set_draw_color(0, 0, 255)  # Blue
+    pdf.set_line_width(2)
+    pdf.rect(210, y, 80, 30, style="FD", round_corners=True, corner_radius=14)
+    y += 45
+
+    # Reset
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(1)
+
     # === Circles ===
     pdf.set_font("Helvetica", "B", size=12)
     pdf.text(50, y, "Circles:")
