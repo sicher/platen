@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <!-- Basic text -->
+  <text x="20" y="30" font-size="24" fill="black">Hello, PDF!</text>
+
+  <!-- Serif font -->
+  <text x="20" y="70" font-family="serif" font-size="18" fill="#333333">Serif Text (Times)</text>
+
+  <!-- Monospace font -->
+  <text x="20" y="100" font-family="monospace" font-size="16" fill="#666666">Monospace (Courier)</text>
+
+  <!-- Bold text -->
+  <text x="20" y="140" font-weight="bold" font-size="20" fill="navy">Bold Sans-Serif</text>
+
+  <!-- Italic text -->
+  <text x="20" y="175" font-style="italic" font-size="18" fill="darkgreen">Italic Text</text>
+
+  <!-- Bold italic -->
+  <text x="20" y="210" font-weight="bold" font-style="italic" font-size="18" fill="maroon">Bold Italic</text>
+
+  <!-- Additional text samples -->
+  <text x="20" y="250" font-size="16" fill="purple">Purple Text Sample</text>
+
+  <text x="20" y="280" font-size="14" fill="teal">Teal Text at Bottom</text>
+</svg>

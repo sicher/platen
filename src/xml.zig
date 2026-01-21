@@ -235,6 +235,16 @@ pub const XmlParser = struct {
         };
     }
 
+    /// Get text content from current position until the next tag
+    /// Returns the trimmed text between current position and next '<'
+    pub fn getTextContent(self: *XmlParser) []const u8 {
+        const start = self.pos;
+        while (self.pos < self.data.len and self.data[self.pos] != '<') {
+            self.pos += 1;
+        }
+        return std.mem.trim(u8, self.data[start..self.pos], " \t\n\r");
+    }
+
     /// Skip to the end of the current element (past the matching end tag)
     pub fn skipElement(self: *XmlParser, tag_name: []const u8) void {
         var depth: usize = 1;

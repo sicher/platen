@@ -48,6 +48,42 @@ pub const LineJoin = enum {
     }
 };
 
+/// Font family for SVG text
+pub const FontFamily = enum {
+    serif, // Times
+    sans_serif, // Helvetica
+    monospace, // Courier
+
+    /// Map to PDF standard font base name
+    pub fn toPdfBaseName(self: FontFamily) []const u8 {
+        return switch (self) {
+            .serif => "Times",
+            .sans_serif => "Helvetica",
+            .monospace => "Courier",
+        };
+    }
+};
+
+/// Font weight
+pub const FontWeight = enum {
+    normal,
+    bold,
+};
+
+/// Font style
+pub const FontStyle = enum {
+    normal,
+    italic,
+    oblique,
+};
+
+/// Text anchor for horizontal alignment
+pub const TextAnchor = enum {
+    start, // Left-aligned (default)
+    middle, // Center-aligned
+    end, // Right-aligned
+};
+
 /// 2D point
 pub const Point = struct {
     x: f64,
@@ -253,6 +289,18 @@ pub const SvgElement = union(enum) {
         style: Style = .{},
         transform: Transform = .{},
     },
+    text: struct {
+        x: f64 = 0,
+        y: f64 = 0,
+        content: []const u8,
+        font_family: FontFamily = .sans_serif,
+        font_size: f64 = 16,
+        font_weight: FontWeight = .normal,
+        font_style: FontStyle = .normal,
+        text_anchor: TextAnchor = .start,
+        style: Style = .{},
+        transform: Transform = .{},
+    },
 
     pub fn deinit(self: *SvgElement, allocator: std.mem.Allocator) void {
         switch (self.*) {
@@ -265,6 +313,7 @@ pub const SvgElement = union(enum) {
                 }
                 g.children.deinit(allocator);
             },
+            .text => |*t| allocator.free(t.content),
             else => {},
         }
     }
@@ -281,6 +330,53 @@ pub const OpacityState = struct {
 };
 
 /// Parsed SVG document
+/// Font used in SVG text elements
+pub const UsedFont = struct {
+    family: FontFamily,
+    weight: FontWeight,
+    style: FontStyle,
+
+    /// Get the PDF standard font name (e.g., "Helvetica-Bold")
+    pub fn toPdfName(self: UsedFont) []const u8 {
+        return switch (self.family) {
+            .sans_serif => switch (self.weight) {
+                .normal => switch (self.style) {
+                    .normal => "Helvetica",
+                    .italic, .oblique => "Helvetica-Oblique",
+                },
+                .bold => switch (self.style) {
+                    .normal => "Helvetica-Bold",
+                    .italic, .oblique => "Helvetica-BoldOblique",
+                },
+            },
+            .serif => switch (self.weight) {
+                .normal => switch (self.style) {
+                    .normal => "Times-Roman",
+                    .italic, .oblique => "Times-Italic",
+                },
+                .bold => switch (self.style) {
+                    .normal => "Times-Bold",
+                    .italic, .oblique => "Times-BoldItalic",
+                },
+            },
+            .monospace => switch (self.weight) {
+                .normal => switch (self.style) {
+                    .normal => "Courier",
+                    .italic, .oblique => "Courier-Oblique",
+                },
+                .bold => switch (self.style) {
+                    .normal => "Courier-Bold",
+                    .italic, .oblique => "Courier-BoldOblique",
+                },
+            },
+        };
+    }
+
+    pub fn eql(a: UsedFont, b: UsedFont) bool {
+        return a.family == b.family and a.weight == b.weight and a.style == b.style;
+    }
+};
+
 pub const Svg = struct {
     allocator: std.mem.Allocator,
     width: f64,
@@ -291,6 +387,7 @@ pub const Svg = struct {
     viewbox_height: f64 = 0,
     elements: std.ArrayListUnmanaged(SvgElement),
     opacity_states: std.ArrayListUnmanaged(OpacityState) = .{},
+    used_fonts: std.ArrayListUnmanaged(UsedFont) = .{},
 
     pub fn init(allocator: std.mem.Allocator) Svg {
         return .{
@@ -299,6 +396,7 @@ pub const Svg = struct {
             .height = 0,
             .elements = .{},
             .opacity_states = .{},
+            .used_fonts = .{},
         };
     }
 
@@ -308,6 +406,7 @@ pub const Svg = struct {
         }
         self.elements.deinit(self.allocator);
         self.opacity_states.deinit(self.allocator);
+        self.used_fonts.deinit(self.allocator);
     }
 
     /// Get or add an opacity state, returns index for naming (GS1, GS2, etc.)
@@ -320,9 +419,23 @@ pub const Svg = struct {
         return self.opacity_states.items.len - 1;
     }
 
+    /// Get or add a font, returns index for naming (F1, F2, etc.)
+    pub fn getOrAddFont(self: *Svg, font: UsedFont) !usize {
+        for (self.used_fonts.items, 0..) |f, i| {
+            if (f.eql(font)) return i;
+        }
+        try self.used_fonts.append(self.allocator, font);
+        return self.used_fonts.items.len - 1;
+    }
+
     /// Check if this SVG uses any transparency
     pub fn hasTransparency(self: *const Svg) bool {
         return self.opacity_states.items.len > 0;
+    }
+
+    /// Check if this SVG uses any text
+    pub fn hasText(self: *const Svg) bool {
+        return self.used_fonts.items.len > 0;
     }
 
     /// Load SVG from file
@@ -393,6 +506,8 @@ pub const Svg = struct {
                 try self.parsePolygon(elem, current_style, current_transform);
             } else if (std.mem.eql(u8, elem.tag, "path")) {
                 try self.parsePath(elem, current_style, current_transform);
+            } else if (std.mem.eql(u8, elem.tag, "text")) {
+                try self.parseText(&parser, elem, current_style, current_transform);
             } else if (std.mem.eql(u8, elem.tag, "g")) {
                 // Group - push transform and style
                 var group_transform = current_transform;
@@ -616,6 +731,55 @@ pub const Svg = struct {
         try self.elements.append(self.allocator, path);
     }
 
+    fn parseText(self: *Svg, parser: *xml.XmlParser, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
+        var text_elem = SvgElement{ .text = .{ .content = "" } };
+        var local_transform = Transform.identity;
+        var local_style = Style{};
+
+        var attrs = elem.attributes();
+        while (attrs.next()) |attr| {
+            if (std.mem.eql(u8, attr.name, "x")) {
+                text_elem.text.x = parseFloat(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "y")) {
+                text_elem.text.y = parseFloat(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "font-family")) {
+                text_elem.text.font_family = parseFontFamily(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "font-size")) {
+                text_elem.text.font_size = parseLengthValue(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "font-weight")) {
+                text_elem.text.font_weight = parseFontWeight(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "font-style")) {
+                text_elem.text.font_style = parseFontStyle(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "text-anchor")) {
+                text_elem.text.text_anchor = parseTextAnchor(attr.value);
+            } else if (std.mem.eql(u8, attr.name, "transform")) {
+                local_transform = parseTransform(attr.value);
+            } else {
+                parseStyleAttribute(attr.name, attr.value, &local_style);
+            }
+        }
+
+        // Get text content from parser (text between <text> and </text>)
+        if (!elem.is_self_closing) {
+            const content = parser.getTextContent();
+            if (content.len > 0) {
+                text_elem.text.content = try self.allocator.dupe(u8, content);
+            }
+        }
+
+        // Register the font
+        const font = UsedFont{
+            .family = text_elem.text.font_family,
+            .weight = text_elem.text.font_weight,
+            .style = text_elem.text.font_style,
+        };
+        _ = try self.getOrAddFont(font);
+
+        text_elem.text.style = parent_style.merge(local_style);
+        text_elem.text.transform = parent_transform.multiply(local_transform);
+        try self.elements.append(self.allocator, text_elem);
+    }
+
     /// Generate PDF content stream for this SVG
     pub fn toPdfContent(self: *Svg, allocator: std.mem.Allocator) ![]u8 {
         var content = std.ArrayListUnmanaged(u8){};
@@ -659,6 +823,7 @@ pub const Svg = struct {
             .polyline => |p| try renderPolyline(self, writer, p),
             .polygon => |p| try renderPolygon(self, writer, p),
             .path => |p| try renderPath(self, writer, p),
+            .text => |t| try renderText(self, writer, t),
             .group => |g| {
                 for (g.children.items) |*child| {
                     try self.renderElement(writer, child);
@@ -996,6 +1161,78 @@ fn renderPath(svg: *Svg, writer: *ContentWriter, path: anytype) !void {
     try restoreTransform(writer, path.transform);
 }
 
+fn renderText(svg: *Svg, writer: *ContentWriter, text: anytype) !void {
+    if (text.content.len == 0) return;
+
+    try applyTransform(writer, text.transform);
+
+    // Find font index
+    const font = UsedFont{
+        .family = text.font_family,
+        .weight = text.font_weight,
+        .style = text.font_style,
+    };
+    var font_idx: usize = 0;
+    for (svg.used_fonts.items, 0..) |f, i| {
+        if (f.eql(font)) {
+            font_idx = i;
+            break;
+        }
+    }
+
+    // Calculate text width for alignment (approximate: 0.5 * font_size per char)
+    // This is an approximation since we don't have access to actual font metrics here.
+    // For pixel-perfect alignment, SVG authors should use explicit positioning.
+    const char_width = text.font_size * 0.5;
+    const text_width = char_width * @as(f64, @floatFromInt(text.content.len));
+
+    // Calculate x offset based on text-anchor
+    var x = text.x;
+    switch (text.text_anchor) {
+        .start => {},
+        .middle => x -= text_width / 2,
+        .end => x -= text_width,
+    }
+
+    // Apply fill color
+    const fill = text.style.getFill();
+    if (fill) |c| {
+        if (!c.isNone()) {
+            try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{
+                @as(f64, @floatFromInt(c.r)) / 255.0,
+                @as(f64, @floatFromInt(c.g)) / 255.0,
+                @as(f64, @floatFromInt(c.b)) / 255.0,
+            });
+        }
+    }
+
+    // PDF text operators
+    // Use Tm (text matrix) with negative Y scale to counter the global SVG Y-flip.
+    // The SVG coordinate system is flipped with "1 0 0 -1 0 height cm", so text
+    // would appear upside down. Using "1 0 0 -1 x y Tm" cancels the flip for text.
+    try writer.append("BT\n");
+    try writer.print("/F{d} {d:.2} Tf\n", .{ font_idx + 1, text.font_size });
+    try writer.print("1 0 0 -1 {d:.2} {d:.2} Tm\n", .{ x, text.y });
+
+    // Write text content (escape special PDF characters)
+    try writer.append("(");
+    for (text.content) |c| {
+        switch (c) {
+            '(' => try writer.append("\\("),
+            ')' => try writer.append("\\)"),
+            '\\' => try writer.append("\\\\"),
+            else => {
+                var buf: [1]u8 = .{c};
+                try writer.append(&buf);
+            },
+        }
+    }
+    try writer.append(") Tj\n");
+    try writer.append("ET\n");
+
+    try restoreTransform(writer, text.transform);
+}
+
 fn applyTransform(writer: *ContentWriter, transform: Transform) !void {
     if (transform.a == 1 and transform.b == 0 and transform.c == 0 and
         transform.d == 1 and transform.e == 0 and transform.f == 0)
@@ -1194,6 +1431,64 @@ fn vectorAngle(ux: f64, uy: f64, vx: f64, vy: f64) f64 {
 // ============================================================================
 // Parsing Helpers
 // ============================================================================
+
+/// Parse font-family attribute
+fn parseFontFamily(value: []const u8) FontFamily {
+    // Check for common font family names
+    const lower = value; // SVG font-family is case-insensitive for generic names
+    if (std.mem.indexOf(u8, lower, "mono") != null or
+        std.mem.indexOf(u8, lower, "courier") != null or
+        std.mem.indexOf(u8, lower, "consolas") != null)
+    {
+        return .monospace;
+    }
+    if (std.mem.indexOf(u8, lower, "serif") != null and
+        std.mem.indexOf(u8, lower, "sans") == null)
+    {
+        // "serif" but not "sans-serif"
+        if (std.mem.indexOf(u8, lower, "times") != null) {
+            return .serif;
+        }
+        return .serif;
+    }
+    // Default to sans-serif (Helvetica)
+    return .sans_serif;
+}
+
+/// Parse font-weight attribute
+fn parseFontWeight(value: []const u8) FontWeight {
+    if (std.mem.eql(u8, value, "bold") or
+        std.mem.eql(u8, value, "bolder") or
+        std.mem.eql(u8, value, "700") or
+        std.mem.eql(u8, value, "800") or
+        std.mem.eql(u8, value, "900"))
+    {
+        return .bold;
+    }
+    return .normal;
+}
+
+/// Parse font-style attribute
+fn parseFontStyle(value: []const u8) FontStyle {
+    if (std.mem.eql(u8, value, "italic")) {
+        return .italic;
+    }
+    if (std.mem.eql(u8, value, "oblique")) {
+        return .oblique;
+    }
+    return .normal;
+}
+
+/// Parse text-anchor attribute
+fn parseTextAnchor(value: []const u8) TextAnchor {
+    if (std.mem.eql(u8, value, "middle")) {
+        return .middle;
+    }
+    if (std.mem.eql(u8, value, "end")) {
+        return .end;
+    }
+    return .start;
+}
 
 /// Parse a float value
 fn parseFloat(str: []const u8) f64 {

@@ -1,7 +1,37 @@
 # zpdf Context
 
 ## Current Focus
-SVG embedding with transparency support complete. All 211 tests pass. Next: Path API (moveTo, lineTo, curveTo), gradients, text elements, or PDF embedding.
+SVG text elements complete. All 211 unit tests + 20 integration tests pass. Path API, gradients, and text elements all done. Next: PDF embedding, SVG `<use>`/`<defs>` elements, or other features.
+
+## What We Did (Session 2026-01-21 #51) [COMPLETE]
+- **Implemented SVG text element support**:
+  - Added to `src/xml.zig`:
+    - `getTextContent()` method to extract text between tags
+  - Added to `src/svg.zig`:
+    - `FontFamily` enum (serif, sans_serif, monospace)
+    - `FontWeight` enum (normal, bold)
+    - `FontStyle` enum (normal, italic, oblique)
+    - `TextAnchor` enum (start, middle, end)
+    - `UsedFont` struct with `toPdfName()` mapping to PDF Type1 fonts
+    - `text` variant in `SvgElement` union with all text properties
+    - `parseText()` function for text element parsing
+    - `renderText()` function generating PDF text operators (BT, Tf, Td, Tj, ET)
+    - `used_fonts` tracking for unique fonts used in SVG
+  - Updated `src/document.zig`:
+    - Added font resources to Form XObjects when SVG contains text
+    - Uses static font name array (F1-F16) to avoid buffer overwrite bug
+    - Inline font dictionaries reference standard Type1 fonts
+- **Added svg_text integration test**:
+  - Created `test/images/text-sample.svg` with various font styles
+  - Added `gen_svg_text()` to `scripts/gen_references.py`
+  - Added `generateSvgTextPdf` test in `integration_tests.zig`
+- **Added --skip-fonts option** for semantic comparison:
+  - `scripts/compare_pdfs.py`: Added `--skip-fonts` flag
+  - `src/testing.zig`: Added `SemanticOptions` struct with `skip_fonts` field
+  - `src/integration_tests.zig`: Test cases can specify `skip_fonts = true`
+  - `src/cli.zig`: CLI supports skip_fonts for check-refs
+  - Needed because zpdf uses inline font dicts in Form XObjects while fpdf2 uses object references
+- All 20 integration tests pass (including svg and svg_text)
 
 ## What We Did (Session 2026-01-21 #50) [COMPLETE]
 - **Fixed SVG style inheritance bug** - tiger.svg was rendering all black:

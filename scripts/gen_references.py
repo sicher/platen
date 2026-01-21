@@ -1157,6 +1157,7 @@ def gen_images():
 def gen_svg():
     """Test SVG embedding as Form XObjects."""
     from fpdf.svg import SVGImage
+    import os
 
     pdf = make_pdf()
     pdf.add_page()
@@ -1176,15 +1177,40 @@ def gen_svg():
     pdf.text(420, 50, "Width=80:")
     pdf.image("test/images/test.svg", x=420, y=55, w=80)
 
-    # Row 2: Large tiger SVG (centered)
-    import os
+    # Row 2: Tiger SVG
     if os.path.exists("test/images/tiger.svg"):
         pdf.text(50, 280, "Tiger SVG (400x400):")
         # Center on page: (595 - 400) / 2 = 97.5
         pdf.image("test/images/tiger.svg", x=97, y=295, w=400, h=400)
 
+    # Note: opacity_test.svg not included - fpdf2 doesn't support rgba colors
+
     pdf.output(OUTPUT_DIR / "svg.pdf")
     print("  svg.pdf")
+
+
+def gen_svg_text():
+    """Test SVG text elements with various fonts and styles."""
+    import os
+
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "SVG Text Test")
+
+    # Full-size text SVG
+    pdf.set_font("Helvetica", "B", size=10)
+    pdf.text(50, 60, "Text SVG (400x300):")
+    pdf.image("test/images/text-sample.svg", x=50, y=75, w=400, h=300)
+
+    # Scaled version
+    pdf.text(50, 400, "Scaled (200x150):")
+    pdf.image("test/images/text-sample.svg", x=50, y=415, w=200, h=150)
+
+    pdf.output(OUTPUT_DIR / "svg_text.pdf")
+    print("  svg_text.pdf")
 
 
 def gen_paths():
@@ -1330,6 +1356,7 @@ GENERATORS = {
     "shapes": gen_shapes,
     "images": gen_images,
     "svg": gen_svg,
+    "svg_text": gen_svg_text,
     "paths": gen_paths,
     "gradients": gen_gradients,
 }

@@ -202,7 +202,7 @@ def compare_words(expected: Word, actual: Word, tolerance: float) -> list[str]:
     return diffs
 
 
-def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int) -> list[str]:
+def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int, skip_fonts: bool = False) -> list[str]:
     """Compare two pages, return list of differences."""
     diffs = []
 
@@ -212,8 +212,8 @@ def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int)
     if abs(expected.height - actual.height) > 0.01:
         diffs.append(f"Page {page_num}: height differs ({expected.height} vs {actual.height})")
 
-    # Compare fonts used on this page
-    if expected.fonts and actual.fonts:
+    # Compare fonts used on this page (skip if fonts are in Form XObjects)
+    if not skip_fonts and expected.fonts and actual.fonts:
         missing = expected.fonts - actual.fonts
         extra = actual.fonts - expected.fonts
         if missing:
@@ -237,7 +237,7 @@ def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int)
     return diffs
 
 
-def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0) -> tuple[bool, list[str]]:
+def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0, skip_fonts: bool = False) -> tuple[bool, list[str]]:
     """
     Compare two PDFs semantically.
 
@@ -258,7 +258,7 @@ def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0) -
 
     # Compare each page
     for i, (exp_page, act_page) in enumerate(zip(expected.pages, actual.pages)):
-        page_diffs = compare_pages(exp_page, act_page, tolerance, i + 1)
+        page_diffs = compare_pages(exp_page, act_page, tolerance, i + 1, skip_fonts)
         diffs.extend(page_diffs)
 
     return len(diffs) == 0, diffs
@@ -270,6 +270,8 @@ def main():
     parser.add_argument("actual", help="Actual/generated PDF")
     parser.add_argument("--tolerance", type=float, default=5.0,
                         help="Position tolerance in points (default: 5.0)")
+    parser.add_argument("--skip-fonts", action="store_true",
+                        help="Skip font comparison (for SVG Form XObjects)")
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Only output on failure")
     args = parser.parse_args()
@@ -281,7 +283,7 @@ def main():
         print(f"Error: {args.actual} not found", file=sys.stderr)
         sys.exit(2)
 
-    match, diffs = compare_pdfs(args.expected, args.actual, args.tolerance)
+    match, diffs = compare_pdfs(args.expected, args.actual, args.tolerance, args.skip_fonts)
 
     if match:
         if not args.quiet:

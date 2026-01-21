@@ -788,12 +788,21 @@ fn checkAllReferences(allocator: std.mem.Allocator, mode: testing.CompareMode) !
         const expected_output_path = std.fmt.bufPrint(&expected_path_buf, "test/output/{s}_expected.pdf", .{tc.name}) catch unreachable;
         std.fs.cwd().copyFile(ref_path, std.fs.cwd(), expected_output_path, .{}) catch {};
 
-        var result = testing.compareWithReferenceMode(allocator, pdf, ref_path, mode, .{}) catch |err| {
-            try print("FAIL {s}: {any}\n", .{ tc.name, err });
-            failed += 1;
-            try results.append(allocator, .{ .name = tc.name, .passed = false });
-            continue;
-        };
+        // Use semantic comparison with options if needed (for SVG Form XObjects)
+        var result = if (tc.skip_fonts)
+            testing.compareWithReferenceSemantic(allocator, pdf, ref_path, .{ .skip_fonts = true }) catch |err| {
+                try print("FAIL {s}: {any}\n", .{ tc.name, err });
+                failed += 1;
+                try results.append(allocator, .{ .name = tc.name, .passed = false });
+                continue;
+            }
+        else
+            testing.compareWithReferenceMode(allocator, pdf, ref_path, mode, .{}) catch |err| {
+                try print("FAIL {s}: {any}\n", .{ tc.name, err });
+                failed += 1;
+                try results.append(allocator, .{ .name = tc.name, .passed = false });
+                continue;
+            };
         defer result.deinit();
 
         const used_mode = switch (result.mode_used) {

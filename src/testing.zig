@@ -27,6 +27,12 @@ pub const StructuralOptions = struct {
     ignore_xref: bool = false,
 };
 
+/// Options for semantic comparison
+pub const SemanticOptions = struct {
+    /// Skip font comparison (useful for SVG Form XObjects)
+    skip_fonts: bool = false,
+};
+
 /// Result of PDF comparison
 pub const CompareResult = struct {
     equal: bool,
@@ -292,6 +298,11 @@ fn generateDiff(
 
 /// Compare PDFs using semantic comparison (text + positions)
 fn comparePdfsSemantic(allocator: std.mem.Allocator, actual: []const u8, expected: []const u8) !CompareResult {
+    return comparePdfsSemanticWithOptions(allocator, actual, expected, .{});
+}
+
+/// Compare PDFs using semantic comparison with options
+fn comparePdfsSemanticWithOptions(allocator: std.mem.Allocator, actual: []const u8, expected: []const u8, options: SemanticOptions) !CompareResult {
     // Write PDFs to temp files
     var tmp_actual = try createTempFile(allocator, "actual_", ".pdf");
     defer tmp_actual.cleanup(allocator);
@@ -305,10 +316,12 @@ fn comparePdfsSemantic(allocator: std.mem.Allocator, actual: []const u8, expecte
 
     // Run semantic comparator
     // Tolerance of 1pt for minor floating-point rounding differences
-    var child = std.process.Child.init(
-        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" },
-        allocator,
-    );
+    const args = if (options.skip_fonts)
+        &[_][]const u8{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0", "--skip-fonts" }
+    else
+        &[_][]const u8{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" };
+
+    var child = std.process.Child.init(args, allocator);
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
 
@@ -357,7 +370,25 @@ fn createTempFile(allocator: std.mem.Allocator, prefix: []const u8, suffix: []co
 
 /// Compare a PDF against a reference file
 pub fn compareWithReference(allocator: std.mem.Allocator, actual: []const u8, reference_path: []const u8) !CompareResult {
-    return compareWithReferenceMode(allocator, actual, reference_path, .auto, .{});
+    return compareWithReferenceSemantic(allocator, actual, reference_path, .{});
+}
+
+/// Compare a PDF against a reference file with semantic options
+pub fn compareWithReferenceSemantic(allocator: std.mem.Allocator, actual: []const u8, reference_path: []const u8, options: SemanticOptions) !CompareResult {
+    const expected = std.fs.cwd().readFileAlloc(allocator, reference_path, 10 * 1024 * 1024) catch |err| {
+        if (err == error.FileNotFound) {
+            return .{ .equal = false, .diff = try allocator.dupe(u8, "Reference file not found"), .allocator = allocator };
+        }
+        return err;
+    };
+    defer allocator.free(expected);
+
+    // Quick check: if identical, no need for further comparison
+    if (std.mem.eql(u8, actual, expected)) {
+        return .{ .equal = true, .mode_used = .semantic };
+    }
+
+    return comparePdfsSemanticWithOptions(allocator, actual, expected, options);
 }
 
 /// Compare a PDF against a reference file with options

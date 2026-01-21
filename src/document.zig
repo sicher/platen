@@ -2669,38 +2669,70 @@ pub const Document = struct {
             try bbox.append(Value.real(s.height));
             try form_dict.put("BBox", .{ .array_val = &bbox });
 
-            // Add ExtGState resources if SVG uses transparency
-            if (s.opacity_states.items.len > 0) {
+            // Build resources dictionary (may include ExtGState, Font, or both)
+            const has_transparency = s.opacity_states.items.len > 0;
+            const has_text = s.used_fonts.items.len > 0;
+
+            if (has_transparency or has_text) {
                 var resources = Dict.init(self.allocator);
                 defer resources.deinit();
 
+                // Add ExtGState for transparency
                 var extgstate = Dict.init(self.allocator);
                 defer extgstate.deinit();
-
-                // Create inline ExtGState dictionaries for each opacity state
-                var gs_dicts = try self.allocator.alloc(Dict, s.opacity_states.items.len);
+                var gs_dicts: []Dict = &.{};
                 defer {
                     for (gs_dicts) |*d| d.deinit();
-                    self.allocator.free(gs_dicts);
+                    if (gs_dicts.len > 0) self.allocator.free(gs_dicts);
                 }
 
-                for (s.opacity_states.items, 0..) |state, idx| {
-                    gs_dicts[idx] = Dict.init(self.allocator);
-                    try gs_dicts[idx].put("Type", Value.name("ExtGState"));
-                    try gs_dicts[idx].put("ca", Value.real(state.fill_opacity));
-                    try gs_dicts[idx].put("CA", Value.real(state.stroke_opacity));
-
-                    const gs_name = extgstateResourceName(idx);
-                    try extgstate.put(gs_name, .{ .dict_val = &gs_dicts[idx] });
+                if (has_transparency) {
+                    gs_dicts = try self.allocator.alloc(Dict, s.opacity_states.items.len);
+                    for (s.opacity_states.items, 0..) |state, idx| {
+                        gs_dicts[idx] = Dict.init(self.allocator);
+                        try gs_dicts[idx].put("Type", Value.name("ExtGState"));
+                        try gs_dicts[idx].put("ca", Value.real(state.fill_opacity));
+                        try gs_dicts[idx].put("CA", Value.real(state.stroke_opacity));
+                        try extgstate.put(extgstateResourceName(idx), .{ .dict_val = &gs_dicts[idx] });
+                    }
+                    try resources.put("ExtGState", .{ .dict_val = &extgstate });
                 }
 
-                try resources.put("ExtGState", .{ .dict_val = &extgstate });
+                // Add Font resources for SVG text elements
+                var font_res = Dict.init(self.allocator);
+                defer font_res.deinit();
+                var font_dicts: []Dict = &.{};
+                defer {
+                    for (font_dicts) |*d| d.deinit();
+                    if (font_dicts.len > 0) self.allocator.free(font_dicts);
+                }
+
+                if (has_text) {
+                    // Static font names for Form XObject resources (F1-F16)
+                    const svg_font_names = [_][]const u8{
+                        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
+                        "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16",
+                    };
+
+                    font_dicts = try self.allocator.alloc(Dict, s.used_fonts.items.len);
+                    for (s.used_fonts.items, 0..) |used_font, idx| {
+                        // Create inline font dict: << /Type /Font /Subtype /Type1 /BaseFont /FontName >>
+                        font_dicts[idx] = Dict.init(self.allocator);
+                        try font_dicts[idx].put("Type", Value.name("Font"));
+                        try font_dicts[idx].put("Subtype", Value.name("Type1"));
+                        try font_dicts[idx].put("BaseFont", Value.name(used_font.toPdfName()));
+
+                        // Font name: /F1, /F2, etc. (use static names to avoid buffer reuse)
+                        const font_name = if (idx < svg_font_names.len) svg_font_names[idx] else "F99";
+                        try font_res.put(font_name, .{ .dict_val = &font_dicts[idx] });
+                    }
+                    try resources.put("Font", .{ .dict_val = &font_res });
+                }
+
                 try form_dict.put("Resources", .{ .dict_val = &resources });
-
-                // Write inside if block so nested dicts are still alive
                 try w.writeStreamCompressed(&form_dict, svg_content);
             } else {
-                // No transparency - write without ExtGState resources
+                // No resources needed
                 try w.writeStreamCompressed(&form_dict, svg_content);
             }
             try w.endObject();

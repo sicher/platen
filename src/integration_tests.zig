@@ -12,6 +12,7 @@ const embedded = @import("embedded.zig");
 const TestCase = struct {
     name: []const u8,
     generate: *const fn (std.mem.Allocator) anyerror![]u8,
+    skip_fonts: bool = false, // Skip font comparison (for SVG Form XObjects)
 };
 
 /// All integration test cases (compared against fpdf2 references)
@@ -33,6 +34,7 @@ const test_cases = [_]TestCase{
     .{ .name = "shapes", .generate = generateShapesPdf },
     .{ .name = "images", .generate = generateImagesPdf },
     .{ .name = "svg", .generate = generateSvgPdf },
+    .{ .name = "svg_text", .generate = generateSvgTextPdf, .skip_fonts = true }, // Form XObject fonts
     .{ .name = "paths", .generate = generatePathsPdf },
     .{ .name = "gradients", .generate = generateGradientsPdf },
 };
@@ -1467,25 +1469,16 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.writeAt(420, 50, "Width=80:");
     try doc.drawSvg(test_svg, 420, 55, 80, 0);
 
-    // Row 2: Opacity test SVG
-    if (doc.loadSvg("test/images/opacity_test.svg")) |opacity_svg| {
-        try doc.writeAt(50, 265, "Opacity Test (transparency):");
-        try doc.drawSvg(opacity_svg, 50, 280, 200, 200);
-
-        try doc.writeAt(280, 265, "Opacity Test (scaled 150x150):");
-        try doc.drawSvg(opacity_svg, 280, 280, 150, 150);
-    } else |_| {
-        // Opacity test SVG not available, skip
-    }
-
-    // Row 3: Large tiger SVG (centered)
+    // Row 2: Tiger SVG
     if (doc.loadSvg("test/images/tiger.svg")) |tiger_svg| {
-        try doc.writeAt(50, 490, "Tiger SVG (300x300):");
+        try doc.writeAt(50, 280, "Tiger SVG (400x400):");
         // Center on page
-        try doc.drawSvg(tiger_svg, 147, 505, 300, 300);
+        try doc.drawSvg(tiger_svg, 97, 295, 400, 400);
     } else |_| {
         // Tiger SVG not available, skip
     }
+
+    // Note: opacity_test.svg not included - fpdf2 doesn't support rgba colors
 
     return doc.output();
 }
@@ -1686,6 +1679,31 @@ test "integration: hello_world PDF" {
     try runIntegrationTest("hello_world", generateHelloWorldPdf);
 }
 
+fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "SVG Text Test");
+
+    // Load text SVG
+    const text_svg = try doc.loadSvg("test/images/text-sample.svg");
+
+    // Full-size text SVG
+    try doc.setFont(.helvetica_bold, 10);
+    try doc.writeAt(50, 60, "Text SVG (400x300):");
+    try doc.drawSvg(text_svg, 50, 75, 400, 300);
+
+    // Scaled version
+    try doc.writeAt(50, 400, "Scaled (200x150):");
+    try doc.drawSvg(text_svg, 50, 415, 200, 150);
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -1767,9 +1785,27 @@ test "integration: gradients PDF" {
     try runIntegrationTest("gradients", generateGradientsPdf);
 }
 
+test "integration: svg_text PDF" {
+    // Tests SVG text elements with various fonts and styles
+    // Skip font comparison since SVG Form XObjects have fonts in their own resources
+    try runIntegrationTestWithOptions("svg_text", generateSvgTextPdf, .{ .skip_fonts = true });
+}
+
+const TestOptions = struct {
+    skip_fonts: bool = false,
+};
+
 fn runIntegrationTest(
     name: []const u8,
     generate: *const fn (std.mem.Allocator) anyerror![]u8,
+) !void {
+    return runIntegrationTestWithOptions(name, generate, .{});
+}
+
+fn runIntegrationTestWithOptions(
+    name: []const u8,
+    generate: *const fn (std.mem.Allocator) anyerror![]u8,
+    options: TestOptions,
 ) !void {
     const allocator = std.testing.allocator;
 
@@ -1795,7 +1831,7 @@ fn runIntegrationTest(
     std.fs.cwd().copyFile(ref_path, std.fs.cwd(), expected_path, .{}) catch {};
 
     // Compare against reference
-    var result = try testing.compareWithReference(allocator, pdf, ref_path);
+    var result = try testing.compareWithReferenceSemantic(allocator, pdf, ref_path, .{ .skip_fonts = options.skip_fonts });
     defer result.deinit();
 
     if (!result.equal) {
