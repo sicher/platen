@@ -24,7 +24,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Document keywords | `set_keywords()` | ✅ `setMetadata()` | |
 | Document creator | `set_creator()` | ✅ `setMetadata()` | |
 | Document producer | `set_producer()` | ✅ `setMetadata()` | zpdf default |
-| Creation date | `set_creation_date()` | ✅ auto-generated | |
+| Creation date | `set_creation_date()` | ✅ `setMetadata()` | auto-generated if not set |
 | **XMP metadata** | `set_xmp_metadata()` | ❌ | **GAP** |
 | **Document language** | `set_lang()` | ❌ | **GAP** |
 
