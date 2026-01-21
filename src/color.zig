@@ -59,6 +59,23 @@ pub const Color = union(enum) {
         }
     }
 
+    /// RGB tuple type for gradient functions
+    pub const Rgb = struct { r: f64, g: f64, b: f64 };
+
+    /// Convert to RGB values (normalizing grayscale and approximating CMYK)
+    pub fn toRgb(self: Color) Rgb {
+        return switch (self) {
+            .gray => |g| .{ .r = g, .g = g, .b = g },
+            .rgb => |c| .{ .r = c.r, .g = c.g, .b = c.b },
+            .cmyk => |c| .{
+                // Simple CMYK to RGB conversion
+                .r = (1 - c.c) * (1 - c.k),
+                .g = (1 - c.m) * (1 - c.k),
+                .b = (1 - c.y) * (1 - c.k),
+            },
+        };
+    }
+
     /// Check if two colors are equal
     pub fn eql(self: Color, other: Color) bool {
         return switch (self) {

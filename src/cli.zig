@@ -77,6 +77,16 @@ pub fn main() !void {
         const output_path = if (args.len > 3) args[3] else "calt_test.pdf";
         try generateCaltTestPdf(allocator, font_path, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "path-test")) {
+        // Test path API (moveTo, lineTo, curveTo)
+        const output_path = if (args.len > 2) args[2] else "path_test.pdf";
+        try generatePathTestPdf(allocator, output_path);
+        try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "gradient-test")) {
+        // Test gradient API (linear, radial)
+        const output_path = if (args.len > 2) args[2] else "gradient_test.pdf";
+        try generateGradientTestPdf(allocator, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -106,6 +116,8 @@ fn printUsage() !void {
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
         \\  mark-test [ttf] [out]   Test GPOS mark positioning (diacritics)
         \\  calt-test [ttf] [out]   Test GSUB contextual alternates (arrows, ligatures)
+        \\  path-test [out]         Test path API (moveTo, lineTo, curveTo)
+        \\  gradient-test [out]     Test gradient API (linear, radial)
         \\
     ;
     try stdout.writeAll(usage);
@@ -530,6 +542,201 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
         try print("  Calt ligature lookups: {}\n", .{ot.calt_liga_lookups.items.len});
         try print("  Chain context lookups: {}\n", .{ot.chain_context_lookups.items.len});
     }
+}
+
+fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "Path API Test");
+
+    var y: f64 = 70;
+
+    // Triangle using moveTo/lineTo
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.blue);
+    doc.setFillColor(zpdf.Color.fromRgb255(200, 200, 255));
+    doc.setLineWidth(2);
+
+    var triangle = doc.createPath();
+    defer triangle.deinit();
+    try triangle.moveTo(100, y);
+    try triangle.lineTo(180, y);
+    try triangle.lineTo(140, y + 60);
+    try triangle.closePath();
+    try doc.drawPath(&triangle, .fill_stroke);
+    y += 80;
+
+    // Bezier curve
+    try doc.setFont(.helvetica, 10);
+    doc.setDrawColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.red);
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 200));
+
+    var bezier = doc.createPath();
+    defer bezier.deinit();
+    try bezier.moveTo(50, y + 50);
+    try bezier.curveTo(100, y, 200, y, 250, y + 50);
+    try bezier.lineTo(250, y + 80);
+    try bezier.curveTo(200, y + 30, 100, y + 30, 50, y + 80);
+    try bezier.closePath();
+    try doc.drawPath(&bezier, .fill_stroke);
+    y += 100;
+
+    // Heart shape using curves
+    try doc.setFont(.helvetica, 10);
+    doc.setDrawColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Heart shape (multiple curveTo):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.fromRgb255(200, 0, 0));
+    doc.setFillColor(zpdf.Color.red);
+    doc.setLineWidth(1);
+
+    var heart = doc.createPath();
+    defer heart.deinit();
+    const hx: f64 = 140;
+    const hy: f64 = y + 60;
+    try heart.moveTo(hx, hy);
+    try heart.curveTo(hx - 50, hy - 50, hx - 80, hy + 10, hx, hy + 60);
+    try heart.curveTo(hx + 80, hy + 10, hx + 50, hy - 50, hx, hy);
+    try doc.drawPath(&heart, .fill_stroke);
+    y += 90;
+
+    // Stroke only path
+    try doc.setFont(.helvetica, 10);
+    doc.setDrawColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Stroke only (zigzag):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.fromRgb255(0, 128, 0));
+    doc.setLineWidth(3);
+
+    var zigzag = doc.createPath();
+    defer zigzag.deinit();
+    try zigzag.moveTo(50, y);
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        const px = 50 + @as(f64, @floatFromInt(i + 1)) * 25;
+        const py = if (i % 2 == 0) y + 30 else y;
+        try zigzag.lineTo(px, py);
+    }
+    try doc.drawPath(&zigzag, .stroke);
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+}
+
+fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "Gradient Test");
+
+    var y: f64 = 70;
+
+    // Linear gradient horizontal
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Linear gradient (horizontal):");
+    y += 15;
+
+    const lin_stops1 = [_]zpdf.ColorStop{
+        .{ .offset = 0.0, .color = zpdf.Color.red },
+        .{ .offset = 1.0, .color = zpdf.Color.blue },
+    };
+    const grad1 = try doc.addLinearGradient(.{
+        .x0 = 50,
+        .y0 = y,
+        .x1 = 250,
+        .y1 = y,
+        .stops = &lin_stops1,
+    });
+    try doc.fillRectGradient(50, y, 200, 50, grad1);
+    y += 70;
+
+    // Linear gradient vertical
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Linear gradient (vertical):");
+    y += 15;
+
+    const lin_stops2 = [_]zpdf.ColorStop{
+        .{ .offset = 0.0, .color = zpdf.Color.fromRgb255(255, 255, 0) },
+        .{ .offset = 1.0, .color = zpdf.Color.fromRgb255(0, 128, 0) },
+    };
+    const grad2 = try doc.addLinearGradient(.{
+        .x0 = 50,
+        .y0 = y,
+        .x1 = 50,
+        .y1 = y + 50,
+        .stops = &lin_stops2,
+    });
+    try doc.fillRectGradient(50, y, 200, 50, grad2);
+    y += 70;
+
+    // Linear gradient 3 colors
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Linear gradient (3 colors):");
+    y += 15;
+
+    const lin_stops3 = [_]zpdf.ColorStop{
+        .{ .offset = 0.0, .color = zpdf.Color.red },
+        .{ .offset = 0.5, .color = zpdf.Color.white },
+        .{ .offset = 1.0, .color = zpdf.Color.blue },
+    };
+    const grad3 = try doc.addLinearGradient(.{
+        .x0 = 50,
+        .y0 = y,
+        .x1 = 250,
+        .y1 = y,
+        .stops = &lin_stops3,
+    });
+    try doc.fillRectGradient(50, y, 200, 50, grad3);
+    y += 70;
+
+    // Radial gradient
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Radial gradient:");
+    y += 15;
+
+    const rad_stops = [_]zpdf.ColorStop{
+        .{ .offset = 0.0, .color = zpdf.Color.white },
+        .{ .offset = 1.0, .color = zpdf.Color.fromRgb255(0, 0, 128) },
+    };
+    const grad4 = try doc.addRadialGradient(.{
+        .x0 = 150,
+        .y0 = y + 40,
+        .r0 = 0,
+        .x1 = 150,
+        .y1 = y + 40,
+        .r1 = 60,
+        .stops = &rad_stops,
+    });
+    try doc.fillRectGradient(50, y, 200, 80, grad4);
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
 }
 
 // Use shared test infrastructure from zpdf module

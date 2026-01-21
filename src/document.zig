@@ -17,6 +17,8 @@ pub const Writer = @import("writer.zig").Writer;
 pub const zlib = @import("zlib.zig");
 pub const images = @import("images.zig");
 pub const svg = @import("svg.zig");
+pub const pathmod = @import("path.zig");
+pub const gradient = @import("gradient.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -34,6 +36,10 @@ pub const EmbeddedFont = embedded.EmbeddedFont;
 pub const Color = color.Color;
 pub const Image = images.Image;
 pub const Svg = svg.Svg;
+pub const Path = pathmod.Path;
+pub const LinearGradient = gradient.LinearGradient;
+pub const RadialGradient = gradient.RadialGradient;
+pub const ColorStop = gradient.ColorStop;
 
 // Layout types
 pub const Border = layout.Border;
@@ -122,6 +128,7 @@ const Page = struct {
     used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
     used_images: std.ArrayListUnmanaged(*Image),
     used_svgs: std.ArrayListUnmanaged(*Svg),
+    used_gradients: std.AutoHashMapUnmanaged(usize, void),
 
     // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
     // All page allocations freed at once in deinit - no individual free() calls
@@ -135,6 +142,7 @@ const Page = struct {
             .used_embedded = .{},
             .used_images = .{},
             .used_svgs = .{},
+            .used_gradients = .{},
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };
     }
@@ -155,6 +163,7 @@ const Page = struct {
         self.used_embedded.deinit(backing_allocator);
         self.used_images.deinit(backing_allocator);
         self.used_svgs.deinit(backing_allocator);
+        self.used_gradients.deinit(backing_allocator);
     }
 
     fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
@@ -317,6 +326,25 @@ fn extgstateResourceName(idx: usize) []const u8 {
     return "GS99";
 }
 
+// Static shading names for gradients
+const shading_names = [_][]const u8{
+    "Sh1",  "Sh2",  "Sh3",  "Sh4",  "Sh5",  "Sh6",  "Sh7",  "Sh8",
+    "Sh9",  "Sh10", "Sh11", "Sh12", "Sh13", "Sh14", "Sh15", "Sh16",
+};
+
+fn shadingResourceName(idx: usize) []const u8 {
+    if (idx < shading_names.len) {
+        return shading_names[idx];
+    }
+    return "Sh99";
+}
+
+/// Stored gradient definition
+pub const GradientDef = union(enum) {
+    linear: LinearGradient,
+    radial: RadialGradient,
+};
+
 // ============================================================================
 // Document
 // ============================================================================
@@ -360,6 +388,8 @@ pub const Document = struct {
     loaded_images: std.ArrayListUnmanaged(*Image) = .{},
     // Track all loaded SVGs
     loaded_svgs: std.ArrayListUnmanaged(*Svg) = .{},
+    // Track gradients used in document
+    gradients: std.ArrayListUnmanaged(GradientDef) = .{},
 
     pub fn init(allocator: std.mem.Allocator) Document {
         return .{
@@ -392,6 +422,8 @@ pub const Document = struct {
             self.allocator.destroy(s);
         }
         self.loaded_svgs.deinit(self.allocator);
+        // Clean up gradients
+        self.gradients.deinit(self.allocator);
     }
 
     /// Add a new page
@@ -2008,6 +2040,90 @@ pub const Document = struct {
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
     }
 
+    /// Create a new path builder.
+    pub fn createPath(self: *Document) Path {
+        return Path.init(self.allocator);
+    }
+
+    /// Draw a path with the specified style.
+    /// Coordinates are from top-left origin.
+    pub fn drawPath(self: *Document, p: *const Path, style: DrawStyle) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        if (p.isEmpty()) return;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Estimate buffer size: ~60 bytes per command + overhead
+        const buf_size = 256 + p.commands.items.len * 64;
+        const buf = try page.pageAllocator().alloc(u8, buf_size);
+        var fbs = std.io.fixedBufferStream(buf);
+        const writer = fbs.writer();
+
+        // Save graphics state
+        try writer.writeAll("q\n");
+
+        // Graphics state
+        var gs_buf: [256]u8 = undefined;
+        const gs_len = self.writeGraphicsState(&gs_buf, style);
+        try writer.writeAll(gs_buf[0..gs_len]);
+
+        // Path commands
+        try p.toPdfContent(page_height, writer);
+
+        // Apply style
+        const op = getPathOperator(style);
+        try writer.writeAll(op);
+
+        // Restore graphics state
+        try writer.writeAll("Q\n");
+
+        const len = fbs.pos;
+        try page.commands.append(self.allocator, .{ .raw = buf[0..len] });
+    }
+
+    /// Add a linear gradient to the document and return its index.
+    pub fn addLinearGradient(self: *Document, grad: LinearGradient) !usize {
+        const idx = self.gradients.items.len;
+        try self.gradients.append(self.allocator, .{ .linear = grad });
+        return idx;
+    }
+
+    /// Add a radial gradient to the document and return its index.
+    pub fn addRadialGradient(self: *Document, grad: RadialGradient) !usize {
+        const idx = self.gradients.items.len;
+        try self.gradients.append(self.allocator, .{ .radial = grad });
+        return idx;
+    }
+
+    /// Fill a rectangle with a gradient.
+    /// The gradient index must have been obtained from addLinearGradient or addRadialGradient.
+    pub fn fillRectGradient(self: *Document, x: f64, y: f64, w: f64, h: f64, gradient_idx: usize) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        if (gradient_idx >= self.gradients.items.len) return error.InvalidGradient;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_height = self.page_size.height;
+
+        // Track that this page uses gradients
+        try page.used_gradients.put(self.allocator, gradient_idx, {});
+
+        // Convert from top-left to PDF coordinates
+        const pdf_y = page_height - y - h;
+
+        var buf: [256]u8 = undefined;
+        var len: usize = 0;
+
+        // Save graphics state, set clip path, paint shading, restore
+        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re W n\n", .{ x, pdf_y, w, h }) catch unreachable).len;
+        len += (std.fmt.bufPrint(buf[len..], "/{s} sh\n", .{shadingResourceName(gradient_idx)}) catch unreachable).len;
+        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+
+        const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
+        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+    }
+
     /// Render deferred commands to page content bytes
     /// Called after subsetting so glyph IDs are properly remapped
     pub fn renderPageCommands(self: *Document, page: *Page) !void {
@@ -2621,6 +2737,13 @@ pub const Document = struct {
             defer font_res.deinit();
             var xobject_res = Dict.init(self.allocator);
             defer xobject_res.deinit();
+            var shading_res = Dict.init(self.allocator);
+            defer shading_res.deinit();
+            var shading_strs = std.ArrayListUnmanaged([]u8){};
+            defer {
+                for (shading_strs.items) |s| self.allocator.free(s);
+                shading_strs.deinit(self.allocator);
+            }
             var resources = Dict.init(self.allocator);
             defer resources.deinit();
 
@@ -2677,12 +2800,70 @@ pub const Document = struct {
                 }
             }
 
-            if (has_fonts or has_xobjects) {
+            // Check if page uses shadings
+            const has_shadings = page.used_gradients.count() > 0;
+
+            if (has_fonts or has_xobjects or has_shadings) {
                 if (has_fonts) {
                     try resources.put("Font", .{ .dict_val = &font_res });
                 }
                 if (has_xobjects) {
                     try resources.put("XObject", .{ .dict_val = &xobject_res });
+                }
+                if (has_shadings) {
+                    // Write inline shading dictionaries
+                    var iter = page.used_gradients.keyIterator();
+                    while (iter.next()) |grad_idx_ptr| {
+                        const grad_idx = grad_idx_ptr.*;
+                        if (grad_idx < self.gradients.items.len) {
+                            const grad_def = self.gradients.items[grad_idx];
+
+                            // Build shading dict with inline function
+                            var shading_buf: [2048]u8 = undefined;
+                            var shading_fbs = std.io.fixedBufferStream(&shading_buf);
+                            const shading_writer = shading_fbs.writer();
+
+                            switch (grad_def) {
+                                .linear => |lg| {
+                                    const pdf_y0 = self.page_size.height - lg.y0;
+                                    const pdf_y1 = self.page_size.height - lg.y1;
+                                    try shading_writer.print("<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2}] /Extend [{s} {s}] /Function ", .{
+                                        lg.x0,
+                                        pdf_y0,
+                                        lg.x1,
+                                        pdf_y1,
+                                        if (lg.extend_before) "true" else "false",
+                                        if (lg.extend_after) "true" else "false",
+                                    });
+                                    try gradient.writeFunctionDict(lg.stops, shading_writer);
+                                    try shading_writer.writeAll(" >>");
+                                },
+                                .radial => |rg| {
+                                    const pdf_y0 = self.page_size.height - rg.y0;
+                                    const pdf_y1 = self.page_size.height - rg.y1;
+                                    try shading_writer.print("<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}] /Extend [{s} {s}] /Function ", .{
+                                        rg.x0,
+                                        pdf_y0,
+                                        rg.r0,
+                                        rg.x1,
+                                        pdf_y1,
+                                        rg.r1,
+                                        if (rg.extend_before) "true" else "false",
+                                        if (rg.extend_after) "true" else "false",
+                                    });
+                                    try gradient.writeFunctionDict(rg.stops, shading_writer);
+                                    try shading_writer.writeAll(" >>");
+                                },
+                            }
+
+                            const shading_name = shadingResourceName(grad_idx);
+                            // Dupe string since stack buffer goes out of scope
+                            const shading_str = try self.allocator.dupe(u8, shading_fbs.getWritten());
+                            try shading_strs.append(self.allocator, shading_str);
+                            try shading_res.put(shading_name, Value.literal(shading_str));
+                        }
+                    }
+                    try resources.put("Shading", .{ .dict_val = &shading_res });
                 }
                 try page_dict.put("Resources", .{ .dict_val = &resources });
             }

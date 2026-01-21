@@ -1534,6 +1534,79 @@ test "drawPolygon less than 3 points does nothing" {
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
 }
 
+test "drawPath basic triangle" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    var path = doc.createPath();
+    defer path.deinit();
+
+    try path.moveTo(100, 100);
+    try path.lineTo(200, 100);
+    try path.lineTo(150, 50);
+    try path.closePath();
+
+    try doc.drawPath(&path, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawPath with bezier curve" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    var path = doc.createPath();
+    defer path.deinit();
+
+    try path.moveTo(100, 200);
+    try path.curveTo(150, 100, 250, 100, 300, 200);
+    try path.lineTo(100, 200);
+    try path.closePath();
+
+    try doc.drawPath(&path, .fill_stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawPath empty path does nothing" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    var path = doc.createPath();
+    defer path.deinit();
+
+    // Empty path should not error
+    try doc.drawPath(&path, .stroke);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+test "drawPath without page returns error" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    var path = doc.createPath();
+    defer path.deinit();
+    try path.moveTo(0, 0);
+
+    try std.testing.expectError(error.NoPage, doc.drawPath(&path, .stroke));
+}
+
 test "setLineWidth stores value" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();

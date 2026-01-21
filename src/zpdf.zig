@@ -69,6 +69,11 @@ pub const LineJoin = document.LineJoin;
 pub const DashPattern = document.DashPattern;
 pub const Point = document.Document.Point;
 
+// Re-export gradient types
+pub const LinearGradient = document.LinearGradient;
+pub const RadialGradient = document.RadialGradient;
+pub const ColorStop = document.ColorStop;
+
 // Re-export OpenType features
 pub const opentype = document.opentype;
 

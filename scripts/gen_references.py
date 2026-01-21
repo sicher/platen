@@ -1187,6 +1187,133 @@ def gen_svg():
     print("  svg.pdf")
 
 
+def gen_paths():
+    """Test path API: moveTo, lineTo, curveTo using fpdf2 drawing module."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "Path API Test")
+
+    y = 70
+
+    # Triangle using polygon (equivalent to moveTo/lineTo/close)
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.text(50, y, "Triangle (moveTo, lineTo, closePath):")
+    y += 15
+
+    pdf.set_draw_color(0, 0, 255)
+    pdf.set_fill_color(200, 200, 255)
+    pdf.set_line_width(2)
+    pdf.polygon([(100, y), (180, y), (140, y + 60)], style="FD")
+    y += 80
+
+    # Bezier curve using pdf.bezier()
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.text(50, y, "Cubic Bezier curve (curveTo):")
+    y += 15
+
+    pdf.set_draw_color(255, 0, 0)
+    pdf.set_fill_color(255, 200, 200)
+    pdf.set_line_width(2)
+    # Simple bezier shape - a curve and its mirror
+    pdf.bezier([(50, y + 50), (100, y), (200, y), (250, y + 50)], style="D")
+    y += 70
+
+    # Heart shape using bezier
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.text(50, y, "Heart shape (bezier curves):")
+    y += 15
+
+    pdf.set_draw_color(200, 0, 0)
+    pdf.set_fill_color(255, 0, 0)
+    pdf.set_line_width(1)
+    # Left half of heart
+    hx, hy = 140, y + 30
+    pdf.bezier([(hx, hy), (hx - 30, hy - 30), (hx - 50, hy + 10), (hx, hy + 50)], style="F")
+    # Right half of heart
+    pdf.bezier([(hx, hy), (hx + 30, hy - 30), (hx + 50, hy + 10), (hx, hy + 50)], style="F")
+    y += 95  # Extra spacing to avoid overlap with zigzag label
+
+    # Stroke only path (zigzag) using polygon with style="D"
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.text(50, y, "Stroke only (zigzag):")
+    y += 15
+
+    pdf.set_draw_color(0, 128, 0)
+    pdf.set_line_width(3)
+    points = [(50, y)]
+    for i in range(8):
+        px = 50 + (i + 1) * 25
+        py = y + 30 if i % 2 == 0 else y
+        points.append((px, py))
+    # Use polyline for open path (no closing)
+    pdf.polyline(points, style="D")
+
+    pdf.output(OUTPUT_DIR / "paths.pdf")
+    print("  paths.pdf")
+
+
+def gen_gradients():
+    """Test gradient API: linear and radial gradients."""
+    from fpdf.pattern import LinearGradient, RadialGradient
+
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "Gradient Test")
+
+    y = 70
+
+    # Linear gradient horizontal
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.text(50, y, "Linear gradient (horizontal):")
+    y += 15
+
+    grad1 = LinearGradient(50, y, 250, y, colors=["#FF0000", "#0000FF"])
+    with pdf.use_pattern(grad1):
+        pdf.rect(50, y, 200, 50, style="F")
+    y += 70
+
+    # Linear gradient vertical
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.text(50, y, "Linear gradient (vertical):")
+    y += 15
+
+    grad2 = LinearGradient(50, y, 50, y + 50, colors=["#FFFF00", "#008000"])
+    with pdf.use_pattern(grad2):
+        pdf.rect(50, y, 200, 50, style="F")
+    y += 70
+
+    # Linear gradient 3 colors
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.text(50, y, "Linear gradient (3 colors):")
+    y += 15
+
+    grad3 = LinearGradient(50, y, 250, y, colors=["#FF0000", "#FFFFFF", "#0000FF"])
+    with pdf.use_pattern(grad3):
+        pdf.rect(50, y, 200, 50, style="F")
+    y += 70
+
+    # Radial gradient
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.text(50, y, "Radial gradient:")
+    y += 15
+
+    grad4 = RadialGradient(150, y + 40, 0, 150, y + 40, 60, colors=["#FFFFFF", "#000080"])
+    with pdf.use_pattern(grad4):
+        pdf.rect(50, y, 200, 80, style="F")
+
+    pdf.output(OUTPUT_DIR / "gradients.pdf")
+    print("  gradients.pdf")
+
+
 GENERATORS = {
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,
@@ -1203,6 +1330,8 @@ GENERATORS = {
     "shapes": gen_shapes,
     "images": gen_images,
     "svg": gen_svg,
+    "paths": gen_paths,
+    "gradients": gen_gradients,
 }
 
 

@@ -33,6 +33,8 @@ const test_cases = [_]TestCase{
     .{ .name = "shapes", .generate = generateShapesPdf },
     .{ .name = "images", .generate = generateImagesPdf },
     .{ .name = "svg", .generate = generateSvgPdf },
+    .{ .name = "paths", .generate = generatePathsPdf },
+    .{ .name = "gradients", .generate = generateGradientsPdf },
 };
 
 // ============================================================================
@@ -1488,6 +1490,190 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "Path API Test");
+
+    var y: f64 = 70;
+
+    // Triangle using moveTo, lineTo, closePath
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.fromRgb255(0, 0, 255));
+    doc.setFillColor(zpdf.Color.fromRgb255(200, 200, 255));
+    doc.setLineWidth(2);
+    var path = doc.createPath();
+    defer path.deinit();
+    try path.moveTo(100, y);
+    try path.lineTo(180, y);
+    try path.lineTo(140, y + 60);
+    try path.closePath();
+    try doc.drawPath(&path, .fill_stroke);
+    y += 80;
+
+    // Cubic Bezier curve
+    try doc.setFont(.helvetica, 10);
+    doc.setDrawColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.fromRgb255(255, 0, 0));
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 200, 200));
+    doc.setLineWidth(2);
+    var bezier = doc.createPath();
+    defer bezier.deinit();
+    try bezier.moveTo(50, y + 50);
+    try bezier.curveTo(100, y, 200, y, 250, y + 50);
+    try doc.drawPath(&bezier, .stroke);
+    y += 70;
+
+    // Heart shape using bezier curves
+    try doc.setFont(.helvetica, 10);
+    doc.setDrawColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Heart shape (bezier curves):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.fromRgb255(200, 0, 0));
+    doc.setFillColor(zpdf.Color.fromRgb255(255, 0, 0));
+    doc.setLineWidth(1);
+    const hx: f64 = 140;
+    const hy: f64 = y + 30;
+
+    // Left half of heart
+    var left_heart = doc.createPath();
+    defer left_heart.deinit();
+    try left_heart.moveTo(hx, hy);
+    try left_heart.curveTo(hx - 30, hy - 30, hx - 50, hy + 10, hx, hy + 50);
+    try doc.drawPath(&left_heart, .fill);
+
+    // Right half of heart
+    var right_heart = doc.createPath();
+    defer right_heart.deinit();
+    try right_heart.moveTo(hx, hy);
+    try right_heart.curveTo(hx + 30, hy - 30, hx + 50, hy + 10, hx, hy + 50);
+    try doc.drawPath(&right_heart, .fill);
+    y += 95; // Extra spacing to avoid overlap with zigzag label
+
+    // Zigzag stroke
+    try doc.setFont(.helvetica, 10);
+    doc.setDrawColor(zpdf.Color.black);
+    try doc.writeAt(50, y, "Stroke only (zigzag):");
+    y += 15;
+
+    doc.setDrawColor(zpdf.Color.fromRgb255(0, 128, 0));
+    doc.setLineWidth(3);
+    var zigzag = doc.createPath();
+    defer zigzag.deinit();
+    try zigzag.moveTo(50, y);
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        const px = 50 + @as(f64, @floatFromInt(i + 1)) * 25;
+        const py = if (i % 2 == 0) y + 30 else y;
+        try zigzag.lineTo(px, py);
+    }
+    try doc.drawPath(&zigzag, .stroke);
+
+    return doc.output();
+}
+
+fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    try doc.writeAt(50, 30, "Gradient Test");
+
+    var y: f64 = 70;
+
+    // Linear gradient horizontal
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Linear gradient (horizontal):");
+    y += 15;
+
+    const grad1 = try doc.addLinearGradient(.{
+        .x0 = 50,
+        .y0 = y,
+        .x1 = 250,
+        .y1 = y,
+        .stops = &[_]zpdf.ColorStop{
+            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 0, 0) },
+            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 0, 255) },
+        },
+    });
+    try doc.fillRectGradient(50, y, 200, 50, grad1);
+    y += 70;
+
+    // Linear gradient vertical
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Linear gradient (vertical):");
+    y += 15;
+
+    const grad2 = try doc.addLinearGradient(.{
+        .x0 = 50,
+        .y0 = y,
+        .x1 = 50,
+        .y1 = y + 50,
+        .stops = &[_]zpdf.ColorStop{
+            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 255, 0) },
+            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 128, 0) },
+        },
+    });
+    try doc.fillRectGradient(50, y, 200, 50, grad2);
+    y += 70;
+
+    // Linear gradient 3 colors
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Linear gradient (3 colors):");
+    y += 15;
+
+    const grad3 = try doc.addLinearGradient(.{
+        .x0 = 50,
+        .y0 = y,
+        .x1 = 250,
+        .y1 = y,
+        .stops = &[_]zpdf.ColorStop{
+            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 0, 0) },
+            .{ .offset = 0.5, .color = zpdf.Color.fromRgb255(255, 255, 255) },
+            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 0, 255) },
+        },
+    });
+    try doc.fillRectGradient(50, y, 200, 50, grad3);
+    y += 70;
+
+    // Radial gradient
+    try doc.setFont(.helvetica, 10);
+    try doc.writeAt(50, y, "Radial gradient:");
+    y += 15;
+
+    const grad4 = try doc.addRadialGradient(.{
+        .x0 = 150,
+        .y0 = y + 40,
+        .r0 = 0,
+        .x1 = 150,
+        .y1 = y + 40,
+        .r1 = 60,
+        .stops = &[_]zpdf.ColorStop{
+            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 255, 255) },
+            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 0, 128) },
+        },
+        .extend_after = false,
+    });
+    try doc.fillRectGradient(50, y, 200, 80, grad4);
+
+    return doc.output();
+}
+
 // ============================================================================
 // Integration Tests
 // ============================================================================
@@ -1569,6 +1755,16 @@ test "integration: images PDF" {
 test "integration: svg PDF" {
     // Tests SVG embedding as Form XObjects
     try runIntegrationTest("svg", generateSvgPdf);
+}
+
+test "integration: paths PDF" {
+    // Tests path API: moveTo, lineTo, curveTo, closePath
+    try runIntegrationTest("paths", generatePathsPdf);
+}
+
+test "integration: gradients PDF" {
+    // Tests gradients: linear horizontal/vertical, radial
+    try runIntegrationTest("gradients", generateGradientsPdf);
 }
 
 fn runIntegrationTest(
