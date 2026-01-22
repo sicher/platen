@@ -465,6 +465,8 @@ pub const Document = struct {
     gradients: std.ArrayListUnmanaged(GradientDef) = .{},
     // Document bookmarks (outline items)
     bookmarks: std.ArrayListUnmanaged(*Bookmark) = .{},
+    // Last top-level bookmark (for building sibling chain)
+    last_top_level_bookmark: ?*Bookmark = null,
     // Page label ranges
     page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .{},
     /// Document metadata (title, author, etc.)
@@ -865,7 +867,8 @@ pub const Document = struct {
     /// Returns null if no pages have been added.
     pub fn currentDestination(self: *const Document) ?Destination {
         if (self.pages.items.len == 0) return null;
-        return .{ .page_index = self.pages.items.len - 1, .y = self.y };
+        // Convert from internal PDF coords (bottom-up) to user coords (top-down)
+        return .{ .page_index = self.pages.items.len - 1, .y = self.page_size.height - self.y };
     }
 
     /// Add an internal link (clickable area that jumps to another page position).
@@ -904,8 +907,9 @@ pub const Document = struct {
             .parent = parent,
         };
 
-        // Update parent's child pointers
+        // Update sibling chain
         if (parent) |p| {
+            // Child bookmark: link to parent's children
             if (p.last_child) |last| {
                 last.next = bookmark;
                 bookmark.prev = last;
@@ -914,6 +918,13 @@ pub const Document = struct {
             }
             p.last_child = bookmark;
             p.count += 1;
+        } else {
+            // Top-level bookmark: link to other top-level items
+            if (self.last_top_level_bookmark) |last| {
+                last.next = bookmark;
+                bookmark.prev = last;
+            }
+            self.last_top_level_bookmark = bookmark;
         }
 
         try self.bookmarks.append(self.allocator, bookmark);
