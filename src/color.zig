@@ -286,6 +286,189 @@ pub const Color = union(enum) {
         };
     }
 
+    /// RGB tuple type for 0-255 values (useful for SVG)
+    pub const Rgb255 = struct { r: u8, g: u8, b: u8 };
+
+    /// Convert to RGB 0-255 values
+    pub fn toRgb255(self: Color) Rgb255 {
+        const rgb = self.toRgb();
+        return .{
+            .r = @intFromFloat(@round(rgb.r * 255)),
+            .g = @intFromFloat(@round(rgb.g * 255)),
+            .b = @intFromFloat(@round(rgb.b * 255)),
+        };
+    }
+
+    /// Comptime-optimized lookup table for named CSS/SVG colors.
+    const named_colors = std.StaticStringMap(Color).initComptime(.{
+        // Blacks and Grays
+        .{ "black", black },
+        .{ "white", white },
+        .{ "gray", gray },
+        .{ "grey", grey },
+        .{ "silver", silver },
+        .{ "darkgray", darkgray },
+        .{ "darkgrey", darkgrey },
+        .{ "dimgray", dimgray },
+        .{ "dimgrey", dimgrey },
+        .{ "lightgray", lightgray },
+        .{ "lightgrey", lightgrey },
+        .{ "gainsboro", gainsboro },
+        .{ "whitesmoke", whitesmoke },
+        // Slate grays
+        .{ "slategray", slategray },
+        .{ "slategrey", slategrey },
+        .{ "lightslategray", lightslategray },
+        .{ "lightslategrey", lightslategrey },
+        .{ "darkslategray", darkslategray },
+        .{ "darkslategrey", darkslategrey },
+        // Reds
+        .{ "red", red },
+        .{ "darkred", darkred },
+        .{ "firebrick", firebrick },
+        .{ "indianred", indianred },
+        .{ "lightcoral", lightcoral },
+        .{ "crimson", crimson },
+        .{ "maroon", maroon },
+        // Pinks
+        .{ "pink", pink },
+        .{ "lightpink", lightpink },
+        .{ "hotpink", hotpink },
+        .{ "deeppink", deeppink },
+        .{ "palevioletred", palevioletred },
+        .{ "mediumvioletred", mediumvioletred },
+        // Oranges
+        .{ "orange", orange },
+        .{ "darkorange", darkorange },
+        .{ "orangered", orangered },
+        .{ "tomato", tomato },
+        .{ "coral", coral },
+        .{ "salmon", salmon },
+        .{ "lightsalmon", lightsalmon },
+        .{ "darksalmon", darksalmon },
+        // Yellows
+        .{ "yellow", yellow },
+        .{ "lightyellow", lightyellow },
+        .{ "gold", gold },
+        .{ "khaki", khaki },
+        .{ "darkkhaki", darkkhaki },
+        .{ "palegoldenrod", palegoldenrod },
+        .{ "moccasin", moccasin },
+        .{ "peachpuff", peachpuff },
+        .{ "papayawhip", papayawhip },
+        .{ "lemonchiffon", lemonchiffon },
+        .{ "cornsilk", cornsilk },
+        // Browns
+        .{ "brown", brown },
+        .{ "saddlebrown", saddlebrown },
+        .{ "sienna", sienna },
+        .{ "chocolate", chocolate },
+        .{ "peru", peru },
+        .{ "sandybrown", sandybrown },
+        .{ "burlywood", burlywood },
+        .{ "tan", tan },
+        .{ "rosybrown", rosybrown },
+        .{ "goldenrod", goldenrod },
+        .{ "darkgoldenrod", darkgoldenrod },
+        // Greens
+        .{ "green", green },
+        .{ "lime", lime },
+        .{ "limegreen", limegreen },
+        .{ "lightgreen", lightgreen },
+        .{ "palegreen", palegreen },
+        .{ "darkgreen", darkgreen },
+        .{ "forestgreen", forestgreen },
+        .{ "seagreen", seagreen },
+        .{ "mediumseagreen", mediumseagreen },
+        .{ "springgreen", springgreen },
+        .{ "mediumspringgreen", mediumspringgreen },
+        .{ "mediumaquamarine", mediumaquamarine },
+        .{ "aquamarine", aquamarine },
+        .{ "darkseagreen", darkseagreen },
+        .{ "yellowgreen", yellowgreen },
+        .{ "greenyellow", greenyellow },
+        .{ "chartreuse", chartreuse },
+        .{ "lawngreen", lawngreen },
+        .{ "olive", olive },
+        .{ "olivedrab", olivedrab },
+        .{ "darkolivegreen", darkolivegreen },
+        // Cyans
+        .{ "cyan", cyan },
+        .{ "aqua", aqua },
+        .{ "lightcyan", lightcyan },
+        .{ "paleturquoise", paleturquoise },
+        .{ "turquoise", turquoise },
+        .{ "mediumturquoise", mediumturquoise },
+        .{ "darkturquoise", darkturquoise },
+        .{ "darkcyan", darkcyan },
+        .{ "teal", teal },
+        .{ "lightseagreen", lightseagreen },
+        .{ "cadetblue", cadetblue },
+        // Blues
+        .{ "blue", blue },
+        .{ "navy", navy },
+        .{ "darkblue", darkblue },
+        .{ "mediumblue", mediumblue },
+        .{ "midnightblue", midnightblue },
+        .{ "royalblue", royalblue },
+        .{ "steelblue", steelblue },
+        .{ "dodgerblue", dodgerblue },
+        .{ "deepskyblue", deepskyblue },
+        .{ "cornflowerblue", cornflowerblue },
+        .{ "skyblue", skyblue },
+        .{ "lightskyblue", lightskyblue },
+        .{ "lightblue", lightblue },
+        .{ "lightsteelblue", lightsteelblue },
+        .{ "powderblue", powderblue },
+        .{ "aliceblue", aliceblue },
+        // Purples
+        .{ "purple", purple },
+        .{ "magenta", magenta },
+        .{ "fuchsia", fuchsia },
+        .{ "darkmagenta", darkmagenta },
+        .{ "indigo", indigo },
+        .{ "darkslateblue", darkslateblue },
+        .{ "slateblue", slateblue },
+        .{ "mediumslateblue", mediumslateblue },
+        .{ "mediumpurple", mediumpurple },
+        .{ "blueviolet", blueviolet },
+        .{ "darkviolet", darkviolet },
+        .{ "darkorchid", darkorchid },
+        .{ "mediumorchid", mediumorchid },
+        .{ "orchid", orchid },
+        .{ "violet", violet },
+        .{ "plum", plum },
+        .{ "thistle", thistle },
+        .{ "lavender", lavender },
+        .{ "rebeccapurple", rebeccapurple },
+        // Whites and off-whites
+        .{ "snow", snow },
+        .{ "honeydew", honeydew },
+        .{ "mintcream", mintcream },
+        .{ "azure", azure },
+        .{ "ghostwhite", ghostwhite },
+        .{ "floralwhite", floralwhite },
+        .{ "ivory", ivory },
+        .{ "beige", beige },
+        .{ "linen", linen },
+        .{ "oldlace", oldlace },
+        .{ "antiquewhite", antiquewhite },
+        .{ "bisque", bisque },
+        .{ "blanchedalmond", blanchedalmond },
+        .{ "navajowhite", navajowhite },
+        .{ "wheat", wheat },
+        .{ "seashell", seashell },
+        .{ "lavenderblush", lavenderblush },
+        .{ "mistyrose", mistyrose },
+    });
+
+    /// Look up a named CSS/SVG color by name (case-sensitive).
+    /// Returns null if the name is not recognized.
+    /// Uses comptime-optimized hash lookup.
+    pub fn fromName(name: []const u8) ?Color {
+        return named_colors.get(name);
+    }
+
     /// Check if two colors are equal
     pub fn eql(self: Color, other: Color) bool {
         return switch (self) {

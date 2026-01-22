@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const xml = @import("xml.zig");
+const color_module = @import("color.zig");
 
 // ============================================================================
 // Types
@@ -1875,38 +1876,15 @@ fn parseColor(str: []const u8) ?Color {
 }
 
 fn namedColor(name: []const u8) ?Color {
-    const colors = .{
-        .{ "black", Color{ .r = 0, .g = 0, .b = 0 } },
-        .{ "white", Color{ .r = 255, .g = 255, .b = 255 } },
-        .{ "red", Color{ .r = 255, .g = 0, .b = 0 } },
-        .{ "green", Color{ .r = 0, .g = 128, .b = 0 } },
-        .{ "blue", Color{ .r = 0, .g = 0, .b = 255 } },
-        .{ "yellow", Color{ .r = 255, .g = 255, .b = 0 } },
-        .{ "cyan", Color{ .r = 0, .g = 255, .b = 255 } },
-        .{ "magenta", Color{ .r = 255, .g = 0, .b = 255 } },
-        .{ "gray", Color{ .r = 128, .g = 128, .b = 128 } },
-        .{ "grey", Color{ .r = 128, .g = 128, .b = 128 } },
-        .{ "orange", Color{ .r = 255, .g = 165, .b = 0 } },
-        .{ "purple", Color{ .r = 128, .g = 0, .b = 128 } },
-        .{ "pink", Color{ .r = 255, .g = 192, .b = 203 } },
-        .{ "brown", Color{ .r = 165, .g = 42, .b = 42 } },
-        .{ "lime", Color{ .r = 0, .g = 255, .b = 0 } },
-        .{ "navy", Color{ .r = 0, .g = 0, .b = 128 } },
-        .{ "teal", Color{ .r = 0, .g = 128, .b = 128 } },
-        .{ "maroon", Color{ .r = 128, .g = 0, .b = 0 } },
-        .{ "olive", Color{ .r = 128, .g = 128, .b = 0 } },
-        .{ "silver", Color{ .r = 192, .g = 192, .b = 192 } },
-        .{ "aqua", Color{ .r = 0, .g = 255, .b = 255 } },
-        .{ "fuchsia", Color{ .r = 255, .g = 0, .b = 255 } },
-        .{ "transparent", Color{ .a = 0 } },
-    };
-
-    inline for (colors) |entry| {
-        if (std.mem.eql(u8, name, entry[0])) {
-            return entry[1];
-        }
+    // Handle special SVG value
+    if (std.mem.eql(u8, name, "transparent")) {
+        return Color{ .a = 0 };
     }
-    return null;
+
+    // Look up from shared CSS/SVG color definitions (148 colors)
+    const css_color = color_module.Color.fromName(name) orelse return null;
+    const rgb = css_color.toRgb255();
+    return Color{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
 }
 
 fn parseHexDigit(c: u8) ?u8 {

@@ -1225,9 +1225,9 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "Red text (RGB: 255, 0, 0)");
     y += 20;
 
-    // Green text
-    doc.setTextColor(zpdf.Color.green);
-    _ = try doc.writeAt(50, y, "Green text (RGB: 0, 255, 0)");
+    // Lime green text (CSS "green" is 0,128,0 - this is "lime")
+    doc.setTextColor(zpdf.Color.lime);
+    _ = try doc.writeAt(50, y, "Lime text (RGB: 0, 255, 0)");
     y += 20;
 
     // Blue text
@@ -1256,8 +1256,8 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "Mixed colors: ");
     doc.setTextColor(zpdf.Color.red);
     _ = try doc.writeAt(145, y, "Red ");
-    doc.setTextColor(zpdf.Color.green);
-    _ = try doc.writeAt(175, y, "Green ");
+    doc.setTextColor(zpdf.Color.lime);
+    _ = try doc.writeAt(175, y, "Lime ");
     doc.setTextColor(zpdf.Color.blue);
     _ = try doc.writeAt(220, y, "Blue");
 
