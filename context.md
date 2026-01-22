@@ -1,9 +1,32 @@
 # zpdf Context
 
 ## Current Focus
-Filling API gaps vs fpdf2. 249 unit tests + 23 integration tests pass.
+Link support complete. 249 unit tests + 24 integration tests pass.
 
 **Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+
+## What We Did (Session 2026-01-22) [COMPLETE]
+- **Implemented link support for TOC generation**:
+  - Added `Rect` type for simple bounding boxes (x, y, width, height)
+  - Added `Destination` type for internal link targets (page_index, y)
+  - Renamed `Region` → `TextBox` (styled text container)
+  - Renamed `getPageRegion()` → `getPageTextBox()`
+  - Renamed `drawRegion()` → `drawTextBox()`
+  - `writeAt()` now returns `Rect` for clickable area
+  - `WriteResult` now includes `rect` field
+  - Added `currentPageIndex()` and `currentDestination()` methods
+  - Added `addLink(rect, dest)` for internal links (TOC navigation)
+  - Added `addExternalLink(rect, url)` for external URL links
+  - PDF output includes `/Annots` array with link annotations
+  - Added links integration test
+- **Fixed bugs**:
+  - colored_text: `Color.green` → `Color.lime` (CSS green is 0,128,0)
+  - shapes: Reference updated with correct 0.567pt default line width
+  - svg_text: SVG now supports all 148 CSS colors
+- **Unified CSS/SVG color handling**:
+  - Added `Color.fromName()` with `StaticStringMap` for O(1) lookup of 148 colors
+  - Added `Color.toRgb255()` for SVG conversion
+  - SVG parser now uses shared color definitions from color.zig
 
 ## What We Did (Session 2026-01-21 #56) [COMPLETE]
 - **Implemented quick wins from API gap analysis**:
