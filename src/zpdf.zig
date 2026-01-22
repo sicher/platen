@@ -75,7 +75,7 @@ pub const LineCap = document.LineCap;
 pub const LineJoin = document.LineJoin;
 pub const DashPattern = document.DashPattern;
 pub const DrawStyleOptions = document.DrawStyleOptions;
-pub const Point = document.Document.Point;
+pub const Point = document.Point;
 
 // Re-export gradient types
 pub const LinearGradient = document.LinearGradient;

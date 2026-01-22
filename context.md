@@ -1,11 +1,26 @@
 # zpdf Context
 
 ## Current Focus
-Link support complete. 249 unit tests + 24 integration tests pass.
+API cleanup complete. 249 unit tests + 24 integration tests pass.
 
-**Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
+## What We Did (Session 2026-01-22 #2) [COMPLETE]
+- **API cleanup and documentation**:
+  - Created `scripts/update_api_docs.py` - extracts API from doc comments, updates README
+  - Updated README.md with complete API reference (52 methods in 10 categories)
+  - Updated API_COMPARISON.md with link support as ✅
+  - Added API Design Guidelines section to DESIGN.md
+- **Unified `Point` type**:
+  - Added `Point` to `layout.zig` as single source of truth
+  - Updated `path.zig` and `svg.zig` to use `layout.Point`
+  - Removed duplicate `Point` definitions
+- **Simplified cursor API** (5 methods → 2):
+  - Removed: `setXY`, `setX`, `setY`, `getX`, `getY`
+  - Added: `setPosition(Point)`, `getPosition() -> Point`
+- **Removed redundant `currentPageIndex()`** - users can use `pageNo() - 1`
+- **Updated DESIGN.md** with all Region → TextBox, setXY → setPosition changes
+- **Future consideration**: Replace `first_indent` option with general cursor advancement on TextBox
 
-## What We Did (Session 2026-01-22) [COMPLETE]
+## What We Did (Session 2026-01-22 #1) [COMPLETE]
 - **Implemented link support for TOC generation**:
   - Added `Rect` type for simple bounding boxes (x, y, width, height)
   - Added `Destination` type for internal link targets (page_index, y)
@@ -14,7 +29,7 @@ Link support complete. 249 unit tests + 24 integration tests pass.
   - Renamed `drawRegion()` → `drawTextBox()`
   - `writeAt()` now returns `Rect` for clickable area
   - `WriteResult` now includes `rect` field
-  - Added `currentPageIndex()` and `currentDestination()` methods
+  - Added `currentDestination()` method
   - Added `addLink(rect, dest)` for internal links (TOC navigation)
   - Added `addExternalLink(rect, url)` for external URL links
   - PDF output includes `/Annots` array with link annotations
@@ -27,6 +42,8 @@ Link support complete. 249 unit tests + 24 integration tests pass.
   - Added `Color.fromName()` with `StaticStringMap` for O(1) lookup of 148 colors
   - Added `Color.toRgb255()` for SVG conversion
   - SVG parser now uses shared color definitions from color.zig
+
+**Decision:** PDF embedding scrapped - SVG already covers vector figure embedding from matplotlib, Inkscape, Illustrator, R/ggplot2.
 
 ## What We Did (Session 2026-01-21 #56) [COMPLETE]
 - **Implemented quick wins from API gap analysis**:

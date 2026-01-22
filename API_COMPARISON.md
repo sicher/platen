@@ -38,7 +38,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Left margin | `set_left_margin()` | ✅ via `Margins` struct | |
 | Top margin | `set_top_margin()` | ✅ via `Margins` struct | |
 | Right margin | `set_right_margin()` | ✅ via `Margins` struct | |
-| Get page region | - | ✅ `getPageRegion()` | zpdf feature |
+| Get page region | - | ✅ `getPageTextBox()` | zpdf feature |
 | **Auto page break** | `set_auto_page_break()` | ❌ | **GAP** - zpdf has manual `writeFlow` |
 | **Page background** | `set_page_background()` | ❌ | **GAP** |
 | **Alias for total pages** | `alias_nb_pages()` | ❌ | **GAP** - "{nb}" placeholder |
@@ -51,11 +51,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| Set position | `set_xy()` | ✅ `setXY()` | |
-| Set X | `set_x()` | ✅ `setX()` | |
-| Set Y | `set_y()` | ✅ `setY()` | |
-| Get X | `get_x()` | ✅ `getX()` | |
-| Get Y | `get_y()` | ✅ `getY()` | |
+| Set position | `set_xy()` | ✅ `setPosition(Point)` | |
+| Get position | `get_x()`/`get_y()` | ✅ `getPosition() -> Point` | |
 | **Line break (Ln)** | `ln()` | ❌ | **GAP** - manual Y adjustment |
 
 ---
@@ -114,7 +111,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| Page region | - | ✅ `getPageRegion()` | |
+| Page region | - | ✅ `getPageTextBox()` | |
 | Custom regions | - | ✅ `Region` struct | |
 | Region with padding | - | ✅ `Padding` | |
 | Region with border | - | ✅ `Border` | |
@@ -136,10 +133,10 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Grayscale | ✅ | ✅ | |
 | CMYK colors | ✅ | ✅ | |
 | Set text color | `set_text_color()` | ✅ `setTextColor()` | |
-| Set fill color | `set_fill_color()` | ✅ `setFillColor()` | |
-| Set draw color | `set_draw_color()` | ✅ `setDrawColor()` | |
-| Named colors | ✅ `DeviceRGB` presets | ✅ black/white/red/green/blue | |
-| **Color names (CSS)** | ✅ many | ⚠️ limited | zpdf has basic presets |
+| Set fill color | `set_fill_color()` | ✅ via `setDrawStyle()` | |
+| Set draw color | `set_draw_color()` | ✅ via `setDrawStyle()` | |
+| Named colors | ✅ `DeviceRGB` presets | ✅ 148 CSS colors | |
+| Color names (CSS) | ✅ many | ✅ all 148 colors | `Color.fromName()` |
 
 ---
 
@@ -159,10 +156,10 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | **Arc** | `arc()` | ❌ | **GAP** |
 | **Solid arc (pie)** | `solid_arc()` | ❌ | **GAP** |
 | **Bezier curves** | `bezier()` | ✅ via Path API | Path.curveTo/quadTo |
-| Line width | `set_line_width()` | ✅ `setLineWidth()` | |
-| Dash pattern | `set_dash_pattern()` | ✅ `setDashPattern()` | |
-| Line cap | ✅ | ✅ `setLineCap()` | |
-| Line join | ✅ | ✅ `setLineJoin()` | |
+| Line width | `set_line_width()` | ✅ via `setDrawStyle()` | |
+| Dash pattern | `set_dash_pattern()` | ✅ via `setDrawStyle()` | |
+| Line cap | ✅ | ✅ via `setDrawStyle()` | |
+| Line join | ✅ | ✅ via `setDrawStyle()` | |
 | Fill/stroke styles | ✅ | ✅ `DrawStyle` | |
 
 ---
@@ -240,10 +237,10 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| **External hyperlinks** | ✅ | ❌ | **GAP** |
-| **Internal links** | `add_link()`, `set_link()` | ❌ | **GAP** |
-| **Link in cell** | ✅ | ❌ | **GAP** |
-| **Link region** | `link()` | ❌ | **GAP** |
+| External hyperlinks | ✅ | ✅ `addExternalLink()` | |
+| Internal links | `add_link()`, `set_link()` | ✅ `addLink()` | |
+| Link region | `link()` | ✅ `addLink(rect, dest)` | |
+| Current destination | - | ✅ `currentDestination()` | zpdf feature |
 | **File links** | ✅ | ❌ | **GAP** |
 
 ---
@@ -349,11 +346,10 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 ## Summary of Gaps
 
 ### High Priority (Common Features)
-1. **Links** - hyperlinks (external URLs, internal page links)
-2. **Table API** - structured table creation
-3. **Document outline/bookmarks** - navigation structure
-4. **Auto page break** - automatic page breaks with callbacks
-5. **Header/footer callbacks** - repeated content per page
+1. **Table API** - structured table creation
+2. **Document outline/bookmarks** - navigation structure
+3. **Auto page break** - automatic page breaks with callbacks
+4. **Header/footer callbacks** - repeated content per page
 
 ### Medium Priority (Useful Features)
 6. **Annotations** - text annotations, highlights, attachments
@@ -378,15 +374,16 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 2. **Wrapped text measurement** - `measureWrappedText()` before rendering
 3. **More OpenType features** - tnum/pnum, frac, zero, dlig exposed
 4. **Break on hyphens option** - control regular hyphen breaking
-5. **Region-based layout** - explicit region model with overflow
+5. **TextBox-based layout** - explicit text box model with overflow
+6. **Destination tracking** - `currentDestination()` for easy TOC building
 
 ---
 
 ## Recommended Implementation Order
 
-### Phase 1: Links & Navigation
-1. External hyperlinks
-2. Internal links (page references)
+### Phase 1: Links & Navigation ✅ DONE
+1. ~~External hyperlinks~~ ✅
+2. ~~Internal links (page references)~~ ✅
 3. Document outline/bookmarks
 
 ### Phase 2: Page Flow

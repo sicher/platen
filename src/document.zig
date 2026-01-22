@@ -48,6 +48,7 @@ pub const VAlign = layout.VAlign;
 pub const LineBreaking = layout.LineBreaking;
 pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
+pub const Point = layout.Point;
 pub const Rect = layout.Rect;
 pub const TextBox = layout.TextBox;
 pub const Destination = layout.Destination;
@@ -456,6 +457,7 @@ pub const Document = struct {
     /// Document metadata (title, author, etc.)
     metadata: DocumentMetadata = .{},
 
+    /// Create a new PDF document.
     pub fn init(allocator: std.mem.Allocator) Document {
         return .{
             .allocator = allocator,
@@ -464,6 +466,7 @@ pub const Document = struct {
         };
     }
 
+    /// Free all document resources.
     pub fn deinit(self: *Document) void {
         for (self.pages.items) |*page| {
             page.deinit(self.allocator);
@@ -821,31 +824,18 @@ pub const Document = struct {
         return metrics.measureTextWidth(text_str, self.getTextStyle());
     }
 
-    /// Set current position (in points from top-left)
-    pub fn setXY(self: *Document, x: f64, y: f64) void {
-        self.x = x;
-        // Convert from top-left to PDF coordinates (bottom-left origin)
-        self.y = self.page_size.height - y;
+    /// Set cursor position (in points from top-left).
+    pub fn setPosition(self: *Document, pos: Point) void {
+        self.x = pos.x;
+        self.y = self.page_size.height - pos.y;
     }
 
-    /// Set X position
-    pub fn setX(self: *Document, x: f64) void {
-        self.x = x;
-    }
-
-    /// Set Y position (from top)
-    pub fn setY(self: *Document, y: f64) void {
-        self.y = self.page_size.height - y;
-    }
-
-    /// Get current X position
-    pub fn getX(self: *Document) f64 {
-        return self.x;
-    }
-
-    /// Get current Y position (from top)
-    pub fn getY(self: *Document) f64 {
-        return self.page_size.height - self.y;
+    /// Get cursor position (in points from top-left).
+    pub fn getPosition(self: *Document) Point {
+        return .{
+            .x = self.x,
+            .y = self.page_size.height - self.y,
+        };
     }
 
     /// Get current page number (1-based).
@@ -854,18 +844,12 @@ pub const Document = struct {
         return self.pages.items.len;
     }
 
-    /// Get current page index (0-based).
-    /// Returns null if no pages have been added.
-    pub fn currentPageIndex(self: *const Document) ?usize {
-        if (self.pages.items.len == 0) return null;
-        return self.pages.items.len - 1;
-    }
-
     /// Get a destination for the current cursor position.
     /// Used as target for internal links (e.g., TOC entries).
+    /// Returns null if no pages have been added.
     pub fn currentDestination(self: *const Document) ?Destination {
-        const page_index = self.currentPageIndex() orelse return null;
-        return .{ .page_index = page_index, .y = self.y };
+        if (self.pages.items.len == 0) return null;
+        return .{ .page_index = self.pages.items.len - 1, .y = self.y };
     }
 
     /// Add an internal link (clickable area that jumps to another page position).
@@ -1184,7 +1168,7 @@ pub const Document = struct {
     /// Writes text at the specified position.
     /// Returns the bounding rectangle of the rendered text.
     pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !Rect {
-        self.setXY(x, y);
+        self.setPosition(.{ .x = x, .y = y });
         try self.write(str);
         const width = self.getTextWidth(str);
         // Y is baseline, so rect top is y - font_size (approximate ascender)
@@ -2357,12 +2341,6 @@ pub const Document = struct {
         const diameter = radius * 2.0;
         return self.drawEllipse(x - radius, y - radius, diameter, diameter, style);
     }
-
-    /// Point for polygon drawing.
-    pub const Point = struct {
-        x: f64,
-        y: f64,
-    };
 
     /// Draw a closed polygon.
     /// Coordinates are from top-left origin.

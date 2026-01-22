@@ -61,6 +61,12 @@ pub const Padding = struct {
     bottom: f64 = 0,
 };
 
+/// A 2D point (x, y coordinates).
+pub const Point = struct {
+    x: f64,
+    y: f64,
+};
+
 /// Simple rectangle (bounding box).
 pub const Rect = struct {
     x: f64,

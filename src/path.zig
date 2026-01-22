@@ -4,6 +4,9 @@
 //! moveTo, lineTo, curveTo, quadTo, and closePath operations.
 
 const std = @import("std");
+const layout = @import("layout.zig");
+
+pub const Point = layout.Point;
 
 /// Path command types
 pub const Command = union(enum) {
@@ -12,11 +15,6 @@ pub const Command = union(enum) {
     curve_to: CubicBezier,
     quad_to: QuadBezier,
     close,
-};
-
-pub const Point = struct {
-    x: f64,
-    y: f64,
 };
 
 pub const CubicBezier = struct {

@@ -6,6 +6,7 @@
 const std = @import("std");
 const xml = @import("xml.zig");
 const color_module = @import("color.zig");
+const layout = @import("layout.zig");
 
 // ============================================================================
 // Types
@@ -85,11 +86,7 @@ pub const TextAnchor = enum {
     end, // Right-aligned
 };
 
-/// 2D point
-pub const Point = struct {
-    x: f64,
-    y: f64,
-};
+pub const Point = layout.Point;
 
 /// Style properties for SVG elements
 pub const Style = struct {

@@ -202,22 +202,21 @@ test "font styles" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/BaseFont /Helvetica-BoldOblique") != null);
 }
 
-test "positioning setXY" {
-    // fpdf2: test_positioning tests
+test "positioning setPosition/getPosition" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
 
-    doc.setXY(100, 200);
-    try std.testing.expectApproxEqAbs(@as(f64, 100), doc.getX(), 0.01);
-    try std.testing.expectApproxEqAbs(@as(f64, 200), doc.getY(), 0.01);
+    doc.setPosition(.{ .x = 100, .y = 200 });
+    const pos = doc.getPosition();
+    try std.testing.expectApproxEqAbs(@as(f64, 100), pos.x, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f64, 200), pos.y, 0.01);
 
-    doc.setX(150);
-    try std.testing.expectApproxEqAbs(@as(f64, 150), doc.getX(), 0.01);
-
-    doc.setY(300);
-    try std.testing.expectApproxEqAbs(@as(f64, 300), doc.getY(), 0.01);
+    doc.setPosition(.{ .x = 150, .y = 300 });
+    const pos2 = doc.getPosition();
+    try std.testing.expectApproxEqAbs(@as(f64, 150), pos2.x, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f64, 300), pos2.y, 0.01);
 }
 
 test "multiple pages" {
@@ -1727,7 +1726,7 @@ test "drawPolygon triangle" {
     defer doc.deinit();
 
     try doc.addPage();
-    const points = [_]document.Document.Point{
+    const points = [_]document.Point{
         .{ .x = 100, .y = 100 },
         .{ .x = 200, .y = 100 },
         .{ .x = 150, .y = 50 },
@@ -1745,7 +1744,7 @@ test "drawPolygon less than 3 points does nothing" {
     defer doc.deinit();
 
     try doc.addPage();
-    const points = [_]document.Document.Point{
+    const points = [_]document.Point{
         .{ .x = 100, .y = 100 },
         .{ .x = 200, .y = 100 },
     };

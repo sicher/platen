@@ -15,6 +15,7 @@ A fast PDF rendering library for Zig, inspired by [fpdf2](https://github.com/py-
 - **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`
 - **Gradients**: linear and radial
 - **Document metadata**: title, author, subject, keywords
+- **Links**: internal (TOC navigation) and external (URLs)
 - **Compression**: FlateDecode for smaller file sizes
 
 ## Quick Start
@@ -116,8 +117,8 @@ try doc.writeAt(50, 50, "Custom font with Unicode: ");
 try doc.addPage();
 try doc.setFont(.helvetica, 11);
 
-// Define a region for text
-var region = zpdf.Region{
+// Define a text box for text
+var region = zpdf.TextBox{
     .x = 72,
     .y = 72,
     .width = 468,  // page width minus margins
@@ -315,60 +316,134 @@ doc.setMetadata(.{
 });
 ```
 
+### Links
+
+```zig
+try doc.addPage();
+try doc.setFont(.helvetica, 12);
+
+// Write text and get its bounding rectangle
+const rect = try doc.writeAt(50, 50, "Click here for Zig documentation");
+
+// Add external link (URL)
+try doc.addExternalLink(rect, "https://ziglang.org/documentation/");
+
+// Internal links for TOC navigation
+try doc.setFont(.helvetica_bold, 16);
+_ = try doc.writeAt(50, 100, "Chapter 1: Introduction");
+const chapter1_dest = doc.currentDestination();  // save this location
+
+// Later, create a link to that chapter
+try doc.addPage();
+try doc.setFont(.helvetica, 12);
+const toc_rect = try doc.writeAt(50, 50, "Go to Chapter 1");
+try doc.addLink(toc_rect, chapter1_dest);
+```
+
 ## API Reference
+
+### Core
+
+| Method | Description |
+|--------|-------------|
+| `deinit()` | Free all document resources |
+| `init()` | Create a new PDF document |
+| `output()` | Generate PDF output |
 
 ### Document
 
 | Method | Description |
 |--------|-------------|
-| `init(allocator)` | Create new document |
-| `deinit()` | Free resources |
-| `setMetadata(meta)` | Set document metadata (title, author, etc.) |
-| `setDefaultPageSize(size)` | Set default for addPage() |
-| `addPage()` | Add page (default size) |
-| `addPageWithSize(size)` | Add page with specific size |
-| `pageNo()` | Get current page count |
-| `output()` | Generate PDF bytes |
-| `setFont(font, size)` | Set standard font |
-| `setEmbeddedFont(font, size)` | Set custom font |
-| `loadFont(path)` | Load TTF/OTF font |
-| `loadImage(path)` | Load JPEG/PNG image |
-| `loadSvg(path)` | Load SVG file |
+| `addPage()` | Add a new page using the default page size |
+| `addPageWithSize()` | Add a new page with a specific size (overrides default for this page) |
+| `getPageTextBox()` | Returns a region for the current page respecting document margins |
+| `pageNo()` | Get current page number (1-based) |
+| `setDefaultPageSize()` | Set the default page size for subsequent addPage() calls |
+| `setMargins()` | Set document margins |
+| `setMetadata()` | Set document metadata (title, author, subject, etc.) |
+
+### Fonts
+
+| Method | Description |
+|--------|-------------|
+| `getFontMetrics()` | Get font metrics for the current font, scaled to the current font size |
+| `getTextStyle()` | Get current text style for measurement |
+| `loadFont()` | Load a TrueType font from file |
+| `setEmbeddedFont()` | Set an embedded font as current |
+| `setFeature()` | Set OpenType feature for all embedded fonts |
+| `setFont()` | Set the current font and size (standard font) |
+| `setFontFeature()` | Set OpenType feature for a specific embedded font |
 
 ### Text
 
 | Method | Description |
 |--------|-------------|
-| `write(str)` | Write at cursor |
-| `writeAt(x, y, str)` | Write at position |
-| `writeLine(&region, str, opts)` | Single line in region |
-| `writeParagraph(&region, str, opts)` | Wrapped text |
-| `writeFlow(str, opts)` | Auto-paginating text |
-| `measureWrappedText(str, opts)` | Measure without rendering |
-| `getTextWidth(str)` | Measure text width |
+| `drawTextBox()` | Draws a region's border and fill (without text) |
+| `getTextWidth()` | Measures text width using current font (standard or embedded) |
+| `measureText()` | Measure text dimensions without rendering |
+| `measureTextWidth()` | Measure text width in points |
+| `measureWrappedText()` | Measures how wrapped text would be laid out without rendering |
+| `write()` | Writes text at the current cursor position |
+| `writeAt()` | Writes text at the specified position |
+| `writeFlow()` | Write text with automatic pagination |
+| `writeLine()` | Writes a single line of text into a content area |
+| `writeParagraph()` | Writes wrapped text into a region |
+
+### Text Styling
+
+| Method | Description |
+|--------|-------------|
+| `getLineHeightPts()` | Get current line height in points |
+| `setCharSpacing()` | Set character spacing (extra space between characters, in points) |
+| `setLineHeight()` | Set line height (as multiple of font size, e.g. 1.2 = 120%) |
+| `setTextColor()` | Set text color |
+
+### Cursor Position
+
+| Method | Description |
+|--------|-------------|
+| `getPosition()` | Get cursor position (in points from top-left) |
+| `setPosition()` | Set cursor position (in points from top-left) |
+
+### Links
+
+| Method | Description |
+|--------|-------------|
+| `addExternalLink()` | Add an external link (clickable area that opens a URL) |
+| `addLink()` | Add an internal link (clickable area that jumps to another page position) |
+| `currentDestination()` | Get a destination for the current cursor position |
+
+### Images & SVG
+
+| Method | Description |
+|--------|-------------|
+| `drawImage()` | Draw an image at the specified position |
+| `drawSvg()` | Draw an SVG at the specified position |
+| `loadImage()` | Load an image from file (JPEG or PNG) |
+| `loadSvg()` | Load an SVG from file |
 
 ### Graphics
 
 | Method | Description |
 |--------|-------------|
-| `drawLine(x1, y1, x2, y2)` | Draw line |
-| `drawRect(x, y, w, h, style)` | Draw rectangle |
-| `drawRoundedRect(x, y, w, h, r, style)` | Draw rounded rectangle |
-| `drawCircle(x, y, r, style)` | Draw circle |
-| `drawEllipse(x, y, w, h, style)` | Draw ellipse |
-| `drawPolygon(points, style)` | Draw polygon |
-| `drawPath(&path, style)` | Draw custom path |
-| `drawImage(img, x, y, w, h)` | Draw image |
-| `drawSvg(svg, x, y, w, h)` | Draw SVG |
-| `drawLinearGradient(...)` | Draw linear gradient |
-| `drawRadialGradient(...)` | Draw radial gradient |
+| `createPath()` | Create a new path builder |
+| `drawCircle()` | Draw a circle (special case of ellipse) |
+| `drawEllipse()` | Draw an ellipse using 4 cubic Bezier curves |
+| `drawLine()` | Draw a line between two points |
+| `drawPath()` | Draw a path with the specified style |
+| `drawPolygon()` | Draw a closed polygon |
+| `drawRect()` | Draw a rectangle |
+| `drawRoundedRect()` | Draw a rectangle with rounded corners |
+| `setDrawStyle()` | Set drawing style (stroke/fill colors, line width, cap, join, dash pattern) |
 
-### Styling
+### Gradients
 
 | Method | Description |
 |--------|-------------|
-| `setDrawStyle(opts)` | Set drawing style (stroke/fill colors, line width, cap, join, dash) |
-| `setTextColor(color)` | Text color |
+| `addLinearGradient()` | Add a linear gradient to the document and return its index |
+| `addRadialGradient()` | Add a radial gradient to the document and return its index |
+| `fillRectGradient()` | Fill a rectangle with a gradient |
+
 
 ## Requirements
 

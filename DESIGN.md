@@ -20,7 +20,7 @@
 - `path.zig` - Path builder API
 - `gradient.zig` - Linear/radial gradient support
 - `color.zig` - Color types (grayscale, RGB, CMYK)
-- `layout.zig` - Layout types (Region, Margins, Padding)
+- `layout.zig` - Layout types (Point, TextBox, Margins, Padding)
 - `zlib.zig` - FlateDecode compression via C zlib
 - `cli.zig` - Command line tool
 
@@ -210,7 +210,7 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - `inter_fonts` - OpenType features (liga, kern, mark, calt, dlig, etc.)
 - `gentium_diacritics` - Mark positioning showcase
 - `opentype_features` - OpenType feature comparison
-- `text_flow` - Regions, word wrapping, padding
+- `text_flow` - TextBox, word wrapping, padding
 - `justify` - Justified text alignment
 - `optimal_breaks` - Knuth-Plass line breaking
 - `colored_text` - Text colors (grayscale, RGB, CMYK)
@@ -255,24 +255,24 @@ const metrics = doc.measureWrappedText(text, .{
 // metrics.line_count  - Number of lines
 // metrics.max_line_width - Width of widest line
 
-// Check if text would fit in a region
-if (metrics.fitsInHeight(region.remainingHeight())) {
-    _ = try doc.writeParagraph(&region, text, .{});
+// Check if text would fit in a text box
+if (metrics.fitsInHeight(box.remainingHeight())) {
+    _ = try doc.writeParagraph(&box, text, .{});
 }
 ```
 
-### Margins and Page Regions
+### Margins and Page TextBox
 
 ```zig
 // Set document margins (optional - defaults to 72pt / 1 inch)
 doc.setMargins(.{ .left = 72, .right = 72, .top = 72, .bottom = 72 });
 
-// Get region for current page (respects margins)
-var region = doc.getPageRegion();
-// → Region{ .x = 72, .y = 72, .width = 468, .height = 648, ... }
+// Get text box for current page (respects margins)
+var box = doc.getPageTextBox();
+// → TextBox{ .x = 72, .y = 72, .width = 468, .height = 648, ... }
 ```
 
-Margins don't magically affect `writeAt()` - they only define what `getPageRegion()` returns.
+Margins don't magically affect `writeAt()` - they only define what `getPageTextBox()` returns.
 
 ### Document Metadata
 
@@ -333,8 +333,14 @@ const TextMetrics = struct {
     lines: usize,    // number of lines (for wrapped text)
 };
 
-/// A rectangular area for content placement
-const Region = struct {
+/// 2D point
+const Point = struct {
+    x: f64,
+    y: f64,
+};
+
+/// A rectangular area for content placement with cursor tracking
+const TextBox = struct {
     // Geometry
     x: f64,
     y: f64,
@@ -352,13 +358,13 @@ const Region = struct {
     fill: ?Color = null,
 
     /// Space remaining in content area
-    pub fn remainingHeight(self: Region) f64;
+    pub fn remainingHeight(self: TextBox) f64;
 
     /// Usable width inside padding
-    pub fn contentWidth(self: Region) f64;
+    pub fn contentWidth(self: TextBox) f64;
 
     /// Check if text metrics fit in remaining space
-    pub fn fits(self: Region, m: TextMetrics) bool;
+    pub fn fits(self: TextBox, m: TextMetrics) bool;
 };
 
 /// Result of writeLine/writeParagraph
@@ -410,12 +416,12 @@ const FlowOptions = struct {
 ```zig
 fn write(self: *Document, text: []const u8) !void
 fn writeAt(self: *Document, x: f64, y: f64, text: []const u8) !void
-fn writeLine(self: *Document, region: *Region, text: []const u8, opts: LineOptions) !WriteResult
-fn writeParagraph(self: *Document, region: *Region, text: []const u8, opts: ParagraphOptions) !WriteResult
+fn writeLine(self: *Document, box: *TextBox, text: []const u8, opts: LineOptions) !WriteResult
+fn writeParagraph(self: *Document, box: *TextBox, text: []const u8, opts: ParagraphOptions) !WriteResult
 fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 
-/// Draw region's border/fill (without text)
-fn drawRegion(self: *Document, region: *const Region) !void
+/// Draw text box's border/fill (without text)
+fn drawTextBox(self: *Document, box: *const TextBox) !void
 ```
 
 ### Usage Patterns
@@ -440,30 +446,30 @@ try doc.writeFlow(long_body_text, .{
 });
 ```
 
-**Manual region control:**
+**Manual text box control:**
 ```zig
-var region = doc.getPageRegion();
+var box = doc.getPageTextBox();
 var remaining: ?[]const u8 = text;
 
 while (remaining) |txt| {
-    const result = try doc.writeParagraph(&region, .{ .text = txt });
+    const result = try doc.writeParagraph(&box, txt, .{});
     remaining = result.overflow;
     if (remaining != null) {
-        try doc.addPage(.a4);
-        region = doc.getPageRegion();
+        try doc.addPage();
+        box = doc.getPageTextBox();
     }
 }
 ```
 
 **Multi-column layout:**
 ```zig
-var left = Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
-var right = Region{ .x = 310, .y = 50, .width = 230, .height = 700 };
+var left = TextBox{ .x = 50, .y = 50, .width = 230, .height = 700 };
+var right = TextBox{ .x = 310, .y = 50, .width = 230, .height = 700 };
 
 var remaining: ?[]const u8 = text;
-for ([_]*Region{ &left, &right }) |region| {
+for ([_]*TextBox{ &left, &right }) |box| {
     if (remaining) |txt| {
-        const result = try doc.writeParagraph(region, .{ .text = txt });
+        const result = try doc.writeParagraph(box, txt, .{});
         remaining = result.overflow;
     }
 }
@@ -496,9 +502,9 @@ _ = try doc.writeParagraph(&region, text, .{ .valign = .middle });
 1. **Measure is cheap** - Font metric lookups, no PDF writing
 2. **No backtracking** - Measure → decide → render (never undo)
 3. **User controls flow** - Library provides primitives, user handles page/column breaks
-4. **Explicit regions** - Margins don't magically affect positioning; ask for `getPageRegion()`
-5. **Single source of truth** - When using regions, the region's cursor is authoritative; don't mix with `setXY()`
-6. **Layered API** - Simple (`writeFlow`) to powerful (`writeParagraph` + manual regions)
+4. **Explicit text boxes** - Margins don't magically affect positioning; ask for `getPageTextBox()`
+5. **Single source of truth** - When using text boxes, the box's cursor is authoritative; don't mix with `setPosition()`
+6. **Layered API** - Simple (`writeFlow`) to powerful (`writeParagraph` + manual text boxes)
 7. **Explicit over magic** - VAlign provides control; no hidden adjustments
 
 ## Graphics Support
@@ -592,6 +598,57 @@ doc.setLineCap(.round);    // .butt, .round, .square
 doc.setLineJoin(.miter);   // .miter, .round, .bevel
 doc.setDashPattern(4, 2, 0);  // dash, gap, phase
 doc.setSolidLine();           // reset to solid
+```
+
+## API Design Guidelines
+
+Principles for zpdf's public API:
+
+### 1. Unify common types
+Define shared types once in `layout.zig` and re-export everywhere:
+- `Point` - 2D coordinates (x, y)
+- `Rect` - bounding box (x, y, width, height)
+- `TextBox` - styled text container with cursor tracking
+
+Avoid duplicate definitions in different modules.
+
+### 2. Prefer structs over multiple parameters
+Use `Point` instead of separate `x, y` parameters where it makes sense:
+```zig
+// Preferred
+doc.setPosition(Point{ .x = 100, .y = 200 });
+const pos = doc.getPosition();
+
+// Avoid proliferating separate x/y methods
+// (removed: setX, setY, getX, getY, setXY)
+```
+
+Exception: Drawing APIs like `writeAt(x, y, text)` keep separate params for convenience.
+
+### 3. Eliminate redundant methods
+If two methods differ only by a constant offset, keep one:
+- `pageNo()` returns page count (1, 2, 3...)
+- Removed `currentPageIndex()` since it's just `pageNo() - 1`
+
+### 4. Composable primitives over special options
+Prefer general mechanisms that compose well:
+- **Future**: Replace `first_indent` option with cursor advancement on TextBox
+- General `cursor_x` movement is more flexible than a specific indent option
+- Works for: first-line indent, bullet offsets, nested blocks, hanging indents
+
+### 5. Naming conventions
+- `write*` - text output (write, writeAt, writeLine, writeParagraph, writeFlow)
+- `draw*` - graphics (drawLine, drawRect, drawCircle, drawPath, drawImage, drawSvg)
+- `load*` - load external resources (loadFont, loadImage, loadSvg)
+- `set*` / `get*` - state configuration
+- `measure*` - measurement without rendering
+- Avoid "region" in variable names - use "textbox" or "box"
+
+### 6. Options structs with defaults
+Use structs with sensible defaults for optional parameters:
+```zig
+_ = try doc.writeParagraph(&box, text, .{});  // all defaults
+_ = try doc.writeParagraph(&box, text, .{ .alignment = .justify });
 ```
 
 ## Zig 0.15 Compatibility Notes
