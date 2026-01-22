@@ -17,7 +17,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Page sizes (A3-A5, Letter, Legal, Tabloid) | ✅ | ✅ | |
 | Custom page sizes | tuple `(w, h)` | ✅ `PageSize{.width, .height}` | |
 | Landscape orientation | `orientation="landscape"` | ✅ `PageSize.landscape()` | |
-| Per-page orientation | `add_page(orientation=)` | ✅ `addPageWithSize()` | |
+| Per-page orientation | `add_page(orientation=)` | ✅ `addPage(size)` | |
 | Document title | `set_title()` | ✅ `setMetadata()` | |
 | Document author | `set_author()` | ✅ `setMetadata()` | |
 | Document subject | `set_subject()` | ✅ `setMetadata()` | |

@@ -113,9 +113,9 @@ Bookmarks and page labels implemented. 259 unit tests pass.
   - New PageSize constants: A3, A5, Legal, Tabloid (already had A4, Letter)
   - `PageSize.landscape()` method to swap width/height
   - `setDefaultPageSize(size)` - set default for subsequent addPage() calls
-  - `addPageWithSize(size)` - add page with specific size (one-off override)
+  - `addPage(size)` - add page with specific size (null uses default)
   - Page struct now stores its own size for per-page MediaBox
-- **Added 3 unit tests**: landscape, setDefaultPageSize, addPageWithSize
+- **Added 3 unit tests**: landscape, setDefaultPageSize, addPage with size
 - **Added landscape integration test**: A4/Letter portrait/landscape, custom size
 - **Created README.md**: full documentation with examples for all features
 - All 239 unit tests + 23 integration tests pass

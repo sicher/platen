@@ -279,7 +279,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         simple_font.setFeature(.calt, false);
 
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(null);
             try doc.setEmbeddedFont(simple_font, 10);
             var y: f64 = 30;
             // 50 lines of text per page
@@ -295,7 +295,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     {
         const t = Timer.begin("OpenType heavy");
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(null);
             var y: f64 = 30;
 
             // Ligature-heavy text
@@ -331,7 +331,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     {
         const t = Timer.begin("Unicode/marks");
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(null);
             var y: f64 = 30;
 
             // Latin extended with diacritics
@@ -377,7 +377,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         const full_text = lorem ++ lorem ++ lorem;
 
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(null);
             try doc.setEmbeddedFont(charter, 10);
 
             // Left column - justified with optimal line breaking

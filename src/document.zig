@@ -525,18 +525,14 @@ pub const Document = struct {
         self.page_size = size;
     }
 
-    /// Add a new page using the default page size.
-    pub fn addPage(self: *Document) !void {
-        try self.addPageWithSize(self.page_size);
-    }
-
-    /// Add a new page with a specific size (overrides default for this page).
-    pub fn addPageWithSize(self: *Document, size: PageSize) !void {
-        self.page_size = size; // Update current size for coordinate calculations
-        try self.pages.append(self.allocator, Page.init(self.allocator, size));
+    /// Add a new page. Uses the specified size, or the default page size if null.
+    pub fn addPage(self: *Document, size: ?PageSize) !void {
+        const actual_size = size orelse self.page_size;
+        self.page_size = actual_size; // Update current size for coordinate calculations
+        try self.pages.append(self.allocator, Page.init(self.allocator, actual_size));
         // Reset position to top-left
         self.x = 0;
-        self.y = size.height;
+        self.y = actual_size.height;
     }
 
     /// Set the current font and size (standard font)
@@ -2018,7 +2014,7 @@ pub const Document = struct {
 
             if (result.overflow) |overflow| {
                 // Need a new page
-                try self.addPage();
+                try self.addPage(null);
                 remaining = overflow;
             } else {
                 remaining = null;

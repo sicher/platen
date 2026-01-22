@@ -52,14 +52,14 @@ const test_cases = [_]TestCase{
 fn generateMinimalPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage();
+    try doc.addPage(null);
     return doc.output();
 }
 
 fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Hello, World!");
     return doc.output();
@@ -68,7 +68,7 @@ fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
 fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage();
+    try doc.addPage(null);
 
     try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(50, 50, "Helvetica Normal");
@@ -88,7 +88,7 @@ fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
 fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage();
+    try doc.addPage(null);
 
     const fonts = [_]zpdf.StandardFont{
         .helvetica,
@@ -121,15 +121,15 @@ fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Page 1");
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Page 2");
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Page 3");
 
@@ -151,7 +151,7 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf");
     const charter_bold_italic = try doc.loadFont("test/fonts/Charter/Charter Bold Italic.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 50;
 
     // Large title
@@ -241,7 +241,7 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     courier.encoding = .identity;
     courier.setFeature(.kern, false);
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 50;
 
     // Title (using CID font)
@@ -354,7 +354,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_ss01.encoding = .identity;
     inter_ss01.setFeature(.ss01, true);
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 32;
 
     // ===== Title =====
@@ -579,7 +579,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf");
     gentium_italic.encoding = .identity;
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 32;
     const desc_x: f64 = 280; // Right column for descriptions
     const desc_width: f64 = 270; // Width of description region
@@ -795,7 +795,7 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_bold.encoding = .identity;
     inter_bold.setFeature(.kern, false);
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 25;
 
     // Title
@@ -906,7 +906,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     // Set margins (1 inch = 72pt)
     doc.setMargins(.{ .left = 72, .right = 72, .top = 72, .bottom = 72 });
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica_bold, 16);
 
     // Title - matches fpdf2 text() positioning
@@ -1054,7 +1054,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 50;
 
     // Title
@@ -1125,7 +1125,7 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 40;
 
     // Title
@@ -1207,7 +1207,7 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     var y: f64 = 50;
 
     // Title
@@ -1269,7 +1269,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1447,7 +1447,7 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1479,7 +1479,7 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1517,7 +1517,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1618,7 +1618,7 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1709,7 +1709,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Page 1: A4 portrait (default)
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 1: A4 Portrait (595 x 842)");
     try doc.setFont(.helvetica, 12);
@@ -1720,7 +1720,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 2: A4 landscape
-    try doc.addPageWithSize(zpdf.PageSize.A4.landscape());
+    try doc.addPage(zpdf.PageSize.A4.landscape());
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 2: A4 Landscape (842 x 595)");
     try doc.setFont(.helvetica, 12);
@@ -1730,7 +1730,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 3: Letter portrait
-    try doc.addPageWithSize(zpdf.PageSize.Letter);
+    try doc.addPage(zpdf.PageSize.Letter);
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 3: Letter Portrait (612 x 792)");
     try doc.setFont(.helvetica, 12);
@@ -1740,7 +1740,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 4: Letter landscape
-    try doc.addPageWithSize(zpdf.PageSize.Letter.landscape());
+    try doc.addPage(zpdf.PageSize.Letter.landscape());
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 4: Letter Landscape (792 x 612)");
     try doc.setFont(.helvetica, 12);
@@ -1750,7 +1750,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 5: Custom size
-    try doc.addPageWithSize(.{ .width = 400, .height = 300 });
+    try doc.addPage(.{ .width = 400, .height = 300 });
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 5: Custom (400 x 300)");
     try doc.setFont(.helvetica, 12);
@@ -1766,7 +1766,7 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 14);
@@ -1976,7 +1976,7 @@ fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -2001,7 +2001,7 @@ fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -2022,7 +2022,7 @@ fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -2049,7 +2049,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Page 1: Table of Contents with internal links
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica_bold, 24);
     _ = try doc.writeAt(50, 50, "Table of Contents");
 
@@ -2076,7 +2076,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "Click on the entries above to navigate.");
 
     // Page 2: Chapter 1
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Chapter 1: Introduction");
 
@@ -2090,7 +2090,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addLink(back1, dest_toc);
 
     // Page 3: Chapter 2
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Chapter 2: Getting Started");
 
@@ -2110,7 +2110,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Page 1: Title (front matter - roman numeral i)
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
     const title_dest = doc.currentDestination().?;
     _ = try doc.addBookmark("Title Page", title_dest, null);
@@ -2120,7 +2120,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(220, 350, "A Sample Book");
 
     // Page 2: Preface (front matter - roman numeral ii)
-    try doc.addPage();
+    try doc.addPage(null);
     const preface_dest = doc.currentDestination().?;
     _ = try doc.addBookmark("Preface", preface_dest, null);
     try doc.setFont(.helvetica_bold, 18);
@@ -2129,7 +2129,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "This is the preface of the document.");
 
     // Page 3: Chapter 1 (body - decimal 1)
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
     const ch1_dest = doc.currentDestination().?;
     const ch1 = try doc.addBookmark("Chapter 1: Introduction", ch1_dest, null);
@@ -2139,7 +2139,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "Welcome to the introduction chapter.");
 
     // Page 4: Section 1.1 (body - decimal 2)
-    try doc.addPage();
+    try doc.addPage(null);
     const sec11_dest = doc.currentDestination().?;
     _ = try doc.addBookmark("Section 1.1: Background", sec11_dest, ch1);
     try doc.setFont(.helvetica_bold, 14);
@@ -2148,7 +2148,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "Some background information.");
 
     // Page 5: Section 1.2 (body - decimal 3)
-    try doc.addPage();
+    try doc.addPage(null);
     const sec12_dest = doc.currentDestination().?;
     _ = try doc.addBookmark("Section 1.2: Overview", sec12_dest, ch1);
     try doc.setFont(.helvetica_bold, 14);
@@ -2157,7 +2157,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "An overview of the topic.");
 
     // Page 6: Chapter 2 (body - decimal 4)
-    try doc.addPage();
+    try doc.addPage(null);
     const ch2_dest = doc.currentDestination().?;
     _ = try doc.addBookmark("Chapter 2: Details", ch2_dest, null);
     try doc.setFont(.helvetica_bold, 18);
@@ -2166,7 +2166,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "This chapter contains detailed information.");
 
     // Page 7: Appendix A (appendix - A-1)
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
     const app_dest = doc.currentDestination().?;
     _ = try doc.addBookmark("Appendix A: References", app_dest, null);

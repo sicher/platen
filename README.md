@@ -354,8 +354,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `addPage()` | Add a new page using the default page size |
-| `addPageWithSize()` | Add a new page with a specific size (overrides default for this page) |
+| `addPage()` | Add a new page. Uses the specified size, or the default page size if null |
 | `getPageTextBox()` | Returns a region for the current page respecting document margins |
 | `pageNo()` | Get current page number (1-based) |
 | `setDefaultPageSize()` | Set the default page size for subsequent addPage() calls |
@@ -405,13 +404,15 @@ try doc.addLink(toc_rect, chapter1_dest);
 | `getPosition()` | Get cursor position (in points from top-left) |
 | `setPosition()` | Set cursor position (in points from top-left) |
 
-### Links
+### Navigation
 
 | Method | Description |
 |--------|-------------|
+| `addBookmark()` | Adds a bookmark (outline item) to the document |
 | `addExternalLink()` | Add an external link (clickable area that opens a URL) |
 | `addLink()` | Add an internal link (clickable area that jumps to another page position) |
 | `currentDestination()` | Get a destination for the current cursor position |
+| `setPageLabel()` | Sets a page label range starting at the specified page index |
 
 ### Images & SVG
 
@@ -440,16 +441,9 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `addBookmark()` | Adds a bookmark (outline item) to the document |
 | `addLinearGradient()` | Add a linear gradient to the document and return its index |
 | `addRadialGradient()` | Add a radial gradient to the document and return its index |
 | `fillRectGradient()` | Fill a rectangle with a gradient |
-
-### Other
-
-| Method | Description |
-|--------|-------------|
-| `setPageLabel()` | Sets a page label range starting at the specified page index |
 
 
 ## Requirements

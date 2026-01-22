@@ -42,7 +42,7 @@ test "Document with text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(50, 50, "Hello, World!");
 
@@ -85,15 +85,15 @@ test "pageNo returns current page number" {
     try std.testing.expectEqual(@as(usize, 0), doc.pageNo());
 
     // Add first page
-    try doc.addPage();
+    try doc.addPage(null);
     try std.testing.expectEqual(@as(usize, 1), doc.pageNo());
 
     // Add second page
-    try doc.addPage();
+    try doc.addPage(null);
     try std.testing.expectEqual(@as(usize, 2), doc.pageNo());
 
     // Add third page
-    try doc.addPage();
+    try doc.addPage(null);
     try std.testing.expectEqual(@as(usize, 3), doc.pageNo());
 }
 
@@ -109,24 +109,24 @@ test "setDefaultPageSize" {
     try std.testing.expectApproxEqAbs(@as(f64, 612), doc.page_size.width, 0.01);
 
     // addPage uses the new default
-    try doc.addPage();
+    try doc.addPage(null);
     try std.testing.expectApproxEqAbs(@as(f64, 612), doc.page_size.width, 0.01);
 }
 
-test "addPageWithSize overrides default" {
+test "addPage with size overrides default" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     // Default is A4
     doc.setDefaultPageSize(PageSize.A4);
-    try doc.addPage(); // A4
+    try doc.addPage(null); // A4
 
     // Add one page with Letter size
-    try doc.addPageWithSize(PageSize.Letter);
+    try doc.addPage(PageSize.Letter);
     try std.testing.expectApproxEqAbs(@as(f64, 612), doc.page_size.width, 0.01);
 
     // Back to A4
-    try doc.addPageWithSize(PageSize.A4);
+    try doc.addPage(PageSize.A4);
     try std.testing.expectApproxEqAbs(@as(f64, 595.28), doc.page_size.width, 0.01);
 }
 
@@ -135,7 +135,7 @@ test "text without font returns error" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     // Should fail because no font is set
     try std.testing.expectError(error.NoFont, doc.write("test"));
 }
@@ -154,7 +154,7 @@ test "multiple fonts on single page" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(50, 50, "Helvetica");
@@ -179,7 +179,7 @@ test "font styles" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(50, 50, "Normal");
@@ -206,7 +206,7 @@ test "positioning setPosition/getPosition" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     doc.setPosition(.{ .x = 100, .y = 200 });
     const pos = doc.getPosition();
@@ -223,11 +223,11 @@ test "multiple pages" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(50, 50, "Page 1");
 
-    try doc.addPage();
+    try doc.addPage(null);
     _ = try doc.writeAt(50, 50, "Page 2");
 
     const pdf = try doc.output();
@@ -242,7 +242,7 @@ test "all 14 standard fonts" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const all_fonts = [_]StandardFont{
         .helvetica,
@@ -391,7 +391,7 @@ test "render text with embedded font" {
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setEmbeddedFont(font, 12);
     _ = try doc.writeAt(50, 50, "Hello, World!");
 
@@ -425,7 +425,7 @@ test "mix standard and embedded fonts" {
 
     const courier_prime = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     // Use standard font first
     try doc.setFont(.helvetica, 12);
@@ -458,7 +458,7 @@ test "multiple embedded fonts" {
     const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
     const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     try doc.setEmbeddedFont(courier_regular, 12);
     _ = try doc.writeAt(50, 50, "Regular");
@@ -492,11 +492,11 @@ test "embedded font on multiple pages" {
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setEmbeddedFont(font, 12);
     _ = try doc.writeAt(50, 50, "Page 1");
 
-    try doc.addPage();
+    try doc.addPage(null);
     // Font should still be set
     _ = try doc.writeAt(50, 50, "Page 2");
 
@@ -546,7 +546,7 @@ test "embedded font widths array in PDF" {
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setEmbeddedFont(font, 12);
     _ = try doc.writeAt(50, 50, "Test");
 
@@ -583,7 +583,7 @@ test "PDF output is valid with embedded font" {
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setEmbeddedFont(font, 24);
     _ = try doc.writeAt(100, 100, "Test embedded font!");
 
@@ -637,7 +637,7 @@ test "writeLine advances cursor" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = doc.getPageTextBox();
@@ -653,7 +653,7 @@ test "writeLine alignment" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 100, .y = 100, .width = 400, .height = 600 };
@@ -676,7 +676,7 @@ test "writeParagraph word wrapping" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 600 };
@@ -692,7 +692,7 @@ test "writeParagraph overflow" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Small region - line height at 12pt with 1.2 factor = 14.4pt
@@ -711,7 +711,7 @@ test "writeFlow creates multiple pages" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
     doc.setMargins(.{ .left = 50, .right = 50, .top = 50, .bottom = 50 });
 
@@ -731,7 +731,7 @@ test "drawTextBox with border" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const region = TextBox{
         .x = 50,
@@ -758,7 +758,7 @@ test "drawTextBox with fill" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const region = TextBox{
         .x = 50,
@@ -785,7 +785,7 @@ test "findHyphenBreak finds break at regular hyphen" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // "state-of-the-art" - should find breaks after each hyphen
@@ -806,7 +806,7 @@ test "findHyphenBreak returns null for word without hyphens" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const word = "supercalifragilistic";
@@ -818,7 +818,7 @@ test "findSoftHyphenBreak finds break at soft hyphen" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // "ex\xc2\xadplicit" - soft-hyphen between "ex" and "plicit"
@@ -834,7 +834,7 @@ test "findSoftHyphenBreak returns null for word without soft hyphens" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const word = "explicit";
@@ -846,7 +846,7 @@ test "soft hyphens stripped from text output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Write text with soft-hyphens
@@ -863,7 +863,7 @@ test "soft-hyphen recursive breaking in narrow column" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 11);
 
     // At 11pt Helvetica:
@@ -896,7 +896,7 @@ test "soft hyphens excluded from text width" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Width with soft-hyphens should equal width without
@@ -909,7 +909,7 @@ test "writeParagraph breaks at hyphens when enabled" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Narrow region - forces "state-of-the-art" to break if hyphen breaking enabled
@@ -927,7 +927,7 @@ test "writeParagraph keeps hyphenated words together when disabled" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // TextBox wide enough for the word to fit on one line
@@ -944,7 +944,7 @@ test "writeParagraph character-level wrapping for long words" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Narrow region - long word without soft-hyphens will be character-wrapped
@@ -964,7 +964,7 @@ test "writeParagraph first line indent" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 200 };
@@ -999,7 +999,7 @@ test "writeParagraph overflow returns remaining text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // TextBox that can only fit 2 lines (line height = 14.4pt at 12pt font)
@@ -1018,7 +1018,7 @@ test "writeParagraph newline forces line break" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 50, .y = 50, .width = 400, .height = 200 };
@@ -1034,7 +1034,7 @@ test "writeLine returns overflow for too-long text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Small region that can only fit ~1 line
@@ -1054,7 +1054,7 @@ test "region padding affects content area" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // TextBox with padding
@@ -1081,7 +1081,7 @@ test "writeFlow handles empty text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
     doc.setMargins(.{ .left = 50, .right = 50, .top = 50, .bottom = 50 });
 
@@ -1096,7 +1096,7 @@ test "writeFlow respects margins" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
     doc.setMargins(.{ .left = 100, .right = 100, .top = 100, .bottom = 100 });
 
@@ -1115,7 +1115,7 @@ test "valign top puts baseline at cursor + font_size" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 50, .y = 100, .width = 200, .height = 200 };
@@ -1135,7 +1135,7 @@ test "valign middle adjusts for leading" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 50, .y = 100, .width = 200, .height = 200 };
@@ -1156,7 +1156,7 @@ test "valign bottom puts baseline at cursor + line_height" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     var region = TextBox{ .x = 50, .y = 100, .width = 200, .height = 200 };
@@ -1176,7 +1176,7 @@ test "writeParagraph optimal line breaking" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     // Courier is monospace: 600 units per char, at 12pt = 7.2pt per char
     try doc.setFont(.courier, 12);
 
@@ -1191,7 +1191,7 @@ test "writeParagraph optimal line breaking" {
     const greedy_result = try doc.writeParagraph(&region_greedy, text, .{ .line_breaking = .greedy });
 
     // Test optimal mode
-    try doc.addPage();
+    try doc.addPage(null);
     var region_optimal = TextBox{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     const optimal_result = try doc.writeParagraph(&region_optimal, text, .{ .line_breaking = .optimal });
 
@@ -1208,7 +1208,7 @@ test "writeParagraph optimal vs greedy produces different breaks" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.courier, 12);
 
     // Verify char width: Courier is monospace at 600 units/1000 * 12pt = 7.2pt/char
@@ -1235,7 +1235,7 @@ test "writeParagraph optimal vs greedy produces different breaks" {
     }
 
     // Now optimal
-    try doc.addPage();
+    try doc.addPage(null);
     var region2 = TextBox{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     _ = try doc.writeParagraph(&region2, text, .{ .line_breaking = .optimal });
 
@@ -1266,7 +1266,7 @@ test "measureWrappedText basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const text = "Hello world";
@@ -1282,7 +1282,7 @@ test "measureWrappedText multiple lines" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.courier, 12);
 
     // Courier at 12pt: each char is 7.2pt wide
@@ -1297,7 +1297,7 @@ test "measureWrappedText empty text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const result = doc.measureWrappedText("", .{ .width = 200 });
@@ -1311,7 +1311,7 @@ test "measureWrappedText matches writeParagraph line count" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const text = "The quick brown fox jumps over the lazy dog. This is a longer text that should wrap across multiple lines when rendered in a narrow region.";
@@ -1331,7 +1331,7 @@ test "measureWrappedText first_indent reduces first line" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.courier, 12);
 
     // Text that fits on one line at width 100
@@ -1351,7 +1351,7 @@ test "measureWrappedText fitsInHeight" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const text = "Line one. Line two. Line three.";
@@ -1368,7 +1368,7 @@ test "measureWrappedText with newlines" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     const text = "Line one\nLine two\nLine three";
@@ -1388,7 +1388,7 @@ test "mark positioning with Tm absolute coordinates" {
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
     inter.encoding = .identity;
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setEmbeddedFont(inter, 14);
 
     // Write "À" (A + combining grave)
@@ -1450,7 +1450,7 @@ test "setTextColor changes text color" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Default is black
@@ -1476,7 +1476,7 @@ test "Color grayscale stored in command" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Set grayscale color
@@ -1493,7 +1493,7 @@ test "Color CMYK stored in command" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
     // Set CMYK cyan
@@ -1587,7 +1587,7 @@ test "drawLine basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.drawLine(50, 50, 200, 200);
 
     const pdf = try doc.output();
@@ -1609,7 +1609,7 @@ test "drawRect stroke" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.drawRect(50, 50, 100, 80, .stroke);
 
     const pdf = try doc.output();
@@ -1624,7 +1624,7 @@ test "drawRect fill" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.drawRect(50, 50, 100, 80, .fill);
 
     const pdf = try doc.output();
@@ -1637,7 +1637,7 @@ test "drawRect fill_stroke" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.drawRect(50, 50, 100, 80, .fill_stroke);
 
     const pdf = try doc.output();
@@ -1650,7 +1650,7 @@ test "drawRoundedRect basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.drawRoundedRect(50, 50, 100, 80, 10, .stroke);
 
     const pdf = try doc.output();
@@ -1665,7 +1665,7 @@ test "drawRoundedRect zero radius falls back to rect" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     // Zero radius should use regular rect (re command)
     try doc.drawRoundedRect(50, 50, 100, 80, 0, .stroke);
 
@@ -1681,7 +1681,7 @@ test "drawRoundedRect radius clamped to half min dimension" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     // Radius 100 is larger than half of min(100, 80) = 40, so clamped to 40
     try doc.drawRoundedRect(50, 50, 100, 80, 100, .fill);
 
@@ -1697,7 +1697,7 @@ test "drawCircle basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.drawCircle(200, 300, 50, .stroke);
 
     const pdf = try doc.output();
@@ -1711,7 +1711,7 @@ test "drawEllipse basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     // drawEllipse(x, y, w, h) - bounding box upper-left at (200, 300), size 80x40
     try doc.drawEllipse(200, 300, 80, 40, .fill);
 
@@ -1725,7 +1725,7 @@ test "drawPolygon triangle" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     const points = [_]document.Point{
         .{ .x = 100, .y = 100 },
         .{ .x = 200, .y = 100 },
@@ -1743,7 +1743,7 @@ test "drawPolygon less than 3 points does nothing" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     const points = [_]document.Point{
         .{ .x = 100, .y = 100 },
         .{ .x = 200, .y = 100 },
@@ -1762,7 +1762,7 @@ test "drawPath basic triangle" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     var path = doc.createPath();
     defer path.deinit();
@@ -1784,7 +1784,7 @@ test "drawPath with bezier curve" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     var path = doc.createPath();
     defer path.deinit();
@@ -1806,7 +1806,7 @@ test "drawPath empty path does nothing" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     var path = doc.createPath();
     defer path.deinit();
@@ -1873,7 +1873,7 @@ test "graphics state used in output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     doc.setDrawStyle(.{
         .line_width = 3.0,
         .dash_pattern = .{ .dash = 5, .gap = 3 },
@@ -1941,7 +1941,7 @@ test "metadata written to PDF Info dictionary" {
         .creator = "Test App",
     });
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1968,7 +1968,7 @@ test "metadata with special characters escaped" {
         .title = "Test (with parens) and \\backslash",
     });
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1984,7 +1984,7 @@ test "no Info dictionary when metadata empty" {
     // Clear default producer
     doc.setMetadata(.{ .producer = null });
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2008,7 +2008,7 @@ test "addBookmark basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     const dest = document.Destination{ .page_index = 0, .y = 100 };
     const bookmark = try doc.addBookmark("Chapter 1", dest, null);
 
@@ -2023,7 +2023,7 @@ test "addBookmark nested" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     const dest = document.Destination{ .page_index = 0, .y = 0 };
 
     // Create parent bookmark
@@ -2056,7 +2056,7 @@ test "addBookmark in PDF output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     const dest = document.Destination{ .page_index = 0, .y = 100 };
     _ = try doc.addBookmark("Test Bookmark", dest, null);
 
@@ -2073,8 +2073,8 @@ test "addBookmark nested in PDF output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
-    try doc.addPage();
+    try doc.addPage(null);
+    try doc.addPage(null);
 
     const ch1 = try doc.addBookmark("Chapter 1", .{ .page_index = 0, .y = 0 }, null);
     _ = try doc.addBookmark("Section 1.1", .{ .page_index = 0, .y = 200 }, ch1);
@@ -2127,7 +2127,7 @@ test "setPageLabel in PDF output" {
     defer doc.deinit();
 
     for (0..6) |_| {
-        try doc.addPage();
+        try doc.addPage(null);
     }
 
     try doc.setPageLabel(0, .{ .style = .roman_lower });
@@ -2148,7 +2148,7 @@ test "setPageLabel with prefix" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setPageLabel(0, .{ .style = .alpha_upper, .prefix = "App-" });
 
     const pdf = try doc.output();
@@ -2162,7 +2162,7 @@ test "setPageLabel with start number" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
     try doc.setPageLabel(0, .{ .style = .decimal, .start = 5 });
 
     const pdf = try doc.output();
@@ -2175,7 +2175,7 @@ test "no outlines or page labels when not set" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(null);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);

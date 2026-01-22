@@ -29,7 +29,8 @@ CATEGORY_RULES = [
       'drawTextBox'], 'Text'),
     (['setTextColor', 'setCharSpacing', 'setLineHeight', 'getLineHeightPts'], 'Text Styling'),
     (['setPosition', 'getPosition'], 'Cursor Position'),
-    (['currentDestination', 'addLink', 'addExternalLink'], 'Links'),
+    (['currentDestination', 'addLink', 'addExternalLink',
+      'addBookmark', 'setPageLabel'], 'Navigation'),
     (['loadImage', 'drawImage', 'loadSvg', 'drawSvg'], 'Images & SVG'),
     (['setDrawStyle', 'createPath'], 'Graphics'),
 ]
@@ -103,7 +104,7 @@ def generate_api_reference(methods: dict[str, str]) -> str:
     # Define category order
     category_order = [
         'Core', 'Document', 'Fonts', 'Text', 'Text Styling',
-        'Cursor Position', 'Links', 'Images & SVG', 'Graphics', 'Gradients', 'Other'
+        'Cursor Position', 'Navigation', 'Images & SVG', 'Graphics', 'Gradients', 'Other'
     ]
 
     lines = ['## API Reference']

@@ -455,7 +455,7 @@ while (remaining) |txt| {
     const result = try doc.writeParagraph(&box, txt, .{});
     remaining = result.overflow;
     if (remaining != null) {
-        try doc.addPage();
+        try doc.addPage(null);
         box = doc.getPageTextBox();
     }
 }
@@ -614,12 +614,12 @@ const dest = doc.currentDestination().?;
 const ch1 = try doc.addBookmark("Chapter 1", dest, null);
 
 // Nested bookmarks (child of ch1)
-try doc.addPage();
+try doc.addPage(null);
 _ = try doc.addBookmark("Section 1.1", doc.currentDestination().?, ch1);
 _ = try doc.addBookmark("Section 1.2", doc.currentDestination().?, ch1);
 
 // Another top-level bookmark
-try doc.addPage();
+try doc.addPage(null);
 _ = try doc.addBookmark("Chapter 2", doc.currentDestination().?, null);
 ```
 
