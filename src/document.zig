@@ -52,6 +52,9 @@ pub const Point = layout.Point;
 pub const Rect = layout.Rect;
 pub const TextBox = layout.TextBox;
 pub const Destination = layout.Destination;
+pub const Bookmark = layout.Bookmark;
+pub const PageLabelStyle = layout.PageLabelStyle;
+pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WrappedTextMetrics = layout.WrappedTextMetrics;
 pub const LineOptions = layout.LineOptions;
@@ -163,6 +166,12 @@ const ContentCommand = union(enum) {
     text: TextCommand,
     /// Raw content (for non-text operations that don't need deferred processing)
     raw: []const u8, // Owned copy
+};
+
+/// Entry in the page labels number tree
+const PageLabelEntry = struct {
+    page_index: usize,
+    label: PageLabel,
 };
 
 /// Link annotation for internal or external links
@@ -454,6 +463,10 @@ pub const Document = struct {
     loaded_svgs: std.ArrayListUnmanaged(*Svg) = .{},
     // Track gradients used in document
     gradients: std.ArrayListUnmanaged(GradientDef) = .{},
+    // Document bookmarks (outline items)
+    bookmarks: std.ArrayListUnmanaged(*Bookmark) = .{},
+    // Page label ranges
+    page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .{},
     /// Document metadata (title, author, etc.)
     metadata: DocumentMetadata = .{},
 
@@ -492,6 +505,13 @@ pub const Document = struct {
         self.loaded_svgs.deinit(self.allocator);
         // Clean up gradients
         self.gradients.deinit(self.allocator);
+        // Clean up bookmarks
+        for (self.bookmarks.items) |bookmark| {
+            self.allocator.destroy(bookmark);
+        }
+        self.bookmarks.deinit(self.allocator);
+        // Clean up page labels
+        self.page_labels.deinit(self.allocator);
     }
 
     /// Set document metadata (title, author, subject, etc.).
@@ -874,6 +894,42 @@ pub const Document = struct {
         const url_copy = try page_alloc.dupe(u8, url);
         try page.annotations.append(self.allocator, .{
             .external = .{ .rect = rect, .url = url_copy },
+        });
+    }
+
+    /// Adds a bookmark (outline item) to the document.
+    /// Returns a pointer to the bookmark, which can be used as a parent for nested bookmarks.
+    pub fn addBookmark(self: *Document, title: []const u8, dest: Destination, parent: ?*Bookmark) !*Bookmark {
+        // Allocate bookmark
+        const bookmark = try self.allocator.create(Bookmark);
+        bookmark.* = .{
+            .title = title,
+            .dest = dest,
+            .parent = parent,
+        };
+
+        // Update parent's child pointers
+        if (parent) |p| {
+            if (p.last_child) |last| {
+                last.next = bookmark;
+                bookmark.prev = last;
+            } else {
+                p.first_child = bookmark;
+            }
+            p.last_child = bookmark;
+            p.count += 1;
+        }
+
+        try self.bookmarks.append(self.allocator, bookmark);
+        return bookmark;
+    }
+
+    /// Sets a page label range starting at the specified page index.
+    /// Labels apply from page_index until the next setPageLabel call or end of document.
+    pub fn setPageLabel(self: *Document, page_index: usize, label: PageLabel) !void {
+        try self.page_labels.append(self.allocator, .{
+            .page_index = page_index,
+            .label = label,
         });
     }
 
@@ -2622,6 +2678,25 @@ pub const Document = struct {
             next_id += 1;
         }
 
+        // Reserve IDs for outlines (1 root + N items)
+        var outlines_root_id: ?ObjectId = null;
+        if (self.bookmarks.items.len > 0) {
+            outlines_root_id = next_id;
+            next_id += 1; // root object
+            // Assign object IDs to each bookmark
+            for (self.bookmarks.items) |bookmark| {
+                bookmark.object_id = next_id;
+                next_id += 1;
+            }
+        }
+
+        // Reserve ID for page labels (1 object with number tree)
+        var page_labels_id: ?ObjectId = null;
+        if (self.page_labels.items.len > 0) {
+            page_labels_id = next_id;
+            next_id += 1;
+        }
+
         const first_page_id = next_id;
 
         // Write header
@@ -2633,6 +2708,12 @@ pub const Document = struct {
         defer catalog_dict.deinit();
         try catalog_dict.put("Type", Value.name("Catalog"));
         try catalog_dict.put("Pages", Value.ref(.{ .id = pages_root_id }));
+        if (outlines_root_id) |id| {
+            try catalog_dict.put("Outlines", Value.ref(.{ .id = id }));
+        }
+        if (page_labels_id) |id| {
+            try catalog_dict.put("PageLabels", Value.ref(.{ .id = id }));
+        }
         try w.writeDict(catalog_dict);
         try w.endObject();
 
@@ -3390,6 +3471,142 @@ pub const Document = struct {
             try info_dict.put("ModDate", Value.string(mod_date_str));
 
             try w.writeDict(info_dict);
+            try w.endObject();
+        }
+
+        // Write outlines (bookmarks) if present
+        if (outlines_root_id) |root_id| {
+            // Find first and last top-level bookmarks
+            var first_top_level: ?*Bookmark = null;
+            var last_top_level: ?*Bookmark = null;
+            var total_count: i32 = 0;
+
+            for (self.bookmarks.items) |bookmark| {
+                if (bookmark.parent == null) {
+                    if (first_top_level == null) {
+                        first_top_level = bookmark;
+                    }
+                    last_top_level = bookmark;
+                }
+                total_count += 1;
+            }
+
+            // Write outlines root
+            try w.beginObject(root_id);
+            var outlines_dict = Dict.init(self.allocator);
+            defer outlines_dict.deinit();
+            try outlines_dict.put("Type", Value.name("Outlines"));
+            if (first_top_level) |first| {
+                try outlines_dict.put("First", Value.ref(.{ .id = first.object_id }));
+            }
+            if (last_top_level) |last| {
+                try outlines_dict.put("Last", Value.ref(.{ .id = last.object_id }));
+            }
+            try outlines_dict.put("Count", Value.int(total_count));
+            try w.writeDict(outlines_dict);
+            try w.endObject();
+
+            // Write each bookmark item
+            for (self.bookmarks.items) |bookmark| {
+                try w.beginObject(bookmark.object_id);
+                var item_dict = Dict.init(self.allocator);
+                defer item_dict.deinit();
+
+                try item_dict.put("Title", Value.string(bookmark.title));
+
+                // Parent reference
+                if (bookmark.parent) |parent| {
+                    try item_dict.put("Parent", Value.ref(.{ .id = parent.object_id }));
+                } else {
+                    try item_dict.put("Parent", Value.ref(.{ .id = root_id }));
+                }
+
+                // Sibling references
+                if (bookmark.prev) |prev| {
+                    try item_dict.put("Prev", Value.ref(.{ .id = prev.object_id }));
+                }
+                if (bookmark.next) |nx| {
+                    try item_dict.put("Next", Value.ref(.{ .id = nx.object_id }));
+                }
+
+                // Child references
+                if (bookmark.first_child) |first| {
+                    try item_dict.put("First", Value.ref(.{ .id = first.object_id }));
+                }
+                if (bookmark.last_child) |last| {
+                    try item_dict.put("Last", Value.ref(.{ .id = last.object_id }));
+                }
+
+                // Count (positive = expanded, negative = collapsed)
+                if (bookmark.count != 0) {
+                    try item_dict.put("Count", Value.int(bookmark.count));
+                }
+
+                // Destination: [page_ref /XYZ left top zoom]
+                var dest_array = Array.init(self.allocator);
+                defer dest_array.deinit();
+                // Get the page object ID for the destination
+                var dest_page_id = first_page_id;
+                for (self.pages.items[0..bookmark.dest.page_index]) |p| {
+                    dest_page_id += 2 + @as(ObjectId, @intCast(p.annotations.items.len));
+                }
+                const dest_page_size = self.pages.items[bookmark.dest.page_index].size;
+                try dest_array.append(Value.ref(.{ .id = dest_page_id }));
+                try dest_array.append(Value.name("XYZ"));
+                try dest_array.append(Value.int(0)); // left
+                try dest_array.append(Value.real(dest_page_size.height - bookmark.dest.y));
+                try dest_array.append(Value.int(0)); // zoom
+                try item_dict.put("Dest", .{ .array_val = &dest_array });
+
+                try w.writeDict(item_dict);
+                try w.endObject();
+            }
+        }
+
+        // Write page labels if present
+        if (page_labels_id) |labels_id| {
+            try w.beginObject(labels_id);
+            var labels_dict = Dict.init(self.allocator);
+            defer labels_dict.deinit();
+
+            // Build /Nums array: [page_index1 dict1 page_index2 dict2 ...]
+            var nums_array = Array.init(self.allocator);
+            defer nums_array.deinit();
+
+            // Store label dicts to keep them in scope
+            var label_dicts = try self.allocator.alloc(Dict, self.page_labels.items.len);
+            defer {
+                for (label_dicts) |*ld| ld.deinit();
+                self.allocator.free(label_dicts);
+            }
+
+            for (self.page_labels.items, 0..) |entry, i| {
+                try nums_array.append(Value.int(@intCast(entry.page_index)));
+
+                // Build label dictionary
+                label_dicts[i] = Dict.init(self.allocator);
+                const label = entry.label;
+
+                // /S - numbering style
+                if (label.style.pdfCode()) |code| {
+                    try label_dicts[i].put("S", Value.name(code));
+                }
+
+                // /P - prefix
+                if (label.prefix) |prefix| {
+                    try label_dicts[i].put("P", Value.string(prefix));
+                }
+
+                // /St - starting number (only if not 1)
+                if (label.start != 1) {
+                    try label_dicts[i].put("St", Value.int(@intCast(label.start)));
+                }
+
+                try nums_array.append(.{ .dict_val = &label_dicts[i] });
+            }
+
+            try labels_dict.put("Nums", .{ .array_val = &nums_array });
+            try w.writeDict(labels_dict);
             try w.endObject();
         }
 

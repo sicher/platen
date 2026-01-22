@@ -1999,3 +1999,191 @@ test "no Info dictionary when metadata empty" {
     const trailer_dict = trailer[0..trailer_end.?];
     try std.testing.expect(std.mem.indexOf(u8, trailer_dict, "/Info") == null);
 }
+
+// ============================================================================
+// Bookmark/Outline Tests
+// ============================================================================
+
+test "addBookmark basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    const dest = document.Destination{ .page_index = 0, .y = 100 };
+    const bookmark = try doc.addBookmark("Chapter 1", dest, null);
+
+    try std.testing.expectEqualStrings("Chapter 1", bookmark.title);
+    try std.testing.expectEqual(@as(usize, 0), bookmark.dest.page_index);
+    try std.testing.expectEqual(@as(f64, 100), bookmark.dest.y);
+    try std.testing.expect(bookmark.parent == null);
+    try std.testing.expectEqual(@as(usize, 1), doc.bookmarks.items.len);
+}
+
+test "addBookmark nested" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    const dest = document.Destination{ .page_index = 0, .y = 0 };
+
+    // Create parent bookmark
+    const ch1 = try doc.addBookmark("Chapter 1", dest, null);
+    try std.testing.expectEqual(@as(i32, 0), ch1.count);
+
+    // Create child bookmarks
+    const sec1 = try doc.addBookmark("Section 1.1", dest, ch1);
+    try std.testing.expect(sec1.parent == ch1);
+    try std.testing.expect(ch1.first_child == sec1);
+    try std.testing.expect(ch1.last_child == sec1);
+    try std.testing.expectEqual(@as(i32, 1), ch1.count);
+
+    const sec2 = try doc.addBookmark("Section 1.2", dest, ch1);
+    try std.testing.expect(sec2.parent == ch1);
+    try std.testing.expect(sec1.next == sec2);
+    try std.testing.expect(sec2.prev == sec1);
+    try std.testing.expect(ch1.first_child == sec1);
+    try std.testing.expect(ch1.last_child == sec2);
+    try std.testing.expectEqual(@as(i32, 2), ch1.count);
+
+    // Another top-level bookmark
+    const ch2 = try doc.addBookmark("Chapter 2", dest, null);
+    try std.testing.expect(ch2.parent == null);
+
+    try std.testing.expectEqual(@as(usize, 4), doc.bookmarks.items.len);
+}
+
+test "addBookmark in PDF output" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    const dest = document.Destination{ .page_index = 0, .y = 100 };
+    _ = try doc.addBookmark("Test Bookmark", dest, null);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check for outlines structure in PDF
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Outlines") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Outlines") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Test Bookmark)") != null);
+}
+
+test "addBookmark nested in PDF output" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.addPage();
+
+    const ch1 = try doc.addBookmark("Chapter 1", .{ .page_index = 0, .y = 0 }, null);
+    _ = try doc.addBookmark("Section 1.1", .{ .page_index = 0, .y = 200 }, ch1);
+    _ = try doc.addBookmark("Section 1.2", .{ .page_index = 0, .y = 400 }, ch1);
+    _ = try doc.addBookmark("Chapter 2", .{ .page_index = 1, .y = 0 }, null);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check bookmark structure
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Chapter 1)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Section 1.1)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Section 1.2)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Chapter 2)") != null);
+    // Check for parent/child links
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/First") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Last") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Parent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Count") != null);
+}
+
+// ============================================================================
+// Page Label Tests
+// ============================================================================
+
+test "PageLabelStyle pdfCode" {
+    const layout = @import("layout.zig");
+    try std.testing.expectEqualStrings("D", layout.PageLabelStyle.decimal.pdfCode().?);
+    try std.testing.expectEqualStrings("r", layout.PageLabelStyle.roman_lower.pdfCode().?);
+    try std.testing.expectEqualStrings("R", layout.PageLabelStyle.roman_upper.pdfCode().?);
+    try std.testing.expectEqualStrings("a", layout.PageLabelStyle.alpha_lower.pdfCode().?);
+    try std.testing.expectEqualStrings("A", layout.PageLabelStyle.alpha_upper.pdfCode().?);
+    try std.testing.expect(layout.PageLabelStyle.none.pdfCode() == null);
+}
+
+test "setPageLabel basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.setPageLabel(0, .{ .style = .roman_lower });
+    try doc.setPageLabel(4, .{ .style = .decimal, .start = 1 });
+
+    try std.testing.expectEqual(@as(usize, 2), doc.page_labels.items.len);
+    try std.testing.expectEqual(@as(usize, 0), doc.page_labels.items[0].page_index);
+    try std.testing.expectEqual(@as(usize, 4), doc.page_labels.items[1].page_index);
+}
+
+test "setPageLabel in PDF output" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    for (0..6) |_| {
+        try doc.addPage();
+    }
+
+    try doc.setPageLabel(0, .{ .style = .roman_lower });
+    try doc.setPageLabel(4, .{ .style = .decimal, .start = 1 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check for page labels in catalog
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/PageLabels") != null);
+    // Check for /Nums array with style codes
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Nums") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/S /r") != null); // roman_lower
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/S /D") != null); // decimal
+}
+
+test "setPageLabel with prefix" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setPageLabel(0, .{ .style = .alpha_upper, .prefix = "App-" });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/P (App-)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/S /A") != null);
+}
+
+test "setPageLabel with start number" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setPageLabel(0, .{ .style = .decimal, .start = 5 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/St 5") != null);
+}
+
+test "no outlines or page labels when not set" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check that catalog doesn't have Outlines or PageLabels
+    const catalog_start = std.mem.indexOf(u8, pdf, "/Type /Catalog");
+    try std.testing.expect(catalog_start != null);
+    const catalog_section = pdf[catalog_start.? .. catalog_start.? + 200];
+    try std.testing.expect(std.mem.indexOf(u8, catalog_section, "/Outlines") == null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog_section, "/PageLabels") == null);
+}

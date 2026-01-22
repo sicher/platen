@@ -42,6 +42,7 @@ const test_cases = [_]TestCase{
     .{ .name = "landscape", .generate = generateLandscapePdf },
     .{ .name = "colors", .generate = generateColorSwatchesPdf },
     .{ .name = "links", .generate = generateLinksPdf },
+    .{ .name = "bookmarks", .generate = generateBookmarksPdf },
 };
 
 // ============================================================================
@@ -2104,6 +2105,79 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Page 1: Title (front matter - roman numeral i)
+    try doc.addPage();
+    try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
+    const title_dest = doc.currentDestination().?;
+    _ = try doc.addBookmark("Title Page", title_dest, null);
+    try doc.setFont(.helvetica_bold, 24);
+    _ = try doc.writeAt(200, 300, "My Document");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(220, 350, "A Sample Book");
+
+    // Page 2: Preface (front matter - roman numeral ii)
+    try doc.addPage();
+    const preface_dest = doc.currentDestination().?;
+    _ = try doc.addBookmark("Preface", preface_dest, null);
+    try doc.setFont(.helvetica_bold, 18);
+    _ = try doc.writeAt(50, 50, "Preface");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, 80, "This is the preface of the document.");
+
+    // Page 3: Chapter 1 (body - decimal 1)
+    try doc.addPage();
+    try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
+    const ch1_dest = doc.currentDestination().?;
+    const ch1 = try doc.addBookmark("Chapter 1: Introduction", ch1_dest, null);
+    try doc.setFont(.helvetica_bold, 18);
+    _ = try doc.writeAt(50, 50, "Chapter 1: Introduction");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, 80, "Welcome to the introduction chapter.");
+
+    // Page 4: Section 1.1 (body - decimal 2)
+    try doc.addPage();
+    const sec11_dest = doc.currentDestination().?;
+    _ = try doc.addBookmark("Section 1.1: Background", sec11_dest, ch1);
+    try doc.setFont(.helvetica_bold, 14);
+    _ = try doc.writeAt(50, 50, "Section 1.1: Background");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, 80, "Some background information.");
+
+    // Page 5: Section 1.2 (body - decimal 3)
+    try doc.addPage();
+    const sec12_dest = doc.currentDestination().?;
+    _ = try doc.addBookmark("Section 1.2: Overview", sec12_dest, ch1);
+    try doc.setFont(.helvetica_bold, 14);
+    _ = try doc.writeAt(50, 50, "Section 1.2: Overview");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, 80, "An overview of the topic.");
+
+    // Page 6: Chapter 2 (body - decimal 4)
+    try doc.addPage();
+    const ch2_dest = doc.currentDestination().?;
+    _ = try doc.addBookmark("Chapter 2: Details", ch2_dest, null);
+    try doc.setFont(.helvetica_bold, 18);
+    _ = try doc.writeAt(50, 50, "Chapter 2: Details");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, 80, "This chapter contains detailed information.");
+
+    // Page 7: Appendix A (appendix - A-1)
+    try doc.addPage();
+    try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
+    const app_dest = doc.currentDestination().?;
+    _ = try doc.addBookmark("Appendix A: References", app_dest, null);
+    try doc.setFont(.helvetica_bold, 18);
+    _ = try doc.writeAt(50, 50, "Appendix A: References");
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, 80, "List of references.");
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2213,6 +2287,11 @@ test "integration: colors PDF" {
 test "integration: links PDF" {
     // Tests internal links (TOC navigation) and external links (URLs)
     try runIntegrationTest("links", generateLinksPdf);
+}
+
+test "integration: bookmarks PDF" {
+    // Tests bookmarks (outlines) and page labels (roman, decimal, alpha)
+    try runIntegrationTest("bookmarks", generateBookmarksPdf);
 }
 
 const TestOptions = struct {

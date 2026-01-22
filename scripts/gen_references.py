@@ -1627,7 +1627,81 @@ def gen_colors():
     print("  colors.pdf")
 
 
+def gen_bookmarks():
+    """Bookmarks (outlines) and page labels.
+
+    Creates a document structure with:
+    - Front matter pages with roman numeral labels (i, ii)
+    - Body pages with decimal labels (1, 2, 3)
+    - Nested bookmark hierarchy
+    """
+    pdf = make_pdf()
+
+    # Page 1: Title (front matter - roman numeral i)
+    pdf.add_page()
+    pdf.set_page_label(label_style="r")  # lowercase roman
+    pdf.start_section("Title Page", level=0)
+    pdf.set_font("Helvetica", "B", size=24)
+    pdf.text(200, 300, "My Document")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(220, 350, "A Sample Book")
+
+    # Page 2: Preface (front matter - roman numeral ii)
+    pdf.add_page()
+    pdf.start_section("Preface", level=0)
+    pdf.set_font("Helvetica", "B", size=18)
+    pdf.text(50, 50, "Preface")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, "This is the preface of the document.")
+
+    # Page 3: Chapter 1 (body - decimal 1)
+    pdf.add_page()
+    pdf.set_page_label(label_style="D", label_start=1)  # decimal starting at 1
+    pdf.start_section("Chapter 1: Introduction", level=0)
+    pdf.set_font("Helvetica", "B", size=18)
+    pdf.text(50, 50, "Chapter 1: Introduction")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, "Welcome to the introduction chapter.")
+
+    # Page 4: Section 1.1 (body - decimal 2)
+    pdf.add_page()
+    pdf.start_section("Section 1.1: Background", level=1)
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, 50, "Section 1.1: Background")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, "Some background information.")
+
+    # Page 5: Section 1.2 (body - decimal 3)
+    pdf.add_page()
+    pdf.start_section("Section 1.2: Overview", level=1)
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, 50, "Section 1.2: Overview")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, "An overview of the topic.")
+
+    # Page 6: Chapter 2 (body - decimal 4)
+    pdf.add_page()
+    pdf.start_section("Chapter 2: Details", level=0)
+    pdf.set_font("Helvetica", "B", size=18)
+    pdf.text(50, 50, "Chapter 2: Details")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, "This chapter contains detailed information.")
+
+    # Page 7: Appendix A (appendix - A-1)
+    pdf.add_page()
+    pdf.set_page_label(label_style="A", label_prefix="A-", label_start=1)  # A-1, A-2, ...
+    pdf.start_section("Appendix A: References", level=0)
+    pdf.set_font("Helvetica", "B", size=18)
+    pdf.text(50, 50, "Appendix A: References")
+    pdf.set_font("Helvetica", "", size=12)
+    pdf.text(50, 80, "List of references.")
+
+    pdf.output(OUTPUT_DIR / "bookmarks.pdf")
+    print("  bookmarks.pdf")
+
+
 GENERATORS = {
+    "bookmarks": gen_bookmarks,
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,
     "multi_font": gen_multi_font,

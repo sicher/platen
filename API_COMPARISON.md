@@ -43,7 +43,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | **Page background** | `set_page_background()` | ❌ | **GAP** |
 | **Alias for total pages** | `alias_nb_pages()` | ❌ | **GAP** - "{nb}" placeholder |
 | Page number | `page_no()` | ✅ `pageNo()` | |
-| **Page labels** | `set_page_label()`, `get_page_label()` | ❌ | **GAP** |
+| Page labels | `set_page_label()`, `get_page_label()` | ✅ `setPageLabel()` | |
 
 ---
 
@@ -249,9 +249,9 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| **Bookmarks/outline** | `start_section()` | ❌ | **GAP** |
-| **Nested sections** | ✅ levels | ❌ | **GAP** |
-| **Table of contents** | `insert_toc_placeholder()` | ❌ | **GAP** |
+| Bookmarks/outline | `start_section()` | ✅ `addBookmark()` | |
+| Nested sections | ✅ levels | ✅ parent pointer | |
+| **Table of contents** | `insert_toc_placeholder()` | ❌ | **GAP** - manual via links |
 | **Auto TOC from HTML** | ✅ `<toc>` | ❌ | **GAP** |
 
 ---
@@ -347,9 +347,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 ### High Priority (Common Features)
 1. **Table API** - structured table creation
-2. **Document outline/bookmarks** - navigation structure
-3. **Auto page break** - automatic page breaks with callbacks
-4. **Header/footer callbacks** - repeated content per page
+2. **Auto page break** - automatic page breaks with callbacks
+3. **Header/footer callbacks** - repeated content per page
 
 ### Medium Priority (Useful Features)
 6. **Annotations** - text annotations, highlights, attachments
@@ -384,7 +383,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 ### Phase 1: Links & Navigation ✅ DONE
 1. ~~External hyperlinks~~ ✅
 2. ~~Internal links (page references)~~ ✅
-3. Document outline/bookmarks
+3. ~~Document outline/bookmarks~~ ✅
+4. ~~Page labels~~ ✅
 
 ### Phase 2: Page Flow
 4. Auto page break with margin

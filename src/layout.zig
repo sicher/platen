@@ -215,6 +215,72 @@ pub const PageSize = struct {
 };
 
 // ============================================================================
+// Navigation Types
+// ============================================================================
+
+/// Bookmark (outline item) for PDF navigation tree.
+pub const Bookmark = struct {
+    /// Displayed title in the bookmark panel.
+    title: []const u8,
+    /// Target destination (page and position).
+    dest: Destination,
+    /// Parent bookmark (null for top-level).
+    parent: ?*Bookmark = null,
+
+    // Internal fields - populated during output
+    /// First child bookmark.
+    first_child: ?*Bookmark = null,
+    /// Last child bookmark.
+    last_child: ?*Bookmark = null,
+    /// Previous sibling.
+    prev: ?*Bookmark = null,
+    /// Next sibling.
+    next: ?*Bookmark = null,
+    /// Number of children (negative if closed).
+    count: i32 = 0,
+    /// Object ID assigned during output.
+    object_id: u32 = 0,
+};
+
+/// Page label numbering style (PDF /S entry).
+pub const PageLabelStyle = enum {
+    /// D: Decimal (1, 2, 3, ...).
+    decimal,
+    /// r: Lowercase Roman (i, ii, iii, ...).
+    roman_lower,
+    /// R: Uppercase Roman (I, II, III, ...).
+    roman_upper,
+    /// a: Lowercase letters (a, b, c, ..., aa, ab, ...).
+    alpha_lower,
+    /// A: Uppercase letters (A, B, C, ..., AA, AB, ...).
+    alpha_upper,
+    /// No style - prefix only.
+    none,
+
+    /// Returns the PDF style code.
+    pub fn pdfCode(self: PageLabelStyle) ?[]const u8 {
+        return switch (self) {
+            .decimal => "D",
+            .roman_lower => "r",
+            .roman_upper => "R",
+            .alpha_lower => "a",
+            .alpha_upper => "A",
+            .none => null,
+        };
+    }
+};
+
+/// Page label specification for custom page numbering.
+pub const PageLabel = struct {
+    /// Numbering style.
+    style: PageLabelStyle = .decimal,
+    /// Optional prefix (e.g., "App-").
+    prefix: ?[]const u8 = null,
+    /// Starting number (default 1).
+    start: u32 = 1,
+};
+
+// ============================================================================
 // Graphics Types
 // ============================================================================
 

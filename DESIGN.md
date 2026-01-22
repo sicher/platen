@@ -600,6 +600,66 @@ doc.setDashPattern(4, 2, 0);  // dash, gap, phase
 doc.setSolidLine();           // reset to solid
 ```
 
+## Navigation
+
+### Bookmarks (Outlines)
+
+Bookmarks appear in the PDF viewer's sidebar for document navigation:
+
+```zig
+// Create a destination at current position
+const dest = doc.currentDestination().?;
+
+// Top-level bookmark
+const ch1 = try doc.addBookmark("Chapter 1", dest, null);
+
+// Nested bookmarks (child of ch1)
+try doc.addPage();
+_ = try doc.addBookmark("Section 1.1", doc.currentDestination().?, ch1);
+_ = try doc.addBookmark("Section 1.2", doc.currentDestination().?, ch1);
+
+// Another top-level bookmark
+try doc.addPage();
+_ = try doc.addBookmark("Chapter 2", doc.currentDestination().?, null);
+```
+
+Bookmarks can be nested to any depth. The parent pointer creates the tree structure.
+
+### Page Labels
+
+Custom page numbering displayed in the viewer's page indicator:
+
+```zig
+// Roman numerals for front matter (pages 0-3)
+try doc.setPageLabel(0, .{ .style = .roman_lower });  // i, ii, iii, iv...
+
+// Arabic numerals starting at 1 (page 4 onwards)
+try doc.setPageLabel(4, .{ .style = .decimal, .start = 1 });  // 1, 2, 3...
+
+// Appendix pages with prefix
+try doc.setPageLabel(104, .{ .style = .alpha_upper, .prefix = "App-" });  // App-A, App-B...
+```
+
+Available styles: `.decimal` (1,2,3), `.roman_lower` (i,ii,iii), `.roman_upper` (I,II,III),
+`.alpha_lower` (a,b,c), `.alpha_upper` (A,B,C), `.none` (prefix only).
+
+### Links
+
+Internal links for TOC-style navigation and external URLs:
+
+```zig
+// Create destination at chapter heading
+const chapter_dest = doc.currentDestination().?;
+
+// Later, create clickable text that jumps to chapter
+const rect = try doc.writeAt(72, 100, "Go to Chapter 1");
+try doc.addLink(rect, chapter_dest);
+
+// External URL link
+const url_rect = try doc.writeAt(72, 120, "Visit website");
+try doc.addExternalLink(url_rect, "https://example.com");
+```
+
 ## API Design Guidelines
 
 Principles for zpdf's public API:

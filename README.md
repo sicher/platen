@@ -440,9 +440,16 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
+| `addBookmark()` | Adds a bookmark (outline item) to the document |
 | `addLinearGradient()` | Add a linear gradient to the document and return its index |
 | `addRadialGradient()` | Add a radial gradient to the document and return its index |
 | `fillRectGradient()` | Fill a rectangle with a gradient |
+
+### Other
+
+| Method | Description |
+|--------|-------------|
+| `setPageLabel()` | Sets a page label range starting at the specified page index |
 
 
 ## Requirements
