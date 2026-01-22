@@ -48,7 +48,9 @@ pub const VAlign = layout.VAlign;
 pub const LineBreaking = layout.LineBreaking;
 pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
-pub const Region = layout.Region;
+pub const Rect = layout.Rect;
+pub const TextBox = layout.TextBox;
+pub const Destination = layout.Destination;
 pub const WriteResult = layout.WriteResult;
 pub const WrappedTextMetrics = layout.WrappedTextMetrics;
 pub const LineOptions = layout.LineOptions;
@@ -162,6 +164,20 @@ const ContentCommand = union(enum) {
     raw: []const u8, // Owned copy
 };
 
+/// Link annotation for internal or external links
+const LinkAnnotation = union(enum) {
+    /// Internal link to page position
+    internal: struct {
+        rect: Rect,
+        dest: Destination,
+    },
+    /// External link to URL
+    external: struct {
+        rect: Rect,
+        url: []const u8, // Owned by page arena
+    },
+};
+
 /// Internal page representation
 const Page = struct {
     content: std.ArrayListUnmanaged(u8), // Legacy: direct content bytes
@@ -171,6 +187,7 @@ const Page = struct {
     used_images: std.ArrayListUnmanaged(*Image),
     used_svgs: std.ArrayListUnmanaged(*Svg),
     used_gradients: std.AutoHashMapUnmanaged(usize, void),
+    annotations: std.ArrayListUnmanaged(LinkAnnotation), // Link annotations
     size: PageSize, // Page dimensions
 
     // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
@@ -186,6 +203,7 @@ const Page = struct {
             .used_images = .{},
             .used_svgs = .{},
             .used_gradients = .{},
+            .annotations = .{},
             .size = size,
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };
@@ -208,6 +226,7 @@ const Page = struct {
         self.used_images.deinit(backing_allocator);
         self.used_svgs.deinit(backing_allocator);
         self.used_gradients.deinit(backing_allocator);
+        self.annotations.deinit(backing_allocator);
     }
 
     fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
@@ -709,7 +728,7 @@ pub const Document = struct {
     }
 
     /// Returns a region for the current page respecting document margins.
-    pub fn getPageRegion(self: *Document) Region {
+    pub fn getPageTextBox(self: *Document) TextBox {
         return .{
             .x = self.margins.left,
             .y = self.margins.top,
@@ -833,6 +852,45 @@ pub const Document = struct {
     /// Returns 0 if no pages have been added.
     pub fn pageNo(self: *Document) usize {
         return self.pages.items.len;
+    }
+
+    /// Get current page index (0-based).
+    /// Returns null if no pages have been added.
+    pub fn currentPageIndex(self: *const Document) ?usize {
+        if (self.pages.items.len == 0) return null;
+        return self.pages.items.len - 1;
+    }
+
+    /// Get a destination for the current cursor position.
+    /// Used as target for internal links (e.g., TOC entries).
+    pub fn currentDestination(self: *const Document) ?Destination {
+        const page_index = self.currentPageIndex() orelse return null;
+        return .{ .page_index = page_index, .y = self.y };
+    }
+
+    /// Add an internal link (clickable area that jumps to another page position).
+    /// The rect specifies the clickable area on the current page.
+    /// The dest specifies the target page and y position.
+    pub fn addLink(self: *Document, rect: Rect, dest: Destination) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        var page = &self.pages.items[self.pages.items.len - 1];
+        try page.annotations.append(self.allocator, .{
+            .internal = .{ .rect = rect, .dest = dest },
+        });
+    }
+
+    /// Add an external link (clickable area that opens a URL).
+    /// The rect specifies the clickable area on the current page.
+    /// The url is copied to page-local storage.
+    pub fn addExternalLink(self: *Document, rect: Rect, url: []const u8) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_alloc = page.pageAllocator();
+        // Copy URL to page arena (freed when page is destroyed)
+        const url_copy = try page_alloc.dupe(u8, url);
+        try page.annotations.append(self.allocator, .{
+            .external = .{ .rect = rect, .url = url_copy },
+        });
     }
 
     /// Writes text at the current cursor position.
@@ -1124,9 +1182,18 @@ pub const Document = struct {
     }
 
     /// Writes text at the specified position.
-    pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !void {
+    /// Returns the bounding rectangle of the rendered text.
+    pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !Rect {
         self.setXY(x, y);
         try self.write(str);
+        const width = self.getTextWidth(str);
+        // Y is baseline, so rect top is y - font_size (approximate ascender)
+        return .{
+            .x = x,
+            .y = y - self.font_size,
+            .width = width,
+            .height = self.font_size,
+        };
     }
 
     /// Measures text width using current font (standard or embedded).
@@ -1161,26 +1228,32 @@ pub const Document = struct {
         return metrics.measureTextWidth(filtered, self.getTextStyle());
     }
 
-    /// Writes a single line of text into a region.
-    /// Does not wrap text. Advances the region cursor by one line height.
-    pub fn writeLine(self: *Document, region: *Region, str: []const u8, opts: LineOptions) !WriteResult {
-        return self.writeLineInternal(region, str, opts.alignment, opts.valign, 0);
+    /// Writes a single line of text into a content area.
+    /// Does not wrap text. Advances the cursor by one line height.
+    pub fn writeLine(self: *Document, area: *TextBox, str: []const u8, opts: LineOptions) !WriteResult {
+        return self.writeLineInternal(area, str, opts.alignment, opts.valign, 0);
     }
 
     /// Internal line writer with indent and valign support.
-    fn writeLineInternal(self: *Document, region: *Region, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
+    fn writeLineInternal(self: *Document, area: *TextBox, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
         const line_height = self.getLineHeightPts();
 
+        // Rect calculation values
+        const rect_x = area.x + area.padding.left;
+        const rect_y = area.y + area.padding.top + area.cursor_y;
+        const rect_width = area.contentWidth();
+
         // Check if we have room for a line
-        if (region.remainingHeight() < line_height) {
+        if (area.remainingHeight() < line_height) {
             return .{
                 .lines_written = 0,
                 .overflow = str,
+                .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = 0 },
             };
         }
 
         const text_width = self.getTextWidth(str);
-        const content_width = region.contentWidth();
+        const content_width = area.contentWidth();
         const available_width = content_width - indent;
 
         // Count spaces for justification calculation
@@ -1198,7 +1271,7 @@ pub const Document = struct {
             0;
 
         // Calculate x position based on alignment (content starts at x + padding.left)
-        const content_x = region.x + region.padding.left;
+        const content_x = area.x + area.padding.left;
         const x = switch (alignment) {
             .left => content_x + indent,
             .center => content_x + indent + (available_width - text_width) / 2,
@@ -1207,30 +1280,31 @@ pub const Document = struct {
         };
 
         // Calculate y position based on vertical alignment
-        const content_y = region.y + region.padding.top;
+        const content_y = area.y + area.padding.top;
         const leading = line_height - self.font_size;
         const y = switch (valign) {
             // Baseline at content_y + cursor_y + font_size (simple)
-            .top => content_y + region.cursor_y + self.font_size,
+            .top => content_y + area.cursor_y + self.font_size,
             // Baseline centered: subtract leading/2 (fpdf2 compatible)
-            .middle => content_y + region.cursor_y + self.font_size - leading / 2,
+            .middle => content_y + area.cursor_y + self.font_size - leading / 2,
             // Baseline at bottom of line height
-            .bottom => content_y + region.cursor_y + line_height,
+            .bottom => content_y + area.cursor_y + line_height,
         };
 
         // Render text (with word spacing if justified)
         if (word_spacing > 0) {
             try self.writeWithWordSpacing(x, y, str, word_spacing);
         } else {
-            try self.writeAt(x, y, str);
+            _ = try self.writeAt(x, y, str);
         }
 
         // Advance cursor
-        region.cursor_y += line_height;
+        area.cursor_y += line_height;
 
         return .{
             .lines_written = 1,
             .overflow = null,
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = line_height },
         };
     }
 
@@ -1601,15 +1675,21 @@ pub const Document = struct {
 
     /// Writes wrapped text into a region.
     /// Supports word wrapping, soft-hyphen breaking, and optional hyphenated word breaking.
-    pub fn writeParagraph(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
+    pub fn writeParagraph(self: *Document, region: *TextBox, str: []const u8, opts: ParagraphOptions) !WriteResult {
         const line_height = self.getLineHeightPts();
         const space_width = self.getTextWidth(" ");
         var lines_written: usize = 0;
         var is_first_line = true;
 
+        // Track starting position for rect calculation
+        const start_cursor_y = region.cursor_y;
+        const rect_x = region.x + region.padding.left;
+        const rect_y = region.y + region.padding.top + start_cursor_y;
+        const rect_width = region.contentWidth();
+
         // Use optimal (Knuth-Plass) line breaking if requested
         if (opts.line_breaking == .optimal) {
-            return self.writeParagraphOptimal(region, str, opts);
+            return self.writeParagraphOptimal(region, str, opts, start_cursor_y);
         }
 
         // Greedy algorithm: process text word by word
@@ -1620,6 +1700,7 @@ pub const Document = struct {
                 return .{
                     .lines_written = lines_written,
                     .overflow = remaining,
+                    .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
                 };
             }
 
@@ -1781,21 +1862,27 @@ pub const Document = struct {
         return .{
             .lines_written = lines_written,
             .overflow = null,
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
         };
     }
 
     /// Write paragraph using pre-computed optimal line breaks.
-    fn writeParagraphOptimal(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
+    fn writeParagraphOptimal(self: *Document, region: *TextBox, str: []const u8, opts: ParagraphOptions, start_cursor_y: f64) !WriteResult {
         const line_height = self.getLineHeightPts();
         const line_width = region.contentWidth() - opts.first_indent;
         const first_line_width = region.contentWidth() - opts.first_indent;
+
+        // Rect calculation values
+        const rect_x = region.x + region.padding.left;
+        const rect_y = region.y + region.padding.top + start_cursor_y;
+        const rect_width = region.contentWidth();
 
         // Compute optimal break points
         const breaks = try self.computeOptimalBreaks(str, line_width, first_line_width);
         defer self.allocator.free(breaks);
 
         if (breaks.len == 0) {
-            return .{ .lines_written = 0, .overflow = null };
+            return .{ .lines_written = 0, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = 0 } };
         }
 
         var lines_written: usize = 0;
@@ -1814,6 +1901,7 @@ pub const Document = struct {
                 return .{
                     .lines_written = lines_written,
                     .overflow = if (overflow_start < str.len) str[overflow_start..] else null,
+                    .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
                 };
             }
 
@@ -1865,7 +1953,7 @@ pub const Document = struct {
             }
         }
 
-        return .{ .lines_written = lines_written, .overflow = null };
+        return .{ .lines_written = lines_written, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height } };
     }
 
     /// Write text with automatic pagination.
@@ -1879,7 +1967,7 @@ pub const Document = struct {
         while (remaining) |text_to_write| {
             if (text_to_write.len == 0) break;
 
-            var region = self.getPageRegion();
+            var region = self.getPageTextBox();
             const result = try self.writeParagraph(&region, text_to_write, .{
                 .alignment = opts.alignment,
                 .valign = opts.valign,
@@ -1901,7 +1989,7 @@ pub const Document = struct {
     }
 
     /// Draws a region's border and fill (without text).
-    pub fn drawRegion(self: *Document, region: Region) !void {
+    pub fn drawTextBox(self: *Document, region: TextBox) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
@@ -2577,13 +2665,14 @@ pub const Document = struct {
         try pages_dict.put("Type", Value.name("Pages"));
         try pages_dict.put("Count", Value.int(@intCast(self.pages.items.len)));
 
-        // Build Kids array
+        // Build Kids array (accounting for annotations per page)
         var kids = Array.init(self.allocator);
         defer kids.deinit();
         var page_id = first_page_id;
-        for (self.pages.items) |_| {
+        for (self.pages.items) |page| {
             try kids.append(Value.ref(.{ .id = page_id }));
-            page_id += 2;
+            // Each page uses: page dict + content stream + annotation objects
+            page_id += 2 + @as(ObjectId, @intCast(page.annotations.items.len));
         }
         try pages_dict.put("Kids", .{ .array_val = &kids });
 
@@ -3023,10 +3112,13 @@ pub const Document = struct {
         // Write each page
         const page_write_start = std.time.milliTimestamp();
         next_id = first_page_id;
-        for (self.pages.items) |page| {
+        for (self.pages.items, 0..) |page, page_idx| {
             const pg_id = next_id;
             const content_id = next_id + 1;
-            next_id += 2;
+            const first_annot_id = next_id + 2;
+            const annot_count = page.annotations.items.len;
+            next_id += 2 + @as(ObjectId, @intCast(annot_count));
+            _ = page_idx; // Used for internal link destinations
 
             // Page dictionary
             try w.beginObject(pg_id);
@@ -3182,6 +3274,17 @@ pub const Document = struct {
                 try page_dict.put("Resources", .{ .dict_val = &resources });
             }
 
+            // Add annotations array if page has links
+            var annots_array = Array.init(self.allocator);
+            defer annots_array.deinit();
+            if (annot_count > 0) {
+                for (0..annot_count) |i| {
+                    const annot_id = first_annot_id + @as(ObjectId, @intCast(i));
+                    try annots_array.append(Value.ref(.{ .id = annot_id }));
+                }
+                try page_dict.put("Annots", .{ .array_val = &annots_array });
+            }
+
             try w.writeDict(page_dict);
             try w.endObject();
 
@@ -3191,6 +3294,75 @@ pub const Document = struct {
             defer content_dict.deinit();
             try w.writeStreamCompressed(&content_dict, page.content.items);
             try w.endObject();
+
+            // Write annotation objects
+            for (page.annotations.items, 0..) |annot, i| {
+                const annot_id = first_annot_id + @as(ObjectId, @intCast(i));
+                try w.beginObject(annot_id);
+                var annot_dict = Dict.init(self.allocator);
+                defer annot_dict.deinit();
+
+                try annot_dict.put("Type", Value.name("Annot"));
+                try annot_dict.put("Subtype", Value.name("Link"));
+
+                // Rect: [x1 y1 x2 y2] in PDF coordinates (y from bottom)
+                const rect = switch (annot) {
+                    .internal => |a| a.rect,
+                    .external => |a| a.rect,
+                };
+                var rect_array = Array.init(self.allocator);
+                defer rect_array.deinit();
+                // Convert from top-down to bottom-up coordinates
+                const y1 = page.size.height - rect.y - rect.height;
+                const y2 = page.size.height - rect.y;
+                try rect_array.append(Value.real(rect.x));
+                try rect_array.append(Value.real(y1));
+                try rect_array.append(Value.real(rect.x + rect.width));
+                try rect_array.append(Value.real(y2));
+                try annot_dict.put("Rect", .{ .array_val = &rect_array });
+
+                // Border: [0 0 0] = no visible border
+                var border_array = Array.init(self.allocator);
+                defer border_array.deinit();
+                try border_array.append(Value.int(0));
+                try border_array.append(Value.int(0));
+                try border_array.append(Value.int(0));
+                try annot_dict.put("Border", .{ .array_val = &border_array });
+
+                // Destination array or action dict (must stay in scope until writeDict)
+                var dest_array = Array.init(self.allocator);
+                defer dest_array.deinit();
+                var action_dict = Dict.init(self.allocator);
+                defer action_dict.deinit();
+
+                switch (annot) {
+                    .internal => |a| {
+                        // /Dest [page_ref /XYZ left top zoom]
+                        // Get the page object ID for the destination
+                        var dest_page_id = first_page_id;
+                        for (self.pages.items[0..a.dest.page_index]) |p| {
+                            dest_page_id += 2 + @as(ObjectId, @intCast(p.annotations.items.len));
+                        }
+                        const dest_page_size = self.pages.items[a.dest.page_index].size;
+                        try dest_array.append(Value.ref(.{ .id = dest_page_id }));
+                        try dest_array.append(Value.name("XYZ"));
+                        try dest_array.append(Value.int(0)); // left (null = unchanged)
+                        // Convert y from top-down to bottom-up
+                        try dest_array.append(Value.real(dest_page_size.height - a.dest.y));
+                        try dest_array.append(Value.int(0)); // zoom (0 = unchanged)
+                        try annot_dict.put("Dest", .{ .array_val = &dest_array });
+                    },
+                    .external => |a| {
+                        // /A << /S /URI /URI (url) >>
+                        try action_dict.put("S", Value.name("URI"));
+                        try action_dict.put("URI", Value.string(a.url));
+                        try annot_dict.put("A", .{ .dict_val = &action_dict });
+                    },
+                }
+
+                try w.writeDict(annot_dict);
+                try w.endObject();
+            }
         }
         last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
 

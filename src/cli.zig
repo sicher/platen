@@ -206,16 +206,16 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
 
     try doc.addPage();
     try doc.setFont(.helvetica, 24);
-    try doc.writeAt(50, 50, "Hello, World!");
+    _ = try doc.writeAt(50, 50, "Hello, World!");
 
     try doc.setFont(.helvetica_bold, 16);
-    try doc.writeAt(50, 100, "This is zpdf - a PDF library for Zig");
+    _ = try doc.writeAt(50, 100, "This is zpdf - a PDF library for Zig");
 
     try doc.setFont(.times_roman, 12);
-    try doc.writeAt(50, 150, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats");
+    _ = try doc.writeAt(50, 150, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats");
 
     try doc.setFont(.courier, 10);
-    try doc.writeAt(50, 200, "Fixed-width font for code");
+    _ = try doc.writeAt(50, 200, "Fixed-width font for code");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -239,44 +239,44 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
 
     // Title with standard font
     try doc.setFont(.helvetica_bold, 24);
-    try doc.writeAt(50, 50, "Embedded Font Test");
+    _ = try doc.writeAt(50, 50, "Embedded Font Test");
 
     // Show font info
     try doc.setFont(.helvetica, 12);
     var info_buf: [256]u8 = undefined;
     const info = std.fmt.bufPrint(&info_buf, "Font: {s}", .{custom_font.name}) catch "Font: Unknown";
-    try doc.writeAt(50, 80, info);
+    _ = try doc.writeAt(50, 80, info);
 
     // Use embedded font at various sizes
     try doc.setEmbeddedFont(custom_font, 24);
-    try doc.writeAt(50, 120, "The quick brown fox jumps over the lazy dog.");
+    _ = try doc.writeAt(50, 120, "The quick brown fox jumps over the lazy dog.");
 
     try doc.setEmbeddedFont(custom_font, 18);
-    try doc.writeAt(50, 160, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    _ = try doc.writeAt(50, 160, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 
     try doc.setEmbeddedFont(custom_font, 18);
-    try doc.writeAt(50, 190, "abcdefghijklmnopqrstuvwxyz");
+    _ = try doc.writeAt(50, 190, "abcdefghijklmnopqrstuvwxyz");
 
     try doc.setEmbeddedFont(custom_font, 18);
-    try doc.writeAt(50, 220, "0123456789 !@#$%^&*()");
+    _ = try doc.writeAt(50, 220, "0123456789 !@#$%^&*()");
 
     // Mix with standard fonts
     try doc.setFont(.helvetica, 12);
-    try doc.writeAt(50, 270, "Standard font (Helvetica) for comparison");
+    _ = try doc.writeAt(50, 270, "Standard font (Helvetica) for comparison");
 
     try doc.setEmbeddedFont(custom_font, 12);
-    try doc.writeAt(50, 290, "Embedded font at same size (12pt)");
+    _ = try doc.writeAt(50, 290, "Embedded font at same size (12pt)");
 
     // Multiple lines
     try doc.setEmbeddedFont(custom_font, 14);
-    try doc.writeAt(50, 340, "Line 1: This is a test of the embedded font.");
-    try doc.writeAt(50, 360, "Line 2: Lorem ipsum dolor sit amet.");
-    try doc.writeAt(50, 380, "Line 3: Consectetur adipiscing elit.");
+    _ = try doc.writeAt(50, 340, "Line 1: This is a test of the embedded font.");
+    _ = try doc.writeAt(50, 360, "Line 2: Lorem ipsum dolor sit amet.");
+    _ = try doc.writeAt(50, 380, "Line 3: Consectetur adipiscing elit.");
 
     // Page 2 - stress test
     try doc.addPage();
     try doc.setFont(.helvetica_bold, 18);
-    try doc.writeAt(50, 50, "Page 2: Extended Character Test");
+    _ = try doc.writeAt(50, 50, "Page 2: Extended Character Test");
 
     try doc.setEmbeddedFont(custom_font, 14);
     var y: f64 = 80;
@@ -289,17 +289,17 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     const line5 = "`abcdefghijklmno";
     const line6 = "pqrstuvwxyz{|}~";
 
-    try doc.writeAt(50, y, line1);
+    _ = try doc.writeAt(50, y, line1);
     y += 20;
-    try doc.writeAt(50, y, line2);
+    _ = try doc.writeAt(50, y, line2);
     y += 20;
-    try doc.writeAt(50, y, line3);
+    _ = try doc.writeAt(50, y, line3);
     y += 20;
-    try doc.writeAt(50, y, line4);
+    _ = try doc.writeAt(50, y, line4);
     y += 20;
-    try doc.writeAt(50, y, line5);
+    _ = try doc.writeAt(50, y, line5);
     y += 20;
-    try doc.writeAt(50, y, line6);
+    _ = try doc.writeAt(50, y, line6);
     y += 30;
 
     // Show metrics
@@ -311,7 +311,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.descent,
         custom_font.cap_height,
     }) catch "Metrics unavailable";
-    try doc.writeAt(50, y, ascent_info);
+    _ = try doc.writeAt(50, y, ascent_info);
     y += 15;
 
     const bbox_info = std.fmt.bufPrint(&metrics_buf, "BBox: [{d}, {d}, {d}, {d}]", .{
@@ -320,7 +320,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.bbox[2],
         custom_font.bbox[3],
     }) catch "BBox unavailable";
-    try doc.writeAt(50, y, bbox_info);
+    _ = try doc.writeAt(50, y, bbox_info);
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -345,11 +345,11 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
 
     // Just a few characters to test subsetting
     try doc.setEmbeddedFont(font, 24);
-    try doc.writeAt(50, 50, "Hello CFF!");
+    _ = try doc.writeAt(50, 50, "Hello CFF!");
 
     try doc.setEmbeddedFont(font, 18);
-    try doc.writeAt(50, 100, "ABCDEFGHIJ");
-    try doc.writeAt(50, 130, "0123456789");
+    _ = try doc.writeAt(50, 100, "ABCDEFGHIJ");
+    _ = try doc.writeAt(50, 130, "0123456789");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -395,11 +395,11 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     var y: f64 = 30;
 
     try doc.setEmbeddedFont(font, 24);
-    try doc.writeAt(50, y, "Mark Positioning Test");
+    _ = try doc.writeAt(50, y, "Mark Positioning Test");
     y += 30;
 
     try doc.setEmbeddedFont(font, 14);
-    try doc.writeAt(50, y, "GPOS Type 4 (mark-to-base) and Type 6 (mark-to-mark)");
+    _ = try doc.writeAt(50, y, "GPOS Type 4 (mark-to-base) and Type 6 (mark-to-mark)");
     y += 24;
 
     // Test text with combining diacritical marks
@@ -407,7 +407,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     try doc.setEmbeddedFont(font, 18);
 
     // Pre-composed vs combining (visual comparison)
-    try doc.writeAt(50, y, "Pre-composed: À É Î Õ Ü ñ");
+    _ = try doc.writeAt(50, y, "Pre-composed: À É Î Õ Ü ñ");
     y += 24;
     // U+0041 U+0300 = A + COMBINING GRAVE ACCENT
     // U+0045 U+0301 = E + COMBINING ACUTE ACCENT
@@ -415,22 +415,22 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     // U+004F U+0303 = O + COMBINING TILDE
     // U+0055 U+0308 = U + COMBINING DIAERESIS
     // U+006E U+0303 = n + COMBINING TILDE
-    try doc.writeAt(50, y, "Combining: A\xcc\x80 E\xcc\x81 I\xcc\x82 O\xcc\x83 U\xcc\x88 n\xcc\x83");
+    _ = try doc.writeAt(50, y, "Combining: A\xcc\x80 E\xcc\x81 I\xcc\x82 O\xcc\x83 U\xcc\x88 n\xcc\x83");
     y += 30;
 
     // More complex combinations
-    try doc.writeAt(50, y, "Double marks: o\xcc\x82\xcc\x81 e\xcc\x84\xcc\x81"); // ô + acute, ē + acute
+    _ = try doc.writeAt(50, y, "Double marks: o\xcc\x82\xcc\x81 e\xcc\x84\xcc\x81"); // ô + acute, ē + acute
     y += 24;
 
     // Vietnamese-style stacked diacritics
-    try doc.writeAt(50, y, "Vietnamese: a\xcc\x82\xcc\x80 e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83"); // â + grave, ê + acute, ô + tilde
+    _ = try doc.writeAt(50, y, "Vietnamese: a\xcc\x82\xcc\x80 e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83"); // â + grave, ê + acute, ô + tilde
     y += 30;
 
     // Comparison row
     try doc.setEmbeddedFont(font, 12);
-    try doc.writeAt(50, y, "If mark positioning works, combining characters should align with pre-composed.");
+    _ = try doc.writeAt(50, y, "If mark positioning works, combining characters should align with pre-composed.");
     y += 16;
-    try doc.writeAt(50, y, "Without mark positioning, combining marks appear after the base character.");
+    _ = try doc.writeAt(50, y, "Without mark positioning, combining marks appear after the base character.");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -471,68 +471,68 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     var y: f64 = 30;
 
     try doc.setEmbeddedFont(font, 24);
-    try doc.writeAt(50, y, "Contextual Alternates (calt) Test");
+    _ = try doc.writeAt(50, y, "Contextual Alternates (calt) Test");
     y += 30;
 
     try doc.setEmbeddedFont(font, 12);
-    try doc.writeAt(50, y, "Inter font: GSUB calt feature for programming ligatures");
+    _ = try doc.writeAt(50, y, "Inter font: GSUB calt feature for programming ligatures");
     y += 24;
 
     // Test arrow sequences
     try doc.setEmbeddedFont(font, 10);
-    try doc.writeAt(50, y, "calt OFF:");
+    _ = try doc.writeAt(50, y, "calt OFF:");
     try doc.setEmbeddedFont(font_no_calt, 16);
-    try doc.writeAt(120, y, "-> => <- <=> !== ===");
+    _ = try doc.writeAt(120, y, "-> => <- <=> !== ===");
     y += 22;
 
     try doc.setEmbeddedFont(font, 10);
-    try doc.writeAt(50, y, "calt ON:");
+    _ = try doc.writeAt(50, y, "calt ON:");
     try doc.setEmbeddedFont(font, 16);
-    try doc.writeAt(120, y, "-> => <- <=> !== ===");
+    _ = try doc.writeAt(120, y, "-> => <- <=> !== ===");
     y += 30;
 
     // Test in context
     try doc.setEmbeddedFont(font, 10);
-    try doc.writeAt(50, y, "In context (calt ON):");
+    _ = try doc.writeAt(50, y, "In context (calt ON):");
     y += 16;
     try doc.setEmbeddedFont(font, 14);
-    try doc.writeAt(50, y, "function arrow() { return x => x + 1; }");
+    _ = try doc.writeAt(50, y, "function arrow() { return x => x + 1; }");
     y += 20;
-    try doc.writeAt(50, y, "if (a !== b && c <= d) { return a <=> b; }");
+    _ = try doc.writeAt(50, y, "if (a !== b && c <= d) { return a <=> b; }");
     y += 20;
-    try doc.writeAt(50, y, "const diff = a -> b -> c;");
+    _ = try doc.writeAt(50, y, "const diff = a -> b -> c;");
     y += 30;
 
     // Test ASCII line (the problematic one from integration tests)
     try doc.setEmbeddedFont(font, 10);
-    try doc.writeAt(50, y, "Full ASCII (calt ON):");
+    _ = try doc.writeAt(50, y, "Full ASCII (calt ON):");
     y += 16;
     try doc.setEmbeddedFont(font, 11);
-    try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@");
+    _ = try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@");
     y += 16;
-    try doc.writeAt(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
+    _ = try doc.writeAt(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
     y += 16;
-    try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
+    _ = try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
     y += 24;
 
     // Same without calt for comparison
     try doc.setEmbeddedFont(font, 10);
-    try doc.writeAt(50, y, "Full ASCII (calt OFF):");
+    _ = try doc.writeAt(50, y, "Full ASCII (calt OFF):");
     y += 16;
     try doc.setEmbeddedFont(font_no_calt, 11);
-    try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@");
+    _ = try doc.writeAt(50, y, "!\"#$%&'()*+,-./0123456789:;<=>?@");
     y += 16;
-    try doc.writeAt(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
+    _ = try doc.writeAt(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`");
     y += 16;
-    try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
+    _ = try doc.writeAt(50, y, "abcdefghijklmnopqrstuvwxyz{|}~");
     y += 24;
 
     // Regular text should be unchanged
     try doc.setEmbeddedFont(font, 10);
-    try doc.writeAt(50, y, "Regular text (should be identical with/without calt):");
+    _ = try doc.writeAt(50, y, "Regular text (should be identical with/without calt):");
     y += 16;
     try doc.setEmbeddedFont(font, 12);
-    try doc.writeAt(50, y, "The quick brown fox jumps over the lazy dog.");
+    _ = try doc.writeAt(50, y, "The quick brown fox jumps over the lazy dog.");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -557,13 +557,13 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
-    try doc.writeAt(50, 30, "Path API Test");
+    _ = try doc.writeAt(50, 30, "Path API Test");
 
     var y: f64 = 70;
 
     // Triangle using moveTo/lineTo
     try doc.setFont(.helvetica, 10);
-    try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
+    _ = try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
     y += 15;
 
     doc.setDrawStyle(.{
@@ -584,7 +584,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     // Bezier curve
     try doc.setFont(.helvetica, 10);
     doc.setDrawStyle(.{});
-    try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
+    _ = try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
     y += 15;
 
     doc.setDrawStyle(.{
@@ -605,7 +605,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     // Heart shape using curves
     try doc.setFont(.helvetica, 10);
     doc.setDrawStyle(.{});
-    try doc.writeAt(50, y, "Heart shape (multiple curveTo):");
+    _ = try doc.writeAt(50, y, "Heart shape (multiple curveTo):");
     y += 15;
 
     doc.setDrawStyle(.{
@@ -626,7 +626,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     // Stroke only path
     try doc.setFont(.helvetica, 10);
     doc.setDrawStyle(.{});
-    try doc.writeAt(50, y, "Stroke only (zigzag):");
+    _ = try doc.writeAt(50, y, "Stroke only (zigzag):");
     y += 15;
 
     doc.setDrawStyle(.{
@@ -661,13 +661,13 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
-    try doc.writeAt(50, 30, "Gradient Test");
+    _ = try doc.writeAt(50, 30, "Gradient Test");
 
     var y: f64 = 70;
 
     // Linear gradient horizontal
     try doc.setFont(.helvetica, 10);
-    try doc.writeAt(50, y, "Linear gradient (horizontal):");
+    _ = try doc.writeAt(50, y, "Linear gradient (horizontal):");
     y += 15;
 
     const lin_stops1 = [_]zpdf.ColorStop{
@@ -686,7 +686,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     // Linear gradient vertical
     try doc.setFont(.helvetica, 10);
-    try doc.writeAt(50, y, "Linear gradient (vertical):");
+    _ = try doc.writeAt(50, y, "Linear gradient (vertical):");
     y += 15;
 
     const lin_stops2 = [_]zpdf.ColorStop{
@@ -705,7 +705,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     // Linear gradient 3 colors
     try doc.setFont(.helvetica, 10);
-    try doc.writeAt(50, y, "Linear gradient (3 colors):");
+    _ = try doc.writeAt(50, y, "Linear gradient (3 colors):");
     y += 15;
 
     const lin_stops3 = [_]zpdf.ColorStop{
@@ -725,7 +725,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     // Radial gradient
     try doc.setFont(.helvetica, 10);
-    try doc.writeAt(50, y, "Radial gradient:");
+    _ = try doc.writeAt(50, y, "Radial gradient:");
     y += 15;
 
     const rad_stops = [_]zpdf.ColorStop{
@@ -767,52 +767,52 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     try doc.addPage();
 
     try doc.setFont(.helvetica_bold, 24);
-    try doc.writeAt(50, 50, "Document with Metadata");
+    _ = try doc.writeAt(50, 50, "Document with Metadata");
 
     try doc.setFont(.helvetica, 12);
     var y: f64 = 100;
 
-    try doc.writeAt(50, y, "This PDF has the following metadata set in the Info dictionary:");
+    _ = try doc.writeAt(50, y, "This PDF has the following metadata set in the Info dictionary:");
     y += 30;
 
     try doc.setFont(.helvetica_bold, 11);
-    try doc.writeAt(50, y, "Title:");
+    _ = try doc.writeAt(50, y, "Title:");
     try doc.setFont(.helvetica, 11);
-    try doc.writeAt(120, y, "zpdf Metadata Demo");
+    _ = try doc.writeAt(120, y, "zpdf Metadata Demo");
     y += 18;
 
     try doc.setFont(.helvetica_bold, 11);
-    try doc.writeAt(50, y, "Author:");
+    _ = try doc.writeAt(50, y, "Author:");
     try doc.setFont(.helvetica, 11);
-    try doc.writeAt(120, y, "zpdf Library");
+    _ = try doc.writeAt(120, y, "zpdf Library");
     y += 18;
 
     try doc.setFont(.helvetica_bold, 11);
-    try doc.writeAt(50, y, "Subject:");
+    _ = try doc.writeAt(50, y, "Subject:");
     try doc.setFont(.helvetica, 11);
-    try doc.writeAt(120, y, "Demonstrating PDF metadata support");
+    _ = try doc.writeAt(120, y, "Demonstrating PDF metadata support");
     y += 18;
 
     try doc.setFont(.helvetica_bold, 11);
-    try doc.writeAt(50, y, "Keywords:");
+    _ = try doc.writeAt(50, y, "Keywords:");
     try doc.setFont(.helvetica, 11);
-    try doc.writeAt(120, y, "pdf, zig, metadata, demo");
+    _ = try doc.writeAt(120, y, "pdf, zig, metadata, demo");
     y += 18;
 
     try doc.setFont(.helvetica_bold, 11);
-    try doc.writeAt(50, y, "Creator:");
+    _ = try doc.writeAt(50, y, "Creator:");
     try doc.setFont(.helvetica, 11);
-    try doc.writeAt(120, y, "zpdf CLI tool");
+    _ = try doc.writeAt(120, y, "zpdf CLI tool");
     y += 18;
 
     try doc.setFont(.helvetica_bold, 11);
-    try doc.writeAt(50, y, "Producer:");
+    _ = try doc.writeAt(50, y, "Producer:");
     try doc.setFont(.helvetica, 11);
-    try doc.writeAt(120, y, "zpdf (default)");
+    _ = try doc.writeAt(120, y, "zpdf (default)");
     y += 40;
 
     try doc.setFont(.helvetica_oblique, 10);
-    try doc.writeAt(50, y, "Use 'pdfinfo' or your PDF viewer's document properties to verify.");
+    _ = try doc.writeAt(50, y, "Use 'pdfinfo' or your PDF viewer's document properties to verify.");
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

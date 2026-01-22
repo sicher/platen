@@ -1,4 +1,4 @@
-//! Layout types for zpdf - regions, alignment, margins, and page sizes.
+//! Layout types for zpdf - content areas, alignment, margins, and page sizes.
 
 const color = @import("color.zig");
 const metrics = @import("metrics.zig");
@@ -53,7 +53,7 @@ pub const Margins = struct {
     bottom: f64 = 72,
 };
 
-/// Region padding in points (defaults to zero).
+/// Content area padding in points (defaults to zero).
 pub const Padding = struct {
     left: f64 = 0,
     right: f64 = 0,
@@ -61,19 +61,35 @@ pub const Padding = struct {
     bottom: f64 = 0,
 };
 
-/// Rectangular area for content placement with cursor tracking.
-pub const Region = struct {
+/// Simple rectangle (bounding box).
+pub const Rect = struct {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+};
+
+/// Internal link destination (page position).
+pub const Destination = struct {
+    /// Page index (0-based).
+    page_index: usize,
+    /// Y position on page (from top).
+    y: f64,
+};
+
+/// Styled text container with cursor tracking for text flow.
+pub const TextBox = struct {
     /// Left edge x coordinate.
     x: f64,
     /// Top edge y coordinate (from page top).
     y: f64,
-    /// Region width.
+    /// Content area width.
     width: f64,
-    /// Region height.
+    /// Content area height.
     height: f64,
     /// Current cursor y position within content area (relative to top padding).
     cursor_y: f64 = 0,
-    /// Inner padding (content inset from region edges).
+    /// Inner padding (content inset from edges).
     padding: Padding = .{},
     /// Border styling.
     border: Border = .{},
@@ -81,18 +97,23 @@ pub const Region = struct {
     fill: ?Color = null,
 
     /// Returns remaining height in content area.
-    pub fn remainingHeight(self: Region) f64 {
+    pub fn remainingHeight(self: TextBox) f64 {
         return self.height - self.padding.top - self.padding.bottom - self.cursor_y;
     }
 
     /// Returns usable width inside padding.
-    pub fn contentWidth(self: Region) f64 {
+    pub fn contentWidth(self: TextBox) f64 {
         return self.width - self.padding.left - self.padding.right;
     }
 
     /// Returns true if the given metrics fit in remaining space.
-    pub fn fits(self: Region, m: TextMetrics) bool {
+    pub fn fits(self: TextBox, m: TextMetrics) bool {
         return m.height <= self.remainingHeight();
+    }
+
+    /// Returns the bounds as a Rect.
+    pub fn toRect(self: TextBox) Rect {
+        return .{ .x = self.x, .y = self.y, .width = self.width, .height = self.height };
     }
 };
 
@@ -102,6 +123,8 @@ pub const WriteResult = struct {
     lines_written: usize,
     /// Text that didn't fit, or null if all text was written.
     overflow: ?[]const u8,
+    /// Bounding rectangle of the rendered text.
+    rect: Rect,
 };
 
 /// Result of measuring wrapped text without rendering.
