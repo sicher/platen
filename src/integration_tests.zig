@@ -42,7 +42,7 @@ const test_cases = [_]TestCase{
     .{ .name = "landscape", .generate = generateLandscapePdf },
     .{ .name = "colors", .generate = generateColorSwatchesPdf },
     .{ .name = "links", .generate = generateLinksPdf },
-    .{ .name = "bookmarks", .generate = generateBookmarksPdf },
+    .{ .name = "outlines", .generate = generateOutlinesPdf },
 };
 
 // ============================================================================
@@ -2105,7 +2105,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
-fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
+fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
@@ -2113,7 +2113,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(null);
     try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
     const title_dest = doc.currentDestination().?;
-    _ = try doc.addBookmark("Title Page", title_dest, null);
+    _ = try doc.addOutlineItem("Title Page", title_dest, null);
     try doc.setFont(.helvetica_bold, 24);
     _ = try doc.writeAt(200, 300, "My Document");
     try doc.setFont(.helvetica, 12);
@@ -2122,7 +2122,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 2: Preface (front matter - roman numeral ii)
     try doc.addPage(null);
     const preface_dest = doc.currentDestination().?;
-    _ = try doc.addBookmark("Preface", preface_dest, null);
+    _ = try doc.addOutlineItem("Preface", preface_dest, null);
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Preface");
     try doc.setFont(.helvetica, 12);
@@ -2132,7 +2132,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(null);
     try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
     const ch1_dest = doc.currentDestination().?;
-    const ch1 = try doc.addBookmark("Chapter 1: Introduction", ch1_dest, null);
+    const ch1 = try doc.addOutlineItem("Chapter 1: Introduction", ch1_dest, null);
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Chapter 1: Introduction");
     try doc.setFont(.helvetica, 12);
@@ -2141,7 +2141,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 4: Section 1.1 (body - decimal 2)
     try doc.addPage(null);
     const sec11_dest = doc.currentDestination().?;
-    _ = try doc.addBookmark("Section 1.1: Background", sec11_dest, ch1);
+    _ = try doc.addOutlineItem("Section 1.1: Background", sec11_dest, ch1);
     try doc.setFont(.helvetica_bold, 14);
     _ = try doc.writeAt(50, 50, "Section 1.1: Background");
     try doc.setFont(.helvetica, 12);
@@ -2150,7 +2150,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 5: Section 1.2 (body - decimal 3)
     try doc.addPage(null);
     const sec12_dest = doc.currentDestination().?;
-    _ = try doc.addBookmark("Section 1.2: Overview", sec12_dest, ch1);
+    _ = try doc.addOutlineItem("Section 1.2: Overview", sec12_dest, ch1);
     try doc.setFont(.helvetica_bold, 14);
     _ = try doc.writeAt(50, 50, "Section 1.2: Overview");
     try doc.setFont(.helvetica, 12);
@@ -2159,7 +2159,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 6: Chapter 2 (body - decimal 4)
     try doc.addPage(null);
     const ch2_dest = doc.currentDestination().?;
-    _ = try doc.addBookmark("Chapter 2: Details", ch2_dest, null);
+    _ = try doc.addOutlineItem("Chapter 2: Details", ch2_dest, null);
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Chapter 2: Details");
     try doc.setFont(.helvetica, 12);
@@ -2169,7 +2169,7 @@ fn generateBookmarksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(null);
     try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
     const app_dest = doc.currentDestination().?;
-    _ = try doc.addBookmark("Appendix A: References", app_dest, null);
+    _ = try doc.addOutlineItem("Appendix A: References", app_dest, null);
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Appendix A: References");
     try doc.setFont(.helvetica, 12);
@@ -2289,9 +2289,9 @@ test "integration: links PDF" {
     try runIntegrationTest("links", generateLinksPdf);
 }
 
-test "integration: bookmarks PDF" {
-    // Tests bookmarks (outlines) and page labels (roman, decimal, alpha)
-    try runIntegrationTest("bookmarks", generateBookmarksPdf);
+test "integration: outlines PDF" {
+    // Tests document outline (table of contents) and page labels
+    try runIntegrationTest("outlines", generateOutlinesPdf);
 }
 
 const TestOptions = struct {

@@ -602,28 +602,28 @@ doc.setSolidLine();           // reset to solid
 
 ## Navigation
 
-### Bookmarks (Outlines)
+### Document Outline
 
-Bookmarks appear in the PDF viewer's sidebar for document navigation:
+The outline appears in the PDF viewer's table of contents sidebar:
 
 ```zig
 // Create a destination at current position
 const dest = doc.currentDestination().?;
 
-// Top-level bookmark
-const ch1 = try doc.addBookmark("Chapter 1", dest, null);
+// Top-level outline item
+const ch1 = try doc.addOutlineItem("Chapter 1", dest, null);
 
-// Nested bookmarks (child of ch1)
+// Nested items (children of ch1)
 try doc.addPage(null);
-_ = try doc.addBookmark("Section 1.1", doc.currentDestination().?, ch1);
-_ = try doc.addBookmark("Section 1.2", doc.currentDestination().?, ch1);
+_ = try doc.addOutlineItem("Section 1.1", doc.currentDestination().?, ch1);
+_ = try doc.addOutlineItem("Section 1.2", doc.currentDestination().?, ch1);
 
-// Another top-level bookmark
+// Another top-level item
 try doc.addPage(null);
-_ = try doc.addBookmark("Chapter 2", doc.currentDestination().?, null);
+_ = try doc.addOutlineItem("Chapter 2", doc.currentDestination().?, null);
 ```
 
-Bookmarks can be nested to any depth. The parent pointer creates the tree structure.
+Outline items can be nested to any depth. The parent pointer creates the tree structure.
 
 ### Page Labels
 

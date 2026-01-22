@@ -1,13 +1,13 @@
 # zpdf Context
 
 ## Current Focus
-Bookmarks and page labels implemented. 259 unit tests pass.
+Document outline and page labels implemented. 260 unit tests pass.
 
 ## What We Did (Session 2026-01-22 #3) [COMPLETE]
-- **Implemented PDF bookmarks/outlines for navigation**:
-  - Added `Bookmark` struct to `layout.zig` with title, dest, parent, sibling/child links
-  - Added `addBookmark(title, dest, parent)` method returning `*Bookmark` for nesting
-  - Bookmarks stored in `Document.bookmarks` array, cleaned up in `deinit()`
+- **Implemented PDF document outline for navigation**:
+  - Added `Outline` struct to `layout.zig` with title, dest, parent, sibling/child links
+  - Added `addOutlineItem(title, dest, parent)` method returning `*Outline` for nesting
+  - Outlines stored in `Document.outlines` array, cleaned up in `deinit()`
   - PDF output generates /Outlines dict and outline item objects
   - /Dest uses [page_ref /XYZ left top zoom] format
   - Sibling links (/Next, /Prev) and child links (/First, /Last) generated from parent pointers
@@ -18,15 +18,15 @@ Bookmarks and page labels implemented. 259 unit tests pass.
   - Added `setPageLabel(page_index, label)` method for label ranges
   - PDF output generates /PageLabels dict with /Nums number tree
   - Supports /S (style), /P (prefix), /St (start) entries
-- **Updated exports**: Bookmark, PageLabelStyle, PageLabel exported via zpdf.zig
-- **Added 11 unit tests** for bookmarks and page labels:
-  - Basic and nested bookmarks, PDF output verification
+- **Updated exports**: Outline, PageLabelStyle, PageLabel exported via zpdf.zig
+- **Added 11 unit tests** for outlines and page labels:
+  - Basic and nested outline items, PDF output verification
   - PageLabelStyle.pdfCode(), setPageLabel basic usage
   - PDF output with various page label options (prefix, start number)
   - Verification that catalog doesn't include outlines/page labels when not set
-- **Added integration test** `bookmarks`:
+- **Added integration test** `outlines`:
   - 7-page document with front matter (roman), body (decimal), appendix (alpha+prefix)
-  - Nested bookmarks (chapters with sections)
+  - Nested outline (chapters with sections)
   - fpdf2 reference generated with matching structure
 - All 260 tests pass (249 unit + 11 new + 25 integration)
 - Updated API docs (54 methods)
@@ -1249,7 +1249,7 @@ Bookmarks and page labels implemented. 259 unit tests pass.
 - ✓ Text flow: regions, word wrapping, justify, optimal line breaking
 
 ### Navigation
-- ✓ Bookmarks/Outlines: addBookmark() with nesting support
+- ✓ Document outline: addOutlineItem() with nesting support
 - ✓ Page labels: setPageLabel() with styles (decimal, roman, alpha), prefix, start number
 - ✓ Internal links: addLink() for TOC-style navigation
 - ✓ External links: addExternalLink() for URLs

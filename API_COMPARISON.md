@@ -249,7 +249,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| Bookmarks/outline | `start_section()` | ✅ `addBookmark()` | |
+| Document outline | `start_section()` | ✅ `addOutlineItem()` | |
 | Nested sections | ✅ levels | ✅ parent pointer | |
 | **Table of contents** | `insert_toc_placeholder()` | ❌ | **GAP** - manual via links |
 | **Auto TOC from HTML** | ✅ `<toc>` | ❌ | **GAP** |
@@ -300,13 +300,13 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| **Table API** | `table()` context manager | ❌ | **GAP** |
-| **Cell borders** | ✅ | ❌ | **GAP** |
-| **Column/row spanning** | ✅ | ❌ | **GAP** |
-| **Header rows** | ✅ | ❌ | **GAP** |
-| **Auto page break in table** | ✅ | ❌ | **GAP** |
-| **Images in cells** | ✅ | ❌ | **GAP** |
-| **Pandas integration** | ✅ | N/A | Python-specific |
+| Table API | `table()` context manager | — | Not planned (use TextBox + drawRect) |
+| Cell borders | ✅ | — | Not planned |
+| Column/row spanning | ✅ | — | Not planned |
+| Header rows | ✅ | — | Not planned |
+| Auto page break in table | ✅ | — | Not planned |
+| Images in cells | ✅ | — | Not planned |
+| Pandas integration | ✅ | N/A | Python-specific |
 
 ---
 
@@ -346,9 +346,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 ## Summary of Gaps
 
 ### High Priority (Common Features)
-1. **Table API** - structured table creation
-2. **Auto page break** - automatic page breaks with callbacks
-3. **Header/footer callbacks** - repeated content per page
+1. **Auto page break** - automatic page breaks with callbacks
+2. **Header/footer callbacks** - repeated content per page
 
 ### Medium Priority (Useful Features)
 6. **Annotations** - text annotations, highlights, attachments
@@ -383,7 +382,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 ### Phase 1: Links & Navigation ✅ DONE
 1. ~~External hyperlinks~~ ✅
 2. ~~Internal links (page references)~~ ✅
-3. ~~Document outline/bookmarks~~ ✅
+3. ~~Document outline~~ ✅
 4. ~~Page labels~~ ✅
 
 ### Phase 2: Page Flow
@@ -393,16 +392,9 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 ### Phase 3: Enhanced Text
 6. Underline/strikethrough text styles
 
-### Phase 4: Tables
-7. Basic table API
-8. Column spanning
-9. Row spanning
-10. Header row repetition
-
-### Phase 5: Additional Graphics
-11. Arc and solid_arc
-12. Regular polygon helper
-13. Polyline
+### Phase 4: Additional Graphics
+7. Arc and solid_arc
+8. Regular polygon helper
 
 ### Phase 6: Advanced Features
 14. Text annotations

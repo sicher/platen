@@ -30,7 +30,7 @@ CATEGORY_RULES = [
     (['setTextColor', 'setCharSpacing', 'setLineHeight', 'getLineHeightPts'], 'Text Styling'),
     (['setPosition', 'getPosition'], 'Cursor Position'),
     (['currentDestination', 'addLink', 'addExternalLink',
-      'addBookmark', 'setPageLabel'], 'Navigation'),
+      'addOutlineItem', 'setPageLabel'], 'Navigation'),
     (['loadImage', 'drawImage', 'loadSvg', 'drawSvg'], 'Images & SVG'),
     (['setDrawStyle', 'createPath'], 'Graphics'),
 ]

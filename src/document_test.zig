@@ -2001,43 +2001,43 @@ test "no Info dictionary when metadata empty" {
 }
 
 // ============================================================================
-// Bookmark/Outline Tests
+// Outline Tests
 // ============================================================================
 
-test "addBookmark basic" {
+test "addOutlineItem basic" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(null);
     const dest = document.Destination{ .page_index = 0, .y = 100 };
-    const bookmark = try doc.addBookmark("Chapter 1", dest, null);
+    const outline = try doc.addOutlineItem("Chapter 1", dest, null);
 
-    try std.testing.expectEqualStrings("Chapter 1", bookmark.title);
-    try std.testing.expectEqual(@as(usize, 0), bookmark.dest.page_index);
-    try std.testing.expectEqual(@as(f64, 100), bookmark.dest.y);
-    try std.testing.expect(bookmark.parent == null);
-    try std.testing.expectEqual(@as(usize, 1), doc.bookmarks.items.len);
+    try std.testing.expectEqualStrings("Chapter 1", outline.title);
+    try std.testing.expectEqual(@as(usize, 0), outline.dest.page_index);
+    try std.testing.expectEqual(@as(f64, 100), outline.dest.y);
+    try std.testing.expect(outline.parent == null);
+    try std.testing.expectEqual(@as(usize, 1), doc.outlines.items.len);
 }
 
-test "addBookmark nested" {
+test "addOutlineItem nested" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(null);
     const dest = document.Destination{ .page_index = 0, .y = 0 };
 
-    // Create parent bookmark
-    const ch1 = try doc.addBookmark("Chapter 1", dest, null);
+    // Create parent outline item
+    const ch1 = try doc.addOutlineItem("Chapter 1", dest, null);
     try std.testing.expectEqual(@as(i32, 0), ch1.count);
 
-    // Create child bookmarks
-    const sec1 = try doc.addBookmark("Section 1.1", dest, ch1);
+    // Create child outline items
+    const sec1 = try doc.addOutlineItem("Section 1.1", dest, ch1);
     try std.testing.expect(sec1.parent == ch1);
     try std.testing.expect(ch1.first_child == sec1);
     try std.testing.expect(ch1.last_child == sec1);
     try std.testing.expectEqual(@as(i32, 1), ch1.count);
 
-    const sec2 = try doc.addBookmark("Section 1.2", dest, ch1);
+    const sec2 = try doc.addOutlineItem("Section 1.2", dest, ch1);
     try std.testing.expect(sec2.parent == ch1);
     try std.testing.expect(sec1.next == sec2);
     try std.testing.expect(sec2.prev == sec1);
@@ -2045,20 +2045,20 @@ test "addBookmark nested" {
     try std.testing.expect(ch1.last_child == sec2);
     try std.testing.expectEqual(@as(i32, 2), ch1.count);
 
-    // Another top-level bookmark
-    const ch2 = try doc.addBookmark("Chapter 2", dest, null);
+    // Another top-level outline item
+    const ch2 = try doc.addOutlineItem("Chapter 2", dest, null);
     try std.testing.expect(ch2.parent == null);
 
-    try std.testing.expectEqual(@as(usize, 4), doc.bookmarks.items.len);
+    try std.testing.expectEqual(@as(usize, 4), doc.outlines.items.len);
 }
 
-test "addBookmark in PDF output" {
+test "addOutlineItem in PDF output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(null);
     const dest = document.Destination{ .page_index = 0, .y = 100 };
-    _ = try doc.addBookmark("Test Bookmark", dest, null);
+    _ = try doc.addOutlineItem("Test Outline", dest, null);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2066,25 +2066,25 @@ test "addBookmark in PDF output" {
     // Check for outlines structure in PDF
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Outlines") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Outlines") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Test Bookmark)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Test Outline)") != null);
 }
 
-test "addBookmark nested in PDF output" {
+test "addOutlineItem nested in PDF output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(null);
     try doc.addPage(null);
 
-    const ch1 = try doc.addBookmark("Chapter 1", .{ .page_index = 0, .y = 0 }, null);
-    _ = try doc.addBookmark("Section 1.1", .{ .page_index = 0, .y = 200 }, ch1);
-    _ = try doc.addBookmark("Section 1.2", .{ .page_index = 0, .y = 400 }, ch1);
-    _ = try doc.addBookmark("Chapter 2", .{ .page_index = 1, .y = 0 }, null);
+    const ch1 = try doc.addOutlineItem("Chapter 1", .{ .page_index = 0, .y = 0 }, null);
+    _ = try doc.addOutlineItem("Section 1.1", .{ .page_index = 0, .y = 200 }, ch1);
+    _ = try doc.addOutlineItem("Section 1.2", .{ .page_index = 0, .y = 400 }, ch1);
+    _ = try doc.addOutlineItem("Chapter 2", .{ .page_index = 1, .y = 0 }, null);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
 
-    // Check bookmark structure
+    // Check outline structure
     try std.testing.expect(std.mem.indexOf(u8, pdf, "(Chapter 1)") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "(Section 1.1)") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "(Section 1.2)") != null);

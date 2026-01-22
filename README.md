@@ -408,9 +408,9 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `addBookmark()` | Adds a bookmark (outline item) to the document |
 | `addExternalLink()` | Add an external link (clickable area that opens a URL) |
 | `addLink()` | Add an internal link (clickable area that jumps to another page position) |
+| `addOutlineItem()` | Adds an outline item to the document (shown in PDF viewer's table of contents) |
 | `currentDestination()` | Get a destination for the current cursor position |
 | `setPageLabel()` | Sets a page label range starting at the specified page index |
 

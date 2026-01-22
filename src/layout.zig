@@ -218,24 +218,24 @@ pub const PageSize = struct {
 // Navigation Types
 // ============================================================================
 
-/// Bookmark (outline item) for PDF navigation tree.
-pub const Bookmark = struct {
-    /// Displayed title in the bookmark panel.
+/// Outline item for PDF document outline (table of contents).
+pub const Outline = struct {
+    /// Displayed title in the outline panel.
     title: []const u8,
     /// Target destination (page and position).
     dest: Destination,
-    /// Parent bookmark (null for top-level).
-    parent: ?*Bookmark = null,
+    /// Parent outline item (null for top-level).
+    parent: ?*Outline = null,
 
     // Internal fields - populated during output
-    /// First child bookmark.
-    first_child: ?*Bookmark = null,
-    /// Last child bookmark.
-    last_child: ?*Bookmark = null,
+    /// First child outline item.
+    first_child: ?*Outline = null,
+    /// Last child outline item.
+    last_child: ?*Outline = null,
     /// Previous sibling.
-    prev: ?*Bookmark = null,
+    prev: ?*Outline = null,
     /// Next sibling.
-    next: ?*Bookmark = null,
+    next: ?*Outline = null,
     /// Number of children (negative if closed).
     count: i32 = 0,
     /// Object ID assigned during output.

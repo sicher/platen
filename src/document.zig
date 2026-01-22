@@ -52,7 +52,7 @@ pub const Point = layout.Point;
 pub const Rect = layout.Rect;
 pub const TextBox = layout.TextBox;
 pub const Destination = layout.Destination;
-pub const Bookmark = layout.Bookmark;
+pub const Outline = layout.Outline;
 pub const PageLabelStyle = layout.PageLabelStyle;
 pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
@@ -463,10 +463,10 @@ pub const Document = struct {
     loaded_svgs: std.ArrayListUnmanaged(*Svg) = .{},
     // Track gradients used in document
     gradients: std.ArrayListUnmanaged(GradientDef) = .{},
-    // Document bookmarks (outline items)
-    bookmarks: std.ArrayListUnmanaged(*Bookmark) = .{},
-    // Last top-level bookmark (for building sibling chain)
-    last_top_level_bookmark: ?*Bookmark = null,
+    // Document outline items
+    outlines: std.ArrayListUnmanaged(*Outline) = .{},
+    // Last top-level outline item (for building sibling chain)
+    last_top_level_outline: ?*Outline = null,
     // Page label ranges
     page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .{},
     /// Document metadata (title, author, etc.)
@@ -507,11 +507,11 @@ pub const Document = struct {
         self.loaded_svgs.deinit(self.allocator);
         // Clean up gradients
         self.gradients.deinit(self.allocator);
-        // Clean up bookmarks
-        for (self.bookmarks.items) |bookmark| {
-            self.allocator.destroy(bookmark);
+        // Clean up outline items
+        for (self.outlines.items) |outline| {
+            self.allocator.destroy(outline);
         }
-        self.bookmarks.deinit(self.allocator);
+        self.outlines.deinit(self.allocator);
         // Clean up page labels
         self.page_labels.deinit(self.allocator);
     }
@@ -896,12 +896,11 @@ pub const Document = struct {
         });
     }
 
-    /// Adds a bookmark (outline item) to the document.
-    /// Returns a pointer to the bookmark, which can be used as a parent for nested bookmarks.
-    pub fn addBookmark(self: *Document, title: []const u8, dest: Destination, parent: ?*Bookmark) !*Bookmark {
-        // Allocate bookmark
-        const bookmark = try self.allocator.create(Bookmark);
-        bookmark.* = .{
+    /// Adds an outline item to the document (shown in PDF viewer's table of contents).
+    /// Returns a pointer to the outline item, which can be used as a parent for nested items.
+    pub fn addOutlineItem(self: *Document, title: []const u8, dest: Destination, parent: ?*Outline) !*Outline {
+        const outline = try self.allocator.create(Outline);
+        outline.* = .{
             .title = title,
             .dest = dest,
             .parent = parent,
@@ -909,26 +908,26 @@ pub const Document = struct {
 
         // Update sibling chain
         if (parent) |p| {
-            // Child bookmark: link to parent's children
+            // Child: link to parent's children
             if (p.last_child) |last| {
-                last.next = bookmark;
-                bookmark.prev = last;
+                last.next = outline;
+                outline.prev = last;
             } else {
-                p.first_child = bookmark;
+                p.first_child = outline;
             }
-            p.last_child = bookmark;
+            p.last_child = outline;
             p.count += 1;
         } else {
-            // Top-level bookmark: link to other top-level items
-            if (self.last_top_level_bookmark) |last| {
-                last.next = bookmark;
-                bookmark.prev = last;
+            // Top-level: link to other top-level items
+            if (self.last_top_level_outline) |last| {
+                last.next = outline;
+                outline.prev = last;
             }
-            self.last_top_level_bookmark = bookmark;
+            self.last_top_level_outline = outline;
         }
 
-        try self.bookmarks.append(self.allocator, bookmark);
-        return bookmark;
+        try self.outlines.append(self.allocator, outline);
+        return outline;
     }
 
     /// Sets a page label range starting at the specified page index.
@@ -2687,12 +2686,12 @@ pub const Document = struct {
 
         // Reserve IDs for outlines (1 root + N items)
         var outlines_root_id: ?ObjectId = null;
-        if (self.bookmarks.items.len > 0) {
+        if (self.outlines.items.len > 0) {
             outlines_root_id = next_id;
             next_id += 1; // root object
-            // Assign object IDs to each bookmark
-            for (self.bookmarks.items) |bookmark| {
-                bookmark.object_id = next_id;
+            // Assign object IDs to each outline item
+            for (self.outlines.items) |outline| {
+                outline.object_id = next_id;
                 next_id += 1;
             }
         }
@@ -3481,19 +3480,19 @@ pub const Document = struct {
             try w.endObject();
         }
 
-        // Write outlines (bookmarks) if present
+        // Write outlines if present
         if (outlines_root_id) |root_id| {
-            // Find first and last top-level bookmarks
-            var first_top_level: ?*Bookmark = null;
-            var last_top_level: ?*Bookmark = null;
+            // Find first and last top-level outline items
+            var first_top_level: ?*Outline = null;
+            var last_top_level: ?*Outline = null;
             var total_count: i32 = 0;
 
-            for (self.bookmarks.items) |bookmark| {
-                if (bookmark.parent == null) {
+            for (self.outlines.items) |outline| {
+                if (outline.parent == null) {
                     if (first_top_level == null) {
-                        first_top_level = bookmark;
+                        first_top_level = outline;
                     }
-                    last_top_level = bookmark;
+                    last_top_level = outline;
                 }
                 total_count += 1;
             }
@@ -3513,40 +3512,40 @@ pub const Document = struct {
             try w.writeDict(outlines_dict);
             try w.endObject();
 
-            // Write each bookmark item
-            for (self.bookmarks.items) |bookmark| {
-                try w.beginObject(bookmark.object_id);
+            // Write each outline item
+            for (self.outlines.items) |outline| {
+                try w.beginObject(outline.object_id);
                 var item_dict = Dict.init(self.allocator);
                 defer item_dict.deinit();
 
-                try item_dict.put("Title", Value.string(bookmark.title));
+                try item_dict.put("Title", Value.string(outline.title));
 
                 // Parent reference
-                if (bookmark.parent) |parent| {
+                if (outline.parent) |parent| {
                     try item_dict.put("Parent", Value.ref(.{ .id = parent.object_id }));
                 } else {
                     try item_dict.put("Parent", Value.ref(.{ .id = root_id }));
                 }
 
                 // Sibling references
-                if (bookmark.prev) |prev| {
+                if (outline.prev) |prev| {
                     try item_dict.put("Prev", Value.ref(.{ .id = prev.object_id }));
                 }
-                if (bookmark.next) |nx| {
+                if (outline.next) |nx| {
                     try item_dict.put("Next", Value.ref(.{ .id = nx.object_id }));
                 }
 
                 // Child references
-                if (bookmark.first_child) |first| {
+                if (outline.first_child) |first| {
                     try item_dict.put("First", Value.ref(.{ .id = first.object_id }));
                 }
-                if (bookmark.last_child) |last| {
+                if (outline.last_child) |last| {
                     try item_dict.put("Last", Value.ref(.{ .id = last.object_id }));
                 }
 
                 // Count (positive = expanded, negative = collapsed)
-                if (bookmark.count != 0) {
-                    try item_dict.put("Count", Value.int(bookmark.count));
+                if (outline.count != 0) {
+                    try item_dict.put("Count", Value.int(outline.count));
                 }
 
                 // Destination: [page_ref /XYZ left top zoom]
@@ -3554,14 +3553,14 @@ pub const Document = struct {
                 defer dest_array.deinit();
                 // Get the page object ID for the destination
                 var dest_page_id = first_page_id;
-                for (self.pages.items[0..bookmark.dest.page_index]) |p| {
+                for (self.pages.items[0..outline.dest.page_index]) |p| {
                     dest_page_id += 2 + @as(ObjectId, @intCast(p.annotations.items.len));
                 }
-                const dest_page_size = self.pages.items[bookmark.dest.page_index].size;
+                const dest_page_size = self.pages.items[outline.dest.page_index].size;
                 try dest_array.append(Value.ref(.{ .id = dest_page_id }));
                 try dest_array.append(Value.name("XYZ"));
                 try dest_array.append(Value.int(0)); // left
-                try dest_array.append(Value.real(dest_page_size.height - bookmark.dest.y));
+                try dest_array.append(Value.real(dest_page_size.height - outline.dest.y));
                 try dest_array.append(Value.int(0)); // zoom
                 try item_dict.put("Dest", .{ .array_val = &dest_array });
 

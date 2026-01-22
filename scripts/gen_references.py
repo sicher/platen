@@ -1627,8 +1627,8 @@ def gen_colors():
     print("  colors.pdf")
 
 
-def gen_bookmarks():
-    """Bookmarks (outlines) and page labels.
+def gen_outlines():
+    """Document outline (table of contents) and page labels.
 
     Creates a document structure with:
     - Front matter pages with roman numeral labels (i, ii)
@@ -1696,12 +1696,12 @@ def gen_bookmarks():
     pdf.set_font("Helvetica", "", size=12)
     pdf.text(50, 80, "List of references.")
 
-    pdf.output(OUTPUT_DIR / "bookmarks.pdf")
-    print("  bookmarks.pdf")
+    pdf.output(OUTPUT_DIR / "outlines.pdf")
+    print("  outlines.pdf")
 
 
 GENERATORS = {
-    "bookmarks": gen_bookmarks,
+    "outlines": gen_outlines,
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,
     "multi_font": gen_multi_font,
