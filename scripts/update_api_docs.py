@@ -27,7 +27,7 @@ CATEGORY_RULES = [
     (['write', 'writeLine', 'writeParagraph', 'writeFlow', 'writeAt',
       'measureText', 'measureTextWidth', 'getTextWidth', 'measureWrappedText',
       'drawTextBox'], 'Text'),
-    (['setTextColor', 'setCharSpacing', 'setLineHeight', 'getLineHeightPts'], 'Text Styling'),
+    (['setTextColor', 'setTextStyle', 'setCharSpacing', 'setLineHeight', 'getLineHeightPts'], 'Text Styling'),
     (['setPosition', 'getPosition'], 'Cursor Position'),
     (['currentDestination', 'addLink', 'addExternalLink',
       'addOutlineItem', 'setPageLabel'], 'Navigation'),

@@ -17,7 +17,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Page sizes (A3-A5, Letter, Legal, Tabloid) | ✅ | ✅ | |
 | Custom page sizes | tuple `(w, h)` | ✅ `PageSize{.width, .height}` | |
 | Landscape orientation | `orientation="landscape"` | ✅ `PageSize.landscape()` | |
-| Per-page orientation | `add_page(orientation=)` | ✅ `addPage(size)` | |
+| Per-page orientation | `add_page(orientation=)` | ✅ `setPageSize()` + `addPage()` | |
 | Document title | `set_title()` | ✅ `setMetadata()` | |
 | Document author | `set_author()` | ✅ `setMetadata()` | |
 | Document subject | `set_subject()` | ✅ `setMetadata()` | |
@@ -39,9 +39,9 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Top margin | `set_top_margin()` | ✅ via `Margins` struct | |
 | Right margin | `set_right_margin()` | ✅ via `Margins` struct | |
 | Get page region | - | ✅ `getPageTextBox()` | zpdf feature |
-| **Auto page break** | `set_auto_page_break()` | ❌ | **GAP** - zpdf has manual `writeFlow` |
-| **Page background** | `set_page_background()` | ❌ | **GAP** |
-| **Alias for total pages** | `alias_nb_pages()` | ❌ | **GAP** - "{nb}" placeholder |
+| Auto page break | `set_auto_page_break()` | — | Not planned (use writeFlow) |
+| Page background | `set_page_background()` | — | Not planned (draw rect first) |
+| Alias for total pages | `alias_nb_pages()` | — | Not planned |
 | Page number | `page_no()` | ✅ `pageNo()` | |
 | Page labels | `set_page_label()`, `get_page_label()` | ✅ `setPageLabel()` | |
 
@@ -53,7 +53,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 |---------|-------|------|-------|
 | Set position | `set_xy()` | ✅ `setPosition(Point)` | |
 | Get position | `get_x()`/`get_y()` | ✅ `getPosition() -> Point` | |
-| **Line break (Ln)** | `ln()` | ❌ | **GAP** - manual Y adjustment |
+| Line break (Ln) | `ln()` | — | Not planned (manual Y adjustment) |
 
 ---
 
@@ -78,8 +78,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Stylistic sets (ss01-08) | ⚠️ | ⚠️ ss01 only | |
 | **Font stretching** | `set_stretching()` | ❌ | **GAP** |
 | **Character spacing** | `set_char_spacing()` | ✅ `setCharSpacing()` | |
-| **Underline style** | ✅ via markdown/style | ❌ | **GAP** |
-| **Strikethrough** | ✅ via markdown | ❌ | **GAP** |
+| **Underline style** | ✅ via markdown/style | ✅ `setTextStyle()` | |
+| **Strikethrough** | ✅ via markdown | ✅ `setTextStyle()` | |
 
 ---
 
@@ -102,8 +102,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Text width measurement | `get_string_width()` | ✅ `getTextWidth()` | |
 | Wrapped text measurement | - | ✅ `measureWrappedText()` | zpdf feature |
 | Line height control | ✅ | ✅ `setLineHeight()` | |
-| **HTML rendering** | `write_html()` | ❌ | **GAP** |
-| **Markdown in cells** | ✅ bold/italic/strike/underline | ❌ | **GAP** |
+| HTML rendering | `write_html()` | — | Not planned |
+| Markdown in cells | ✅ bold/italic/strike/underline | — | Not planned |
 
 ---
 
@@ -119,9 +119,9 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Write to region | `text_columns()` | ✅ `writeParagraph()` | |
 | Overflow handling | ✅ | ✅ `WriteResult.overflow` | |
 | Auto pagination | ✅ | ✅ `writeFlow()` | |
-| **Multi-column layout** | `text_columns()` | ❌ | **GAP** - manual only |
-| **Shaped regions** | ✅ circle/polygon | ❌ | **GAP** |
-| **Header/footer callbacks** | `header()`, `footer()` | ❌ | **GAP** |
+| Multi-column layout | `text_columns()` | — | Not planned (manual) |
+| Shaped regions | ✅ circle/polygon | — | Not planned |
+| Header/footer callbacks | `header()`, `footer()` | — | Not planned |
 
 ---
 
@@ -300,7 +300,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 | Feature | fpdf2 | zpdf | Notes |
 |---------|-------|------|-------|
-| Table API | `table()` context manager | — | Not planned (use TextBox + drawRect) |
+| Table API | `table()` context manager | — | Not planned (use Region + drawRect) |
 | Cell borders | ✅ | — | Not planned |
 | Column/row spanning | ✅ | — | Not planned |
 | Header rows | ✅ | — | Not planned |
@@ -343,36 +343,33 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 ---
 
-## Summary of Gaps
+## Summary of Gaps (Low-Level PDF Features)
 
-### High Priority (Common Features)
-1. **Auto page break** - automatic page breaks with callbacks
-2. **Header/footer callbacks** - repeated content per page
+### Graphics Primitives
+- **Arc/pie shapes** - PDF path operators
+- **Blend modes** - ExtGState transparency
+- **Pattern fills** - repeating patterns
+- **Clipping paths** - clip to arbitrary shapes
 
-### Medium Priority (Useful Features)
-6. **Annotations** - text annotations, highlights, attachments
-7. **Arc/pie shapes** - charts and diagrams
-8. **Multi-column text** - magazine/newspaper layouts
-9. **HTML rendering** - `write_html()` subset
-10. **Underline/strikethrough** - text decoration
-11. **Image clipping** - circular avatars, etc.
+### Annotations
+- **Text annotations** - popup notes
+- **Highlight/underline/strikeout** - markup annotations
+- **File attachments** - embedded files
 
-### Lower Priority (Specialized)
-12. **Encryption** - password protection, permissions
-13. **PDF/A compliance** - archival standards
-14. **Barcodes** - Code39, QR, etc. (can use external libs + image)
-15. **Digital signatures** - document signing
-16. **Display/viewer settings** - zoom, layout preferences
-17. **Presentation mode** - slide transitions
-18. **Pattern fills** - repeated patterns
-23. **Blend modes** - image compositing
+### PDF Structure
+- **Viewer preferences** - zoom, page layout, toolbar
+- **Encryption** - AES/RC4 password protection
+
+### Images
+- **Additional formats** - TIFF, BMP, GIF
+- **Image clipping** - clip to rect/ellipse
 
 ### zpdf Advantages (Features NOT in fpdf2)
 1. **Knuth-Plass optimal line breaking** - better paragraph layout
 2. **Wrapped text measurement** - `measureWrappedText()` before rendering
 3. **More OpenType features** - tnum/pnum, frac, zero, dlig exposed
 4. **Break on hyphens option** - control regular hyphen breaking
-5. **TextBox-based layout** - explicit text box model with overflow
+5. **Region-based layout** - explicit region model with overflow
 6. **Destination tracking** - `currentDestination()` for easy TOC building
 
 ---
@@ -385,19 +382,18 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 3. ~~Document outline~~ ✅
 4. ~~Page labels~~ ✅
 
-### Phase 2: Page Flow
-4. Auto page break with margin
-5. Header/footer callbacks
+### Phase 2: Graphics Primitives
+5. Arc and solid_arc (pie)
+6. Blend modes
+7. Clipping paths
 
-### Phase 3: Enhanced Text
-6. Underline/strikethrough text styles
+### Phase 3: Text Decoration ✅ DONE
+8. ~~Underline/strikethrough~~ ✅
 
-### Phase 4: Additional Graphics
-7. Arc and solid_arc
-8. Regular polygon helper
+### Phase 4: Annotations
+9. Text annotations (popups)
+10. Markup annotations (highlight, etc.)
 
-### Phase 6: Advanced Features
-14. Text annotations
-15. Highlight annotations
-16. File attachments
-17. Encryption (basic)
+### Phase 5: Advanced
+11. Encryption
+12. Viewer preferences

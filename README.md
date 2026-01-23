@@ -1,6 +1,6 @@
 # zpdf
 
-A fast PDF rendering library for Zig, inspired by [fpdf2](https://github.com/py-pdf/fpdf2).
+A fast PDF rendering library for Zig.
 
 ## Features
 
@@ -117,8 +117,8 @@ try doc.writeAt(50, 50, "Custom font with Unicode: ");
 try doc.addPage();
 try doc.setFont(.helvetica, 11);
 
-// Define a text box for text
-var region = zpdf.TextBox{
+// Define a region for text
+var region = zpdf.Region{
     .x = 72,
     .y = 72,
     .width = 468,  // page width minus margins
@@ -165,21 +165,21 @@ const color1 = zpdf.Color.red;
 const color2 = zpdf.Color.navy;
 const color3 = zpdf.Color.coral;
 
-// From RGB (0-1 range)
-const color4 = zpdf.Color.fromRgb(0.5, 0.25, 0.75);
+// From RGB (0-255 range) - the common case
+const color4 = zpdf.Color.rgb(128, 64, 192);
 
-// From RGB (0-255 range)
-const color5 = zpdf.Color.fromRgb255(128, 64, 192);
+// From RGB floats (0.0-1.0 range)
+const color5 = zpdf.Color.rgbf(0.5, 0.25, 0.75);
 
 // From hex string
-const color6 = zpdf.Color.fromHex("#FF6600").?;
-const color7 = zpdf.Color.fromHex("F60").?;  // short form
+const color6 = zpdf.Color.hex("#FF6600").?;
+const color7 = zpdf.Color.hex("F60").?;  // short form
 
-// Grayscale (0 = black, 1 = white)
-const color8 = zpdf.Color.grayscale(0.5);
+// Greyscale (0 = black, 1 = white)
+const color8 = zpdf.Color.greyscale(0.5);
 
 // CMYK for print
-const color9 = zpdf.Color.fromCmyk(1, 0, 0, 0);  // cyan
+const color9 = zpdf.Color.cmyk(1, 0, 0, 0);  // cyan
 ```
 
 Available presets: `black`, `white`, `red`, `green`, `blue`, `cyan`, `magenta`, `yellow`, `orange`, `pink`, `purple`, `brown`, `navy`, `teal`, `coral`, `salmon`, `gold`, `silver`, `maroon`, `olive`, `lime`, `indigo`, `violet`, `turquoise`, `skyblue`, `forestgreen`, and many more.
@@ -268,14 +268,14 @@ try doc.drawSvg(svg, 300, 50, 150, 150);
 ```zig
 // Linear gradient
 var linear = zpdf.LinearGradient.init(0, 0, 200, 0);  // left to right
-linear.addStop(0.0, zpdf.Color.fromRgb(1, 0, 0));     // red
-linear.addStop(1.0, zpdf.Color.fromRgb(0, 0, 1));     // blue
+linear.addStop(0.0, zpdf.Color.rgb(255, 0, 0));       // red
+linear.addStop(1.0, zpdf.Color.rgb(0, 0, 255));       // blue
 try doc.drawLinearGradient(&linear, 50, 50, 200, 100);
 
 // Radial gradient
 var radial = zpdf.RadialGradient.init(100, 100, 50);  // center, radius
-radial.addStop(0.0, zpdf.Color.fromRgb(1, 1, 0));     // yellow center
-radial.addStop(1.0, zpdf.Color.fromRgb(1, 0, 0));     // red edge
+radial.addStop(0.0, zpdf.Color.rgb(255, 255, 0));     // yellow center
+radial.addStop(1.0, zpdf.Color.rgb(255, 0, 0));       // red edge
 try doc.drawRadialGradient(&radial, 50, 200, 100, 100);
 ```
 
@@ -285,20 +285,23 @@ try doc.drawRadialGradient(&radial, 50, 200, 100, 100);
 // Available sizes: A3, A4, A5, Letter, Legal, Tabloid
 // Default is A4
 
-// Set default page size for the document
-doc.setDefaultPageSize(zpdf.PageSize.Letter);
+// Set page size for subsequent pages
+doc.setPageSize(zpdf.PageSize.Letter);
 
 try doc.addPage();  // Letter
 try doc.addPage();  // Letter
 
-// One-off different size
-try doc.addPageWithSize(zpdf.PageSize.A4);
+// Change to a different size
+doc.setPageSize(zpdf.PageSize.A4);
+try doc.addPage();  // A4
 
 // Landscape orientation
-try doc.addPageWithSize(zpdf.PageSize.Letter.landscape());
+doc.setPageSize(zpdf.PageSize.Letter.landscape());
+try doc.addPage();
 
 // Custom size
-try doc.addPageWithSize(.{ .width = 500, .height = 700 });
+doc.setPageSize(.{ .width = 500, .height = 700 });
+try doc.addPage();
 ```
 
 ### Document Metadata
@@ -354,10 +357,10 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `addPage()` | Add a new page. Uses the specified size, or the default page size if null |
+| `addPage()` | Add a new page using the current page size |
 | `getPageTextBox()` | Returns a region for the current page respecting document margins |
 | `pageNo()` | Get current page number (1-based) |
-| `setDefaultPageSize()` | Set the default page size for subsequent addPage() calls |
+| `setPageSize()` | Set the page size for subsequent addPage() calls |
 | `setMargins()` | Set document margins |
 | `setMetadata()` | Set document metadata (title, author, subject, etc.) |
 
@@ -377,7 +380,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `drawTextBox()` | Draws a region's border and fill (without text) |
+| `drawRegion()` | Draws a region's border and fill (without text) |
 | `getTextWidth()` | Measures text width using current font (standard or embedded) |
 | `measureText()` | Measure text dimensions without rendering |
 | `measureTextWidth()` | Measure text width in points |
@@ -396,6 +399,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 | `setCharSpacing()` | Set character spacing (extra space between characters, in points) |
 | `setLineHeight()` | Set line height (as multiple of font size, e.g. 1.2 = 120%) |
 | `setTextColor()` | Set text color |
+| `setTextStyle()` | Set text style (color and decoration) |
 
 ### Cursor Position
 
