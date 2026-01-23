@@ -205,6 +205,10 @@ pub const WriteOptions = struct {
     /// If true, wrap text to next line when it doesn't fit.
     /// If false, text stays on one line.
     wrap: bool = true,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+    /// Allow breaking after regular hyphens in compound words (e.g., "state-of-the-art").
+    break_on_hyphens: bool = true,
 };
 
 /// Options for writeParagraph (wrapped text with alignment).
@@ -218,14 +222,6 @@ pub const ParagraphOptions = struct {
     break_on_hyphens: bool = true,
     /// Line breaking algorithm. Greedy is fast, optimal (Knuth-Plass) produces better results.
     line_breaking: LineBreaking = .greedy,
-};
-
-/// Options for writeFlow (auto-pagination).
-pub const FlowOptions = struct {
-    /// Horizontal text alignment.
-    alignment: Align = .left,
-    /// Vertical text alignment within line height.
-    valign: VAlign = .top,
 };
 
 /// Page size in points (1 point = 1/72 inch)

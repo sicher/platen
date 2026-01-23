@@ -65,7 +65,6 @@ pub const WriteResult = layout.WriteResult;
 pub const WrappedTextMetrics = layout.WrappedTextMetrics;
 pub const WriteOptions = layout.WriteOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
-pub const FlowOptions = layout.FlowOptions;
 pub const MeasureOptions = layout.MeasureOptions;
 pub const PageSize = layout.PageSize;
 
@@ -1355,14 +1354,14 @@ pub const Document = struct {
             .justify => content_x + indent,
         };
 
-        // Calculate y position based on vertical alignment
+        // Calculate y position based on vertical alignment (uses ascender for visible text alignment)
         const content_y = area.y + area.padding.top;
-        const leading = line_height - self.font_size;
+        const ascender = self.getFontMetrics().ascender;
         const y = switch (valign) {
-            // Baseline at content_y + cursor_y + font_size (simple)
-            .top => content_y + area.cursor_y + self.font_size,
-            // Baseline centered: subtract leading/2 (fpdf2 compatible)
-            .middle => content_y + area.cursor_y + self.font_size - leading / 2,
+            // Baseline at content_y + cursor_y + ascender (visible text top aligns)
+            .top => content_y + area.cursor_y + ascender,
+            // Baseline centered in line height
+            .middle => content_y + area.cursor_y + line_height / 2 + ascender / 2,
             // Baseline at bottom of line height
             .bottom => content_y + area.cursor_y + line_height,
         };
@@ -1397,6 +1396,18 @@ pub const Document = struct {
         const line_height = self.getLineHeightPts();
         const ascender = self.getFontMetrics().ascender;
         const space_width = self.getTextWidth(" ");
+
+        // Helper to compute y position based on valign
+        // Uses ascender for .top so visible text top aligns with cursor position
+        const getYPos = struct {
+            fn call(reg: *Region, lh: f64, asc: f64, valign: VAlign) f64 {
+                return switch (valign) {
+                    .top => reg.y + reg.padding.top + reg.cursor_y + asc,
+                    .middle => reg.y + reg.padding.top + reg.cursor_y + lh / 2 + asc / 2,
+                    .bottom => reg.y + reg.padding.top + reg.cursor_y + lh,
+                };
+            }
+        }.call;
 
         // Track for rect calculation
         const start_cursor_x = region.cursor_x;
@@ -1458,7 +1469,7 @@ pub const Document = struct {
                 // Word fits - write it
                 if (!opts.measure_only) {
                     const abs_x = region.x + region.padding.left + region.cursor_x;
-                    const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                    const abs_y = getYPos(region, line_height, ascender, opts.valign);
                     self.setPosition(.{ .x = abs_x, .y = abs_y });
                     try self.writeAtCursor(word);
                 }
@@ -1489,7 +1500,7 @@ pub const Document = struct {
                 // No wrapping - write word at current position even if it overflows
                 if (!opts.measure_only) {
                     const abs_x = region.x + region.padding.left + region.cursor_x;
-                    const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                    const abs_y = getYPos(region, line_height, ascender, opts.valign);
                     self.setPosition(.{ .x = abs_x, .y = abs_y });
                     try self.writeAtCursor(word);
                 }
@@ -1507,7 +1518,7 @@ pub const Document = struct {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                        const abs_y = getYPos(region, line_height, ascender, opts.valign);
                         self.setPosition(.{ .x = abs_x, .y = abs_y });
                         try self.writeAtCursor(prefix);
                         try self.writeAtCursor("-");
@@ -1517,11 +1528,25 @@ pub const Document = struct {
                     region.newLine(line_height);
                     lines_written += 1;
                     remaining = remaining[break_pos + 2 ..]; // Skip soft-hyphen (2 bytes)
+                } else if (opts.break_on_hyphens and self.findHyphenBreak(word, available_width) != null) {
+                    const break_pos = self.findHyphenBreak(word, available_width).?;
+                    const prefix = word[0..break_pos];
+                    if (!opts.measure_only) {
+                        const abs_x = region.x + region.padding.left;
+                        const abs_y = getYPos(region, line_height, ascender, opts.valign);
+                        self.setPosition(.{ .x = abs_x, .y = abs_y });
+                        try self.writeAtCursor(prefix);
+                    }
+                    region.cursor_x = self.getTextWidth(prefix);
+                    if (region.cursor_x > max_x) max_x = region.cursor_x;
+                    region.newLine(line_height);
+                    lines_written += 1;
+                    remaining = remaining[break_pos..];
                 } else if (self.findCharacterBreak(word, available_width)) |break_pos| {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                        const abs_y = getYPos(region, line_height, ascender, opts.valign);
                         self.setPosition(.{ .x = abs_x, .y = abs_y });
                         try self.writeAtCursor(prefix);
                     }
@@ -1534,7 +1559,7 @@ pub const Document = struct {
                     // Nothing fits, write word anyway (will overflow)
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                        const abs_y = getYPos(region, line_height, ascender, opts.valign);
                         self.setPosition(.{ .x = abs_x, .y = abs_y });
                         try self.writeAtCursor(word);
                     }
@@ -2214,37 +2239,6 @@ pub const Document = struct {
         return .{ .lines_written = lines_written, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height } };
     }
 
-    /// Write text with automatic pagination.
-    /// Creates new pages as needed to fit all text.
-    pub fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !usize {
-        if (text.len == 0) return 0;
-
-        var total_lines: usize = 0;
-        var remaining: ?[]const u8 = text;
-
-        while (remaining) |text_to_write| {
-            if (text_to_write.len == 0) break;
-
-            var region = self.getPageRegion();
-            const result = try self.writeParagraph(&region, text_to_write, .{
-                .alignment = opts.alignment,
-                .valign = opts.valign,
-            });
-
-            total_lines += result.lines_written;
-
-            if (result.overflow) |overflow| {
-                // Need a new page
-                try self.addPage();
-                remaining = overflow;
-            } else {
-                remaining = null;
-            }
-        }
-
-        return total_lines;
-    }
-
     /// Draws a region's border and fill (without text).
     pub fn drawRegion(self: *Document, region: Region) !void {
         if (self.pages.items.len == 0) return error.NoPage;
@@ -2775,13 +2769,10 @@ pub const Document = struct {
                         var prefix_buf: [512]u8 = undefined;
                         const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
 
-                        const font_size = self.font_size;
+                        const ascender = self.getFontMetrics().ascender;
                         const y_pos = switch (opts.valign) {
-                            .top => region.y + region.padding.top + region.cursor_y + font_size,
-                            .middle => blk: {
-                                const leading = line_height - font_size;
-                                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
-                            },
+                            .top => region.y + region.padding.top + region.cursor_y + ascender,
+                            .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
                             .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                         };
 
@@ -2802,11 +2793,8 @@ pub const Document = struct {
 
                             if (region.remainingHeight() >= line_height) {
                                 const y_pos2 = switch (opts.valign) {
-                                    .top => region.y + region.padding.top + region.cursor_y + font_size,
-                                    .middle => blk: {
-                                        const leading = line_height - font_size;
-                                        break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
-                                    },
+                                    .top => region.y + region.padding.top + region.cursor_y + ascender,
+                                    .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
                                     .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                                 };
                                 _ = try self.writeAt(region.x + region.padding.left, y_pos2, clean_suffix);
@@ -2830,13 +2818,10 @@ pub const Document = struct {
                         const prefix = word_text[0..break_pos];
                         const suffix = word_text[break_pos..];
 
-                        const font_size = self.font_size;
+                        const ascender = self.getFontMetrics().ascender;
                         const y_pos = switch (opts.valign) {
-                            .top => region.y + region.padding.top + region.cursor_y + font_size,
-                            .middle => blk: {
-                                const leading = line_height - font_size;
-                                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
-                            },
+                            .top => region.y + region.padding.top + region.cursor_y + ascender,
+                            .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
                             .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                         };
 
@@ -2849,11 +2834,8 @@ pub const Document = struct {
                         // Render suffix on next line
                         if (suffix.len > 0 and region.remainingHeight() >= line_height) {
                             const y_pos2 = switch (opts.valign) {
-                                .top => region.y + region.padding.top + region.cursor_y + font_size,
-                                .middle => blk: {
-                                    const leading = line_height - font_size;
-                                    break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
-                                },
+                                .top => region.y + region.padding.top + region.cursor_y + ascender,
+                                .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
                                 .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                             };
                             _ = try self.writeAt(region.x + region.padding.left, y_pos2, suffix);
@@ -2871,16 +2853,13 @@ pub const Document = struct {
                 if (big_word.start_span == big_word.end_span) {
                     const span = text.spans.items[big_word.start_span];
                     var remaining_text = span.text[big_word.start_offset..big_word.end_offset];
-                    const font_size = self.font_size;
+                    const ascender = self.getFontMetrics().ascender;
                     var did_break = false;
 
                     while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
                         const y_pos = switch (opts.valign) {
-                            .top => region.y + region.padding.top + region.cursor_y + font_size,
-                            .middle => blk: {
-                                const leading = line_height - font_size;
-                                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
-                            },
+                            .top => region.y + region.padding.top + region.cursor_y + ascender,
+                            .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
                             .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                         };
                         const x_pos = region.x + region.padding.left;
@@ -2971,7 +2950,8 @@ pub const Document = struct {
         content_width: f64,
     ) !void {
         const line_height = self.getLineHeightPts();
-        const font_size = self.font_size;
+        const ascender = self.getFontMetrics().ascender;
+        const font_size = self.font_size; // needed for decoration scaling
 
         // Calculate x offset based on alignment
         const slack = line_width - content_width;
@@ -2989,13 +2969,10 @@ pub const Document = struct {
         else
             space_width;
 
-        // Calculate y position based on valign (top-down coordinate for writeAt)
+        // Calculate y position based on valign (uses ascender for visible text alignment)
         const y_pos = switch (valign) {
-            .top => region.y + region.padding.top + region.cursor_y + font_size,
-            .middle => blk: {
-                const leading = line_height - font_size;
-                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
-            },
+            .top => region.y + region.padding.top + region.cursor_y + ascender,
+            .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
             .bottom => region.y + region.padding.top + region.cursor_y + line_height,
         };
 
@@ -3180,6 +3157,7 @@ pub const Document = struct {
         start_cursor_y: f64,
     ) !WriteResult {
         const space_width = self.getTextWidth(" ");
+        const ascender = self.getFontMetrics().ascender;
         var lines_written: usize = 0;
         const rect_x = region.x + region.padding.left;
         const rect_y = region.y + region.padding.top + start_cursor_y;
@@ -3280,11 +3258,8 @@ pub const Document = struct {
             // Render line
             if (line.len > 0) {
                 const y_pos = switch (opts.valign) {
-                    .top => region.y + region.padding.top + region.cursor_y + self.font_size,
-                    .middle => blk: {
-                        const leading = line_height - self.font_size;
-                        break :blk region.y + region.padding.top + region.cursor_y + self.font_size - leading / 2;
-                    },
+                    .top => region.y + region.padding.top + region.cursor_y + ascender,
+                    .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + ascender / 2,
                     .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                 };
 

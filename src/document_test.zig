@@ -1078,7 +1078,7 @@ test "writeStyled respects margins via region" {
     }
 }
 
-test "valign top puts baseline at cursor + font_size" {
+test "valign top puts baseline at cursor + ascender" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1094,14 +1094,15 @@ test "valign top puts baseline at cursor + font_size" {
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
         if (cmd == .text) {
-            // top-down y = region.y + cursor_y(0) + font_size(12) = 112
-            // PDF y = page_height(841.89) - 112 = 729.89
-            try std.testing.expectApproxEqAbs(@as(f64, 729.89), cmd.text.y, 0.1);
+            // Helvetica ascender = 0.718 * 12 = 8.616
+            // top-down y = region.y + cursor_y(0) + ascender(8.616) = 108.616
+            // PDF y = page_height(841.89) - 108.616 = 733.274
+            try std.testing.expectApproxEqAbs(@as(f64, 733.274), cmd.text.y, 0.1);
         }
     }
 }
 
-test "valign middle adjusts for leading" {
+test "valign middle centers text in line height" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1117,10 +1118,10 @@ test "valign middle adjusts for leading" {
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
         if (cmd == .text) {
-            // line_height = 12 * 1.2 = 14.4, leading = 2.4
-            // top-down y = region.y + cursor_y(0) + font_size(12) - leading/2(1.2) = 110.8
-            // PDF y = page_height(841.89) - 110.8 = 731.09
-            try std.testing.expectApproxEqAbs(@as(f64, 731.09), cmd.text.y, 0.1);
+            // line_height = 12 * 1.2 = 14.4, ascender = 8.616
+            // top-down y = region.y + cursor_y(0) + line_height/2 + ascender/2 = 100 + 7.2 + 4.308 = 111.508
+            // PDF y = page_height(841.89) - 111.508 = 730.382
+            try std.testing.expectApproxEqAbs(@as(f64, 730.382), cmd.text.y, 0.1);
         }
     }
 }

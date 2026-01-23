@@ -1144,7 +1144,12 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
         \\"badness" (slack squared) across all lines, often leaving space on one line to improve others.
     ;
     var exp_region = zpdf.Region{ .x = 50, .y = y, .width = 495, .height = 30 };
-    _ = try doc.writeParagraph(&exp_region, explanation, .{});
+    {
+        var st = doc.createStyledText();
+        defer st.deinit();
+        try st.append(explanation, .{});
+        _ = try doc.writeStyled(&exp_region, &st, .{});
+    }
     y += 38;
 
     // Monospace example with the classic test case
