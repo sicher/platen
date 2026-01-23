@@ -2672,7 +2672,7 @@ pub const Document = struct {
     }
 
     /// Measure function adapter for StyledText.prepare()
-    fn styledTextMeasure(text: []const u8, style: TextStyleOptions, ctx: *anyopaque) f64 {
+    pub fn styledTextMeasure(text: []const u8, style: TextStyleOptions, ctx: *anyopaque) f64 {
         const doc: *Document = @ptrCast(@alignCast(ctx));
         // Text width doesn't depend on color/decoration, just the font
         _ = style;
@@ -2684,24 +2684,31 @@ pub const Document = struct {
     pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, opts: ParagraphOptions) !WriteResult {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        // Prepare text (preprocesses words with width measurement)
-        try text.prepare(styledTextMeasure, @ptrCast(self));
-
         const line_height = self.getLineHeightPts();
-        const space_width = self.getTextWidth(" ");
-        var lines_written: usize = 0;
-
-        // Track starting position for rect calculation
         const start_cursor_y = region.cursor_y;
         const rect_x = region.x + region.padding.left;
         const rect_y = region.y + region.padding.top + start_cursor_y;
         const rect_width = region.contentWidth();
+        const line_width = region.contentWidth();
+
+        // Fast path: single-span, greedy mode, left-aligned - skip preprocessing
+        if (opts.line_breaking == .greedy and opts.alignment == .left and text.spans.items.len == 1) {
+            const span = text.spans.items[0];
+            // Check for soft-hyphens (need preprocessing if present)
+            if (std.mem.indexOf(u8, span.text, "\xC2\xAD") == null) {
+                return self.writeStyledGreedyFast(region, span.text, span.style, opts, line_height, line_width, start_cursor_y);
+            }
+        }
+
+        // Prepare text (preprocesses words with width measurement)
+        try text.prepare(styledTextMeasure, @ptrCast(self));
+
+        const space_width = self.getTextWidth(" ");
+        var lines_written: usize = 0;
 
         if (text.words.items.len == 0) {
             return .{ .lines_written = 0, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = 0 } };
         }
-
-        const line_width = region.contentWidth();
 
         // Use optimal or greedy line breaking based on options
         if (opts.line_breaking == .optimal) {
@@ -3158,6 +3165,146 @@ pub const Document = struct {
 
         // Advance cursor
         region.cursor_y += line_height;
+    }
+
+    /// Fast path for single-span greedy left-aligned text.
+    /// Processes inline without preprocessing - similar to writeParagraph.
+    fn writeStyledGreedyFast(
+        self: *Document,
+        region: *Region,
+        text: []const u8,
+        style: TextStyleOptions,
+        opts: ParagraphOptions,
+        line_height: f64,
+        line_width: f64,
+        start_cursor_y: f64,
+    ) !WriteResult {
+        const space_width = self.getTextWidth(" ");
+        var lines_written: usize = 0;
+        const rect_x = region.x + region.padding.left;
+        const rect_y = region.y + region.padding.top + start_cursor_y;
+        const rect_width = region.contentWidth();
+
+        // Apply style
+        self.setTextColor(style.color);
+
+        var remaining = text;
+        while (remaining.len > 0) {
+            if (region.remainingHeight() < line_height) {
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = remaining,
+                    .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+                };
+            }
+
+            // Build line by collecting words
+            var line_end: usize = 0;
+            var current_width: f64 = 0;
+            var word_start: usize = 0;
+            var in_word = false;
+            var forced_break = false;
+
+            for (remaining, 0..) |c, i| {
+                const is_space = c == ' ' or c == '\t' or c == '\n';
+
+                if (is_space and in_word) {
+                    const word = remaining[word_start..i];
+                    const word_width = self.getTextWidth(word);
+
+                    if (current_width + word_width <= line_width + 0.01) {
+                        current_width += word_width + space_width;
+                        line_end = i;
+                    } else if (line_end == 0) {
+                        // First word doesn't fit - try hyphen break
+                        if (opts.break_on_hyphens) {
+                            if (self.findHyphenBreak(word, line_width)) |break_pos| {
+                                line_end = word_start + break_pos;
+                                break;
+                            }
+                        }
+                        // Character-level break as fallback
+                        if (self.findCharacterBreak(word, line_width - current_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                            break;
+                        }
+                        line_end = i;
+                    } else {
+                        break;
+                    }
+
+                    in_word = false;
+
+                    if (c == '\n') {
+                        forced_break = true;
+                        break;
+                    }
+                } else if (!is_space and !in_word) {
+                    word_start = i;
+                    in_word = true;
+                }
+            }
+
+            // Handle final word
+            if (in_word and !forced_break) {
+                const word = remaining[word_start..];
+                const word_width = self.getTextWidth(word);
+
+                if (current_width + word_width <= line_width + 0.01) {
+                    line_end = remaining.len;
+                } else if (line_end == 0) {
+                    if (opts.break_on_hyphens) {
+                        if (self.findHyphenBreak(word, line_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                        }
+                    }
+                    if (line_end == 0) {
+                        if (self.findCharacterBreak(word, line_width - current_width)) |break_pos| {
+                            line_end = word_start + break_pos;
+                        }
+                    }
+                    if (line_end == 0) {
+                        line_end = remaining.len;
+                    }
+                }
+            }
+
+            if (line_end == 0) break;
+
+            // Get line text
+            var line = remaining[0..line_end];
+            while (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) line = line[1..];
+            while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t' or line[line.len - 1] == '\n'))
+                line = line[0 .. line.len - 1];
+
+            // Render line
+            if (line.len > 0) {
+                const y_pos = switch (opts.valign) {
+                    .top => region.y + region.padding.top + region.cursor_y + self.font_size,
+                    .middle => blk: {
+                        const leading = line_height - self.font_size;
+                        break :blk region.y + region.padding.top + region.cursor_y + self.font_size - leading / 2;
+                    },
+                    .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                };
+
+                _ = try self.writeAt(region.x + region.padding.left, y_pos, line);
+                region.newLine(line_height);
+                lines_written += 1;
+            }
+
+            // Advance past rendered content + whitespace
+            remaining = remaining[line_end..];
+            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
+                remaining = remaining[1..];
+            }
+        }
+
+        return .{
+            .lines_written = lines_written,
+            .overflow = null,
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+        };
     }
 
     /// Write styled text using optimal (Knuth-Plass) line breaking.

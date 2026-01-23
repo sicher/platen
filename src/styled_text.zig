@@ -122,6 +122,14 @@ pub const StyledText = struct {
             return;
         }
 
+        // Estimate word count and pre-allocate (assume ~6 chars per word on average)
+        var total_len: usize = 0;
+        for (self.spans.items) |span| {
+            total_len += span.text.len;
+        }
+        const estimated_words = (total_len / 6) + 1;
+        try self.words.ensureTotalCapacity(self.allocator, estimated_words);
+
         // Walk through all spans, identifying words and measuring them
         var span_idx: u16 = 0;
         var byte_idx: u16 = 0;
@@ -145,27 +153,10 @@ pub const StyledText = struct {
                         word_width = self.measureWord(word_start_span, word_start_offset, span_idx, byte_idx, measure_fn, ctx);
 
                         // Check if newline follows (force break)
-                        var force_break = (c == '\n');
-                        if (!force_break) {
-                            // Look ahead for newline
-                            var look_span = span_idx;
-                            var look_byte = byte_idx + 1;
-                            outer: while (look_span < self.spans.items.len) {
-                                const ls = self.spans.items[look_span];
-                                while (look_byte < ls.text.len) {
-                                    const lc = ls.text[look_byte];
-                                    if (lc == '\n') {
-                                        force_break = true;
-                                        break :outer;
-                                    } else if (lc != ' ' and lc != '\t') {
-                                        break :outer;
-                                    }
-                                    look_byte += 1;
-                                }
-                                look_span += 1;
-                                look_byte = 0;
-                            }
-                        }
+                        const force_break = if (c == '\n')
+                            true
+                        else
+                            self.checkNewlineAhead(span_idx, byte_idx + 1);
 
                         // Store word
                         try self.words.append(self.allocator, .{
@@ -177,9 +168,11 @@ pub const StyledText = struct {
                             .force_break = force_break,
                         });
 
-                        // Check for soft-hyphens and add break points
-                        if (try self.findSoftHyphenBreaks(word_start_span, word_start_offset, span_idx, byte_idx, measure_fn, ctx)) |bp| {
-                            self.words.items[self.words.items.len - 1].break_points = bp;
+                        // Check for soft-hyphens and add break points (only for single-span words)
+                        if (word_start_span == span_idx) {
+                            if (try self.findSoftHyphenBreaks(word_start_span, word_start_offset, span_idx, byte_idx, measure_fn, ctx)) |bp| {
+                                self.words.items[self.words.items.len - 1].break_points = bp;
+                            }
                         }
 
                         in_word = false;
@@ -218,9 +211,11 @@ pub const StyledText = struct {
                 .force_break = false,
             });
 
-            // Check for soft-hyphens and add break points
-            if (try self.findSoftHyphenBreaks(word_start_span, word_start_offset, last_span_idx, end_offset, measure_fn, ctx)) |bp| {
-                self.words.items[self.words.items.len - 1].break_points = bp;
+            // Check for soft-hyphens and add break points (only for single-span words)
+            if (word_start_span == last_span_idx) {
+                if (try self.findSoftHyphenBreaks(word_start_span, word_start_offset, last_span_idx, end_offset, measure_fn, ctx)) |bp| {
+                    self.words.items[self.words.items.len - 1].break_points = bp;
+                }
             }
         }
 
@@ -254,6 +249,25 @@ pub const StyledText = struct {
         return width;
     }
 
+    /// Check if a newline follows before the next word (skipping spaces/tabs).
+    fn checkNewlineAhead(self: *const StyledText, start_span: u16, start_byte: u16) bool {
+        var look_span = start_span;
+        var look_byte: usize = start_byte;
+
+        while (look_span < self.spans.items.len) {
+            const ls = self.spans.items[look_span];
+            while (look_byte < ls.text.len) {
+                const lc = ls.text[look_byte];
+                if (lc == '\n') return true;
+                if (lc != ' ' and lc != '\t') return false;
+                look_byte += 1;
+            }
+            look_span += 1;
+            look_byte = 0;
+        }
+        return false;
+    }
+
     /// Find soft-hyphens in a word and create break points.
     /// Only handles single-span words for now; returns null for multi-span words.
     fn findSoftHyphenBreaks(
@@ -271,7 +285,10 @@ pub const StyledText = struct {
         const span = self.spans.items[start_span];
         const word_text = span.text[start_offset..end_offset];
 
-        // Count soft-hyphens first (UTF-8: 0xC2 0xAD)
+        // Fast path: check if soft-hyphen exists at all (0xC2 0xAD in UTF-8)
+        if (std.mem.indexOf(u8, word_text, "\xC2\xAD") == null) return null;
+
+        // Count soft-hyphens (UTF-8: 0xC2 0xAD)
         var count: usize = 0;
         var i: usize = 0;
         while (i + 1 < word_text.len) {
@@ -283,7 +300,7 @@ pub const StyledText = struct {
             }
         }
 
-        if (count == 0) return null;
+        if (count == 0) return null; // Shouldn't happen after indexOf check, but defensive
 
         // Allocate break points
         const break_points = try self.allocator.alloc(BreakPoint, count);
