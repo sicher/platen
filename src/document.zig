@@ -59,7 +59,6 @@ pub const PageLabelStyle = layout.PageLabelStyle;
 pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WrappedTextMetrics = layout.WrappedTextMetrics;
-pub const LineOptions = layout.LineOptions;
 pub const WriteOptions = layout.WriteOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const FlowOptions = layout.FlowOptions;
@@ -1307,12 +1306,6 @@ pub const Document = struct {
         return metrics.measureTextWidth(filtered, self.getTextStyle());
     }
 
-    /// Writes a single line of text into a content area.
-    /// Does not wrap text. Advances the cursor by one line height.
-    pub fn writeLine(self: *Document, area: *Region, str: []const u8, opts: LineOptions) !WriteResult {
-        return self.writeLineInternal(area, str, opts.alignment, opts.valign, 0);
-    }
-
     /// Internal line writer with indent and valign support.
     fn writeLineInternal(self: *Document, area: *Region, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
         const line_height = self.getLineHeightPts();
@@ -1395,7 +1388,7 @@ pub const Document = struct {
     ///
     /// Options:
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
-    /// - wrap: If false, text stays on one line without wrapping (like writeLine)
+    /// - wrap: If false, text stays on one line without wrapping
     pub fn write(self: *Document, region: *Region, str: []const u8, opts: WriteOptions) !WriteResult {
         const line_height = self.getLineHeightPts();
         const ascender = self.getFontMetrics().ascender;
@@ -1947,7 +1940,6 @@ pub const Document = struct {
         const line_height = self.getLineHeightPts();
         const space_width = self.getTextWidth(" ");
         var lines_written: usize = 0;
-        var is_first_line = true;
 
         // Track starting position for rect calculation
         const start_cursor_y = region.cursor_y;
@@ -1973,8 +1965,7 @@ pub const Document = struct {
             }
 
             // Calculate available width for this line (respects padding)
-            const indent = if (is_first_line) opts.first_indent else 0;
-            const line_width = region.contentWidth() - indent;
+            const line_width = region.contentWidth();
 
             // Build a line by collecting words
             var line_end: usize = 0;
@@ -2103,16 +2094,15 @@ pub const Document = struct {
                 if (line.len < buf.len - 1) {
                     @memcpy(buf[0..line.len], line);
                     buf[line.len] = '-';
-                    _ = try self.writeLineInternal(region, buf[0 .. line.len + 1], line_alignment, opts.valign, indent);
+                    _ = try self.writeLineInternal(region, buf[0 .. line.len + 1], line_alignment, opts.valign, 0);
                 } else {
                     // Line too long for buffer, render without hyphen (fallback)
-                    _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+                    _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, 0);
                 }
             } else {
-                _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+                _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, 0);
             }
             lines_written += 1;
-            is_first_line = false;
 
             // Skip past rendered text
             if (soft_hyphen_break) {
@@ -2137,8 +2127,7 @@ pub const Document = struct {
     /// Write paragraph using pre-computed optimal line breaks.
     fn writeParagraphOptimal(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions, start_cursor_y: f64) !WriteResult {
         const line_height = self.getLineHeightPts();
-        const line_width = region.contentWidth() - opts.first_indent;
-        const first_line_width = region.contentWidth() - opts.first_indent;
+        const line_width = region.contentWidth();
 
         // Rect calculation values
         const rect_x = region.x + region.padding.left;
@@ -2146,7 +2135,7 @@ pub const Document = struct {
         const rect_width = region.contentWidth();
 
         // Compute optimal break points
-        const breaks = try self.computeOptimalBreaks(str, line_width, first_line_width);
+        const breaks = try self.computeOptimalBreaks(str, line_width, line_width);
         defer self.allocator.free(breaks);
 
         if (breaks.len == 0) {
@@ -2205,11 +2194,8 @@ pub const Document = struct {
             else
                 opts.alignment;
 
-            // Calculate indent (only first line)
-            const indent = if (line_idx == 0) opts.first_indent else 0;
-
             // Render the line
-            _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, indent);
+            _ = try self.writeLineInternal(region, line, line_alignment, opts.valign, 0);
             lines_written += 1;
 
             // Move past break point and any whitespace
@@ -2239,7 +2225,6 @@ pub const Document = struct {
             const result = try self.writeParagraph(&region, text_to_write, .{
                 .alignment = opts.alignment,
                 .valign = opts.valign,
-                .first_indent = if (total_lines == 0) opts.first_indent else 0,
             });
 
             total_lines += result.lines_written;

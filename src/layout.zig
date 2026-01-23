@@ -161,7 +161,7 @@ pub const Region = struct {
     }
 };
 
-/// Result of writeLine or writeParagraph.
+/// Result of writeParagraph.
 pub const WriteResult = struct {
     /// Number of lines rendered.
     lines_written: usize,
@@ -198,31 +198,21 @@ pub const MeasureOptions = struct {
     line_breaking: LineBreaking = .greedy,
 };
 
-/// Options for writeLine (single line, no wrap).
-pub const LineOptions = struct {
-    /// Horizontal text alignment.
-    alignment: Align = .left,
-    /// Vertical text alignment within line height.
-    valign: VAlign = .top,
-};
-
 /// Options for write() (flowing text with cursor tracking).
 pub const WriteOptions = struct {
     /// If true, only measure text without rendering. Cursor is still updated.
     measure_only: bool = false,
     /// If true, wrap text to next line when it doesn't fit.
-    /// If false, text stays on one line (like writeLine).
+    /// If false, text stays on one line.
     wrap: bool = true,
 };
 
-/// Options for writeParagraph (wrapped text).
+/// Options for writeParagraph (wrapped text with alignment).
 pub const ParagraphOptions = struct {
     /// Horizontal text alignment.
     alignment: Align = .left,
     /// Vertical text alignment within line height.
     valign: VAlign = .top,
-    /// First line indent in points.
-    first_indent: f64 = 0,
     /// Allow breaking after regular hyphens in compound words (e.g., "state-of-the-art").
     /// Default true. Set false for fpdf2 compatibility (only soft-hyphens break).
     break_on_hyphens: bool = true,
@@ -236,8 +226,6 @@ pub const FlowOptions = struct {
     alignment: Align = .left,
     /// Vertical text alignment within line height.
     valign: VAlign = .top,
-    /// First line indent in points.
-    first_indent: f64 = 0,
 };
 
 /// Page size in points (1 point = 1/72 inch)

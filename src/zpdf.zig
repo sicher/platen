@@ -68,7 +68,6 @@ pub const PageLabelStyle = document.PageLabelStyle;
 pub const PageLabel = document.PageLabel;
 pub const WriteResult = document.WriteResult;
 pub const WrappedTextMetrics = document.WrappedTextMetrics;
-pub const LineOptions = document.LineOptions;
 pub const WriteOptions = document.WriteOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
 pub const FlowOptions = document.FlowOptions;

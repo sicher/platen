@@ -635,7 +635,7 @@ test "getPageRegion respects margins" {
     try std.testing.expectEqual(PageSize.A4.height - 200, region.height);
 }
 
-test "writeLine advances cursor" {
+test "writeParagraph advances cursor" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -645,13 +645,13 @@ test "writeLine advances cursor" {
     var region = doc.getPageRegion();
     const initial_cursor = region.cursor_y;
 
-    _ = try doc.writeLine(&region, "Test line", .{});
+    _ = try doc.writeParagraph(&region, "Test line", .{});
 
     try std.testing.expect(region.cursor_y > initial_cursor);
     try std.testing.expectEqual(doc.getLineHeightPts(), region.cursor_y);
 }
 
-test "writeLine alignment" {
+test "writeParagraph alignment" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -661,11 +661,11 @@ test "writeLine alignment" {
     var region = Region{ .x = 100, .y = 100, .width = 400, .height = 600 };
 
     // Test left alignment (default)
-    _ = try doc.writeLine(&region, "Left", .{});
+    _ = try doc.writeParagraph(&region, "Left", .{});
     // Test center alignment
-    _ = try doc.writeLine(&region, "Center", .{ .alignment = .center });
+    _ = try doc.writeParagraph(&region, "Center", .{ .alignment = .center });
     // Test right alignment
-    _ = try doc.writeLine(&region, "Right", .{ .alignment = .right });
+    _ = try doc.writeParagraph(&region, "Right", .{ .alignment = .right });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -962,41 +962,6 @@ test "writeParagraph character-level wrapping for long words" {
     try std.testing.expect(result.overflow == null);
 }
 
-test "writeParagraph first line indent" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
-    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 200 };
-    const text = "First line has indent. Second line does not.";
-
-    _ = try doc.writeParagraph(&region, text, .{ .first_indent = 20 });
-
-    // Check that two text commands were created (two lines)
-    const page = &doc.pages.items[0];
-    var text_count: usize = 0;
-    var first_x: ?f64 = null;
-    var second_x: ?f64 = null;
-    for (page.commands.items) |cmd| {
-        if (cmd == .text) {
-            text_count += 1;
-            if (first_x == null) {
-                first_x = cmd.text.x;
-            } else if (second_x == null) {
-                second_x = cmd.text.x;
-            }
-        }
-    }
-
-    try std.testing.expect(text_count >= 2);
-    // First line should be 20pt further right than second line
-    if (first_x != null and second_x != null) {
-        try std.testing.expectApproxEqAbs(first_x.? - 20, second_x.?, 0.1);
-    }
-}
-
 test "writeParagraph overflow returns remaining text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
@@ -1032,7 +997,7 @@ test "writeParagraph newline forces line break" {
     try std.testing.expectEqual(@as(usize, 3), result.lines_written);
 }
 
-test "writeLine returns overflow for too-long text" {
+test "writeParagraph returns overflow for too-long text" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1042,12 +1007,12 @@ test "writeLine returns overflow for too-long text" {
     // Small region that can only fit ~1 line
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 15 };
 
-    const result1 = try doc.writeLine(&region, "First line", .{});
+    const result1 = try doc.writeParagraph(&region, "First line", .{});
     try std.testing.expectEqual(@as(usize, 1), result1.lines_written);
     try std.testing.expect(result1.overflow == null);
 
     // Second line should indicate no room
-    const result2 = try doc.writeLine(&region, "Second line", .{});
+    const result2 = try doc.writeParagraph(&region, "Second line", .{});
     try std.testing.expectEqual(@as(usize, 0), result2.lines_written);
     try std.testing.expectEqualStrings("Second line", result2.overflow.?);
 }
@@ -1075,7 +1040,7 @@ test "region padding affects content area" {
     try std.testing.expectEqual(@as(f64, 90), region.remainingHeight());
 
     // Write a line and check remaining height decreased
-    _ = try doc.writeLine(&region, "Test", .{});
+    _ = try doc.writeParagraph(&region, "Test", .{});
     try std.testing.expect(region.remainingHeight() < 90);
 }
 
@@ -1121,7 +1086,7 @@ test "valign top puts baseline at cursor + font_size" {
     try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
-    _ = try doc.writeLine(&region, "Test", .{ .valign = .top });
+    _ = try doc.writeParagraph(&region, "Test", .{ .valign = .top });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
@@ -1141,7 +1106,7 @@ test "valign middle adjusts for leading" {
     try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
-    _ = try doc.writeLine(&region, "Test", .{ .valign = .middle });
+    _ = try doc.writeParagraph(&region, "Test", .{ .valign = .middle });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
@@ -1162,7 +1127,7 @@ test "valign bottom puts baseline at cursor + line_height" {
     try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
-    _ = try doc.writeLine(&region, "Test", .{ .valign = .bottom });
+    _ = try doc.writeParagraph(&region, "Test", .{ .valign = .bottom });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {

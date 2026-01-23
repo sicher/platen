@@ -89,7 +89,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 |---------|-------|------|-------|
 | Simple text at position | `text()` | ✅ `writeAt()` | |
 | Write text (flowing) | `write()` | ✅ `write()` | |
-| Cell | `cell()` | ⚠️ | `Region` with `border`/`fill` + `writeLine` |
+| Cell | `cell()` | ⚠️ | `Region` with `border`/`fill` + `writeParagraph` |
 | Multi-cell | `multi_cell()` | ✅ | `Region` with `border`/`fill` + `writeParagraph` |
 | Word wrapping | ✅ | ✅ | |
 | Character wrapping | `wrapmode="CHAR"` | ✅ | fallback for long words |
@@ -97,7 +97,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Vertical alignment | ✅ | ✅ | top/middle/bottom |
 | Soft hyphen support | ✅ | ✅ | U+00AD |
 | Regular hyphen breaking | - | ✅ `break_on_hyphens` | zpdf feature |
-| First line indent | ✅ | ✅ | |
+| First line indent | ✅ | ⚠️ | `measureWrappedText()` only |
 | Optimal line breaking | - | ✅ Knuth-Plass | zpdf feature |
 | Text width measurement | `get_string_width()` | ✅ `getTextWidth()` | |
 | Wrapped text measurement | - | ✅ `measureWrappedText()` | zpdf feature |

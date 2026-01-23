@@ -2488,7 +2488,7 @@ test "integration: opentype_features PDF" {
 }
 
 test "integration: text_flow PDF" {
-    // Tests Text Flow API: regions, margins, writeLine, writeParagraph, drawRegion
+    // Tests Text Flow API: regions, margins, writeParagraph, drawRegion
     try runIntegrationTest("text_flow", generateTextFlowPdf);
 }
 

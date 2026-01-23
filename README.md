@@ -130,7 +130,6 @@ const text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit...";
 // Write wrapped text (returns overflow if text doesn't fit)
 const result = try doc.writeParagraph(&region, text, .{
     .alignment = .justify,
-    .first_indent = 20,
 });
 
 if (result.overflow) |remaining| {
@@ -388,7 +387,6 @@ try doc.addLink(toc_rect, chapter1_dest);
 | `write(*Region, str, WriteOptions) -> WriteResult` | Writes flowing text into a region with word wrapping |
 | `writeAt(f64, f64, str) -> Rect` | Writes text at the specified position |
 | `writeFlow(str, FlowOptions) -> usize` | Write text with automatic pagination |
-| `writeLine(*Region, str, LineOptions) -> WriteResult` | Writes a single line of text into a content area |
 | `writeParagraph(*Region, str, ParagraphOptions) -> WriteResult` | Writes wrapped text into a region |
 
 ### Text Styling

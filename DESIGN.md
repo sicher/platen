@@ -234,7 +234,6 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 |----------|---------|
 | `write(str)` | Write at cursor position |
 | `writeAt(x, y, str)` | Write at specific position |
-| `writeLine(&region, opts)` | Single line in region, no wrap, advances cursor |
 | `writeParagraph(&region, opts)` | Wrapped text in region, returns overflow |
 | `writeFlow(str, opts)` | Convenience: auto-adds pages on overflow |
 | `measureWrappedText(str, opts)` | Measure text layout without rendering |
@@ -367,7 +366,7 @@ const TextBox = struct {
     pub fn fits(self: TextBox, m: TextMetrics) bool;
 };
 
-/// Result of writeLine/writeParagraph
+/// Result of writeParagraph
 const WriteResult = struct {
     lines_written: usize,       // number of lines rendered
     overflow: ?[]const u8,      // text that didn't fit (null if all fit)
@@ -383,12 +382,6 @@ const VAlign = enum {
     bottom,  // baseline at content_y + line_height
 };
 
-/// Options for writeLine (single line, no wrap)
-const LineOptions = struct {
-    alignment: Align = .left,
-    valign: VAlign = .top,
-};
-
 /// Line breaking algorithm
 const LineBreaking = enum {
     greedy,   // Fill each line as much as possible (fast, default)
@@ -399,7 +392,6 @@ const LineBreaking = enum {
 const ParagraphOptions = struct {
     alignment: Align = .left,
     valign: VAlign = .top,
-    first_indent: f64 = 0,
     break_on_hyphens: bool = true,    // Break at regular hyphens (false for fpdf2 compat)
     line_breaking: LineBreaking = .greedy,  // Algorithm for line breaks
 };
@@ -407,7 +399,7 @@ const ParagraphOptions = struct {
 /// Options for writeFlow (convenience auto-page)
 const FlowOptions = struct {
     alignment: Align = .left,
-    first_indent: f64 = 0,
+    valign: VAlign = .top,
 };
 ```
 
@@ -416,8 +408,7 @@ const FlowOptions = struct {
 ```zig
 fn write(self: *Document, text: []const u8) !void
 fn writeAt(self: *Document, x: f64, y: f64, text: []const u8) !void
-fn writeLine(self: *Document, box: *TextBox, text: []const u8, opts: LineOptions) !WriteResult
-fn writeParagraph(self: *Document, box: *TextBox, text: []const u8, opts: ParagraphOptions) !WriteResult
+fn writeParagraph(self: *Document, box: *Region, text: []const u8, opts: ParagraphOptions) !WriteResult
 fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 
 /// Draw text box's border/fill (without text)
@@ -442,7 +433,6 @@ try doc.save("output.pdf");
 ```zig
 try doc.writeFlow(long_body_text, .{
     .alignment = .justify,
-    .first_indent = 20,  // paragraph indent
 });
 ```
 
@@ -697,7 +687,7 @@ Prefer general mechanisms that compose well:
 - Works for: first-line indent, bullet offsets, nested blocks, hanging indents
 
 ### 5. Naming conventions
-- `write*` - text output (write, writeAt, writeLine, writeParagraph, writeFlow)
+- `write*` - text output (write, writeAt, writeParagraph, writeFlow)
 - `draw*` - graphics (drawLine, drawRect, drawCircle, drawPath, drawImage, drawSvg)
 - `load*` - load external resources (loadFont, loadImage, loadSvg)
 - `set*` / `get*` - state configuration
