@@ -19,6 +19,7 @@ pub const images = @import("images.zig");
 pub const svg = @import("svg.zig");
 pub const pathmod = @import("path.zig");
 pub const gradient = @import("gradient.zig");
+pub const styled_text = @import("styled_text.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -37,6 +38,8 @@ pub const Color = color.Color;
 pub const Image = images.Image;
 pub const Svg = svg.Svg;
 pub const Path = pathmod.Path;
+pub const StyledText = styled_text.StyledText;
+pub const Span = styled_text.Span;
 pub const LinearGradient = gradient.LinearGradient;
 pub const RadialGradient = gradient.RadialGradient;
 pub const ColorStop = gradient.ColorStop;
@@ -2660,6 +2663,456 @@ pub const Document = struct {
     /// Create a new path builder.
     pub fn createPath(self: *Document) Path {
         return Path.init(self.allocator);
+    }
+
+    /// Create a new styled text builder.
+    pub fn createStyledText(self: *Document) StyledText {
+        return StyledText.init(self.allocator);
+    }
+
+    /// Measure function adapter for StyledText.prepare()
+    fn styledTextMeasure(text: []const u8, style: TextStyleOptions, ctx: *anyopaque) f64 {
+        const doc: *Document = @ptrCast(@alignCast(ctx));
+        // Text width doesn't depend on color/decoration, just the font
+        _ = style;
+        return doc.getTextWidth(text);
+    }
+
+    /// Write styled text into a region with alignment support.
+    /// Uses Knuth-Plass optimal line breaking when requested.
+    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, opts: ParagraphOptions) !WriteResult {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        // Prepare text (preprocesses words with width measurement)
+        try text.prepare(styledTextMeasure, @ptrCast(self));
+
+        const line_height = self.getLineHeightPts();
+        const space_width = self.getTextWidth(" ");
+        var lines_written: usize = 0;
+
+        // Track starting position for rect calculation
+        const start_cursor_y = region.cursor_y;
+        const rect_x = region.x + region.padding.left;
+        const rect_y = region.y + region.padding.top + start_cursor_y;
+        const rect_width = region.contentWidth();
+
+        if (text.words.items.len == 0) {
+            return .{ .lines_written = 0, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = 0 } };
+        }
+
+        const line_width = region.contentWidth();
+
+        // Use optimal or greedy line breaking based on options
+        if (opts.line_breaking == .optimal) {
+            return self.writeStyledOptimal(region, text, opts, line_height, space_width, line_width, start_cursor_y);
+        }
+
+        // Greedy algorithm
+        const n = text.words.items.len;
+        var word_idx: usize = 0;
+
+        while (word_idx < n) {
+            // Check if we have room for another line
+            if (region.remainingHeight() < line_height) {
+                // Return overflow - remaining words
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = self.getStyledTextFromWord(text, word_idx),
+                    .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+                };
+            }
+
+            // Collect words that fit on this line
+            var current_width: f64 = 0;
+            const line_start = word_idx;
+            var line_end = word_idx;
+
+            while (line_end < n) {
+                const word = text.words.items[line_end];
+                const word_with_space = if (line_end > line_start) word.width + space_width else word.width;
+
+                if (current_width + word_with_space > line_width + 0.01) break;
+
+                current_width += word_with_space;
+                line_end += 1;
+
+                if (word.force_break) break;
+            }
+
+            // Handle case where first word doesn't fit
+            if (line_end == line_start and line_start < n) {
+                line_end = line_start + 1;
+                current_width = text.words.items[line_start].width;
+            }
+
+            // Determine alignment
+            const is_last_line = (line_end >= n);
+            const has_force_break = line_end > 0 and text.words.items[line_end - 1].force_break;
+            const line_alignment = if (opts.alignment == .justify and (is_last_line or has_force_break))
+                Align.left
+            else
+                opts.alignment;
+
+            // Render the line
+            try self.renderStyledLine(region, text, line_start, line_end, line_alignment, opts.valign, line_width, space_width, current_width);
+            lines_written += 1;
+
+            word_idx = line_end;
+        }
+
+        return .{
+            .lines_written = lines_written,
+            .overflow = null,
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+        };
+    }
+
+    /// Get remaining text from a word index (for overflow).
+    fn getStyledTextFromWord(self: *Document, text: *const StyledText, word_idx: usize) ?[]const u8 {
+        _ = self;
+        if (word_idx >= text.words.items.len) return null;
+
+        const word = text.words.items[word_idx];
+        const span = text.spans.items[word.start_span];
+        return span.text[word.start_offset..];
+    }
+
+    /// Render a single line of styled text.
+    fn renderStyledLine(
+        self: *Document,
+        region: *Region,
+        text: *const StyledText,
+        line_start: usize,
+        line_end: usize,
+        alignment: Align,
+        valign: VAlign,
+        line_width: f64,
+        space_width: f64,
+        content_width: f64,
+    ) !void {
+        const line_height = self.getLineHeightPts();
+        const font_size = self.font_size;
+
+        // Calculate x offset based on alignment
+        const slack = line_width - content_width;
+        const x_offset: f64 = switch (alignment) {
+            .left => 0,
+            .center => slack / 2,
+            .right => slack,
+            .justify => 0,
+        };
+
+        // Calculate word spacing for justify
+        const word_count = line_end - line_start;
+        const actual_space_width = if (alignment == .justify and word_count > 1)
+            space_width + slack / @as(f64, @floatFromInt(word_count - 1))
+        else
+            space_width;
+
+        // Calculate y position based on valign (top-down coordinate for writeAt)
+        const y_pos = switch (valign) {
+            .top => region.y + region.padding.top + region.cursor_y + font_size,
+            .middle => blk: {
+                const leading = line_height - font_size;
+                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
+            },
+            .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+        };
+
+        const x_start = region.x + region.padding.left + x_offset;
+        var current_x = x_start;
+
+        // Track decoration runs for continuous underlines/strikethroughs
+        const DecoRun = struct {
+            start_x: f64,
+            end_x: f64,
+            color: ?Color,
+            underline: bool,
+            strikethrough: bool,
+        };
+        var deco_runs: [64]DecoRun = undefined;
+        var deco_count: usize = 0;
+
+        // Current decoration state
+        var in_underline = false;
+        var in_strikethrough = false;
+        var deco_start_x: f64 = 0;
+        var deco_color: ?Color = null;
+
+        // Helper to end current decoration run
+        const endDecoRun = struct {
+            fn call(runs: *[64]DecoRun, count: *usize, start_x: f64, end_x: f64, run_color: ?Color, underline: bool, strikethrough: bool) void {
+                if (count.* < 64 and (underline or strikethrough)) {
+                    runs[count.*] = .{
+                        .start_x = start_x,
+                        .end_x = end_x,
+                        .color = run_color,
+                        .underline = underline,
+                        .strikethrough = strikethrough,
+                    };
+                    count.* += 1;
+                }
+            }
+        }.call;
+
+        // Render each word
+        for (line_start..line_end) |word_idx| {
+            const word = text.words.items[word_idx];
+
+            // Add space before word (except first)
+            if (word_idx > line_start) {
+                // If we're in a decoration, include the space
+                if (!in_underline and !in_strikethrough) {
+                    current_x += actual_space_width;
+                } else {
+                    current_x += actual_space_width;
+                }
+            }
+
+            // Render word segments (may span multiple styles)
+            var span_idx = word.start_span;
+            while (span_idx <= word.end_span) : (span_idx += 1) {
+                const span = text.spans.items[span_idx];
+                const seg_start: usize = if (span_idx == word.start_span) word.start_offset else 0;
+                const seg_end: usize = if (span_idx == word.end_span) word.end_offset else span.text.len;
+
+                if (seg_end > seg_start) {
+                    const segment = span.text[seg_start..seg_end];
+                    const seg_underline = span.style.decoration.underline;
+                    const seg_strike = span.style.decoration.strikethrough;
+
+                    // Check if decoration state changed
+                    if (seg_underline != in_underline or seg_strike != in_strikethrough) {
+                        // End previous run if any
+                        if (in_underline or in_strikethrough) {
+                            endDecoRun(&deco_runs, &deco_count, deco_start_x, current_x, deco_color, in_underline, in_strikethrough);
+                        }
+                        // Start new run if needed
+                        if (seg_underline or seg_strike) {
+                            deco_start_x = current_x;
+                            deco_color = span.style.color;
+                        }
+                        in_underline = seg_underline;
+                        in_strikethrough = seg_strike;
+                    }
+
+                    // Save and apply color only (decoration handled separately)
+                    const saved_color = self.text_color;
+                    const saved_decoration = self.text_decoration;
+                    self.text_color = span.style.color;
+                    self.text_decoration = .none; // Don't draw per-segment
+
+                    // Get segment width and render using writeAt
+                    const seg_width = self.getTextWidth(segment);
+                    _ = try self.writeAt(current_x, y_pos, segment);
+                    current_x += seg_width;
+
+                    // Restore style
+                    self.text_color = saved_color;
+                    self.text_decoration = saved_decoration;
+                }
+            }
+        }
+
+        // End any remaining decoration run
+        if (in_underline or in_strikethrough) {
+            endDecoRun(&deco_runs, &deco_count, deco_start_x, current_x, deco_color, in_underline, in_strikethrough);
+        }
+
+        // Draw all decoration runs as raw commands
+        if (deco_count > 0) {
+            var page = &self.pages.items[self.pages.items.len - 1];
+            const page_alloc = page.pageAllocator();
+
+            // Get decoration metrics (scale from 1000 units)
+            const scale = font_size / 1000.0;
+            var underline_pos: f64 = -100;
+            var underline_thick: f64 = 50;
+            var strikeout_pos: f64 = 250;
+            var strikeout_thick: f64 = 50;
+
+            if (self.current_embedded) |emb| {
+                underline_pos = @floatFromInt(emb.underline_position);
+                underline_thick = @floatFromInt(emb.underline_thickness);
+                strikeout_pos = @floatFromInt(emb.strikeout_position);
+                strikeout_thick = @floatFromInt(emb.strikeout_size);
+            }
+
+            for (deco_runs[0..deco_count]) |run| {
+                const width = run.end_x - run.start_x;
+                if (width > 0) {
+                    var buf: [512]u8 = undefined;
+                    var len: usize = 0;
+
+                    // Save graphics state and set color
+                    const q_str = "q\n";
+                    @memcpy(buf[len..][0..q_str.len], q_str);
+                    len += q_str.len;
+
+                    if (run.color) |c| {
+                        const rgb = c.toRgb();
+                        len += (std.fmt.bufPrint(buf[len..], "{d:.3} {d:.3} {d:.3} rg\n", .{ rgb.r, rgb.g, rgb.b }) catch unreachable).len;
+                    } else {
+                        const g_str = "0.000 g\n";
+                        @memcpy(buf[len..][0..g_str.len], g_str);
+                        len += g_str.len;
+                    }
+
+                    // Draw underline
+                    if (run.underline) {
+                        const ul_y = self.page_size.height - y_pos + underline_pos * scale;
+                        const h = underline_thick * scale;
+                        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ run.start_x, ul_y, width, -h }) catch unreachable).len;
+                    }
+
+                    // Draw strikethrough
+                    if (run.strikethrough) {
+                        const st_y = self.page_size.height - y_pos + strikeout_pos * scale;
+                        const h = strikeout_thick * scale;
+                        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ run.start_x, st_y, width, -h }) catch unreachable).len;
+                    }
+
+                    // Restore graphics state
+                    const Q_str = "Q\n";
+                    @memcpy(buf[len..][0..Q_str.len], Q_str);
+                    len += Q_str.len;
+
+                    const raw_copy = try page_alloc.dupe(u8, buf[0..len]);
+                    try page.commands.append(self.allocator, .{ .raw = raw_copy });
+                }
+            }
+        }
+
+        // Advance cursor
+        region.cursor_y += line_height;
+    }
+
+    /// Write styled text using optimal (Knuth-Plass) line breaking.
+    fn writeStyledOptimal(
+        self: *Document,
+        region: *Region,
+        text: *StyledText,
+        opts: ParagraphOptions,
+        line_height: f64,
+        space_width: f64,
+        line_width: f64,
+        start_cursor_y: f64,
+    ) !WriteResult {
+        const rect_x = region.x + region.padding.left;
+        const rect_y = region.y + region.padding.top + start_cursor_y;
+        const rect_width = region.contentWidth();
+
+        // Compute optimal break points using preprocessed word data
+        const breaks = try self.computeStyledOptimalBreaks(text, line_width, space_width);
+        defer self.allocator.free(breaks);
+
+        if (breaks.len == 0) {
+            return .{ .lines_written = 0, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = 0 } };
+        }
+
+        var lines_written: usize = 0;
+        var line_start: usize = 0;
+
+        for (breaks, 0..) |line_end, line_idx| {
+            // Check if we have room
+            if (region.remainingHeight() < line_height) {
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = self.getStyledTextFromWord(text, line_start),
+                    .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+                };
+            }
+
+            // Calculate line content width
+            var content_width: f64 = 0;
+            for (line_start..line_end) |w| {
+                if (w > line_start) content_width += space_width;
+                content_width += text.words.items[w].width;
+            }
+
+            // Determine alignment
+            const is_last_line = (line_idx == breaks.len - 1);
+            const has_force_break = line_end > 0 and text.words.items[line_end - 1].force_break;
+            const line_alignment = if (opts.alignment == .justify and (is_last_line or has_force_break))
+                Align.left
+            else
+                opts.alignment;
+
+            try self.renderStyledLine(region, text, line_start, line_end, line_alignment, opts.valign, line_width, space_width, content_width);
+            lines_written += 1;
+            line_start = line_end;
+        }
+
+        return .{
+            .lines_written = lines_written,
+            .overflow = null,
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+        };
+    }
+
+    /// Compute optimal breaks for styled text using Knuth-Plass.
+    fn computeStyledOptimalBreaks(self: *Document, text: *const StyledText, line_width: f64, space_width: f64) ![]usize {
+        const n = text.words.items.len;
+        if (n == 0) return self.allocator.alloc(usize, 0);
+
+        const INFINITY: f64 = 1e18;
+
+        var dp = try self.allocator.alloc(f64, n + 1);
+        defer self.allocator.free(dp);
+        var prev = try self.allocator.alloc(usize, n + 1);
+        defer self.allocator.free(prev);
+
+        dp[0] = 0;
+        prev[0] = 0;
+
+        // For each ending position
+        for (1..n + 1) |j| {
+            dp[j] = INFINITY;
+            prev[j] = 0;
+
+            // Try each starting position
+            var line_w: f64 = 0;
+            var start_i = j;
+            while (start_i > 0) {
+                start_i -= 1;
+                const word = text.words.items[start_i];
+
+                // Check force break constraint
+                if (word.force_break and start_i + 1 < j) break;
+
+                // Add word width
+                if (start_i + 1 < j) line_w += space_width;
+                line_w += word.width;
+
+                // Line too wide
+                if (line_w > line_width + 0.01) break;
+
+                // Compute badness
+                const slack = line_width - line_w;
+                const is_last_line = (j == n);
+                const is_forced = text.words.items[j - 1].force_break;
+                const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
+
+                const total = dp[start_i] + badness;
+                if (total < dp[j]) {
+                    dp[j] = total;
+                    prev[j] = start_i;
+                }
+            }
+        }
+
+        // Backtrack
+        var breaks = std.ArrayListUnmanaged(usize){};
+        errdefer breaks.deinit(self.allocator);
+
+        var pos = n;
+        while (pos > 0) {
+            try breaks.append(self.allocator, pos);
+            pos = prev[pos];
+        }
+
+        std.mem.reverse(usize, breaks.items);
+        return breaks.toOwnedSlice(self.allocator);
     }
 
     /// Draw a path with the specified style.

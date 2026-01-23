@@ -1,9 +1,101 @@
 # zpdf Context
 
 ## Current Focus
-Document outline and page labels implemented. 260 unit tests pass.
+Implemented `StyledText` builder API for styled paragraphs. All 288 tests pass.
+
+## What We Did (Session 2026-01-23 #2)
+- **Implemented `StyledText` builder API for styled paragraphs**:
+  - New `src/styled_text.zig` with `StyledText` and `Span` types
+  - Builder pattern mirroring existing `Path` API
+  - `append(text, style)` and `appendOwned(text, style)` methods
+  - Preprocessing for Knuth-Plass via `prepare()` method
+  - Word boundary detection across styled spans
+  - `measureWord()` helper for multi-span word width calculation
+
+- **Document integration**:
+  - `createStyledText()` - factory method
+  - `writeStyled(region, text, opts)` - renders styled text with word wrap
+  - `styledTextMeasure()` - callback for preprocessing
+  - `renderStyledLine()` - uses `writeAt()` for each styled segment
+  - `computeStyledOptimalBreaks()` - Knuth-Plass for styled text
+  - `getStyledTextFromWord()` - extracts word text across spans
+
+- **Features**:
+  - Inline color changes (red, blue, green, etc.)
+  - Text decorations (underline, strikethrough)
+  - Combined styles (color + decoration)
+  - Word wrapping across multiple lines
+  - Justified/centered alignment
+  - Optimal line breaking (Knuth-Plass)
+
+- **Added 5 unit tests** in document_test.zig
+- **Added integration test** `styled_text` with 7 demonstration sections
+- **Exports**: `StyledText`, `Span` exported via zpdf.zig
+- 288 tests pass
+
+## What We Did (Session 2026-01-23)
+- **Added `write(region, text)` API for chunked wrapped text**:
+  - Enables inline style changes within flowing, wrapped text
+  - `TextBox` now tracks `cursor_x` and `cursor_y`
+  - Added `TextBox.newLine(line_height)` helper
+  - Added `TextBox.remainingWidth()` helper
+  - Renamed old `write(str)` to private `writeAtCursor()`
+
+- **Public API now**:
+  - `writeAt(x, y, text)` - absolute positioning, no wrap
+  - `writeLine(region, text, opts)` - single line, no wrap
+  - `write(region, text)` - **NEW** - flowing text with wrap, tracks cursor
+
+- **Usage example**:
+  ```zig
+  var region = zpdf.TextBox{ .x = 50, .y = 100, .width = 300, .height = 200 };
+  doc.setTextStyle(.{});
+  _ = try doc.write(&region, "Normal text ");
+  doc.setTextStyle(.{ .color = zpdf.Color.red });
+  _ = try doc.write(&region, "red text ");
+  doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+  _ = try doc.write(&region, "underlined.");
+  ```
+
+- **Updated text_style integration test** to use new `write()` API
+- Added 5 unit tests for `write()` and `TextBox.newLine()`
+- 274 tests pass
+
+## What We Did (Session 2026-01-22 #4) [COMPLETE]
+- **Implemented text decorations (underline, strikethrough)**:
+  - **Font metrics parsing**:
+    - Added `PostTable` and `Os2Table` to `ttf.zig` for underline/strikethrough metrics
+    - Parse POST table for `underline_position`, `underline_thickness`
+    - Parse OS/2 table for `strikeout_position`, `strikeout_size`
+  - **EmbeddedFont metrics**: Added decoration fields, scaled to 1000 units
+  - **Standard fonts**: Added decoration defaults to `StandardFontMetrics` (-100, 50, 250, 50)
+  - **Layout types**:
+    - `TextDecoration` struct with `underline`, `strikethrough` bools
+    - `TextStyleOptions` struct with `color` and `decoration` (parallels `DrawStyleOptions`)
+  - **Document API**:
+    - Added `text_decoration` state field
+    - Added `setTextStyle(TextStyleOptions)` method (sets color + decoration)
+    - `TextCommand` stores decoration state and text width
+    - `drawTextDecorations()` renders PDF rectangles after text
+  - **Rendering**: Decorations drawn as filled rectangles outside BT/ET blocks
+- **Added 6 unit tests** for decorations (using setTextStyle)
+- **Added integration test** `text_decorations` with fpdf2 reference
+- **Exports**: `TextDecoration`, `TextStyleOptions` exported via zpdf.zig
+- **Updated API docs**: 54 methods (added setTextStyle)
+- All tests pass
 
 ## What We Did (Session 2026-01-22 #3) [COMPLETE]
+- **Renamed Bookmark → Outline** (matches PDF spec terminology):
+  - `Bookmark` struct → `Outline`
+  - `addBookmark()` → `addOutlineItem()`
+  - Integration test renamed from `bookmarks` to `outlines`
+- **Updated API_COMPARISON.md** to reflect low-level PDF focus:
+  - Marked as "Not planned": Tables, Auto page break, Header/footer callbacks, HTML rendering, Multi-column layout
+  - Reorganized priorities: Arc/pie shapes, Blend modes, Clipping paths, Annotations, Encryption
+- **Simplified addPage API**: `addPage()` and `addPageWithSize()` → unified `addPage(size: ?PageSize)`
+- **Fixed bugs**: Y coordinate conversion in `currentDestination()`, missing sibling links for top-level outlines
+
+**Also in this session:**
 - **Implemented PDF document outline for navigation**:
   - Added `Outline` struct to `layout.zig` with title, dest, parent, sibling/child links
   - Added `addOutlineItem(title, dest, parent)` method returning `*Outline` for nesting

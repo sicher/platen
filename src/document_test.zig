@@ -2462,3 +2462,117 @@ test "write() with wrap=false stays on one line" {
     // cursor_x should be beyond the region width (text overflows)
     try std.testing.expect(region.cursor_x > 60);
 }
+
+// ============================================================================
+// StyledText Tests
+// ============================================================================
+
+test "writeStyled basic" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var text = doc.createStyledText();
+    defer text.deinit();
+
+    try text.append("Hello ", .{});
+    try text.append("World", .{ .color = Color.red });
+
+    var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
+    const result = try doc.writeStyled(&region, &text, .{});
+
+    try std.testing.expectEqual(@as(usize, 1), result.lines_written);
+    try std.testing.expect(result.overflow == null);
+}
+
+test "writeStyled word wrapping" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var text = doc.createStyledText();
+    defer text.deinit();
+
+    try text.append("The quick brown fox ", .{});
+    try text.append("jumps over the lazy dog", .{ .color = Color.blue });
+
+    // Narrow region to force wrapping
+    var region = Region{ .x = 50, .y = 50, .width = 120, .height = 200 };
+    const result = try doc.writeStyled(&region, &text, .{});
+
+    try std.testing.expect(result.lines_written > 1);
+    try std.testing.expect(result.overflow == null);
+}
+
+test "writeStyled justified alignment" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var text = doc.createStyledText();
+    defer text.deinit();
+
+    try text.append("This is a ", .{});
+    try text.append("test", .{ .color = Color.red });
+    try text.append(" of justified text.", .{});
+
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 200 };
+    const result = try doc.writeStyled(&region, &text, .{ .alignment = .justify });
+
+    try std.testing.expect(result.lines_written >= 1);
+    try std.testing.expect(result.overflow == null);
+}
+
+test "writeStyled optimal line breaking" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var text = doc.createStyledText();
+    defer text.deinit();
+
+    try text.append("The quick brown ", .{});
+    try text.append("fox jumps over ", .{ .color = Color.red });
+    try text.append("the lazy dog.", .{});
+
+    var region = Region{ .x = 50, .y = 50, .width = 150, .height = 200 };
+    const result = try doc.writeStyled(&region, &text, .{
+        .line_breaking = .optimal,
+    });
+
+    try std.testing.expect(result.lines_written >= 1);
+    try std.testing.expect(result.overflow == null);
+}
+
+test "writeStyled generates valid PDF" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var text = doc.createStyledText();
+    defer text.deinit();
+
+    try text.append("Normal ", .{});
+    try text.append("red ", .{ .color = Color.red });
+    try text.append("underlined", .{ .decoration = .{ .underline = true } });
+
+    var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
+    _ = try doc.writeStyled(&region, &text, .{});
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // PDF should be valid
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(pdf.len > 100);
+}

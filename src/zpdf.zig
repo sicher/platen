@@ -90,6 +90,10 @@ pub const ColorStop = document.ColorStop;
 // Re-export OpenType features
 pub const opentype = document.opentype;
 
+// Re-export styled text types
+pub const StyledText = document.StyledText;
+pub const Span = document.Span;
+
 // ============================================================================
 // Units - all measurements in PDF are in points (1pt = 1/72 inch)
 // ============================================================================
@@ -136,4 +140,5 @@ test {
     _ = @import("testing.zig");
     _ = @import("integration_tests.zig");
     _ = @import("document_test.zig");
+    _ = @import("styled_text.zig");
 }

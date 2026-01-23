@@ -46,6 +46,7 @@ const test_cases = [_]TestCase{
     .{ .name = "text_decorations", .generate = generateTextDecorationsPdf },
     .{ .name = "text_style", .generate = generateTextStylePdf },
     .{ .name = "auto_height", .generate = generateAutoHeightPdf },
+    .{ .name = "styled_text", .generate = generateStyledTextPdf },
 };
 
 // ============================================================================
@@ -2451,6 +2452,190 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var y: f64 = 50;
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    _ = try doc.writeAt(50, y, "StyledText Builder Test");
+    y += 35;
+
+    try doc.setFont(.helvetica, 12);
+
+    // Section 1: Basic styled text
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "1. Basic Inline Styles");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("This sentence has ", .{});
+        try text.append("red text", .{ .color = zpdf.Color.red });
+        try text.append(", ", .{});
+        try text.append("blue text", .{ .color = zpdf.Color.blue });
+        try text.append(", and ", .{});
+        try text.append("green text", .{ .color = zpdf.Color.green });
+        try text.append(" inline.", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
+        _ = try doc.writeStyled(&region, &text, .{});
+        y += 35;
+    }
+
+    // Section 2: Decorations
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "2. Text Decorations");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("Normal, ", .{});
+        try text.append("underlined", .{ .decoration = .{ .underline = true } });
+        try text.append(", and ", .{});
+        try text.append("strikethrough", .{ .decoration = .{ .strikethrough = true } });
+        try text.append(" text.", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
+        _ = try doc.writeStyled(&region, &text, .{});
+        y += 35;
+    }
+
+    // Section 3: Combined color and decoration
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "3. Combined Styles");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("Mix ", .{});
+        try text.append("red underline", .{ .color = zpdf.Color.red, .decoration = .{ .underline = true } });
+        try text.append(" with ", .{});
+        try text.append("blue strikethrough", .{ .color = zpdf.Color.blue, .decoration = .{ .strikethrough = true } });
+        try text.append(" easily.", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
+        _ = try doc.writeStyled(&region, &text, .{});
+        y += 35;
+    }
+
+    // Section 4: Word wrapping with styles
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "4. Word Wrapping with Styles");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("The ", .{});
+        try text.append("quick brown", .{ .color = zpdf.Color.rgb(139, 69, 19) }); // brown
+        try text.append(" fox jumps over the ", .{});
+        try text.append("lazy", .{ .decoration = .{ .strikethrough = true } });
+        try text.append(" dog. This paragraph demonstrates that styled text wraps correctly across multiple lines while ", .{});
+        try text.append("preserving", .{ .color = zpdf.Color.red });
+        try text.append(" each word's ", .{});
+        try text.append("individual style", .{ .color = zpdf.Color.blue, .decoration = .{ .underline = true } });
+        try text.append(".", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+        _ = try doc.writeStyled(&region, &text, .{});
+        y += 80;
+    }
+
+    // Section 5: Justified styled text
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "5. Justified Alignment");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("Justified text spreads words evenly across each line, creating clean edges on both the left and right margins. This paragraph demonstrates how ", .{});
+        try text.append("styled text", .{ .color = zpdf.Color.navy });
+        try text.append(" with ", .{});
+        try text.append("inline formatting", .{ .decoration = .{ .underline = true } });
+        try text.append(" integrates seamlessly with justified alignment. The spacing between words is ", .{});
+        try text.append("automatically adjusted", .{ .color = zpdf.Color.maroon });
+        try text.append(" to fill each line completely, while preserving all the ", .{});
+        try text.append("color", .{ .color = zpdf.Color.teal });
+        try text.append(" and ", .{});
+        try text.append("decoration", .{ .decoration = .{ .strikethrough = true } });
+        try text.append(" attributes of each styled span.", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+        _ = try doc.writeStyled(&region, &text, .{ .alignment = .justify });
+        y += 110;
+    }
+
+    // Section 6: Centered styled text
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "6. Centered Alignment");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("Centered ", .{});
+        try text.append("styled", .{ .color = zpdf.Color.purple });
+        try text.append(" text", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 30 };
+        _ = try doc.writeStyled(&region, &text, .{ .alignment = .center });
+        y += 40;
+    }
+
+    // Section 7: Optimal line breaking
+    try doc.setFont(.helvetica_bold, 12);
+    _ = try doc.writeAt(50, y, "7. Optimal Line Breaking (Knuth-Plass)");
+    y += 20;
+
+    try doc.setFont(.helvetica, 12);
+    {
+        var text = doc.createStyledText();
+        defer text.deinit();
+
+        try text.append("This paragraph uses the ", .{});
+        try text.append("Knuth-Plass", .{ .color = zpdf.Color.teal });
+        try text.append(" optimal line breaking algorithm, which considers the ", .{});
+        try text.append("entire paragraph", .{ .decoration = .{ .underline = true } });
+        try text.append(" when deciding where to break lines. Unlike the greedy approach that fills each line as much as possible, this algorithm minimizes the total ", .{});
+        try text.append("badness", .{ .color = zpdf.Color.crimson });
+        try text.append(" across all lines, producing more ", .{});
+        try text.append("balanced", .{ .color = zpdf.Color.forestgreen });
+        try text.append(" and ", .{});
+        try text.append("aesthetically pleasing", .{ .decoration = .{ .underline = true } });
+        try text.append(" results. The difference is most noticeable in narrow columns where word lengths vary significantly.", .{});
+
+        var region = zpdf.Region{ .x = 50, .y = y, .width = 280, .height = 120 };
+        _ = try doc.writeStyled(&region, &text, .{
+            .alignment = .justify,
+            .line_breaking = .optimal,
+        });
+    }
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2580,6 +2765,11 @@ test "integration: text_style PDF" {
 test "integration: auto_height PDF" {
     // Tests box with height determined by text content
     try runIntegrationTest("auto_height", generateAutoHeightPdf);
+}
+
+test "integration: styled_text PDF" {
+    // Tests StyledText builder with inline styles, decorations, and alignment
+    try runIntegrationTest("styled_text", generateStyledTextPdf);
 }
 
 const TestOptions = struct {
