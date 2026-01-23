@@ -381,7 +381,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             try doc.setEmbeddedFont(charter, 10);
 
             // Left column - justified with optimal line breaking
-            var region = zpdf.TextBox{ .x = 50, .y = 50, .width = 230, .height = 700 };
+            var region = zpdf.Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
             _ = try doc.writeParagraph(&region, full_text, .{
                 .alignment = .justify,
                 .valign = .top,
@@ -389,7 +389,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             });
 
             // Right column - justified with optimal line breaking
-            region = zpdf.TextBox{ .x = 320, .y = 50, .width = 230, .height = 700 };
+            region = zpdf.Region{ .x = 320, .y = 50, .width = 230, .height = 700 };
             _ = try doc.writeParagraph(&region, full_text, .{
                 .alignment = .justify,
                 .valign = .top,

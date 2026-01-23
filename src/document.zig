@@ -52,7 +52,7 @@ pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
 pub const Point = layout.Point;
 pub const Rect = layout.Rect;
-pub const TextBox = layout.TextBox;
+pub const Region = layout.Region;
 pub const Destination = layout.Destination;
 pub const Outline = layout.Outline;
 pub const PageLabelStyle = layout.PageLabelStyle;
@@ -766,7 +766,7 @@ pub const Document = struct {
     }
 
     /// Returns a region for the current page respecting document margins.
-    pub fn getPageTextBox(self: *Document) TextBox {
+    pub fn getPageRegion(self: *Document) Region {
         return .{
             .x = self.margins.left,
             .y = self.margins.top,
@@ -1311,12 +1311,12 @@ pub const Document = struct {
 
     /// Writes a single line of text into a content area.
     /// Does not wrap text. Advances the cursor by one line height.
-    pub fn writeLine(self: *Document, area: *TextBox, str: []const u8, opts: LineOptions) !WriteResult {
+    pub fn writeLine(self: *Document, area: *Region, str: []const u8, opts: LineOptions) !WriteResult {
         return self.writeLineInternal(area, str, opts.alignment, opts.valign, 0);
     }
 
     /// Internal line writer with indent and valign support.
-    fn writeLineInternal(self: *Document, area: *TextBox, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
+    fn writeLineInternal(self: *Document, area: *Region, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
         const line_height = self.getLineHeightPts();
 
         // Rect calculation values
@@ -1398,7 +1398,7 @@ pub const Document = struct {
     /// Options:
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
     /// - wrap: If false, text stays on one line without wrapping (like writeLine)
-    pub fn write(self: *Document, region: *TextBox, str: []const u8, opts: WriteOptions) !WriteResult {
+    pub fn write(self: *Document, region: *Region, str: []const u8, opts: WriteOptions) !WriteResult {
         const line_height = self.getLineHeightPts();
         const ascender = self.getFontMetrics().ascender;
         const space_width = self.getTextWidth(" ");
@@ -1945,7 +1945,7 @@ pub const Document = struct {
 
     /// Writes wrapped text into a region.
     /// Supports word wrapping, soft-hyphen breaking, and optional hyphenated word breaking.
-    pub fn writeParagraph(self: *Document, region: *TextBox, str: []const u8, opts: ParagraphOptions) !WriteResult {
+    pub fn writeParagraph(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions) !WriteResult {
         const line_height = self.getLineHeightPts();
         const space_width = self.getTextWidth(" ");
         var lines_written: usize = 0;
@@ -2137,7 +2137,7 @@ pub const Document = struct {
     }
 
     /// Write paragraph using pre-computed optimal line breaks.
-    fn writeParagraphOptimal(self: *Document, region: *TextBox, str: []const u8, opts: ParagraphOptions, start_cursor_y: f64) !WriteResult {
+    fn writeParagraphOptimal(self: *Document, region: *Region, str: []const u8, opts: ParagraphOptions, start_cursor_y: f64) !WriteResult {
         const line_height = self.getLineHeightPts();
         const line_width = region.contentWidth() - opts.first_indent;
         const first_line_width = region.contentWidth() - opts.first_indent;
@@ -2237,7 +2237,7 @@ pub const Document = struct {
         while (remaining) |text_to_write| {
             if (text_to_write.len == 0) break;
 
-            var region = self.getPageTextBox();
+            var region = self.getPageRegion();
             const result = try self.writeParagraph(&region, text_to_write, .{
                 .alignment = opts.alignment,
                 .valign = opts.valign,
@@ -2259,7 +2259,7 @@ pub const Document = struct {
     }
 
     /// Draws a region's border and fill (without text).
-    pub fn drawTextBox(self: *Document, region: TextBox) !void {
+    pub fn drawRegion(self: *Document, region: Region) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];

@@ -103,7 +103,7 @@ pub const Destination = struct {
 };
 
 /// Styled text container with cursor tracking for text flow.
-pub const TextBox = struct {
+pub const Region = struct {
     /// Left edge x coordinate.
     x: f64,
     /// Top edge y coordinate (from page top).
@@ -124,38 +124,38 @@ pub const TextBox = struct {
     fill: ?Color = null,
 
     /// Returns remaining height in content area.
-    pub fn remainingHeight(self: TextBox) f64 {
+    pub fn remainingHeight(self: Region) f64 {
         return self.height - self.padding.top - self.padding.bottom - self.cursor_y;
     }
 
     /// Returns remaining width on current line.
-    pub fn remainingWidth(self: TextBox) f64 {
+    pub fn remainingWidth(self: Region) f64 {
         return self.contentWidth() - self.cursor_x;
     }
 
     /// Resets cursor to origin (0, 0). Useful after measure pass.
-    pub fn reset(self: *TextBox) void {
+    pub fn reset(self: *Region) void {
         self.cursor_x = 0;
         self.cursor_y = 0;
     }
 
     /// Returns usable width inside padding.
-    pub fn contentWidth(self: TextBox) f64 {
+    pub fn contentWidth(self: Region) f64 {
         return self.width - self.padding.left - self.padding.right;
     }
 
     /// Returns true if the given metrics fit in remaining space.
-    pub fn fits(self: TextBox, m: TextMetrics) bool {
+    pub fn fits(self: Region, m: TextMetrics) bool {
         return m.height <= self.remainingHeight();
     }
 
     /// Returns the bounds as a Rect.
-    pub fn toRect(self: TextBox) Rect {
+    pub fn toRect(self: Region) Rect {
         return .{ .x = self.x, .y = self.y, .width = self.width, .height = self.height };
     }
 
     /// Advances cursor to next line.
-    pub fn newLine(self: *TextBox, line_height: f64) void {
+    pub fn newLine(self: *Region, line_height: f64) void {
         self.cursor_x = 0;
         self.cursor_y += line_height;
     }

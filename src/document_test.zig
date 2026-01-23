@@ -8,7 +8,7 @@ const zpdf = @import("zpdf.zig");
 const Document = document.Document;
 const StandardFont = document.StandardFont;
 const PageSize = document.PageSize;
-const TextBox = document.TextBox;
+const Region = document.Region;
 const Border = document.Border;
 const Color = document.Color;
 
@@ -620,12 +620,12 @@ test "unit conversions" {
     try std.testing.expectApproxEqAbs(@as(f64, 28.35), cm(1), 0.01);
 }
 
-test "getPageTextBox respects margins" {
+test "getPageRegion respects margins" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     doc.setMargins(.{ .left = 50, .right = 50, .top = 100, .bottom = 100 });
-    const region = doc.getPageTextBox();
+    const region = doc.getPageRegion();
 
     try std.testing.expectEqual(@as(f64, 50), region.x);
     try std.testing.expectEqual(@as(f64, 100), region.y);
@@ -640,7 +640,7 @@ test "writeLine advances cursor" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = doc.getPageTextBox();
+    var region = doc.getPageRegion();
     const initial_cursor = region.cursor_y;
 
     _ = try doc.writeLine(&region, "Test line", .{});
@@ -656,7 +656,7 @@ test "writeLine alignment" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 100, .y = 100, .width = 400, .height = 600 };
+    var region = Region{ .x = 100, .y = 100, .width = 400, .height = 600 };
 
     // Test left alignment (default)
     _ = try doc.writeLine(&region, "Left", .{});
@@ -679,7 +679,7 @@ test "writeParagraph word wrapping" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 600 };
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 600 };
     const long_text = "This is a longer piece of text that should wrap across multiple lines within the region.";
 
     const result = try doc.writeParagraph(&region, long_text, .{});
@@ -696,8 +696,8 @@ test "writeParagraph overflow" {
     try doc.setFont(.helvetica, 12);
 
     // Small region - line height at 12pt with 1.2 factor = 14.4pt
-    // TextBox of 15pt should fit one line, but not two (would need 28.8pt)
-    var region = TextBox{ .x = 50, .y = 50, .width = 100, .height = 15 };
+    // Region of 15pt should fit one line, but not two (would need 28.8pt)
+    var region = Region{ .x = 50, .y = 50, .width = 100, .height = 15 };
     const long_text = "Word one two three four five six seven eight nine ten.";
 
     const result = try doc.writeParagraph(&region, long_text, .{});
@@ -727,13 +727,13 @@ test "writeFlow creates multiple pages" {
     try std.testing.expect(doc.pages.items.len > 1);
 }
 
-test "drawTextBox with border" {
+test "drawRegion with border" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(null);
 
-    const region = TextBox{
+    const region = Region{
         .x = 50,
         .y = 50,
         .width = 200,
@@ -741,7 +741,7 @@ test "drawTextBox with border" {
         .border = Border.all,
     };
 
-    try doc.drawTextBox(region);
+    try doc.drawRegion(region);
 
     // Verify page has commands (the raw drawing commands)
     try std.testing.expect(doc.pages.items[0].commands.items.len == 1);
@@ -754,13 +754,13 @@ test "drawTextBox with border" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "%%EOF") != null);
 }
 
-test "drawTextBox with fill" {
+test "drawRegion with fill" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(null);
 
-    const region = TextBox{
+    const region = Region{
         .x = 50,
         .y = 50,
         .width = 200,
@@ -768,7 +768,7 @@ test "drawTextBox with fill" {
         .fill = Color.red,
     };
 
-    try doc.drawTextBox(region);
+    try doc.drawRegion(region);
 
     // Verify page has commands (the raw drawing commands)
     try std.testing.expect(doc.pages.items[0].commands.items.len == 1);
@@ -873,7 +873,7 @@ test "soft-hyphen recursive breaking in narrow column" {
     // So with 26pt column, we should get: "in-", "com-", "pre-", "hen-", "si-", "ble"
 
     // 26pt column - wide enough for "com-" to fit
-    var region = TextBox{ .x = 72, .y = 100, .width = 26, .height = 200 };
+    var region = Region{ .x = 72, .y = 100, .width = 26, .height = 200 };
     const word = "in\xc2\xadcom\xc2\xadpre\xc2\xadhen\xc2\xadsi\xc2\xadble";
 
     const result = try doc.writeParagraph(&region, word, .{ .break_on_hyphens = false });
@@ -915,7 +915,7 @@ test "writeParagraph breaks at hyphens when enabled" {
     // Narrow region - forces "state-of-the-art" to break if hyphen breaking enabled
     // At 12pt Helvetica, "state-of-the-art" is about 86pt wide
     // Make region narrow enough to force a break
-    var region = TextBox{ .x = 50, .y = 50, .width = 70, .height = 200 };
+    var region = Region{ .x = 50, .y = 50, .width = 70, .height = 200 };
 
     const result = try doc.writeParagraph(&region, "state-of-the-art", .{ .break_on_hyphens = true });
 
@@ -930,9 +930,9 @@ test "writeParagraph keeps hyphenated words together when disabled" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    // TextBox wide enough for the word to fit on one line
+    // Region wide enough for the word to fit on one line
     // At 12pt Helvetica, "state-of-the-art" is about 86pt wide
-    var region = TextBox{ .x = 50, .y = 50, .width = 90, .height = 200 };
+    var region = Region{ .x = 50, .y = 50, .width = 90, .height = 200 };
 
     const result = try doc.writeParagraph(&region, "state-of-the-art", .{ .break_on_hyphens = false });
 
@@ -949,7 +949,7 @@ test "writeParagraph character-level wrapping for long words" {
 
     // Narrow region - long word without soft-hyphens will be character-wrapped
     // At 12pt Helvetica, "supercalifragilisticexpialidocious" is about 180pt wide
-    var region = TextBox{ .x = 50, .y = 50, .width = 60, .height = 200 };
+    var region = Region{ .x = 50, .y = 50, .width = 60, .height = 200 };
 
     const result = try doc.writeParagraph(&region, "supercalifragilisticexpialidocious", .{});
 
@@ -967,7 +967,7 @@ test "writeParagraph first line indent" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 200 };
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 200 };
     const text = "First line has indent. Second line does not.";
 
     _ = try doc.writeParagraph(&region, text, .{ .first_indent = 20 });
@@ -1002,8 +1002,8 @@ test "writeParagraph overflow returns remaining text" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    // TextBox that can only fit 2 lines (line height = 14.4pt at 12pt font)
-    var region = TextBox{ .x = 50, .y = 50, .width = 100, .height = 30 };
+    // Region that can only fit 2 lines (line height = 14.4pt at 12pt font)
+    var region = Region{ .x = 50, .y = 50, .width = 100, .height = 30 };
     const text = "Line one fits here. Line two fits too. Line three overflows. Line four too.";
 
     const result = try doc.writeParagraph(&region, text, .{});
@@ -1021,7 +1021,7 @@ test "writeParagraph newline forces line break" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 50, .width = 400, .height = 200 };
+    var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
     const text = "Line one.\nLine two.\nLine three.";
 
     const result = try doc.writeParagraph(&region, text, .{});
@@ -1038,7 +1038,7 @@ test "writeLine returns overflow for too-long text" {
     try doc.setFont(.helvetica, 12);
 
     // Small region that can only fit ~1 line
-    var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 15 };
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 15 };
 
     const result1 = try doc.writeLine(&region, "First line", .{});
     try std.testing.expectEqual(@as(usize, 1), result1.lines_written);
@@ -1057,8 +1057,8 @@ test "region padding affects content area" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    // TextBox with padding
-    var region = TextBox{
+    // Region with padding
+    var region = Region{
         .x = 50,
         .y = 50,
         .width = 200,
@@ -1118,7 +1118,7 @@ test "valign top puts baseline at cursor + font_size" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
     _ = try doc.writeLine(&region, "Test", .{ .valign = .top });
 
     const page = &doc.pages.items[0];
@@ -1138,7 +1138,7 @@ test "valign middle adjusts for leading" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
     _ = try doc.writeLine(&region, "Test", .{ .valign = .middle });
 
     const page = &doc.pages.items[0];
@@ -1159,7 +1159,7 @@ test "valign bottom puts baseline at cursor + line_height" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
     _ = try doc.writeLine(&region, "Test", .{ .valign = .bottom });
 
     const page = &doc.pages.items[0];
@@ -1187,12 +1187,12 @@ test "writeParagraph optimal line breaking" {
     const text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
 
     // Test greedy mode
-    var region_greedy = TextBox{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    var region_greedy = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     const greedy_result = try doc.writeParagraph(&region_greedy, text, .{ .line_breaking = .greedy });
 
     // Test optimal mode
     try doc.addPage(null);
-    var region_optimal = TextBox{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    var region_optimal = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     const optimal_result = try doc.writeParagraph(&region_optimal, text, .{ .line_breaking = .optimal });
 
     // Both should produce 7 lines for this text
@@ -1221,7 +1221,7 @@ test "writeParagraph optimal vs greedy produces different breaks" {
     const region_width = 101.0; // Just over 14 chars to ensure fit
     const text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
 
-    var region = TextBox{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    var region = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     _ = try doc.writeParagraph(&region, text, .{ .line_breaking = .greedy });
 
     // Get greedy text commands
@@ -1236,7 +1236,7 @@ test "writeParagraph optimal vs greedy produces different breaks" {
 
     // Now optimal
     try doc.addPage(null);
-    var region2 = TextBox{ .x = 0, .y = 0, .width = region_width, .height = 500 };
+    var region2 = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     _ = try doc.writeParagraph(&region2, text, .{ .line_breaking = .optimal });
 
     var optimal_lines = std.ArrayListUnmanaged([]const u8){};
@@ -1321,7 +1321,7 @@ test "measureWrappedText matches writeParagraph line count" {
     const metrics = doc.measureWrappedText(text, .{ .width = width });
 
     // Actually render
-    var region = TextBox{ .x = 0, .y = 0, .width = width, .height = 1000 };
+    var region = Region{ .x = 0, .y = 0, .width = width, .height = 1000 };
     const result = try doc.writeParagraph(&region, text, .{});
 
     try std.testing.expectEqual(result.lines_written, metrics.line_count);
@@ -1397,7 +1397,7 @@ test "measureWrappedText auto_height scenario" {
 
     // Create box with measured height + padding
     const box_height = metrics.height + 2 * box_padding;
-    var region = TextBox{
+    var region = Region{
         .x = 50,
         .y = 80,
         .width = box_width,
@@ -2364,7 +2364,7 @@ test "write() advances cursor_x" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 50, .width = 300, .height = 100 };
+    var region = Region{ .x = 50, .y = 50, .width = 300, .height = 100 };
 
     try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
     try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
@@ -2385,7 +2385,7 @@ test "write() wraps to next line" {
     try doc.setFont(.helvetica, 12);
 
     // Narrow region to force wrapping
-    var region = TextBox{ .x = 50, .y = 50, .width = 60, .height = 100 };
+    var region = Region{ .x = 50, .y = 50, .width = 60, .height = 100 };
 
     // "Hello World" won't fit on one 60pt line (Hello ~27pt, World ~31pt, space ~3pt)
     _ = try doc.write(&region, "Hello World", .{});
@@ -2401,7 +2401,7 @@ test "write() with multiple styled chunks" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 50, .width = 300, .height = 100 };
+    var region = Region{ .x = 50, .y = 50, .width = 300, .height = 100 };
 
     doc.setTextStyle(.{});
     _ = try doc.write(&region, "Normal ", .{});
@@ -2429,7 +2429,7 @@ test "write() returns overflow when region is full" {
     try doc.setFont(.helvetica, 12);
 
     // Very small region - only fits one line
-    var region = TextBox{ .x = 50, .y = 50, .width = 100, .height = 15 };
+    var region = Region{ .x = 50, .y = 50, .width = 100, .height = 15 };
 
     const result = try doc.write(&region, "This is a long text that will overflow the small region", .{});
 
@@ -2437,8 +2437,8 @@ test "write() returns overflow when region is full" {
     try std.testing.expect(result.overflow != null);
 }
 
-test "TextBox.newLine resets cursor_x and advances cursor_y" {
-    var region = TextBox{ .x = 50, .y = 50, .width = 300, .height = 100 };
+test "Region.newLine resets cursor_x and advances cursor_y" {
+    var region = Region{ .x = 50, .y = 50, .width = 300, .height = 100 };
     region.cursor_x = 150;
     region.cursor_y = 20;
 
@@ -2455,7 +2455,7 @@ test "write() with measure_only tracks cursor without rendering" {
     try doc.addPage(null);
     try doc.setFont(.helvetica, 12);
 
-    var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 100 };
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
 
     // Measure pass - cursor should advance but no text rendered
     _ = try doc.write(&region, "Hello ", .{ .measure_only = true });
@@ -2485,7 +2485,7 @@ test "write() with wrap=false stays on one line" {
     try doc.setFont(.helvetica, 12);
 
     // Narrow region that would normally wrap
-    var region = TextBox{ .x = 50, .y = 50, .width = 60, .height = 100 };
+    var region = Region{ .x = 50, .y = 50, .width = 60, .height = 100 };
 
     _ = try doc.write(&region, "Hello World Test", .{ .wrap = false });
 
