@@ -216,11 +216,22 @@ pub const Font = struct {
         if (data.len < 30) return null;
 
         // OS/2 table layout (relevant fields):
+        // 0-2: version (u16)
         // 26-28: yStrikeoutSize (i16)
         // 28-30: yStrikeoutPosition (i16)
+        // 88-90: sCapHeight (i16) - only in version 2+
+
+        // sCapHeight is at offset 88, requires version >= 2 and enough data
+        const version = readU16(data, 0);
+        const cap_height: i16 = if (version >= 2 and data.len >= 90)
+            readI16(data, 88)
+        else
+            0; // Will be estimated from ascent if 0
+
         return Os2Table{
             .strikeout_size = readI16(data, 26),
             .strikeout_position = readI16(data, 28),
+            .cap_height = cap_height,
         };
     }
 
@@ -413,10 +424,11 @@ pub const PostTable = struct {
     underline_thickness: i16,
 };
 
-/// 'OS/2' table - OS/2 and Windows metrics (strikethrough metrics)
+/// 'OS/2' table - OS/2 and Windows metrics
 pub const Os2Table = struct {
     strikeout_size: i16,
     strikeout_position: i16,
+    cap_height: i16, // sCapHeight - height of capital letters (0 if not available)
 };
 
 /// Parse cmap table to look up a glyph ID

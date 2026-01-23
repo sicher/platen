@@ -16,14 +16,16 @@ pub const TextMetrics = struct {
 /// Font metrics scaled to a specific font size (in points).
 /// All values are in points at the given font size.
 pub const FontMetrics = struct {
-    /// Distance from baseline to top of tallest glyph (positive, in points)
+    /// Typographic ascender line (hhea.ascent, positive, in points)
     ascender: f64,
-    /// Distance from baseline to bottom of lowest glyph (negative, in points)
+    /// Typographic descender line (hhea.descent, negative, in points)
     descender: f64,
     /// Height of capital letters (in points)
     cap_height: f64,
     /// Height of lowercase 'x' (in points, estimated if not available)
     x_height: f64,
+    /// Highest point of any glyph (head.yMax, for top alignment)
+    y_max: f64,
     /// The font size these metrics are scaled to
     font_size: f64,
     /// Units per em in the original font (useful for advanced calculations)

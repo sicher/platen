@@ -1971,10 +1971,115 @@ def gen_auto_height():
     print("  auto_height.pdf")
 
 
+def gen_valign():
+    """Test vertical alignment of text within boxes (top, middle, bottom) with different fonts."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Register fonts
+    pdf.add_font("Inter", "", "test/fonts/Inter/Inter-Regular.ttf")
+    pdf.add_font("Gentium", "", "test/fonts/Gentium/Gentium-Regular.ttf")
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "Vertical Alignment Test")
+
+    # Common settings
+    box_width = 150
+    box_height = 120
+    padding = 8
+    font_size = 11
+    line_height = font_size * 1.2
+    content_width = box_width - 2 * padding
+
+    # Sample text that will wrap to multiple lines
+    sample_text = ("The quick brown fox jumps over the lazy dog. "
+                   "Pack my box with five dozen liquor jugs.")
+
+    valigns = [
+        ("Top (valign=T)", "top"),
+        ("Middle (valign=M)", "middle"),
+        ("Bottom (valign=B)", "bottom"),
+    ]
+
+    fonts = [
+        ("Helvetica", "Helvetica (built-in):"),
+        ("Inter", "Inter (embedded):"),
+        ("Gentium", "Gentium (embedded):"),
+    ]
+
+    for row, (font_name, font_label) in enumerate(fonts):
+        y = 60 + row * 150
+
+        # Row label
+        pdf.set_font("Helvetica", "B", size=12)
+        pdf.text(50, y - 15, font_label)
+
+        # Set font and calculate line count for this font
+        pdf.set_font(font_name, "", size=font_size)
+        words = sample_text.split()
+        lines = []
+        current_line = ""
+        for word in words:
+            test_line = f"{current_line} {word}".strip()
+            if pdf.get_string_width(test_line) <= content_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+
+        num_lines = len(lines)
+        text_height = num_lines * line_height
+
+        for i, (label, valign) in enumerate(valigns):
+            x = 50 + i * (box_width + 20)
+
+            # Draw label above box
+            pdf.set_font("Helvetica", "B", size=10)
+            pdf.text(x, y - 5, label)
+
+            # Draw box border
+            pdf.set_draw_color(0, 0, 0)
+            pdf.set_line_width(0.5)
+            pdf.rect(x, y, box_width, box_height, style="D")
+
+            # Draw alignment guide lines (before text)
+            pdf.set_line_width(0.3)
+            # Red line at top padding edge
+            pdf.set_draw_color(255, 0, 0)
+            pdf.line(x, y + padding, x + box_width, y + padding)
+            # Blue line at center
+            pdf.set_draw_color(0, 0, 255)
+            pdf.line(x, y + box_height / 2, x + box_width, y + box_height / 2)
+            # Green line at bottom padding edge
+            pdf.set_draw_color(0, 180, 0)
+            pdf.line(x, y + box_height - padding, x + box_width, y + box_height - padding)
+
+            # Calculate text Y position based on valign
+            if valign == "top":
+                text_y = y + padding
+            elif valign == "middle":
+                text_y = y + (box_height - text_height) / 2
+            else:  # bottom
+                text_y = y + box_height - text_height - padding
+
+            # Draw the text
+            pdf.set_font(font_name, "", size=font_size)
+            pdf.set_xy(x + padding, text_y)
+            pdf.multi_cell(w=content_width, h=line_height, text=sample_text, align="L")
+
+    pdf.output(OUTPUT_DIR / "valign.pdf")
+    print("  valign.pdf")
+
+
 GENERATORS = {
     "text_decorations": gen_text_decorations,
     "text_style": gen_text_style,
     "auto_height": gen_auto_height,
+    "valign": gen_valign,
     "outlines": gen_outlines,
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,

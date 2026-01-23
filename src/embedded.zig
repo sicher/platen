@@ -152,8 +152,8 @@ pub const EmbeddedFont = struct {
     strikeout_position: i16, // Distance above baseline
     strikeout_size: i16,
 
-    // Encoding mode
-    encoding: FontEncoding = .win_ansi,
+    // Encoding mode (identity preserves composite glyphs and supports full Unicode)
+    encoding: FontEncoding = .identity,
 
     // Subsetting support (WinAnsi mode)
     used_chars: [256]bool = [_]bool{false} ** 256, // Track which WinAnsi chars are used
@@ -228,9 +228,14 @@ pub const EmbeddedFont = struct {
         const ascent: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(hhea.ascent)) * scale));
         const descent: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(hhea.descent)) * scale));
 
-        // Estimate CapHeight as 70% of ascent if not available
-        // (Would need OS/2 table for accurate value)
-        const cap_height: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(ascent)) * 0.7));
+        // Get CapHeight from OS/2 table if available, otherwise estimate as 70% of ascent
+        const cap_height: i16 = if (font.os2) |os2| blk: {
+            if (os2.cap_height > 0) {
+                break :blk @intFromFloat(@round(@as(f64, @floatFromInt(os2.cap_height)) * scale));
+            } else {
+                break :blk @intFromFloat(@round(@as(f64, @floatFromInt(ascent)) * 0.7));
+            }
+        } else @intFromFloat(@round(@as(f64, @floatFromInt(ascent)) * 0.7));
 
         // Scale bounding box
         const bbox: [4]i16 = .{
@@ -801,8 +806,45 @@ pub const EmbeddedFont = struct {
         return self.widths[char];
     }
 
-    /// Get text width in points
+    /// Get text width in points.
+    /// For identity encoding, decodes UTF-8 and uses actual glyph widths.
+    /// For WinAnsi encoding, uses byte-indexed width table.
     pub fn measureTextWidth(self: *const EmbeddedFont, text: []const u8, size: f64) f64 {
+        if (self.encoding == .identity) {
+            // Identity encoding: decode UTF-8 and sum actual glyph widths
+            var total: u32 = 0;
+            var i: usize = 0;
+            while (i < text.len) {
+                const byte = text[i];
+                if (byte < 0x80) {
+                    // ASCII: direct glyph lookup
+                    if (self.font.getCharWidth(@intCast(byte))) |w| {
+                        // Scale from font units to 1/1000 em
+                        const units_per_em = self.font.head.?.units_per_em;
+                        total += @intFromFloat(@round(@as(f64, @floatFromInt(w)) * 1000.0 / @as(f64, @floatFromInt(units_per_em))));
+                    }
+                    i += 1;
+                } else {
+                    // Multi-byte UTF-8
+                    const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
+                    if (i + len > text.len) break;
+
+                    const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
+                        i += 1;
+                        continue;
+                    };
+
+                    if (self.font.getCharWidth(codepoint)) |w| {
+                        const units_per_em = self.font.head.?.units_per_em;
+                        total += @intFromFloat(@round(@as(f64, @floatFromInt(w)) * 1000.0 / @as(f64, @floatFromInt(units_per_em))));
+                    }
+                    i += len;
+                }
+            }
+            return @as(f64, @floatFromInt(total)) * size / 1000.0;
+        }
+
+        // WinAnsi encoding: use byte-indexed width table
         var total: u32 = 0;
         for (text) |c| {
             total += self.widths[c];

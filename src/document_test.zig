@@ -392,6 +392,7 @@ test "render text with embedded font" {
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    font.encoding = .win_ansi; // Test WinAnsi format specifically
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
@@ -426,6 +427,7 @@ test "mix standard and embedded fonts" {
     defer doc.deinit();
 
     const courier_prime = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    courier_prime.encoding = .win_ansi; // Test WinAnsi format specifically
 
     try doc.addPage();
 
@@ -458,7 +460,9 @@ test "multiple embedded fonts" {
     defer doc.deinit();
 
     const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    courier_regular.encoding = .win_ansi; // Test WinAnsi format specifically
     const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf");
+    courier_bold.encoding = .win_ansi;
 
     try doc.addPage();
 
@@ -493,6 +497,7 @@ test "embedded font on multiple pages" {
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    font.encoding = .win_ansi; // Test WinAnsi format specifically
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
@@ -547,6 +552,7 @@ test "embedded font widths array in PDF" {
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    font.encoding = .win_ansi; // Test WinAnsi format specifically
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
@@ -1078,7 +1084,7 @@ test "writeStyled respects margins via region" {
     }
 }
 
-test "valign top puts baseline at cursor + ascender" {
+test "valign top uses CSS-style half-leading calculation" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1094,15 +1100,18 @@ test "valign top puts baseline at cursor + ascender" {
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
         if (cmd == .text) {
-            // Helvetica ascender = 0.718 * 12 = 8.616
-            // top-down y = region.y + cursor_y(0) + ascender(8.616) = 108.616
-            // PDF y = page_height(841.89) - 108.616 = 733.274
-            try std.testing.expectApproxEqAbs(@as(f64, 733.274), cmd.text.y, 0.1);
+            // CSS-style valign: baseline = cursor_y + (line_height + ascender - descender) / 2
+            // Helvetica: ascender = 0.718 * 12 = 8.616, descender = 0.207 * 12 = 2.484
+            // line_height = 12 * 1.2 = 14.4
+            // baseline = 0 + (14.4 + 8.616 - 2.484) / 2 = 10.266
+            // top-down y = region.y(100) + baseline(10.266) = 110.266
+            // PDF y = page_height(841.89) - 110.266 = 731.624
+            try std.testing.expectApproxEqAbs(@as(f64, 731.62), cmd.text.y, 0.1);
         }
     }
 }
 
-test "valign middle centers text in line height" {
+test "valign middle centers text block in region" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1118,15 +1127,14 @@ test "valign middle centers text in line height" {
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
         if (cmd == .text) {
-            // line_height = 12 * 1.2 = 14.4, ascender = 8.616
-            // top-down y = region.y + cursor_y(0) + line_height/2 + ascender/2 = 100 + 7.2 + 4.308 = 111.508
-            // PDF y = page_height(841.89) - 111.508 = 730.382
-            try std.testing.expectApproxEqAbs(@as(f64, 730.382), cmd.text.y, 0.1);
+            // Block-level middle valign centers text in region, then uses CSS-style .top
+            // PDF y ≈ 637.17 (with CSS-style half-leading calculation)
+            try std.testing.expectApproxEqAbs(@as(f64, 637.17), cmd.text.y, 0.1);
         }
     }
 }
 
-test "valign bottom puts baseline at cursor + line_height" {
+test "valign bottom puts text block at bottom of region" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1142,9 +1150,11 @@ test "valign bottom puts baseline at cursor + line_height" {
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
         if (cmd == .text) {
-            // top-down y = region.y + cursor_y(0) + line_height(14.4) = 114.4
-            // PDF y = page_height(841.89) - 114.4 = 727.49
-            try std.testing.expectApproxEqAbs(@as(f64, 727.49), cmd.text.y, 0.1);
+            // Block-level bottom valign + .bottom per-line positioning (baseline flush)
+            // text_height = 14.4, available = 200, block_offset = 200 - 14.4 - 0.1 = 185.5
+            // per-line .bottom: baseline = region.y(100) + cursor_y(185.5) + line_height(14.4) = 299.9
+            // PDF y = 841.89 - 299.9 = 541.99
+            try std.testing.expectApproxEqAbs(@as(f64, 541.99), cmd.text.y, 0.1);
         }
     }
 }

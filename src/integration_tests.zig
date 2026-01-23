@@ -8,6 +8,14 @@ const zpdf = @import("zpdf.zig");
 const testing = @import("testing.zig");
 const embedded = @import("embedded.zig");
 
+/// Helper to write plain text using writeStyled (replaces writeParagraph)
+fn writeText(doc: *zpdf.Document, region: *zpdf.Region, text: []const u8, opts: zpdf.ParagraphOptions) !zpdf.WriteResult {
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append(text, .{});
+    return doc.writeStyled(region, &st, opts);
+}
+
 /// Reference test case
 const TestCase = struct {
     name: []const u8,
@@ -144,16 +152,24 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    // Load font families
+    // Load font families (use win_ansi to match fpdf2 reference)
     const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    courier_regular.encoding = .win_ansi;
     const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf");
+    courier_bold.encoding = .win_ansi;
     const courier_italic = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Italic.ttf");
+    courier_italic.encoding = .win_ansi;
     const courier_bold_italic = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold Italic.ttf");
+    courier_bold_italic.encoding = .win_ansi;
 
     const charter_regular = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
+    charter_regular.encoding = .win_ansi;
     const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
+    charter_bold.encoding = .win_ansi;
     const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf");
+    charter_italic.encoding = .win_ansi;
     const charter_bold_italic = try doc.loadFont("test/fonts/Charter/Charter Bold Italic.ttf");
+    charter_bold_italic.encoding = .win_ansi;
 
     try doc.addPage();
     var y: f64 = 50;
@@ -603,21 +619,21 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "A\xcc\x80a\xcc\x80 A\xcc\x81a\xcc\x81 A\xcc\x82a\xcc\x82 A\xcc\x83a\xcc\x83 A\xcc\x84a\xcc\x84");
     try doc.setEmbeddedFont(gentium, 9);
     var region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "grave, acute, circumflex, tilde, macron", .{});
+    _ = try writeText(&doc, &region, "grave, acute, circumflex, tilde, macron", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // breve, dot above, diaeresis, hook above, ring above
     _ = try doc.writeAt(50, y, "A\xcc\x86a\xcc\x86 A\xcc\x87a\xcc\x87 A\xcc\x88a\xcc\x88 A\xcc\x89a\xcc\x89 A\xcc\x8aa\xcc\x8a");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "breve, dot above, diaeresis, hook above, ring above", .{});
+    _ = try writeText(&doc, &region, "breve, dot above, diaeresis, hook above, ring above", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // double acute, caron, double grave
     _ = try doc.writeAt(50, y, "A\xcc\x8ba\xcc\x8b A\xcc\x8ca\xcc\x8c A\xcc\x8fa\xcc\x8f O\xcc\x8bo\xcc\x8b O\xcc\x8co\xcc\x8c");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "double acute, caron, double grave (Hungarian, Czech)", .{});
+    _ = try writeText(&doc, &region, "double acute, caron, double grave (Hungarian, Czech)", .{});
     y += 20;
 
     // --- Combining Marks (Below) ---
@@ -629,14 +645,14 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "C\xcc\xa7c\xcc\xa7 S\xcc\xa7s\xcc\xa7 A\xcc\xa8a\xcc\xa8 E\xcc\xa8e\xcc\xa8 A\xcc\xa3a\xcc\xa3");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "cedilla (French, Turkish), ogonek (Polish), dot below (Vietnamese)", .{});
+    _ = try writeText(&doc, &region, "cedilla (French, Turkish), ogonek (Polish), dot below (Vietnamese)", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // macron below, line below, ring below
     _ = try doc.writeAt(50, y, "A\xcc\xb1a\xcc\xb1 A\xcc\xb2a\xcc\xb2 A\xcc\xa5a\xcc\xa5 O\xcc\xa3o\xcc\xa3 U\xcc\xa3u\xcc\xa3");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "macron below, line below, ring below, more dot below", .{});
+    _ = try writeText(&doc, &region, "macron below, line below, ring below, more dot below", .{});
     y += 20;
 
     // --- Stacked Diacritics (Vietnamese style) ---
@@ -648,14 +664,14 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "A\xcc\x82\xcc\x81a\xcc\x82\xcc\x81 E\xcc\x82\xcc\x80e\xcc\x82\xcc\x80 O\xcc\x82\xcc\x89o\xcc\x82\xcc\x89 A\xcc\x82\xcc\x83a\xcc\x82\xcc\x83");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "circumflex + acute, grave, hook above, tilde (Vietnamese vowels)", .{});
+    _ = try writeText(&doc, &region, "circumflex + acute, grave, hook above, tilde (Vietnamese vowels)", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // breve + tone, horn + tone (precomposed)
     _ = try doc.writeAt(50, y, "A\xcc\x86\xcc\x81a\xcc\x86\xcc\x81 A\xcc\x86\xcc\x80a\xcc\x86\xcc\x80 \xe1\xbb\x9a\xe1\xbb\x9b \xe1\xbb\x9c\xe1\xbb\x9d \xe1\xbb\xa8\xe1\xbb\xa9 \xe1\xbb\xaa\xe1\xbb\xab");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "breve+tone (combining), horn+tone (precomposed: Ớờ Ứừ)", .{});
+    _ = try writeText(&doc, &region, "breve+tone (combining), horn+tone (precomposed: Ớờ Ứừ)", .{});
     y += 20;
 
     // --- Above + Below Combinations ---
@@ -667,14 +683,14 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "S\xcc\xa7\xcc\x81s\xcc\xa7\xcc\x81 C\xcc\xa7\xcc\x82c\xcc\xa7\xcc\x82 T\xcc\xa7\xcc\x83t\xcc\xa7\xcc\x83");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "cedilla combined with acute, circumflex, tilde above", .{});
+    _ = try writeText(&doc, &region, "cedilla combined with acute, circumflex, tilde above", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // ogonek + above marks
     _ = try doc.writeAt(50, y, "A\xcc\xa8\xcc\x84a\xcc\xa8\xcc\x84 E\xcc\xa8\xcc\x81e\xcc\xa8\xcc\x81 O\xcc\xa3\xcc\x82o\xcc\xa3\xcc\x82");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "ogonek + macron, ogonek + acute, dot below + circumflex", .{});
+    _ = try writeText(&doc, &region, "ogonek + macron, ogonek + acute, dot below + circumflex", .{});
     y += 20;
 
     // --- Precomposed Characters ---
@@ -686,14 +702,14 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "\xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x83\xc3\xa3 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Precomposed Latin letters with grave, acute, circumflex, tilde", .{});
+    _ = try writeText(&doc, &region, "Precomposed Latin letters with grave, acute, circumflex, tilde", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // Vietnamese precomposed
     _ = try doc.writeAt(50, y, "\xe1\xba\xa0\xe1\xba\xa1 \xe1\xba\xa2\xe1\xba\xa3 \xe1\xba\xa4\xe1\xba\xa5 \xc6\xa0\xc6\xa1 \xc6\xaf\xc6\xb0");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Vietnamese precomposed: A with dot, hook, circumflex+acute, horn", .{});
+    _ = try writeText(&doc, &region, "Vietnamese precomposed: A with dot, hook, circumflex+acute, horn", .{});
     y += 20;
 
     // --- Latin Extended (Ogonek, Cedilla, Caron) ---
@@ -705,14 +721,14 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "\xc4\x84\xc4\x85 \xc4\x98\xc4\x99 \xc4\xae\xc4\xaf \xc5\xb2\xc5\xb3");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Polish: A, E, I, U with ogonek", .{});
+    _ = try writeText(&doc, &region, "Polish: A, E, I, U with ogonek", .{});
     y += 17;
     try doc.setEmbeddedFont(gentium, 13);
     // Turkish/Romanian cedilla, Czech caron
     _ = try doc.writeAt(50, y, "\xc5\x9e\xc5\x9f \xc5\xa2\xc5\xa3 \xc4\x8e\xc4\x8f \xc4\xbd\xc4\xbe \xc5\xa4\xc5\xa5 \xc5\x87\xc5\x88");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Turkish/Romanian cedilla; Czech/Slovak caron", .{});
+    _ = try writeText(&doc, &region, "Turkish/Romanian cedilla; Czech/Slovak caron", .{});
     y += 20;
 
     // --- Multiple Diacritics Stress Test ---
@@ -724,7 +740,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "A\xcc\xa3\xcc\x82\xcc\x81a\xcc\xa3\xcc\x82\xcc\x81 E\xcc\xa8\xcc\x84\xcc\x87e\xcc\xa8\xcc\x84\xcc\x87 O\xcc\xa7\xcc\x83\xcc\x8ao\xcc\xa7\xcc\x83\xcc\x8a");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 40 };
-    _ = try doc.writeParagraph(&region, "dot below + circumflex + acute; ogonek + macron + dot above; cedilla + tilde + ring", .{});
+    _ = try writeText(&doc, &region, "dot below + circumflex + acute; ogonek + macron + dot above; cedilla + tilde + ring", .{});
     y += 22;
 
     // --- Sample Text in Various Languages ---
@@ -735,25 +751,25 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "Ti\xe1\xba\xbfng Vi\xe1\xbb\x87t: X\xc3\xa3 h\xe1\xbb\x99i ch\xe1\xbb\xa7 ngh\xc4\xa9a Vi\xe1\xbb\x87t Nam");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Vietnamese with stacked diacritics and horn", .{});
+    _ = try writeText(&doc, &region, "Vietnamese with stacked diacritics and horn", .{});
     y += 15;
     try doc.setEmbeddedFont(gentium, 11);
     _ = try doc.writeAt(50, y, "Polski: Zwy\xc5\xbc\xc4\x87 \xc5\x82\xc3\xb3dki\xc4\x99 sta\xc5\x84cie\xc4\x87 \xc5\xbcmij\xc4\x85");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Polish with ogonek, kreska, overdot", .{});
+    _ = try writeText(&doc, &region, "Polish with ogonek, kreska, overdot", .{});
     y += 15;
     try doc.setEmbeddedFont(gentium, 11);
     _ = try doc.writeAt(50, y, "T\xc3\xbcrk\xc3\xa7e: \xc3\x87al\xc4\xb1\xc5\x9fkan \xc3\xb6\xc4\x9frenciler");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "Turkish with cedilla, dotless i, breve", .{});
+    _ = try writeText(&doc, &region, "Turkish with cedilla, dotless i, breve", .{});
     y += 15;
     try doc.setEmbeddedFont(gentium_italic, 11);
     _ = try doc.writeAt(50, y, "Fran\xc3\xa7ais: L'\xc3\xa9l\xc3\xa8ve na\xc3\xaff re\xc3\xa7oit");
     try doc.setEmbeddedFont(gentium, 9);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try doc.writeParagraph(&region, "French with cedilla, accents, diaeresis", .{});
+    _ = try writeText(&doc, &region, "French with cedilla, accents, diaeresis", .{});
     y += 18;
 
     // --- Font Styles ---
@@ -943,13 +959,13 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(72, y, "Word Wrapping Test:");
     y += 14.4;
 
-    // Use writeParagraph with valign: .middle for fpdf2-compatible positioning
+    // Use writeStyled with valign: .middle for fpdf2-compatible positioning
     try doc.setFont(.helvetica, 11);
     var region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = 200 };
     const paragraph1 = "This is a test paragraph that demonstrates word wrapping. " ++
         "The text should automatically wrap to fit within the region width. " ++
         "Long words like supercalifragilisticexpialidocious should also be handled.";
-    _ = try doc.writeParagraph(&region, paragraph1, .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph1, .{ .valign = .middle, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Demo 1: Regular hyphens - compound words stay together (100pt column)
@@ -963,7 +979,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     // With break_on_hyphens=false, the compound word stays intact
     region = zpdf.Region{ .x = 72, .y = y, .width = 100, .height = 60 };
     const paragraph2a = "Look: state-of-the-art works.";
-    _ = try doc.writeParagraph(&region, paragraph2a, .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph2a, .{ .valign = .middle, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Demo 2: Soft-hyphens - word breaks at soft-hyphen point (26pt column)
@@ -977,7 +993,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     region = zpdf.Region{ .x = 72, .y = y, .width = 26, .height = 80 };
     // Word has soft-hyphens: in­com­pre­hen­si­ble
     const paragraph2b = "in\xc2\xadcom\xc2\xadpre\xc2\xadhen\xc2\xadsi\xc2\xadble";
-    _ = try doc.writeParagraph(&region, paragraph2b, .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph2b, .{ .valign = .middle, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Demo 3: Character wrap - long word without soft-hyphens in narrow column
@@ -989,7 +1005,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     // "supercalifragilisticexpialidocious" is ~155pt at 11pt, won't fit in 50pt
     // Without soft-hyphens, it overflows the line (character-level handling)
     region = zpdf.Region{ .x = 72, .y = y, .width = 50, .height = 80 };
-    _ = try doc.writeParagraph(&region, "supercalifragilisticexpialidocious", .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, "supercalifragilisticexpialidocious", .{ .valign = .middle, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Centered paragraph section
@@ -1001,7 +1017,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = 100 };
     const paragraph3 = "This paragraph is center aligned. Each line of text " ++
         "will be centered within the region width.";
-    _ = try doc.writeParagraph(&region, paragraph3, .{ .alignment = .center, .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph3, .{ .alignment = .center, .valign = .middle, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Overflow test - small region that forces overflow
@@ -1014,7 +1030,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     region = zpdf.Region{ .x = 72, .y = y, .width = 150, .height = 30 };
     const overflow_text = "Line one fits here. Line two fits here. " ++
         "Line three overflows. Line four overflows.";
-    const result = try doc.writeParagraph(&region, overflow_text, .{ .valign = .middle, .break_on_hyphens = false });
+    const result = try writeText(&doc, &region, overflow_text, .{ .valign = .middle, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Show what overflowed
@@ -1049,7 +1065,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.setFont(.helvetica, 11);
     // fpdf2 uses set_xy(x, y+5), so we set cursor_y = 5 to match
     boxed_region.cursor_y = 5;
-    _ = try doc.writeParagraph(&boxed_region, "This text is inside a bordered region with a light gray background fill.", .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &boxed_region, "This text is inside a bordered region with a light gray background fill.", .{ .valign = .middle, .break_on_hyphens = false });
 
     return doc.output();
 }
@@ -1083,7 +1099,12 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         "Justified text creates clean edges on both sides of a text block, which many " ++
         "readers find visually appealing. However, it can create uneven spacing between " ++
         "words, especially in narrow columns. The last line is typically left-aligned.";
-    _ = try doc.writeParagraph(&region, text1, .{ .alignment = .justify, .valign = .middle, .break_on_hyphens = false });
+    {
+        var st = doc.createStyledText();
+        defer st.deinit();
+        try st.append(text1, .{});
+        _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify, .break_on_hyphens = false });
+    }
     y = region.y + region.cursor_y + 16;
 
     // Test 2: Narrow column justified (more lines)
@@ -1097,7 +1118,12 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         "Each line must stretch to fill the available width, which can create " ++
         "noticeable gaps between words. Good typography balances readability with " ++
         "visual appeal. The spacing should be even across the paragraph.";
-    _ = try doc.writeParagraph(&region, text2, .{ .alignment = .justify, .valign = .middle, .break_on_hyphens = false });
+    {
+        var st = doc.createStyledText();
+        defer st.deinit();
+        try st.append(text2, .{});
+        _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify, .break_on_hyphens = false });
+    }
     y = region.y + region.cursor_y + 16;
 
     // Test 3: Compare left vs justify with same long text
@@ -1111,7 +1137,12 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
 
     try doc.setFont(.helvetica, 11);
     region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-    _ = try doc.writeParagraph(&region, compare_text, .{ .alignment = .left, .valign = .middle, .break_on_hyphens = false });
+    {
+        var st = doc.createStyledText();
+        defer st.deinit();
+        try st.append(compare_text, .{});
+        _ = try doc.writeStyled(&region, &st, .{ .alignment = .left, .break_on_hyphens = false });
+    }
     y = region.y + region.cursor_y + 12;
 
     try doc.setFont(.helvetica_bold, 11);
@@ -1120,7 +1151,12 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
 
     try doc.setFont(.helvetica, 11);
     region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-    _ = try doc.writeParagraph(&region, compare_text, .{ .alignment = .justify, .valign = .middle, .break_on_hyphens = false });
+    {
+        var st = doc.createStyledText();
+        defer st.deinit();
+        try st.append(compare_text, .{});
+        _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify, .break_on_hyphens = false });
+    }
 
     return doc.output();
 }
@@ -1165,8 +1201,8 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.setFont(.courier, 12);
     var mono_greedy = zpdf.Region{ .x = 50, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
     var mono_optimal = zpdf.Region{ .x = 180, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
-    _ = try doc.writeParagraph(&mono_greedy, mono_text, .{ .line_breaking = .greedy });
-    _ = try doc.writeParagraph(&mono_optimal, mono_text, .{ .line_breaking = .optimal });
+    _ = try writeText(&doc, &mono_greedy, mono_text, .{ .line_breaking = .greedy });
+    _ = try writeText(&doc, &mono_optimal, mono_text, .{ .line_breaking = .optimal });
     try doc.drawRegion(mono_greedy);
     try doc.drawRegion(mono_optimal);
 
@@ -1201,12 +1237,12 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     // Left column - Greedy
     try doc.setFont(.times_roman, 10);
     var left_col = zpdf.Region{ .x = left_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
-    _ = try doc.writeParagraph(&left_col, lorem, .{ .line_breaking = .greedy, .alignment = .justify });
+    _ = try writeText(&doc, &left_col, lorem, .{ .line_breaking = .greedy, .alignment = .justify });
     try doc.drawRegion(left_col);
 
     // Right column - Optimal
     var right_col = zpdf.Region{ .x = right_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
-    _ = try doc.writeParagraph(&right_col, lorem, .{ .line_breaking = .optimal, .alignment = .justify });
+    _ = try writeText(&doc, &right_col, lorem, .{ .line_breaking = .optimal, .alignment = .justify });
     try doc.drawRegion(right_col);
 
     return doc.output();
@@ -2641,6 +2677,94 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Load embedded fonts (identity encoding is now default)
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
+
+    try doc.addPage();
+
+    // Title
+    try doc.setFont(.helvetica_bold, 16);
+    _ = try doc.writeAt(50, 30, "Vertical Alignment Test");
+
+    // Common settings
+    const box_width: f64 = 150;
+    const box_height: f64 = 120;
+    const padding: f64 = 8;
+
+    const sample_text = "The quick brown fox jumps over the lazy dog. " ++
+        "Pack my box with five dozen liquor jugs.";
+
+    const valigns = [_]struct { label: []const u8, valign: zpdf.VAlign }{
+        .{ .label = "Top (valign=T)", .valign = .top },
+        .{ .label = "Middle (valign=M)", .valign = .middle },
+        .{ .label = "Bottom (valign=B)", .valign = .bottom },
+    };
+
+    // Font configurations: null means use built-in Helvetica
+    const FontConfig = struct { embedded: ?*zpdf.EmbeddedFont, label: []const u8 };
+    const fonts = [_]FontConfig{
+        .{ .embedded = null, .label = "Helvetica (built-in):" },
+        .{ .embedded = inter, .label = "Inter (embedded):" },
+        .{ .embedded = gentium, .label = "Gentium (embedded):" },
+    };
+
+    for (fonts, 0..) |f, row| {
+        const y = 60 + @as(f64, @floatFromInt(row)) * 150;
+
+        // Row label
+        try doc.setFont(.helvetica_bold, 12);
+        _ = try doc.writeAt(50, y - 15, f.label);
+
+        for (valigns, 0..) |v, i| {
+            const x = 50 + @as(f64, @floatFromInt(i)) * (box_width + 20);
+
+            // Draw label above box
+            try doc.setFont(.helvetica_bold, 10);
+            _ = try doc.writeAt(x, y - 5, v.label);
+
+            // Draw box border
+            doc.setDrawStyle(.{ .line_width = 0.5, .stroke_color = zpdf.Color.black });
+            try doc.drawRect(x, y, box_width, box_height, .stroke);
+
+            // Draw alignment guide lines (before text)
+            doc.setDrawStyle(.{ .line_width = 0.3, .stroke_color = zpdf.Color.red });
+            try doc.drawLine(x, y + padding, x + box_width, y + padding);
+            doc.setDrawStyle(.{ .line_width = 0.3, .stroke_color = zpdf.Color.blue });
+            try doc.drawLine(x, y + box_height / 2, x + box_width, y + box_height / 2);
+            doc.setDrawStyle(.{ .line_width = 0.3, .stroke_color = zpdf.Color.rgb(0, 180, 0) });
+            try doc.drawLine(x, y + box_height - padding, x + box_width, y + box_height - padding);
+
+            // Set font (built-in or embedded)
+            if (f.embedded) |emb| {
+                try doc.setEmbeddedFont(emb, 11);
+            } else {
+                try doc.setFont(.helvetica, 11);
+            }
+
+            // Write text inside with valign
+            var st = doc.createStyledText();
+            defer st.deinit();
+            try st.append(sample_text, .{});
+
+            var region = zpdf.Region{
+                .x = x,
+                .y = y,
+                .width = box_width,
+                .height = box_height,
+                .padding = .{ .left = padding, .right = padding, .top = padding, .bottom = padding },
+            };
+            _ = try doc.writeStyled(&region, &st, .{ .valign = v.valign });
+        }
+    }
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2678,7 +2802,7 @@ test "integration: opentype_features PDF" {
 }
 
 test "integration: text_flow PDF" {
-    // Tests Text Flow API: regions, margins, writeParagraph, drawRegion
+    // Tests Text Flow API: regions, margins, writeStyled, drawRegion
     try runIntegrationTest("text_flow", generateTextFlowPdf);
 }
 
@@ -2777,6 +2901,11 @@ test "integration: styled_text PDF" {
     try runIntegrationTest("styled_text", generateStyledTextPdf);
 }
 
+test "integration: valign PDF" {
+    // Tests vertical text alignment (top, middle, bottom) in boxes
+    try runIntegrationTest("valign", generateValignPdf);
+}
+
 const TestOptions = struct {
     skip_fonts: bool = false,
 };
@@ -2834,3 +2963,31 @@ fn runIntegrationTestWithOptions(
 // Export test cases for CLI use
 pub const cases = test_cases;
 pub const Case = TestCase;
+
+test "debug: font metrics" {
+    const allocator = std.testing.allocator;
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Built-in font
+    try doc.setFont(.helvetica, 11);
+    const hm = doc.getFontMetrics();
+    std.debug.print("\nHelvetica 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ hm.ascender, hm.y_max, hm.cap_height });
+
+    // Embedded fonts
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    try doc.setEmbeddedFont(inter, 11);
+    const im = doc.getFontMetrics();
+    std.debug.print("Inter 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ im.ascender, im.y_max, im.cap_height });
+
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
+    try doc.setEmbeddedFont(gentium, 11);
+    const gm = doc.getFontMetrics();
+    std.debug.print("Gentium 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ gm.ascender, gm.y_max, gm.cap_height });
+
+    // What y position would .top valign give?
+    // region.y=60, padding.top=8, cursor_y=0
+    const top_y_helvetica = 60 + 8 + 0 + hm.ascender;
+    const top_y_inter = 60 + 8 + 0 + im.ascender;
+    std.debug.print("Top valign baseline y: Helvetica={d:.2}, Inter={d:.2}\n", .{ top_y_helvetica, top_y_inter });
+}
