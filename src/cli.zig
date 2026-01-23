@@ -190,7 +190,7 @@ fn generateTestPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -204,7 +204,7 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Hello, World!");
 
@@ -235,7 +235,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         return;
     };
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title with standard font
     try doc.setFont(.helvetica_bold, 24);
@@ -274,7 +274,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     _ = try doc.writeAt(50, 380, "Line 3: Consectetur adipiscing elit.");
 
     // Page 2 - stress test
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Page 2: Extended Character Test");
 
@@ -341,7 +341,7 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     };
     font.encoding = .identity; // Enable CID mode
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Just a few characters to test subsetting
     try doc.setEmbeddedFont(font, 24);
@@ -391,7 +391,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     font.setFeature(.mark, true);
     font.setFeature(.mkmk, true);
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 30;
 
     try doc.setEmbeddedFont(font, 24);
@@ -467,7 +467,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     font_no_calt.encoding = .identity;
     font_no_calt.setFeature(.calt, false);
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 30;
 
     try doc.setEmbeddedFont(font, 24);
@@ -553,7 +553,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -568,7 +568,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     doc.setDrawStyle(.{
         .stroke_color = zpdf.Color.blue,
-        .fill_color = zpdf.Color.fromRgb255(200, 200, 255),
+        .fill_color = zpdf.Color.rgb(200, 200, 255),
         .line_width = 2,
     });
 
@@ -589,7 +589,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     doc.setDrawStyle(.{
         .stroke_color = zpdf.Color.red,
-        .fill_color = zpdf.Color.fromRgb255(255, 200, 200),
+        .fill_color = zpdf.Color.rgb(255, 200, 200),
     });
 
     var bezier = doc.createPath();
@@ -609,7 +609,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 15;
 
     doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.fromRgb255(200, 0, 0),
+        .stroke_color = zpdf.Color.rgb(200, 0, 0),
         .fill_color = zpdf.Color.red,
     });
 
@@ -630,7 +630,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 15;
 
     doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.fromRgb255(0, 128, 0),
+        .stroke_color = zpdf.Color.rgb(0, 128, 0),
         .line_width = 3,
     });
 
@@ -657,7 +657,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -690,8 +690,8 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 15;
 
     const lin_stops2 = [_]zpdf.ColorStop{
-        .{ .offset = 0.0, .color = zpdf.Color.fromRgb255(255, 255, 0) },
-        .{ .offset = 1.0, .color = zpdf.Color.fromRgb255(0, 128, 0) },
+        .{ .offset = 0.0, .color = zpdf.Color.rgb(255, 255, 0) },
+        .{ .offset = 1.0, .color = zpdf.Color.rgb(0, 128, 0) },
     };
     const grad2 = try doc.addLinearGradient(.{
         .x0 = 50,
@@ -730,7 +730,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     const rad_stops = [_]zpdf.ColorStop{
         .{ .offset = 0.0, .color = zpdf.Color.white },
-        .{ .offset = 1.0, .color = zpdf.Color.fromRgb255(0, 0, 128) },
+        .{ .offset = 1.0, .color = zpdf.Color.rgb(0, 0, 128) },
     };
     const grad4 = try doc.addRadialGradient(.{
         .x0 = 150,
@@ -764,7 +764,7 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .creator = "zpdf CLI tool",
     });
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     try doc.setFont(.helvetica_bold, 24);
     _ = try doc.writeAt(50, 50, "Document with Metadata");

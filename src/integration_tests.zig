@@ -55,14 +55,14 @@ const test_cases = [_]TestCase{
 fn generateMinimalPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage(null);
+    try doc.addPage();
     return doc.output();
 }
 
 fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Hello, World!");
     return doc.output();
@@ -71,7 +71,7 @@ fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
 fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage(null);
+    try doc.addPage();
 
     try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(50, 50, "Helvetica Normal");
@@ -91,7 +91,7 @@ fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
 fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
-    try doc.addPage(null);
+    try doc.addPage();
 
     const fonts = [_]zpdf.StandardFont{
         .helvetica,
@@ -124,15 +124,15 @@ fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Page 1");
 
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Page 2");
 
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(50, 50, "Page 3");
 
@@ -154,7 +154,7 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf");
     const charter_bold_italic = try doc.loadFont("test/fonts/Charter/Charter Bold Italic.ttf");
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 50;
 
     // Large title
@@ -244,7 +244,7 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     courier.encoding = .identity;
     courier.setFeature(.kern, false);
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 50;
 
     // Title (using CID font)
@@ -357,7 +357,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_ss01.encoding = .identity;
     inter_ss01.setFeature(.ss01, true);
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 32;
 
     // ===== Title =====
@@ -582,7 +582,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf");
     gentium_italic.encoding = .identity;
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 32;
     const desc_x: f64 = 280; // Right column for descriptions
     const desc_width: f64 = 270; // Width of description region
@@ -798,7 +798,7 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_bold.encoding = .identity;
     inter_bold.setFeature(.kern, false);
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 25;
 
     // Title
@@ -909,7 +909,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     // Set margins (1 inch = 72pt)
     doc.setMargins(.{ .left = 72, .right = 72, .top = 72, .bottom = 72 });
 
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 16);
 
     // Title - matches fpdf2 text() positioning
@@ -1041,7 +1041,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
         .width = region_width,
         .height = 60,
         .border = zpdf.Border.all,
-        .fill = zpdf.Color.fromRgb(0.95, 0.95, 0.95),
+        .fill = zpdf.Color.rgbf(0.95, 0.95, 0.95),
     };
     try doc.drawRegion(boxed_region);
 
@@ -1057,7 +1057,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 50;
 
     // Title
@@ -1128,7 +1128,7 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 40;
 
     // Title
@@ -1210,7 +1210,7 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
     var y: f64 = 50;
 
     // Title
@@ -1240,12 +1240,12 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 20;
 
     // Gray text (using grayscale) - 128/255 = 0.502
-    doc.setTextColor(zpdf.Color.grayscale(128.0 / 255.0));
+    doc.setTextColor(zpdf.Color.greyscale(128.0 / 255.0));
     _ = try doc.writeAt(50, y, "Gray text (50% gray)");
     y += 20;
 
     // Custom color (orange) - RGB 255, 165, 0
-    doc.setTextColor(zpdf.Color.fromRgb255(255, 165, 0));
+    doc.setTextColor(zpdf.Color.rgb(255, 165, 0));
     _ = try doc.writeAt(50, y, "Orange text (RGB: 255, 165, 0)");
     y += 20;
 
@@ -1272,7 +1272,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1317,12 +1317,12 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawRect(50, y, 60, 30, .stroke);
 
     // Fill only
-    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(200, 200, 255) });
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.rgb(200, 200, 255) });
     try doc.drawRect(130, y, 60, 30, .fill);
 
     // Fill and stroke
     doc.setDrawStyle(.{
-        .fill_color = zpdf.Color.fromRgb255(255, 200, 200),
+        .fill_color = zpdf.Color.rgb(255, 200, 200),
         .stroke_color = zpdf.Color.red,
         .line_width = 2,
     });
@@ -1341,12 +1341,12 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawRoundedRect(50, y, 60, 30, 5, .stroke);
 
     // Medium radius
-    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(255, 230, 200) });
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.rgb(255, 230, 200) });
     try doc.drawRoundedRect(130, y, 60, 30, 10, .fill);
 
     // Large radius (pill shape) - use 14 not 15 to avoid fpdf2 edge case bug
     doc.setDrawStyle(.{
-        .fill_color = zpdf.Color.fromRgb255(200, 230, 255),
+        .fill_color = zpdf.Color.rgb(200, 230, 255),
         .stroke_color = zpdf.Color.blue,
         .line_width = 2,
     });
@@ -1366,13 +1366,13 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawCircle(80, y + 25, 25, .stroke);
 
     // Filled circle
-    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(200, 255, 200) });
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.rgb(200, 255, 200) });
     try doc.drawCircle(160, y + 25, 25, .fill);
 
     // Fill and stroke
     doc.setDrawStyle(.{
-        .fill_color = zpdf.Color.fromRgb255(255, 255, 200),
-        .stroke_color = zpdf.Color.fromRgb255(0, 128, 0),
+        .fill_color = zpdf.Color.rgb(255, 255, 200),
+        .stroke_color = zpdf.Color.rgb(0, 128, 0),
         .line_width = 2,
     });
     try doc.drawCircle(240, y + 25, 25, .fill_stroke);
@@ -1391,11 +1391,11 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawEllipse(80, y + 20, 40, 20, .stroke);
 
     // Vertical ellipse
-    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(255, 200, 255) });
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.rgb(255, 200, 255) });
     try doc.drawEllipse(180, y + 20, 20, 30, .fill_stroke);
 
     // Large ellipse
-    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(200, 255, 255) });
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.rgb(200, 255, 255) });
     try doc.drawEllipse(280, y + 20, 50, 20, .fill);
     y += 55;
 
@@ -1414,7 +1414,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawPolygon(&triangle, .stroke);
 
     // Square
-    doc.setDrawStyle(.{ .fill_color = zpdf.Color.fromRgb255(255, 220, 180) });
+    doc.setDrawStyle(.{ .fill_color = zpdf.Color.rgb(255, 220, 180) });
     const square = [_]zpdf.Point{
         .{ .x = 140, .y = y },
         .{ .x = 180, .y = y },
@@ -1437,8 +1437,8 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
         };
     }
     doc.setDrawStyle(.{
-        .fill_color = zpdf.Color.fromRgb255(220, 220, 255),
-        .stroke_color = zpdf.Color.fromRgb255(100, 100, 200),
+        .fill_color = zpdf.Color.rgb(220, 220, 255),
+        .stroke_color = zpdf.Color.rgb(100, 100, 200),
         .line_width = 2,
     });
     try doc.drawPolygon(&pentagon, .fill_stroke);
@@ -1450,7 +1450,7 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1482,7 +1482,7 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1520,7 +1520,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1534,8 +1534,8 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.fromRgb255(0, 0, 255),
-        .fill_color = zpdf.Color.fromRgb255(200, 200, 255),
+        .stroke_color = zpdf.Color.rgb(0, 0, 255),
+        .fill_color = zpdf.Color.rgb(200, 200, 255),
         .line_width = 2,
     });
     var path = doc.createPath();
@@ -1554,8 +1554,8 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.fromRgb255(255, 0, 0),
-        .fill_color = zpdf.Color.fromRgb255(255, 200, 200),
+        .stroke_color = zpdf.Color.rgb(255, 0, 0),
+        .fill_color = zpdf.Color.rgb(255, 200, 200),
         .line_width = 2,
     });
     var bezier = doc.createPath();
@@ -1572,8 +1572,8 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.fromRgb255(200, 0, 0),
-        .fill_color = zpdf.Color.fromRgb255(255, 0, 0),
+        .stroke_color = zpdf.Color.rgb(200, 0, 0),
+        .fill_color = zpdf.Color.rgb(255, 0, 0),
     });
     const hx: f64 = 140;
     const hy: f64 = y + 30;
@@ -1600,7 +1600,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.fromRgb255(0, 128, 0),
+        .stroke_color = zpdf.Color.rgb(0, 128, 0),
         .line_width = 3,
     });
     var zigzag = doc.createPath();
@@ -1621,7 +1621,7 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -1640,8 +1640,8 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .x1 = 250,
         .y1 = y,
         .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 0, 0) },
-            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 0, 255) },
+            .{ .offset = 0, .color = zpdf.Color.rgb(255, 0, 0) },
+            .{ .offset = 1, .color = zpdf.Color.rgb(0, 0, 255) },
         },
     });
     try doc.fillRectGradient(50, y, 200, 50, grad1);
@@ -1658,8 +1658,8 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .x1 = 50,
         .y1 = y + 50,
         .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 255, 0) },
-            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 128, 0) },
+            .{ .offset = 0, .color = zpdf.Color.rgb(255, 255, 0) },
+            .{ .offset = 1, .color = zpdf.Color.rgb(0, 128, 0) },
         },
     });
     try doc.fillRectGradient(50, y, 200, 50, grad2);
@@ -1676,9 +1676,9 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .x1 = 250,
         .y1 = y,
         .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 0, 0) },
-            .{ .offset = 0.5, .color = zpdf.Color.fromRgb255(255, 255, 255) },
-            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 0, 255) },
+            .{ .offset = 0, .color = zpdf.Color.rgb(255, 0, 0) },
+            .{ .offset = 0.5, .color = zpdf.Color.rgb(255, 255, 255) },
+            .{ .offset = 1, .color = zpdf.Color.rgb(0, 0, 255) },
         },
     });
     try doc.fillRectGradient(50, y, 200, 50, grad3);
@@ -1697,8 +1697,8 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .y1 = y + 40,
         .r1 = 60,
         .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.fromRgb255(255, 255, 255) },
-            .{ .offset = 1, .color = zpdf.Color.fromRgb255(0, 0, 128) },
+            .{ .offset = 0, .color = zpdf.Color.rgb(255, 255, 255) },
+            .{ .offset = 1, .color = zpdf.Color.rgb(0, 0, 128) },
         },
         .extend_after = false,
     });
@@ -1712,7 +1712,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Page 1: A4 portrait (default)
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 1: A4 Portrait (595 x 842)");
     try doc.setFont(.helvetica, 12);
@@ -1723,7 +1723,8 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 2: A4 landscape
-    try doc.addPage(zpdf.PageSize.A4.landscape());
+    doc.setPageSize(zpdf.PageSize.A4.landscape());
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 2: A4 Landscape (842 x 595)");
     try doc.setFont(.helvetica, 12);
@@ -1733,7 +1734,8 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 3: Letter portrait
-    try doc.addPage(zpdf.PageSize.Letter);
+    doc.setPageSize(zpdf.PageSize.Letter);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 3: Letter Portrait (612 x 792)");
     try doc.setFont(.helvetica, 12);
@@ -1743,7 +1745,8 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 4: Letter landscape
-    try doc.addPage(zpdf.PageSize.Letter.landscape());
+    doc.setPageSize(zpdf.PageSize.Letter.landscape());
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 4: Letter Landscape (792 x 612)");
     try doc.setFont(.helvetica, 12);
@@ -1753,7 +1756,8 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 100, buf[0..len]);
 
     // Page 5: Custom size
-    try doc.addPage(.{ .width = 400, .height = 300 });
+    doc.setPageSize(.{ .width = 400, .height = 300 });
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(50, 50, "Page 5: Custom (400 x 300)");
     try doc.setFont(.helvetica, 12);
@@ -1769,7 +1773,7 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 14);
@@ -1979,7 +1983,7 @@ fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -2004,7 +2008,7 @@ fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -2025,7 +2029,7 @@ fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 16);
@@ -2052,7 +2056,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Page 1: Table of Contents with internal links
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 24);
     _ = try doc.writeAt(50, 50, "Table of Contents");
 
@@ -2079,7 +2083,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, y, "Click on the entries above to navigate.");
 
     // Page 2: Chapter 1
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Chapter 1: Introduction");
 
@@ -2093,7 +2097,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addLink(back1, dest_toc);
 
     // Page 3: Chapter 2
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setFont(.helvetica_bold, 18);
     _ = try doc.writeAt(50, 50, "Chapter 2: Getting Started");
 
@@ -2113,7 +2117,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Page 1: Title (front matter - roman numeral i)
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
     const title_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Title Page", title_dest, null);
@@ -2123,7 +2127,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(220, 350, "A Sample Book");
 
     // Page 2: Preface (front matter - roman numeral ii)
-    try doc.addPage(null);
+    try doc.addPage();
     const preface_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Preface", preface_dest, null);
     try doc.setFont(.helvetica_bold, 18);
@@ -2132,7 +2136,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "This is the preface of the document.");
 
     // Page 3: Chapter 1 (body - decimal 1)
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
     const ch1_dest = doc.currentDestination().?;
     const ch1 = try doc.addOutlineItem("Chapter 1: Introduction", ch1_dest, null);
@@ -2142,7 +2146,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "Welcome to the introduction chapter.");
 
     // Page 4: Section 1.1 (body - decimal 2)
-    try doc.addPage(null);
+    try doc.addPage();
     const sec11_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Section 1.1: Background", sec11_dest, ch1);
     try doc.setFont(.helvetica_bold, 14);
@@ -2151,7 +2155,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "Some background information.");
 
     // Page 5: Section 1.2 (body - decimal 3)
-    try doc.addPage(null);
+    try doc.addPage();
     const sec12_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Section 1.2: Overview", sec12_dest, ch1);
     try doc.setFont(.helvetica_bold, 14);
@@ -2160,7 +2164,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "An overview of the topic.");
 
     // Page 6: Chapter 2 (body - decimal 4)
-    try doc.addPage(null);
+    try doc.addPage();
     const ch2_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Chapter 2: Details", ch2_dest, null);
     try doc.setFont(.helvetica_bold, 18);
@@ -2169,7 +2173,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(50, 80, "This chapter contains detailed information.");
 
     // Page 7: Appendix A (appendix - A-1)
-    try doc.addPage(null);
+    try doc.addPage();
     try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
     const app_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Appendix A: References", app_dest, null);
@@ -2185,7 +2189,7 @@ fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     var y: f64 = 50;
     const line_height: f64 = 30;
@@ -2262,7 +2266,7 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     var y: f64 = 50;
     const line_height: f64 = 25;
@@ -2279,15 +2283,15 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     y += line_height;
 
     // Color only
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(1, 0, 0) });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(1, 0, 0) });
     _ = try doc.writeAt(50, y, "Red text");
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0.5, 0) });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0.5, 0) });
     _ = try doc.writeAt(50, y, "Green text");
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0, 1) });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 1) });
     _ = try doc.writeAt(50, y, "Blue text");
     y += line_height + 10;
 
@@ -2301,15 +2305,15 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     y += line_height + 10;
 
     // Color + decoration combined
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(1, 0, 0), .decoration = .{ .underline = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(1, 0, 0), .decoration = .{ .underline = true } });
     _ = try doc.writeAt(50, y, "Red underlined");
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0, 1), .decoration = .{ .strikethrough = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 1), .decoration = .{ .strikethrough = true } });
     _ = try doc.writeAt(50, y, "Blue strikethrough");
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
     _ = try doc.writeAt(50, y, "Purple with both decorations");
     y += line_height + 10;
 
@@ -2319,11 +2323,11 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     y += line_height;
 
     // Grayscale colors
-    doc.setTextStyle(.{ .color = zpdf.Color.grayscale(0.5) });
+    doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.5) });
     _ = try doc.writeAt(50, y, "50% gray text");
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.grayscale(0.3), .decoration = .{ .underline = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.3), .decoration = .{ .underline = true } });
     _ = try doc.writeAt(50, y, "30% gray underlined");
     y += line_height + 20;
 
@@ -2345,7 +2349,7 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
         .y = box_y,
         .width = box_width,
         .height = box_height,
-        .fill = zpdf.Color.fromRgb(0.95, 0.95, 0.95),
+        .fill = zpdf.Color.rgbf(0.95, 0.95, 0.95),
         .border = .{ .top = true, .bottom = true, .left = true, .right = true },
     });
 
@@ -2364,7 +2368,7 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     doc.setTextStyle(.{});
     _ = try doc.write(&region, "The ", .{});
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0.6, 0.3, 0) }); // brown
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.6, 0.3, 0) }); // brown
     _ = try doc.write(&region, "quick brown fox ", .{});
 
     doc.setTextStyle(.{ .decoration = .{ .underline = true } });
@@ -2373,25 +2377,25 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     doc.setTextStyle(.{});
     _ = try doc.write(&region, "over the ", .{});
 
-    doc.setTextStyle(.{ .color = zpdf.Color.grayscale(0.5), .decoration = .{ .strikethrough = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } });
     _ = try doc.write(&region, "lazy ", .{});
 
     doc.setTextStyle(.{});
     _ = try doc.write(&region, "dog, demonstrating how ", .{});
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0, 0.8) });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 0.8) });
     _ = try doc.write(&region, "different ", .{});
 
     doc.setTextStyle(.{});
     _ = try doc.write(&region, "words can have ", .{});
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0.8, 0, 0), .decoration = .{ .underline = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } });
     _ = try doc.write(&region, "unique colors ", .{});
 
     doc.setTextStyle(.{});
     _ = try doc.write(&region, "and ", .{});
 
-    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0.5, 0), .decoration = .{ .strikethrough = true } });
+    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } });
     _ = try doc.write(&region, "decorations ", .{});
 
     doc.setTextStyle(.{});
@@ -2404,7 +2408,7 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage(null);
+    try doc.addPage();
 
     // Title
     try doc.setFont(.helvetica_bold, 14);
@@ -2430,7 +2434,7 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
         .y = box_y,
         .width = box_width,
         .height = box_height,
-        .fill = zpdf.Color.fromRgb(0.9, 0.95, 1.0),
+        .fill = zpdf.Color.rgbf(0.9, 0.95, 1.0),
         .border = .{ .top = true, .bottom = true, .left = true, .right = true },
     });
 

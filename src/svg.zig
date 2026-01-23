@@ -1880,7 +1880,7 @@ fn namedColor(name: []const u8) ?Color {
 
     // Look up from shared CSS/SVG color definitions (148 colors)
     const css_color = color_module.Color.fromName(name) orelse return null;
-    const rgb = css_color.toRgb255();
+    const rgb = css_color.toRgb();
     return Color{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
 }
 

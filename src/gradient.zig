@@ -115,8 +115,8 @@ pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
 
     if (stops.len == 2) {
         // Simple 2-color: Type 2 exponential interpolation
-        const c0 = stops[0].color.toRgb();
-        const c1 = stops[1].color.toRgb();
+        const c0 = stops[0].color.toRgbf();
+        const c1 = stops[1].color.toRgbf();
         try writer.print(
             \\<<
             \\/FunctionType 2
@@ -134,8 +134,8 @@ pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
         // Functions array (inline Type 2 functions)
         try writer.writeAll("/Functions [\n");
         for (0..stops.len - 1) |i| {
-            const c0 = stops[i].color.toRgb();
-            const c1 = stops[i + 1].color.toRgb();
+            const c0 = stops[i].color.toRgbf();
+            const c1 = stops[i + 1].color.toRgbf();
             try writer.print(
                 \\<< /FunctionType 2 /Domain [0 1] /C0 [{d:.3} {d:.3} {d:.3}] /C1 [{d:.3} {d:.3} {d:.3}] /N 1 >>
                 \\
