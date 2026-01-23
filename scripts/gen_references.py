@@ -26,6 +26,8 @@ from pathlib import Path
 # correct references. These must be manually maintained from zpdf output.
 EXCLUDED_TESTS = {
     "inter_fonts",  # fpdf2 doesn't apply Inter's <=> → ⇔ ligature
+    "text_style",   # Uses zpdf's write() API for inline-styled flowing text
+    "auto_height",  # zpdf positions text one line_height below padding; fpdf2 differs
 }
 
 SCRIPT_DIR = Path(__file__).parent
@@ -1700,7 +1702,279 @@ def gen_outlines():
     print("  outlines.pdf")
 
 
+def gen_text_decorations():
+    """Text decorations: underline and strikethrough."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    y = 50
+    line_height = 30
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=18)
+    pdf.text(50, y, "Text Decorations Test")
+    y += 40
+
+    # Normal text (no decoration)
+    pdf.set_font("Helvetica", "", size=14)
+    pdf.text(50, y, "Normal text (no decoration)")
+    y += line_height
+
+    # Underlined text
+    pdf.set_font("Helvetica", "U", size=14)
+    pdf.text(50, y, "Underlined text")
+    y += line_height
+
+    # Strikethrough text
+    pdf.set_font("Helvetica", "S", size=14)
+    pdf.text(50, y, "Strikethrough text")
+    y += line_height
+
+    # Both underline and strikethrough
+    pdf.set_font("Helvetica", "US", size=14)
+    pdf.text(50, y, "Both underline and strikethrough")
+    y += 50
+
+    # Different font sizes
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, y, "Different font sizes:")
+    y += 25
+
+    pdf.set_font("Helvetica", "U", size=10)
+    pdf.text(50, y, "10pt underlined")
+    y += 20
+
+    pdf.set_font("Helvetica", "U", size=14)
+    pdf.text(50, y, "14pt underlined")
+    y += 25
+
+    pdf.set_font("Helvetica", "U", size=20)
+    pdf.text(50, y, "20pt underlined")
+    y += 40
+
+    # Different fonts
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, y, "Different fonts:")
+    y += 25
+
+    pdf.set_font("Helvetica", "U", size=12)
+    pdf.text(50, y, "Helvetica underlined")
+    y += 20
+
+    pdf.set_font("Times", "U", size=12)
+    pdf.text(50, y, "Times Roman underlined")
+    y += 20
+
+    pdf.set_font("Courier", "U", size=12)
+    pdf.text(50, y, "Courier underlined")
+
+    pdf.output(OUTPUT_DIR / "text_decorations.pdf")
+    print("  text_decorations.pdf")
+
+
+def gen_text_style():
+    """Text style API: setTextStyle with color and decoration combinations."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    y = 50
+    line_height = 25
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=18)
+    pdf.text(50, y, "Text Style Test")
+    y += 40
+
+    pdf.set_font("Helvetica", "", size=14)
+
+    # Default style (black, no decoration)
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(50, y, "Default style (black, no decoration)")
+    y += line_height
+
+    # Color only
+    pdf.set_text_color(255, 0, 0)  # Red
+    pdf.text(50, y, "Red text")
+    y += line_height
+
+    pdf.set_text_color(0, 128, 0)  # Green (0.5 * 255 = 127.5 ≈ 128)
+    pdf.text(50, y, "Green text")
+    y += line_height
+
+    pdf.set_text_color(0, 0, 255)  # Blue
+    pdf.text(50, y, "Blue text")
+    y += line_height + 10
+
+    # Decoration only (black)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "U", size=14)  # Underline
+    pdf.text(50, y, "Underlined (black)")
+    y += line_height
+
+    pdf.set_font("Helvetica", "S", size=14)  # Strikethrough
+    pdf.text(50, y, "Strikethrough (black)")
+    y += line_height + 10
+
+    # Color + decoration combined
+    pdf.set_text_color(255, 0, 0)  # Red
+    pdf.set_font("Helvetica", "U", size=14)
+    pdf.text(50, y, "Red underlined")
+    y += line_height
+
+    pdf.set_text_color(0, 0, 255)  # Blue
+    pdf.set_font("Helvetica", "S", size=14)
+    pdf.text(50, y, "Blue strikethrough")
+    y += line_height
+
+    pdf.set_text_color(128, 0, 128)  # Purple (0.5 * 255 = 127.5 ≈ 128)
+    pdf.set_font("Helvetica", "US", size=14)  # Both
+    pdf.text(50, y, "Purple with both decorations")
+    y += line_height + 10
+
+    # Reset and verify
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", size=14)
+    pdf.text(50, y, "Reset to defaults")
+    y += line_height
+
+    # Grayscale colors
+    pdf.set_text_color(128)  # 50% gray
+    pdf.text(50, y, "50% gray text")
+    y += line_height
+
+    pdf.set_text_color(77)  # 30% gray (0.3 * 255 = 76.5 ≈ 77)
+    pdf.set_font("Helvetica", "U", size=14)
+    pdf.text(50, y, "30% gray underlined")
+    y += line_height + 20
+
+    # Styled text box - manual word positioning with inline styles
+    pdf.set_font("Helvetica", "B", size=12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(50, y, "Styled Text in Box (using write()):")
+    y += 20
+
+    # Draw a bordered box with light gray fill
+    box_x = 50
+    box_y = y
+    box_width = 400
+    box_height = 80
+    padding = 10
+
+    pdf.set_fill_color(242, 242, 242)  # 0.95 * 255 = 242
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(1)
+    pdf.rect(box_x, box_y, box_width, box_height, style="FD")
+
+    # Write styled text inside the box - simulate wrapped text with inline styles
+    pdf.set_font("Helvetica", "", size=11)
+    text_y = box_y + padding + 11  # baseline offset
+    x = box_x + padding
+
+    # Line 1: "The quick brown fox jumps over the lazy dog,"
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(x, text_y, "The ")
+    x += pdf.get_string_width("The ")
+
+    pdf.set_text_color(153, 77, 0)  # brown (0.6, 0.3, 0) * 255
+    pdf.text(x, text_y, "quick brown fox ")
+    x += pdf.get_string_width("quick brown fox ")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "U", size=11)
+    pdf.text(x, text_y, "jumps ")
+    x += pdf.get_string_width("jumps ")
+
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.text(x, text_y, "over the ")
+    x += pdf.get_string_width("over the ")
+
+    pdf.set_text_color(128)  # 0.5 gray
+    pdf.set_font("Helvetica", "S", size=11)
+    pdf.text(x, text_y, "lazy ")
+    x += pdf.get_string_width("lazy ")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.text(x, text_y, "dog,")
+
+    # Line 2
+    text_y += 16
+    x = box_x + padding
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(x, text_y, "demonstrating how ")
+    x += pdf.get_string_width("demonstrating how ")
+
+    pdf.set_text_color(0, 0, 204)  # (0, 0, 0.8) * 255
+    pdf.text(x, text_y, "different ")
+    x += pdf.get_string_width("different ")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.text(x, text_y, "words can have ")
+    x += pdf.get_string_width("words can have ")
+
+    pdf.set_text_color(204, 0, 0)  # (0.8, 0, 0) * 255
+    pdf.set_font("Helvetica", "U", size=11)
+    pdf.text(x, text_y, "unique colors")
+    x += pdf.get_string_width("unique colors")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.text(x, text_y, " and")
+
+    # Line 3
+    text_y += 16
+    x = box_x + padding
+
+    pdf.set_text_color(0, 128, 0)  # (0, 0.5, 0) * 255
+    pdf.set_font("Helvetica", "S", size=11)
+    pdf.text(x, text_y, "decorations")
+    x += pdf.get_string_width("decorations")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.text(x, text_y, " within the same wrapped paragraph.")
+
+    pdf.output(OUTPUT_DIR / "text_style.pdf")
+    print("  text_style.pdf")
+
+
+def gen_auto_height():
+    """Auto-height box: box height determined by text content."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=14)
+    pdf.text(50, 50, "Auto-height Box Demo")
+
+    # Box with auto-height using multi_cell
+    pdf.set_font("Helvetica", "", size=11)
+    box_width = 250
+    box_padding = 8
+    box_y = 80
+
+    sample_text = ("This box height is automatically calculated based on the text content. "
+                   "The text wraps within the specified width, and the box grows to fit.")
+
+    # Set colors for the box
+    pdf.set_fill_color(230, 242, 255)  # light blue (0.9, 0.95, 1.0) * 255
+    pdf.set_draw_color(0, 0, 0)
+
+    # Position and draw multi_cell with border and fill
+    # multi_cell handles the padding internally via cell margin
+    pdf.c_margin = box_padding
+    pdf.set_xy(50, box_y)
+    pdf.multi_cell(w=box_width, h=11 * 1.2, text=sample_text, border=1, fill=True)
+
+    pdf.output(OUTPUT_DIR / "auto_height.pdf")
+    print("  auto_height.pdf")
+
+
 GENERATORS = {
+    "text_decorations": gen_text_decorations,
+    "text_style": gen_text_style,
+    "auto_height": gen_auto_height,
     "outlines": gen_outlines,
     "minimal": gen_minimal,
     "hello_world": gen_hello_world,

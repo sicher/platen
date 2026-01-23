@@ -23,6 +23,8 @@ pub const Font = struct {
     head: ?HeadTable = null,
     hhea: ?HheaTable = null,
     maxp: ?MaxpTable = null,
+    post: ?PostTable = null,
+    os2: ?Os2Table = null,
 
     // Cached cmap lookup (avoids subtable search on every glyph lookup)
     cmap_subtable_offset: u32 = 0,
@@ -76,6 +78,8 @@ pub const Font = struct {
         font.head = font.parseHead();
         font.hhea = font.parseHhea();
         font.maxp = font.parseMaxp();
+        font.post = font.parsePost();
+        font.os2 = font.parseOs2();
 
         // Initialize cmap cache for fast glyph lookups
         font.initCmapCache();
@@ -187,6 +191,36 @@ pub const Font = struct {
 
         return MaxpTable{
             .num_glyphs = readU16(data, 4),
+        };
+    }
+
+    /// Parse 'post' table (underline metrics)
+    fn parsePost(self: *const Font) ?PostTable {
+        const data = self.getTable("post".*) orelse return null;
+        if (data.len < 12) return null;
+
+        // post table layout:
+        // 0-4: version (Fixed)
+        // 4-8: italicAngle (Fixed)
+        // 8-10: underlinePosition (FWord/i16)
+        // 10-12: underlineThickness (FWord/i16)
+        return PostTable{
+            .underline_position = readI16(data, 8),
+            .underline_thickness = readI16(data, 10),
+        };
+    }
+
+    /// Parse 'OS/2' table (strikethrough metrics)
+    fn parseOs2(self: *const Font) ?Os2Table {
+        const data = self.getTable("OS/2".*) orelse return null;
+        if (data.len < 30) return null;
+
+        // OS/2 table layout (relevant fields):
+        // 26-28: yStrikeoutSize (i16)
+        // 28-30: yStrikeoutPosition (i16)
+        return Os2Table{
+            .strikeout_size = readI16(data, 26),
+            .strikeout_position = readI16(data, 28),
         };
     }
 
@@ -371,6 +405,18 @@ pub const HheaTable = struct {
 /// 'maxp' table - maximum profile
 pub const MaxpTable = struct {
     num_glyphs: u16,
+};
+
+/// 'post' table - PostScript hints (underline metrics)
+pub const PostTable = struct {
+    underline_position: i16,
+    underline_thickness: i16,
+};
+
+/// 'OS/2' table - OS/2 and Windows metrics (strikethrough metrics)
+pub const Os2Table = struct {
+    strikeout_size: i16,
+    strikeout_position: i16,
 };
 
 /// Parse cmap table to look up a glyph ID

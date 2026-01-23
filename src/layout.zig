@@ -45,6 +45,25 @@ pub const LineBreaking = enum {
     optimal,
 };
 
+/// Text decoration options.
+pub const TextDecoration = struct {
+    /// Draw underline below text baseline.
+    underline: bool = false,
+    /// Draw strikethrough line through text.
+    strikethrough: bool = false,
+
+    pub const none = TextDecoration{};
+};
+
+/// Options for text styling (color, decoration).
+/// Use with setTextStyle() to configure text appearance.
+pub const TextStyleOptions = struct {
+    /// Text color.
+    color: Color = Color.black,
+    /// Text decoration (underline, strikethrough).
+    decoration: TextDecoration = .none,
+};
+
 /// Document margins in points.
 pub const Margins = struct {
     left: f64 = 72,
@@ -93,6 +112,8 @@ pub const TextBox = struct {
     width: f64,
     /// Content area height.
     height: f64,
+    /// Current cursor x position within content area (relative to left padding).
+    cursor_x: f64 = 0,
     /// Current cursor y position within content area (relative to top padding).
     cursor_y: f64 = 0,
     /// Inner padding (content inset from edges).
@@ -105,6 +126,17 @@ pub const TextBox = struct {
     /// Returns remaining height in content area.
     pub fn remainingHeight(self: TextBox) f64 {
         return self.height - self.padding.top - self.padding.bottom - self.cursor_y;
+    }
+
+    /// Returns remaining width on current line.
+    pub fn remainingWidth(self: TextBox) f64 {
+        return self.contentWidth() - self.cursor_x;
+    }
+
+    /// Resets cursor to origin (0, 0). Useful after measure pass.
+    pub fn reset(self: *TextBox) void {
+        self.cursor_x = 0;
+        self.cursor_y = 0;
     }
 
     /// Returns usable width inside padding.
@@ -120,6 +152,12 @@ pub const TextBox = struct {
     /// Returns the bounds as a Rect.
     pub fn toRect(self: TextBox) Rect {
         return .{ .x = self.x, .y = self.y, .width = self.width, .height = self.height };
+    }
+
+    /// Advances cursor to next line.
+    pub fn newLine(self: *TextBox, line_height: f64) void {
+        self.cursor_x = 0;
+        self.cursor_y += line_height;
     }
 };
 
@@ -166,6 +204,15 @@ pub const LineOptions = struct {
     alignment: Align = .left,
     /// Vertical text alignment within line height.
     valign: VAlign = .top,
+};
+
+/// Options for write() (flowing text with cursor tracking).
+pub const WriteOptions = struct {
+    /// If true, only measure text without rendering. Cursor is still updated.
+    measure_only: bool = false,
+    /// If true, wrap text to next line when it doesn't fit.
+    /// If false, text stays on one line (like writeLine).
+    wrap: bool = true,
 };
 
 /// Options for writeParagraph (wrapped text).

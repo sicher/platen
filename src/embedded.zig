@@ -146,6 +146,12 @@ pub const EmbeddedFont = struct {
     stem_v: u16,
     flags: FontFlags,
 
+    // Text decoration metrics (scaled to 1000 units)
+    underline_position: i16, // Distance below baseline (usually negative)
+    underline_thickness: i16,
+    strikeout_position: i16, // Distance above baseline
+    strikeout_size: i16,
+
     // Encoding mode
     encoding: FontEncoding = .win_ansi,
 
@@ -238,6 +244,28 @@ pub const EmbeddedFont = struct {
         // Would need proper stem detection for accuracy
         const stem_v: u16 = 80;
 
+        // Get underline metrics from POST table (defaults based on fpdf2)
+        const underline_position: i16 = if (font.post) |post|
+            @intFromFloat(@round(@as(f64, @floatFromInt(post.underline_position)) * scale))
+        else
+            -100; // Default from fpdf2 core fonts
+
+        const underline_thickness: i16 = if (font.post) |post|
+            @intFromFloat(@round(@as(f64, @floatFromInt(post.underline_thickness)) * scale))
+        else
+            50; // Default from fpdf2 core fonts
+
+        // Get strikeout metrics from OS/2 table (defaults based on fpdf2)
+        const strikeout_position: i16 = if (font.os2) |os2|
+            @intFromFloat(@round(@as(f64, @floatFromInt(os2.strikeout_position)) * scale))
+        else
+            250; // Default: roughly middle of x-height
+
+        const strikeout_size: i16 = if (font.os2) |os2|
+            @intFromFloat(@round(@as(f64, @floatFromInt(os2.strikeout_size)) * scale))
+        else
+            50; // Default from fpdf2 core fonts
+
         // Determine flags from font properties
         var flags = FontFlags{};
 
@@ -270,6 +298,10 @@ pub const EmbeddedFont = struct {
             .italic_angle = 0,
             .stem_v = stem_v,
             .flags = flags,
+            .underline_position = underline_position,
+            .underline_thickness = underline_thickness,
+            .strikeout_position = strikeout_position,
+            .strikeout_size = strikeout_size,
         };
 
         return embedded;

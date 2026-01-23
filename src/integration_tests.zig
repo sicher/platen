@@ -43,6 +43,9 @@ const test_cases = [_]TestCase{
     .{ .name = "colors", .generate = generateColorSwatchesPdf },
     .{ .name = "links", .generate = generateLinksPdf },
     .{ .name = "outlines", .generate = generateOutlinesPdf },
+    .{ .name = "text_decorations", .generate = generateTextDecorationsPdf },
+    .{ .name = "text_style", .generate = generateTextStylePdf },
+    .{ .name = "auto_height", .generate = generateAutoHeightPdf },
 };
 
 // ============================================================================
@@ -2178,6 +2181,272 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+
+    var y: f64 = 50;
+    const line_height: f64 = 30;
+
+    // Title
+    try doc.setFont(.helvetica_bold, 18);
+    _ = try doc.writeAt(50, y, "Text Decorations Test");
+    y += 40;
+
+    // Normal text (no decoration)
+    try doc.setFont(.helvetica, 14);
+    _ = try doc.writeAt(50, y, "Normal text (no decoration)");
+    y += line_height;
+
+    // Underlined text
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(50, y, "Underlined text");
+    doc.setTextStyle(.{});
+    y += line_height;
+
+    // Strikethrough text
+    doc.setTextStyle(.{ .decoration = .{ .strikethrough = true } });
+    _ = try doc.writeAt(50, y, "Strikethrough text");
+    doc.setTextStyle(.{});
+    y += line_height;
+
+    // Both underline and strikethrough
+    doc.setTextStyle(.{ .decoration = .{ .underline = true, .strikethrough = true } });
+    _ = try doc.writeAt(50, y, "Both underline and strikethrough");
+    doc.setTextStyle(.{});
+    y += 50;
+
+    // Different font sizes
+    try doc.setFont(.helvetica_bold, 14);
+    _ = try doc.writeAt(50, y, "Different font sizes:");
+    y += 25;
+
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    try doc.setFont(.helvetica, 10);
+    _ = try doc.writeAt(50, y, "10pt underlined");
+    y += 20;
+
+    try doc.setFont(.helvetica, 14);
+    _ = try doc.writeAt(50, y, "14pt underlined");
+    y += 25;
+
+    try doc.setFont(.helvetica, 20);
+    _ = try doc.writeAt(50, y, "20pt underlined");
+    doc.setTextStyle(.{});
+    y += 40;
+
+    // Different fonts
+    try doc.setFont(.helvetica_bold, 14);
+    _ = try doc.writeAt(50, y, "Different fonts:");
+    y += 25;
+
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(50, y, "Helvetica underlined");
+    y += 20;
+
+    try doc.setFont(.times_roman, 12);
+    _ = try doc.writeAt(50, y, "Times Roman underlined");
+    y += 20;
+
+    try doc.setFont(.courier, 12);
+    _ = try doc.writeAt(50, y, "Courier underlined");
+    doc.setTextStyle(.{});
+
+    return doc.output();
+}
+
+fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+
+    var y: f64 = 50;
+    const line_height: f64 = 25;
+
+    // Title
+    try doc.setFont(.helvetica_bold, 18);
+    _ = try doc.writeAt(50, y, "Text Style Test");
+    y += 40;
+
+    try doc.setFont(.helvetica, 14);
+
+    // Default style (black, no decoration)
+    _ = try doc.writeAt(50, y, "Default style (black, no decoration)");
+    y += line_height;
+
+    // Color only
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(1, 0, 0) });
+    _ = try doc.writeAt(50, y, "Red text");
+    y += line_height;
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0.5, 0) });
+    _ = try doc.writeAt(50, y, "Green text");
+    y += line_height;
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0, 1) });
+    _ = try doc.writeAt(50, y, "Blue text");
+    y += line_height + 10;
+
+    // Decoration only
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(50, y, "Underlined (black)");
+    y += line_height;
+
+    doc.setTextStyle(.{ .decoration = .{ .strikethrough = true } });
+    _ = try doc.writeAt(50, y, "Strikethrough (black)");
+    y += line_height + 10;
+
+    // Color + decoration combined
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(1, 0, 0), .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(50, y, "Red underlined");
+    y += line_height;
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0, 1), .decoration = .{ .strikethrough = true } });
+    _ = try doc.writeAt(50, y, "Blue strikethrough");
+    y += line_height;
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
+    _ = try doc.writeAt(50, y, "Purple with both decorations");
+    y += line_height + 10;
+
+    // Reset and verify
+    doc.setTextStyle(.{});
+    _ = try doc.writeAt(50, y, "Reset to defaults");
+    y += line_height;
+
+    // Grayscale colors
+    doc.setTextStyle(.{ .color = zpdf.Color.grayscale(0.5) });
+    _ = try doc.writeAt(50, y, "50% gray text");
+    y += line_height;
+
+    doc.setTextStyle(.{ .color = zpdf.Color.grayscale(0.3), .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(50, y, "30% gray underlined");
+    y += line_height + 20;
+
+    // Styled text box using write() for flowing text with inline styles
+    try doc.setFont(.helvetica_bold, 12);
+    doc.setTextStyle(.{});
+    _ = try doc.writeAt(50, y, "Styled Text in Box (using write()):");
+    y += 20;
+
+    // Draw a bordered box with light gray fill
+    const box_x: f64 = 50;
+    const box_y = y;
+    const box_width: f64 = 400;
+    const box_height: f64 = 80;
+    const padding: f64 = 10;
+
+    try doc.drawTextBox(.{
+        .x = box_x,
+        .y = box_y,
+        .width = box_width,
+        .height = box_height,
+        .fill = zpdf.Color.fromRgb(0.95, 0.95, 0.95),
+        .border = .{ .top = true, .bottom = true, .left = true, .right = true },
+    });
+
+    // Create a TextBox region for flowing text
+    var region = zpdf.TextBox{
+        .x = box_x,
+        .y = box_y,
+        .width = box_width,
+        .height = box_height,
+        .padding = .{ .left = padding, .right = padding, .top = padding, .bottom = padding },
+    };
+
+    // Write styled text using write() - text flows and wraps automatically
+    try doc.setFont(.helvetica, 11);
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "The ", .{});
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0.6, 0.3, 0) }); // brown
+    _ = try doc.write(&region, "quick brown fox ", .{});
+
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    _ = try doc.write(&region, "jumps ", .{});
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "over the ", .{});
+
+    doc.setTextStyle(.{ .color = zpdf.Color.grayscale(0.5), .decoration = .{ .strikethrough = true } });
+    _ = try doc.write(&region, "lazy ", .{});
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "dog, demonstrating how ", .{});
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0, 0.8) });
+    _ = try doc.write(&region, "different ", .{});
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "words can have ", .{});
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0.8, 0, 0), .decoration = .{ .underline = true } });
+    _ = try doc.write(&region, "unique colors ", .{});
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "and ", .{});
+
+    doc.setTextStyle(.{ .color = zpdf.Color.fromRgb(0, 0.5, 0), .decoration = .{ .strikethrough = true } });
+    _ = try doc.write(&region, "decorations ", .{});
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "within the same wrapped paragraph.", .{});
+
+    return doc.output();
+}
+
+fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+
+    // Title
+    try doc.setFont(.helvetica_bold, 14);
+    _ = try doc.writeAt(50, 50, "Auto-height Box Demo");
+
+    // Demonstrates creating a box whose height is determined by text content
+    try doc.setFont(.helvetica, 11);
+    const box_width: f64 = 250;
+    const box_padding: f64 = 8;
+    const content_width = box_width - 2 * box_padding;
+
+    const sample_text = "This box height is automatically calculated based on the text content. " ++
+        "The text wraps within the specified width, and the box grows to fit.";
+
+    // Measure text to get required height
+    const metrics = doc.measureWrappedText(sample_text, .{ .width = content_width });
+    const box_height = metrics.height + 2 * box_padding;
+
+    // Draw box with calculated height
+    const box_y: f64 = 80;
+    try doc.drawTextBox(.{
+        .x = 50,
+        .y = box_y,
+        .width = box_width,
+        .height = box_height,
+        .fill = zpdf.Color.fromRgb(0.9, 0.95, 1.0),
+        .border = .{ .top = true, .bottom = true, .left = true, .right = true },
+    });
+
+    // Write text inside
+    var region = zpdf.TextBox{
+        .x = 50,
+        .y = box_y,
+        .width = box_width,
+        .height = box_height,
+        .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
+    };
+    _ = try doc.write(&region, sample_text, .{});
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2292,6 +2561,21 @@ test "integration: links PDF" {
 test "integration: outlines PDF" {
     // Tests document outline (table of contents) and page labels
     try runIntegrationTest("outlines", generateOutlinesPdf);
+}
+
+test "integration: text_decorations PDF" {
+    // Tests underline and strikethrough text decorations
+    try runIntegrationTest("text_decorations", generateTextDecorationsPdf);
+}
+
+test "integration: text_style PDF" {
+    // Tests setTextStyle with color and decoration combinations
+    try runIntegrationTest("text_style", generateTextStylePdf);
+}
+
+test "integration: auto_height PDF" {
+    // Tests box with height determined by text content
+    try runIntegrationTest("auto_height", generateAutoHeightPdf);
 }
 
 const TestOptions = struct {

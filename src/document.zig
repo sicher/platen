@@ -46,6 +46,8 @@ pub const Border = layout.Border;
 pub const Align = layout.Align;
 pub const VAlign = layout.VAlign;
 pub const LineBreaking = layout.LineBreaking;
+pub const TextDecoration = layout.TextDecoration;
+pub const TextStyleOptions = layout.TextStyleOptions;
 pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
 pub const Point = layout.Point;
@@ -58,6 +60,7 @@ pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WrappedTextMetrics = layout.WrappedTextMetrics;
 pub const LineOptions = layout.LineOptions;
+pub const WriteOptions = layout.WriteOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const FlowOptions = layout.FlowOptions;
 pub const MeasureOptions = layout.MeasureOptions;
@@ -158,6 +161,12 @@ const TextCommand = struct {
     text_color: Color,
     /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
     cached_glyphs: ?[]const u16 = null,
+    /// Text width (for decoration drawing)
+    text_width: f64 = 0,
+    /// Draw underline
+    underline: bool = false,
+    /// Draw strikethrough
+    strikethrough: bool = false,
 };
 
 /// Content command for deferred rendering (enables glyph ID remapping)
@@ -441,6 +450,8 @@ pub const Document = struct {
     line_height: f64 = 1.2,
     /// Text color (default black).
     text_color: Color = Color.black,
+    /// Text decoration (underline, strikethrough).
+    text_decoration: TextDecoration = .none,
     /// Fill color for shapes (default black).
     fill_color: Color = Color.black,
     /// Stroke/draw color for lines and borders (default black).
@@ -733,6 +744,12 @@ pub const Document = struct {
         self.text_color = c;
     }
 
+    /// Set text style (color and decoration).
+    pub fn setTextStyle(self: *Document, opts: TextStyleOptions) void {
+        self.text_color = opts.color;
+        self.text_decoration = opts.decoration;
+    }
+
     /// Set drawing style (stroke/fill colors, line width, cap, join, dash pattern).
     pub fn setDrawStyle(self: *Document, opts: layout.DrawStyleOptions) void {
         self.line_width = opts.line_width;
@@ -939,8 +956,8 @@ pub const Document = struct {
         });
     }
 
-    /// Writes text at the current cursor position.
-    pub fn write(self: *Document, str: []const u8) !void {
+    /// Internal: Writes text at the current cursor position.
+    fn writeAtCursor(self: *Document, str: []const u8) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
@@ -970,6 +987,12 @@ pub const Document = struct {
             return error.NoFont;
         };
 
+        // Calculate text width for decorations (only if decoration enabled)
+        const text_width = if (self.text_decoration.underline or self.text_decoration.strikethrough)
+            self.getTextWidth(text_copy)
+        else
+            0;
+
         // Store deferred command with cached glyphs
         try page.commands.append(self.allocator, .{
             .text = .{
@@ -982,6 +1005,9 @@ pub const Document = struct {
                 .font = font_ref,
                 .text_color = self.text_color,
                 .cached_glyphs = cached_glyphs,
+                .text_width = text_width,
+                .underline = self.text_decoration.underline,
+                .strikethrough = self.text_decoration.strikethrough,
             },
         });
     }
@@ -1015,6 +1041,12 @@ pub const Document = struct {
             return error.NoFont;
         };
 
+        // Calculate text width for decorations (only if decoration enabled)
+        const text_width = if (self.text_decoration.underline or self.text_decoration.strikethrough)
+            self.getTextWidth(text_copy)
+        else
+            0;
+
         // Store deferred command with word spacing and cached glyphs
         // Convert Y from top-left to PDF coordinates (bottom-left origin)
         try page.commands.append(self.allocator, .{
@@ -1028,6 +1060,9 @@ pub const Document = struct {
                 .font = font_ref,
                 .text_color = self.text_color,
                 .cached_glyphs = cached_glyphs,
+                .text_width = text_width,
+                .underline = self.text_decoration.underline,
+                .strikethrough = self.text_decoration.strikethrough,
             },
         });
     }
@@ -1231,7 +1266,7 @@ pub const Document = struct {
     /// Returns the bounding rectangle of the rendered text.
     pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !Rect {
         self.setPosition(.{ .x = x, .y = y });
-        try self.write(str);
+        try self.writeAtCursor(str);
         const width = self.getTextWidth(str);
         // Y is baseline, so rect top is y - font_size (approximate ascender)
         return .{
@@ -1351,6 +1386,195 @@ pub const Document = struct {
             .lines_written = 1,
             .overflow = null,
             .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = line_height },
+        };
+    }
+
+    /// Writes flowing text into a region with word wrapping.
+    /// Text continues from the current cursor position (cursor_x, cursor_y).
+    /// Words wrap to the next line when they don't fit. Cursor is updated to
+    /// the end of the written text, allowing subsequent write() calls to continue
+    /// the flow with different styles.
+    ///
+    /// Options:
+    /// - measure_only: Track cursor position without rendering (for calculating dimensions)
+    /// - wrap: If false, text stays on one line without wrapping (like writeLine)
+    pub fn write(self: *Document, region: *TextBox, str: []const u8, opts: WriteOptions) !WriteResult {
+        const line_height = self.getLineHeightPts();
+        const ascender = self.getFontMetrics().ascender;
+        const space_width = self.getTextWidth(" ");
+
+        // Track for rect calculation
+        const start_cursor_x = region.cursor_x;
+        const start_cursor_y = region.cursor_y;
+        const rect_x = region.x + region.padding.left + start_cursor_x;
+        const rect_y = region.y + region.padding.top + start_cursor_y;
+        var max_x: f64 = start_cursor_x;
+
+        var lines_written: usize = 0;
+        var remaining = str;
+
+        // Skip leading whitespace only at start of line
+        if (region.cursor_x == 0) {
+            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t')) {
+                remaining = remaining[1..];
+            }
+        }
+
+        while (remaining.len > 0) {
+            // Check if we have room for a line (only check at start of new line)
+            // Use small epsilon for floating point comparison
+            if (region.cursor_x == 0 and region.remainingHeight() < line_height - 0.01) {
+                return .{
+                    .lines_written = lines_written,
+                    .overflow = remaining,
+                    .rect = .{ .x = rect_x, .y = rect_y, .width = max_x - start_cursor_x, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+                };
+            }
+
+            // Find the next word
+            var word_end: usize = 0;
+            var is_newline = false;
+            for (remaining, 0..) |c, i| {
+                if (c == ' ' or c == '\t' or c == '\n') {
+                    word_end = i;
+                    is_newline = (c == '\n');
+                    break;
+                }
+            } else {
+                word_end = remaining.len;
+            }
+
+            if (word_end == 0) {
+                // Whitespace at start - handle newline or skip space
+                if (is_newline) {
+                    region.newLine(line_height);
+                    lines_written += 1;
+                }
+                remaining = remaining[1..];
+                continue;
+            }
+
+            const word = remaining[0..word_end];
+            const word_width = self.getTextWidth(word);
+            const available_width = region.remainingWidth();
+
+            // Check if word fits on current line
+            if (word_width <= available_width + 0.01) {
+                // Word fits - write it
+                if (!opts.measure_only) {
+                    const abs_x = region.x + region.padding.left + region.cursor_x;
+                    const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                    self.setPosition(.{ .x = abs_x, .y = abs_y });
+                    try self.writeAtCursor(word);
+                }
+
+                region.cursor_x += word_width;
+                if (region.cursor_x > max_x) max_x = region.cursor_x;
+
+                // Handle what comes after the word
+                remaining = remaining[word_end..];
+                if (remaining.len > 0) {
+                    const next_char = remaining[0];
+                    if (next_char == '\n') {
+                        // Explicit newline (always respected, even with wrap=false)
+                        region.newLine(line_height);
+                        lines_written += 1;
+                        remaining = remaining[1..];
+                        // Skip whitespace at start of new line
+                        while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t')) {
+                            remaining = remaining[1..];
+                        }
+                    } else if (next_char == ' ' or next_char == '\t') {
+                        // Add space after word
+                        region.cursor_x += space_width;
+                        remaining = remaining[1..];
+                    }
+                }
+            } else if (!opts.wrap) {
+                // No wrapping - write word at current position even if it overflows
+                if (!opts.measure_only) {
+                    const abs_x = region.x + region.padding.left + region.cursor_x;
+                    const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                    self.setPosition(.{ .x = abs_x, .y = abs_y });
+                    try self.writeAtCursor(word);
+                }
+                region.cursor_x += word_width;
+                if (region.cursor_x > max_x) max_x = region.cursor_x;
+                remaining = remaining[word_end..];
+                if (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t')) {
+                    region.cursor_x += space_width;
+                    remaining = remaining[1..];
+                }
+            } else if (region.cursor_x == 0) {
+                // Word doesn't fit and we're at start of line - must write it anyway
+                // Try soft-hyphen break first
+                if (self.findSoftHyphenBreak(word, available_width)) |break_pos| {
+                    const prefix = word[0..break_pos];
+                    if (!opts.measure_only) {
+                        const abs_x = region.x + region.padding.left;
+                        const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                        self.setPosition(.{ .x = abs_x, .y = abs_y });
+                        try self.writeAtCursor(prefix);
+                        try self.writeAtCursor("-");
+                    }
+                    region.cursor_x = self.getTextWidth(prefix) + self.getTextWidth("-");
+                    if (region.cursor_x > max_x) max_x = region.cursor_x;
+                    region.newLine(line_height);
+                    lines_written += 1;
+                    remaining = remaining[break_pos + 2 ..]; // Skip soft-hyphen (2 bytes)
+                } else if (self.findCharacterBreak(word, available_width)) |break_pos| {
+                    const prefix = word[0..break_pos];
+                    if (!opts.measure_only) {
+                        const abs_x = region.x + region.padding.left;
+                        const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                        self.setPosition(.{ .x = abs_x, .y = abs_y });
+                        try self.writeAtCursor(prefix);
+                    }
+                    region.cursor_x = self.getTextWidth(prefix);
+                    if (region.cursor_x > max_x) max_x = region.cursor_x;
+                    region.newLine(line_height);
+                    lines_written += 1;
+                    remaining = remaining[break_pos..];
+                } else {
+                    // Nothing fits, write word anyway (will overflow)
+                    if (!opts.measure_only) {
+                        const abs_x = region.x + region.padding.left;
+                        const abs_y = region.y + region.padding.top + region.cursor_y + ascender;
+                        self.setPosition(.{ .x = abs_x, .y = abs_y });
+                        try self.writeAtCursor(word);
+                    }
+                    region.cursor_x = word_width;
+                    if (region.cursor_x > max_x) max_x = region.cursor_x;
+                    remaining = remaining[word_end..];
+                    if (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
+                        remaining = remaining[1..];
+                    }
+                }
+            } else {
+                // Word doesn't fit - wrap to next line
+                region.newLine(line_height);
+                lines_written += 1;
+                // Don't consume the word, let next iteration handle it
+            }
+        }
+
+        // Calculate actual lines - if cursor moved vertically, that's our line count
+        const final_lines: usize = if (region.cursor_y > start_cursor_y)
+            @as(usize, @intFromFloat((region.cursor_y - start_cursor_y) / line_height)) + 1
+        else if (region.cursor_x > start_cursor_x)
+            1
+        else
+            0;
+
+        return .{
+            .lines_written = final_lines,
+            .overflow = null,
+            .rect = .{
+                .x = rect_x,
+                .y = rect_y,
+                .width = max_x - start_cursor_x,
+                .height = if (final_lines > 0) @as(f64, @floatFromInt(final_lines)) * line_height else 0,
+            },
         };
     }
 
@@ -2588,12 +2812,73 @@ pub const Document = struct {
                     }
 
                     try cw.append("ET\n");
+
+                    // Draw text decorations (underline/strikethrough)
+                    // These must be outside the text block (BT/ET)
+                    if (t.underline or t.strikethrough) {
+                        try self.drawTextDecorations(&cw, &t);
+                    }
                 },
                 .raw => |data| {
                     try cw.append(data);
                 },
             }
         }
+    }
+
+    /// Draw underline and/or strikethrough decorations for text.
+    /// Called after text is rendered, outside the BT/ET block.
+    fn drawTextDecorations(self: *Document, cw: *ContentWriter, t: *const TextCommand) !void {
+        _ = self;
+        // Get decoration metrics based on font type
+        var underline_pos: f64 = -100; // Default in 1000 units
+        var underline_thick: f64 = 50;
+        var strikeout_pos: f64 = 250;
+        var strikeout_thick: f64 = 50;
+
+        switch (t.font) {
+            .embedded => |emb| {
+                underline_pos = @floatFromInt(emb.underline_position);
+                underline_thick = @floatFromInt(emb.underline_thickness);
+                strikeout_pos = @floatFromInt(emb.strikeout_position);
+                strikeout_thick = @floatFromInt(emb.strikeout_size);
+            },
+            .standard => {
+                // Standard fonts use fixed decoration metrics (from fpdf2)
+                underline_pos = -100;
+                underline_thick = 50;
+                strikeout_pos = 250;
+                strikeout_thick = 50;
+            },
+        }
+
+        // Scale from 1000 units to points
+        const scale = t.font_size / 1000.0;
+        const x = t.x;
+        const w = t.text_width;
+
+        // Save graphics state, set stroke color to text color
+        try cw.append("q\n");
+        try t.text_color.writeFill(cw);
+
+        if (t.underline) {
+            // Position: baseline + underline_position (negative = below)
+            const y = t.y + underline_pos * scale;
+            const h = underline_thick * scale;
+            // PDF rectangle: x y width height re f (filled)
+            try cw.print("{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ x, y, w, -h });
+        }
+
+        if (t.strikethrough) {
+            // Position: baseline + strikeout_position (positive = above)
+            const y = t.y + strikeout_pos * scale;
+            const h = strikeout_thick * scale;
+            // PDF rectangle with negative height extends downward
+            try cw.print("{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ x, y, w, -h });
+        }
+
+        // Restore graphics state
+        try cw.append("Q\n");
     }
 
     /// Output timing information for performance analysis.

@@ -137,7 +137,7 @@ test "text without font returns error" {
 
     try doc.addPage(null);
     // Should fail because no font is set
-    try std.testing.expectError(error.NoFont, doc.write("test"));
+    try std.testing.expectError(error.NoFont, doc.writeAt(0, 0, "test"));
 }
 
 test "text without page returns error" {
@@ -146,7 +146,7 @@ test "text without page returns error" {
 
     try doc.setFont(.helvetica, 12);
     // Should fail because no page is added
-    try std.testing.expectError(error.NoPage, doc.write("test"));
+    try std.testing.expectError(error.NoPage, doc.writeAt(0, 0, "test"));
 }
 
 test "multiple fonts on single page" {
@@ -850,7 +850,7 @@ test "soft hyphens stripped from text output" {
     try doc.setFont(.helvetica, 12);
 
     // Write text with soft-hyphens
-    try doc.write("ex\xc2\xadplic\xc2\xadit");
+    _ = try doc.writeAt(0, 0, "ex\xc2\xadplic\xc2\xadit");
 
     // The stored text should have soft-hyphens stripped
     const page = &doc.pages.items[0];
@@ -1377,6 +1377,39 @@ test "measureWrappedText with newlines" {
     try std.testing.expectEqual(@as(usize, 3), metrics.line_count);
 }
 
+test "measureWrappedText auto_height scenario" {
+    // Tests that measureWrappedText and write() agree on text fitting
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 11);
+
+    const sample_text = "This box height is automatically calculated based on the text content. " ++
+        "The text wraps within the specified width, and the box grows to fit.";
+    const box_width: f64 = 250;
+    const box_padding: f64 = 8;
+    const content_width = box_width - 2 * box_padding;
+
+    // Measure text to get required height
+    const metrics = doc.measureWrappedText(sample_text, .{ .width = content_width });
+    try std.testing.expectEqual(@as(usize, 3), metrics.line_count);
+
+    // Create box with measured height + padding
+    const box_height = metrics.height + 2 * box_padding;
+    var region = TextBox{
+        .x = 50,
+        .y = 80,
+        .width = box_width,
+        .height = box_height,
+        .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
+    };
+
+    // Write should fit without overflow
+    const result = try doc.write(&region, sample_text, .{});
+    try std.testing.expect(result.overflow == null);
+}
+
 test "mark positioning with Tm absolute coordinates" {
     // This test verifies Tm-based absolute positioning for mark glyphs.
     // Each glyph gets: "1 0 0 1 x y Tm <glyph> Tj"
@@ -1461,7 +1494,7 @@ test "setTextColor changes text color" {
     try std.testing.expect(doc.text_color.eql(Color.red));
 
     // Write some text
-    try doc.write("Red text");
+    _ = try doc.writeAt(0, 0, "Red text");
 
     // Verify the command stored the color
     const page = &doc.pages.items[0];
@@ -1482,7 +1515,7 @@ test "Color grayscale stored in command" {
     // Set grayscale color
     const gray = Color.grayscale(0.5);
     doc.setTextColor(gray);
-    try doc.write("Gray text");
+    _ = try doc.writeAt(0, 0, "Gray text");
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -1499,7 +1532,7 @@ test "Color CMYK stored in command" {
     // Set CMYK cyan
     const cyan = Color.fromCmyk(1, 0, 0, 0);
     doc.setTextColor(cyan);
-    try doc.write("Cyan text");
+    _ = try doc.writeAt(0, 0, "Cyan text");
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -2186,4 +2219,279 @@ test "no outlines or page labels when not set" {
     const catalog_section = pdf[catalog_start.? .. catalog_start.? + 200];
     try std.testing.expect(std.mem.indexOf(u8, catalog_section, "/Outlines") == null);
     try std.testing.expect(std.mem.indexOf(u8, catalog_section, "/PageLabels") == null);
+}
+
+// ============================================================================
+// Text Decoration Tests
+// ============================================================================
+
+test "setTextStyle enables underline decoration" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    // Default is no decoration
+    try std.testing.expect(!doc.text_decoration.underline);
+
+    // Enable underline via setTextStyle
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    try std.testing.expect(doc.text_decoration.underline);
+
+    // Write text
+    _ = try doc.writeAt(0, 0, "Underlined text");
+
+    // Verify the command has underline enabled
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[0];
+    try std.testing.expect(cmd.text.underline);
+}
+
+test "setTextStyle enables strikethrough decoration" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    // Default is no decoration
+    try std.testing.expect(!doc.text_decoration.strikethrough);
+
+    // Enable strikethrough via setTextStyle
+    doc.setTextStyle(.{ .decoration = .{ .strikethrough = true } });
+    try std.testing.expect(doc.text_decoration.strikethrough);
+
+    // Write text
+    _ = try doc.writeAt(0, 0, "Strikethrough text");
+
+    // Verify the command has strikethrough enabled
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[0];
+    try std.testing.expect(cmd.text.strikethrough);
+}
+
+test "text width stored in command for decorations" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+
+    _ = try doc.writeAt(0, 0, "Hello");
+
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[0];
+
+    // Text width should be non-zero
+    try std.testing.expect(cmd.text.text_width > 0);
+}
+
+test "setTextStyle with both decorations" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+    doc.setTextStyle(.{ .decoration = .{ .underline = true, .strikethrough = true } });
+
+    _ = try doc.writeAt(0, 0, "Test");
+
+    // Verify both decorations stored in command
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[0];
+    try std.testing.expect(cmd.text.underline);
+    try std.testing.expect(cmd.text.strikethrough);
+    try std.testing.expect(cmd.text.text_width > 0);
+
+    // PDF output should succeed
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(pdf.len > 0);
+}
+
+test "setTextStyle sets color and decoration" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    // Set color and decoration together
+    doc.setTextStyle(.{ .color = Color.red, .decoration = .{ .underline = true } });
+    try std.testing.expect(doc.text_color.eql(Color.red));
+    try std.testing.expect(doc.text_decoration.underline);
+}
+
+test "decoration not rendered when disabled" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    _ = try doc.writeAt(0, 0, "Test");
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Should not contain "re f" since no decorations
+    // (Note: could be present from other drawing - we check that decoration wasn't added)
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[0];
+    try std.testing.expect(!cmd.text.underline);
+    try std.testing.expect(!cmd.text.strikethrough);
+}
+
+test "embedded font decoration metrics from POST/OS2 tables" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+
+    // Check decoration metrics were loaded
+    // Courier Prime should have reasonable values
+    try std.testing.expect(font.underline_position != 0 or font.underline_thickness != 0);
+    try std.testing.expect(font.strikeout_position > 0);
+    try std.testing.expect(font.strikeout_size > 0);
+}
+
+test "write() advances cursor_x" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    var region = TextBox{ .x = 50, .y = 50, .width = 300, .height = 100 };
+
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
+
+    _ = try doc.write(&region, "Hello", .{});
+
+    // cursor_x should have advanced
+    try std.testing.expect(region.cursor_x > 0);
+    // cursor_y should still be 0 (same line)
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
+}
+
+test "write() wraps to next line" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    // Narrow region to force wrapping
+    var region = TextBox{ .x = 50, .y = 50, .width = 60, .height = 100 };
+
+    // "Hello World" won't fit on one 60pt line (Hello ~27pt, World ~31pt, space ~3pt)
+    _ = try doc.write(&region, "Hello World", .{});
+
+    // Should have wrapped - cursor_y should have advanced
+    try std.testing.expect(region.cursor_y > 0);
+}
+
+test "write() with multiple styled chunks" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    var region = TextBox{ .x = 50, .y = 50, .width = 300, .height = 100 };
+
+    doc.setTextStyle(.{});
+    _ = try doc.write(&region, "Normal ", .{});
+
+    doc.setTextStyle(.{ .color = Color.red });
+    _ = try doc.write(&region, "red ", .{});
+
+    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
+    _ = try doc.write(&region, "underlined", .{});
+
+    // Should have 3 text commands
+    const page = &doc.pages.items[0];
+    try std.testing.expectEqual(@as(usize, 3), page.commands.items.len);
+
+    // Check styles were preserved
+    try std.testing.expect(page.commands.items[1].text.text_color.eql(Color.red));
+    try std.testing.expect(page.commands.items[2].text.underline);
+}
+
+test "write() returns overflow when region is full" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    // Very small region - only fits one line
+    var region = TextBox{ .x = 50, .y = 50, .width = 100, .height = 15 };
+
+    const result = try doc.write(&region, "This is a long text that will overflow the small region", .{});
+
+    // Should have overflow
+    try std.testing.expect(result.overflow != null);
+}
+
+test "TextBox.newLine resets cursor_x and advances cursor_y" {
+    var region = TextBox{ .x = 50, .y = 50, .width = 300, .height = 100 };
+    region.cursor_x = 150;
+    region.cursor_y = 20;
+
+    region.newLine(14.4);
+
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
+    try std.testing.expectApproxEqAbs(@as(f64, 34.4), region.cursor_y, 0.01);
+}
+
+test "write() with measure_only tracks cursor without rendering" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    var region = TextBox{ .x = 50, .y = 50, .width = 200, .height = 100 };
+
+    // Measure pass - cursor should advance but no text rendered
+    _ = try doc.write(&region, "Hello ", .{ .measure_only = true });
+    const cursor_after_measure = region.cursor_x;
+    try std.testing.expect(cursor_after_measure > 0);
+
+    // Check no text was rendered (page content should be empty)
+    const page = &doc.pages.items[0];
+    try std.testing.expectEqual(@as(usize, 0), page.commands.items.len);
+
+    // Reset cursor and write for real
+    region.cursor_x = 0;
+    _ = try doc.write(&region, "Hello ", .{});
+
+    // Cursor should match the measured position
+    try std.testing.expectApproxEqAbs(cursor_after_measure, region.cursor_x, 0.01);
+
+    // Now there should be commands
+    try std.testing.expect(page.commands.items.len > 0);
+}
+
+test "write() with wrap=false stays on one line" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(null);
+    try doc.setFont(.helvetica, 12);
+
+    // Narrow region that would normally wrap
+    var region = TextBox{ .x = 50, .y = 50, .width = 60, .height = 100 };
+
+    _ = try doc.write(&region, "Hello World Test", .{ .wrap = false });
+
+    // With wrap=false, cursor_y should stay at 0 (no line wrapping)
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
+
+    // cursor_x should be beyond the region width (text overflows)
+    try std.testing.expect(region.cursor_x > 60);
 }

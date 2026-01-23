@@ -42,6 +42,11 @@ pub const StandardFontMetrics = struct {
     descender: i16,
     cap_height: i16,
     x_height: i16,
+    // Text decoration metrics (consistent across standard fonts per fpdf2)
+    underline_position: i16 = -100,
+    underline_thickness: i16 = 50,
+    strikeout_position: i16 = 250,
+    strikeout_size: i16 = 50,
 };
 
 /// Get metrics for standard fonts (in 1000 units)
