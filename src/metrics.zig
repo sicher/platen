@@ -90,8 +90,8 @@ pub fn getStandardFontMetrics(font: fonts.StandardFont) StandardFontMetrics {
     };
 }
 
-/// Text style with spacing overrides
-pub const TextStyle = struct {
+/// Font style for text measurement (standard fonts only).
+pub const FontStyle = struct {
     font: fonts.StandardFont = .helvetica,
     size: f64 = 12.0,
     /// Extra space between characters (in points). Can be negative.
@@ -100,7 +100,7 @@ pub const TextStyle = struct {
     line_height: f64 = 1.2,
 
     /// Calculate line height in points
-    pub fn lineHeightPts(self: TextStyle) f64 {
+    pub fn lineHeightPts(self: FontStyle) f64 {
         return self.size * self.line_height;
     }
 };
@@ -112,7 +112,7 @@ pub fn charWidth(font: fonts.StandardFont, char: u8) u16 {
 }
 
 /// Measure text width in points
-pub fn measureTextWidth(text: []const u8, style: TextStyle) f64 {
+pub fn measureTextWidth(text: []const u8, style: FontStyle) f64 {
     if (text.len == 0) return 0;
 
     const widths = getWidthTable(style.font);
@@ -130,7 +130,7 @@ pub fn measureTextWidth(text: []const u8, style: TextStyle) f64 {
 }
 
 /// Measure text and return full metrics
-pub fn measureText(text: []const u8, style: TextStyle) TextMetrics {
+pub fn measureText(text: []const u8, style: FontStyle) TextMetrics {
     return .{
         .width = measureTextWidth(text, style),
         .height = style.lineHeightPts(),
@@ -434,7 +434,7 @@ const zapf_dingbats_widths = [256]u16{
 // ============================================================================
 
 test "measure simple text" {
-    const style = TextStyle{ .font = .helvetica, .size = 12.0 };
+    const style = FontStyle{ .font = .helvetica, .size = 12.0 };
     const metrics = measureText("Hello", style);
 
     // "Hello" = H(722) + e(556) + l(222) + l(222) + o(556) = 2278
@@ -444,7 +444,7 @@ test "measure simple text" {
 }
 
 test "measure with character spacing" {
-    const style = TextStyle{ .font = .helvetica, .size = 12.0, .char_spacing = 1.0 };
+    const style = FontStyle{ .font = .helvetica, .size = 12.0, .char_spacing = 1.0 };
     const metrics = measureText("Hello", style);
 
     // Base width ~27.336 + 4 * 1.0 (4 gaps between 5 chars) = 31.336
@@ -452,7 +452,7 @@ test "measure with character spacing" {
 }
 
 test "courier is monospace" {
-    const style = TextStyle{ .font = .courier, .size = 10.0 };
+    const style = FontStyle{ .font = .courier, .size = 10.0 };
     const w1 = measureTextWidth("iiiii", style);
     const w2 = measureTextWidth("MMMMM", style);
 
@@ -461,9 +461,9 @@ test "courier is monospace" {
 }
 
 test "line height calculation" {
-    const style1 = TextStyle{ .size = 12.0, .line_height = 1.0 };
+    const style1 = FontStyle{ .size = 12.0, .line_height = 1.0 };
     try std.testing.expectApproxEqAbs(@as(f64, 12.0), style1.lineHeightPts(), 0.001);
 
-    const style2 = TextStyle{ .size = 12.0, .line_height = 1.5 };
+    const style2 = FontStyle{ .size = 12.0, .line_height = 1.5 };
     try std.testing.expectApproxEqAbs(@as(f64, 18.0), style2.lineHeightPts(), 0.001);
 }

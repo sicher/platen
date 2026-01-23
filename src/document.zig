@@ -31,7 +31,7 @@ const Value = objects.Value;
 pub const StandardFont = fonts.StandardFont;
 pub const Font = fonts.Font;
 pub const TextMetrics = metrics.TextMetrics;
-pub const TextStyle = metrics.TextStyle;
+pub const FontStyle = metrics.FontStyle;
 pub const FontMetrics = metrics.FontMetrics;
 pub const EmbeddedFont = embedded.EmbeddedFont;
 pub const Color = color.Color;
@@ -40,6 +40,7 @@ pub const Svg = svg.Svg;
 pub const Path = pathmod.Path;
 pub const StyledText = styled_text.StyledText;
 pub const Span = styled_text.Span;
+pub const BreakPoint = styled_text.BreakPoint;
 pub const LinearGradient = gradient.LinearGradient;
 pub const RadialGradient = gradient.RadialGradient;
 pub const ColorStop = gradient.ColorStop;
@@ -794,8 +795,8 @@ pub const Document = struct {
         return self.font_size * self.line_height;
     }
 
-    /// Get current text style for measurement
-    pub fn getTextStyle(self: *Document) TextStyle {
+    /// Get current font style for measurement (standard fonts only).
+    pub fn getFontStyle(self: *Document) FontStyle {
         return .{
             .font = self.current_font orelse .helvetica,
             .size = self.font_size,
@@ -851,12 +852,12 @@ pub const Document = struct {
 
     /// Measure text dimensions without rendering
     pub fn measureText(self: *Document, text_str: []const u8) TextMetrics {
-        return metrics.measureText(text_str, self.getTextStyle());
+        return metrics.measureText(text_str, self.getFontStyle());
     }
 
     /// Measure text width in points
     pub fn measureTextWidth(self: *Document, text_str: []const u8) f64 {
-        return metrics.measureTextWidth(text_str, self.getTextStyle());
+        return metrics.measureTextWidth(text_str, self.getFontStyle());
     }
 
     /// Set cursor position (in points from top-left).
@@ -1285,7 +1286,7 @@ pub const Document = struct {
             if (self.current_embedded) |emb| {
                 return emb.measureTextWidth(str, self.font_size);
             }
-            return metrics.measureTextWidth(str, self.getTextStyle());
+            return metrics.measureTextWidth(str, self.getFontStyle());
         }
 
         // Slow path: filter out soft-hyphens using stack buffer
@@ -1306,7 +1307,7 @@ pub const Document = struct {
         if (self.current_embedded) |emb| {
             return emb.measureTextWidth(filtered, self.font_size);
         }
-        return metrics.measureTextWidth(filtered, self.getTextStyle());
+        return metrics.measureTextWidth(filtered, self.getFontStyle());
     }
 
     /// Internal line writer with indent and valign support.
@@ -2741,8 +2742,180 @@ pub const Document = struct {
 
             // Handle case where first word doesn't fit
             if (line_end == line_start and line_start < n) {
+                const big_word = text.words.items[line_start];
+
+                // Try to break at soft-hyphen if available
+                if (big_word.break_points) |break_points| {
+                    const hyphen_width = self.getTextWidth("-");
+
+                    // Find best break point that fits
+                    var best_bp: ?styled_text.BreakPoint = null;
+                    for (break_points) |bp| {
+                        if (bp.width + hyphen_width <= line_width + 0.01) {
+                            best_bp = bp;
+                        } else {
+                            break; // Break points are ordered by position
+                        }
+                    }
+
+                    if (best_bp) |bp| {
+                        // Render prefix + hyphen on this line
+                        const span = text.spans.items[big_word.start_span];
+                        const prefix_end = bp.offset;
+                        const prefix = span.text[big_word.start_offset..prefix_end];
+
+                        // Strip soft-hyphens from prefix for rendering
+                        var prefix_buf: [512]u8 = undefined;
+                        const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
+
+                        const font_size = self.font_size;
+                        const y_pos = switch (opts.valign) {
+                            .top => region.y + region.padding.top + region.cursor_y + font_size,
+                            .middle => blk: {
+                                const leading = line_height - font_size;
+                                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
+                            },
+                            .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                        };
+
+                        const x_pos = region.x + region.padding.left;
+                        _ = try self.writeAt(x_pos, y_pos, clean_prefix);
+                        _ = try self.writeAt(x_pos + bp.width, y_pos, "-");
+
+                        region.newLine(line_height);
+                        lines_written += 1;
+
+                        // Now render the suffix on the next line
+                        // Skip the soft-hyphen bytes (2 bytes for UTF-8 soft-hyphen)
+                        const suffix_start = prefix_end + 2;
+                        if (suffix_start < big_word.end_offset) {
+                            const suffix = span.text[suffix_start..big_word.end_offset];
+                            var suffix_buf: [512]u8 = undefined;
+                            const clean_suffix = stripSoftHyphensTo(suffix, &suffix_buf);
+
+                            if (region.remainingHeight() >= line_height) {
+                                const y_pos2 = switch (opts.valign) {
+                                    .top => region.y + region.padding.top + region.cursor_y + font_size,
+                                    .middle => blk: {
+                                        const leading = line_height - font_size;
+                                        break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
+                                    },
+                                    .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                                };
+                                _ = try self.writeAt(region.x + region.padding.left, y_pos2, clean_suffix);
+                                region.newLine(line_height);
+                                lines_written += 1;
+                            }
+                        }
+
+                        word_idx = line_start + 1;
+                        continue;
+                    }
+                }
+
+                // Try regular hyphen breaking if enabled (only for single-span words)
+                if (opts.break_on_hyphens and big_word.start_span == big_word.end_span) {
+                    const span = text.spans.items[big_word.start_span];
+                    const word_text = span.text[big_word.start_offset..big_word.end_offset];
+
+                    if (self.findHyphenBreak(word_text, line_width)) |break_pos| {
+                        // break_pos is position after the hyphen
+                        const prefix = word_text[0..break_pos];
+                        const suffix = word_text[break_pos..];
+
+                        const font_size = self.font_size;
+                        const y_pos = switch (opts.valign) {
+                            .top => region.y + region.padding.top + region.cursor_y + font_size,
+                            .middle => blk: {
+                                const leading = line_height - font_size;
+                                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
+                            },
+                            .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                        };
+
+                        const x_pos = region.x + region.padding.left;
+                        _ = try self.writeAt(x_pos, y_pos, prefix);
+
+                        region.newLine(line_height);
+                        lines_written += 1;
+
+                        // Render suffix on next line
+                        if (suffix.len > 0 and region.remainingHeight() >= line_height) {
+                            const y_pos2 = switch (opts.valign) {
+                                .top => region.y + region.padding.top + region.cursor_y + font_size,
+                                .middle => blk: {
+                                    const leading = line_height - font_size;
+                                    break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
+                                },
+                                .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                            };
+                            _ = try self.writeAt(region.x + region.padding.left, y_pos2, suffix);
+                            region.newLine(line_height);
+                            lines_written += 1;
+                        }
+
+                        word_idx = line_start + 1;
+                        continue;
+                    }
+                }
+
+                // Last resort: character-level breaking (only for single-span words)
+                // Loop until entire word is consumed
+                if (big_word.start_span == big_word.end_span) {
+                    const span = text.spans.items[big_word.start_span];
+                    var remaining_text = span.text[big_word.start_offset..big_word.end_offset];
+                    const font_size = self.font_size;
+                    var did_break = false;
+
+                    while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
+                        const y_pos = switch (opts.valign) {
+                            .top => region.y + region.padding.top + region.cursor_y + font_size,
+                            .middle => blk: {
+                                const leading = line_height - font_size;
+                                break :blk region.y + region.padding.top + region.cursor_y + font_size - leading / 2;
+                            },
+                            .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                        };
+                        const x_pos = region.x + region.padding.left;
+
+                        // Check if remaining text fits on line
+                        const remaining_width = self.getTextWidth(remaining_text);
+                        if (remaining_width <= line_width + 0.01) {
+                            // Fits - render it and we're done
+                            _ = try self.writeAt(x_pos, y_pos, remaining_text);
+                            region.newLine(line_height);
+                            lines_written += 1;
+                            did_break = true;
+                            break;
+                        }
+
+                        // Doesn't fit - find break point
+                        if (self.findCharacterBreak(remaining_text, line_width)) |break_pos| {
+                            const prefix = remaining_text[0..break_pos];
+                            _ = try self.writeAt(x_pos, y_pos, prefix);
+                            region.newLine(line_height);
+                            lines_written += 1;
+                            remaining_text = remaining_text[break_pos..];
+                            did_break = true;
+                        } else {
+                            // Can't break (shouldn't happen) - render what we can
+                            _ = try self.writeAt(x_pos, y_pos, remaining_text);
+                            region.newLine(line_height);
+                            lines_written += 1;
+                            did_break = true;
+                            break;
+                        }
+                    }
+
+                    if (did_break) {
+                        word_idx = line_start + 1;
+                        continue;
+                    }
+                }
+
+                // No break point found - include oversized word as-is
                 line_end = line_start + 1;
-                current_width = text.words.items[line_start].width;
+                current_width = big_word.width;
             }
 
             // Determine alignment
@@ -4411,6 +4584,30 @@ fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
         }
     }
     return result;
+}
+
+/// Strip soft-hyphens to a provided buffer. Returns slice of buffer used.
+fn stripSoftHyphensTo(str: []const u8, buf: []u8) []const u8 {
+    // Fast path: no soft-hyphens
+    if (std.mem.indexOf(u8, str, "\xC2\xAD") == null) {
+        const len = @min(str.len, buf.len);
+        @memcpy(buf[0..len], str[0..len]);
+        return buf[0..len];
+    }
+
+    // Strip soft-hyphens
+    var j: usize = 0;
+    var i: usize = 0;
+    while (i < str.len and j < buf.len) {
+        if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+            i += 2; // Skip soft-hyphen
+        } else {
+            buf[j] = str[i];
+            j += 1;
+            i += 1;
+        }
+    }
+    return buf[0..j];
 }
 
 /// Check if text contains any soft-hyphens.

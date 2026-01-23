@@ -16,6 +16,14 @@ pub const Span = struct {
     style: TextStyleOptions = .{},
 };
 
+/// A potential break point within a word (soft-hyphen location).
+pub const BreakPoint = struct {
+    /// Byte offset within word where soft-hyphen is located.
+    offset: u16,
+    /// Width of text up to this point (not including the hyphen that would be added).
+    width: f64,
+};
+
 /// Preprocessed word info for line breaking.
 /// A word may span multiple styled segments.
 const StyledWord = struct {
@@ -31,6 +39,9 @@ const StyledWord = struct {
     width: f64,
     /// Must break after this word (newline follows).
     force_break: bool,
+    /// Optional break points within word (soft-hyphen locations).
+    /// null for most words. When breaking, a visible hyphen is added.
+    break_points: ?[]const BreakPoint = null,
 };
 
 /// Function type for measuring text width.
@@ -46,6 +57,8 @@ pub const StyledText = struct {
 
     // Preprocessed data for Knuth-Plass (populated by prepare())
     words: std.ArrayListUnmanaged(StyledWord) = .{},
+    /// Storage for break point arrays (freed in deinit).
+    break_point_storage: std.ArrayListUnmanaged([]const BreakPoint) = .{},
     prepared: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) StyledText {
@@ -58,6 +71,11 @@ pub const StyledText = struct {
             self.allocator.free(text);
         }
         self.owned_text.deinit(self.allocator);
+        // Free break point arrays
+        for (self.break_point_storage.items) |bp_array| {
+            self.allocator.free(bp_array);
+        }
+        self.break_point_storage.deinit(self.allocator);
         self.spans.deinit(self.allocator);
         self.words.deinit(self.allocator);
     }
@@ -159,6 +177,11 @@ pub const StyledText = struct {
                             .force_break = force_break,
                         });
 
+                        // Check for soft-hyphens and add break points
+                        if (try self.findSoftHyphenBreaks(word_start_span, word_start_offset, span_idx, byte_idx, measure_fn, ctx)) |bp| {
+                            self.words.items[self.words.items.len - 1].break_points = bp;
+                        }
+
                         in_word = false;
                         word_width = 0;
                     }
@@ -185,14 +208,20 @@ pub const StyledText = struct {
             const last_span = self.spans.items[last_span_idx];
             word_width = self.measureWord(word_start_span, word_start_offset, last_span_idx, @intCast(last_span.text.len), measure_fn, ctx);
 
+            const end_offset: u16 = @intCast(last_span.text.len);
             try self.words.append(self.allocator, .{
                 .start_span = word_start_span,
                 .start_offset = word_start_offset,
                 .end_span = last_span_idx,
-                .end_offset = @intCast(last_span.text.len),
+                .end_offset = end_offset,
                 .width = word_width,
                 .force_break = false,
             });
+
+            // Check for soft-hyphens and add break points
+            if (try self.findSoftHyphenBreaks(word_start_span, word_start_offset, last_span_idx, end_offset, measure_fn, ctx)) |bp| {
+                self.words.items[self.words.items.len - 1].break_points = bp;
+            }
         }
 
         self.prepared = true;
@@ -225,9 +254,117 @@ pub const StyledText = struct {
         return width;
     }
 
+    /// Find soft-hyphens in a word and create break points.
+    /// Only handles single-span words for now; returns null for multi-span words.
+    fn findSoftHyphenBreaks(
+        self: *StyledText,
+        start_span: u16,
+        start_offset: u16,
+        end_span: u16,
+        end_offset: u16,
+        measure_fn: MeasureFn,
+        ctx: *anyopaque,
+    ) !?[]const BreakPoint {
+        // Only handle single-span words for now
+        if (start_span != end_span) return null;
+
+        const span = self.spans.items[start_span];
+        const word_text = span.text[start_offset..end_offset];
+
+        // Count soft-hyphens first (UTF-8: 0xC2 0xAD)
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i + 1 < word_text.len) {
+            if (word_text[i] == 0xC2 and word_text[i + 1] == 0xAD) {
+                count += 1;
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        if (count == 0) return null;
+
+        // Allocate break points
+        const break_points = try self.allocator.alloc(BreakPoint, count);
+        errdefer self.allocator.free(break_points);
+
+        // Fill in break points with positions and widths
+        var bp_idx: usize = 0;
+        i = 0;
+        while (i + 1 < word_text.len) {
+            if (word_text[i] == 0xC2 and word_text[i + 1] == 0xAD) {
+                // Measure width up to this point (excluding soft-hyphen bytes)
+                // We need to measure the text with soft-hyphens removed
+                const prefix = word_text[0..i];
+                const width = self.measureTextWithoutSoftHyphens(prefix, span.style, measure_fn, ctx);
+
+                break_points[bp_idx] = .{
+                    .offset = @intCast(start_offset + i),
+                    .width = width,
+                };
+                bp_idx += 1;
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        // Store in break_point_storage for cleanup
+        try self.break_point_storage.append(self.allocator, break_points);
+
+        return break_points;
+    }
+
+    /// Measure text width, stripping soft-hyphens.
+    fn measureTextWithoutSoftHyphens(
+        self: *const StyledText,
+        text: []const u8,
+        style: TextStyleOptions,
+        measure_fn: MeasureFn,
+        ctx: *anyopaque,
+    ) f64 {
+        _ = self;
+        // Check if text contains soft-hyphens
+        var has_soft_hyphen = false;
+        for (0..text.len -| 1) |i| {
+            if (text[i] == 0xC2 and text[i + 1] == 0xAD) {
+                has_soft_hyphen = true;
+                break;
+            }
+        }
+
+        if (!has_soft_hyphen) {
+            return measure_fn(text, style, ctx);
+        }
+
+        // Strip soft-hyphens using stack buffer
+        var buf: [1024]u8 = undefined;
+        var buf_len: usize = 0;
+        var i: usize = 0;
+        while (i < text.len) {
+            if (i + 1 < text.len and text[i] == 0xC2 and text[i + 1] == 0xAD) {
+                i += 2; // Skip soft-hyphen
+            } else {
+                if (buf_len < buf.len) {
+                    buf[buf_len] = text[i];
+                    buf_len += 1;
+                }
+                i += 1;
+            }
+        }
+
+        return measure_fn(buf[0..buf_len], style, ctx);
+    }
+
     /// Reset preparation state (call after modifying spans).
     pub fn invalidate(self: *StyledText) void {
         self.prepared = false;
+        // Clear break points when invalidating
+        for (self.break_point_storage.items) |bp_array| {
+            self.allocator.free(bp_array);
+        }
+        self.break_point_storage.clearRetainingCapacity();
     }
 };
 
@@ -316,4 +453,66 @@ test "StyledText appendOwned copies text" {
     }
 
     try std.testing.expectEqualStrings("temporary!", st.spans.items[0].text);
+}
+
+test "StyledText detects soft-hyphens during prepare" {
+    const allocator = std.testing.allocator;
+    var st = StyledText.init(allocator);
+    defer st.deinit();
+
+    // Word with soft-hyphens: "in­com­pre­hen­si­ble" (U+00AD = 0xC2 0xAD in UTF-8)
+    try st.append("in\xC2\xADcom\xC2\xADpre\xC2\xADhen\xC2\xADsi\xC2\xADble", .{});
+
+    try st.prepare(testMeasure, @constCast(@ptrCast(&@as(u8, 0))));
+
+    // Should have one word
+    try std.testing.expectEqual(@as(usize, 1), st.words.items.len);
+
+    // Word should have 5 break points (one for each soft-hyphen)
+    const word = st.words.items[0];
+    try std.testing.expect(word.break_points != null);
+    try std.testing.expectEqual(@as(usize, 5), word.break_points.?.len);
+
+    // Break points should be at increasing offsets
+    const bps = word.break_points.?;
+    try std.testing.expect(bps[0].offset < bps[1].offset);
+    try std.testing.expect(bps[1].offset < bps[2].offset);
+    try std.testing.expect(bps[2].offset < bps[3].offset);
+    try std.testing.expect(bps[3].offset < bps[4].offset);
+}
+
+test "StyledText word without soft-hyphens has no break points" {
+    const allocator = std.testing.allocator;
+    var st = StyledText.init(allocator);
+    defer st.deinit();
+
+    try st.append("hello world", .{});
+    try st.prepare(testMeasure, @constCast(@ptrCast(&@as(u8, 0))));
+
+    // Should have two words
+    try std.testing.expectEqual(@as(usize, 2), st.words.items.len);
+
+    // Neither word should have break points
+    try std.testing.expect(st.words.items[0].break_points == null);
+    try std.testing.expect(st.words.items[1].break_points == null);
+}
+
+test "StyledText break point widths are measured correctly" {
+    const allocator = std.testing.allocator;
+    var st = StyledText.init(allocator);
+    defer st.deinit();
+
+    // "ab­cd" - soft-hyphen after "ab"
+    try st.append("ab\xC2\xADcd", .{});
+    try st.prepare(testMeasure, @constCast(@ptrCast(&@as(u8, 0))));
+
+    try std.testing.expectEqual(@as(usize, 1), st.words.items.len);
+
+    const word = st.words.items[0];
+    try std.testing.expect(word.break_points != null);
+    try std.testing.expectEqual(@as(usize, 1), word.break_points.?.len);
+
+    // Width at break point should be width of "ab" (2 chars * 10 = 20)
+    const bp = word.break_points.?[0];
+    try std.testing.expectEqual(@as(f64, 20.0), bp.width);
 }

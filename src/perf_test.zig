@@ -382,19 +382,29 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
             // Left column - justified with optimal line breaking
             var region = zpdf.Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
-            _ = try doc.writeParagraph(&region, full_text, .{
-                .alignment = .justify,
-                .valign = .top,
-                .line_breaking = .optimal,
-            });
+            {
+                var st = doc.createStyledText();
+                defer st.deinit();
+                try st.append(full_text, .{});
+                _ = try doc.writeStyled(&region, &st, .{
+                    .alignment = .justify,
+                    .valign = .top,
+                    .line_breaking = .optimal,
+                });
+            }
 
             // Right column - justified with optimal line breaking
             region = zpdf.Region{ .x = 320, .y = 50, .width = 230, .height = 700 };
-            _ = try doc.writeParagraph(&region, full_text, .{
-                .alignment = .justify,
-                .valign = .top,
-                .line_breaking = .optimal,
-            });
+            {
+                var st = doc.createStyledText();
+                defer st.deinit();
+                try st.append(full_text, .{});
+                _ = try doc.writeStyled(&region, &st, .{
+                    .alignment = .justify,
+                    .valign = .top,
+                    .line_breaking = .optimal,
+                });
+            }
         }
         result.text_flow_ms = t.endPrint(config.quiet);
     }

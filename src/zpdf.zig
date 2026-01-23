@@ -37,7 +37,7 @@ pub const EmbeddedFont = document.EmbeddedFont;
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
-pub const TextStyle = document.TextStyle;
+pub const FontStyle = document.FontStyle;
 pub const FontMetrics = document.FontMetrics;
 
 // Re-export color
@@ -70,7 +70,6 @@ pub const WriteResult = document.WriteResult;
 pub const WrappedTextMetrics = document.WrappedTextMetrics;
 pub const WriteOptions = document.WriteOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
-pub const FlowOptions = document.FlowOptions;
 pub const MeasureOptions = document.MeasureOptions;
 pub const PageSize = document.PageSize;
 
@@ -93,6 +92,7 @@ pub const opentype = document.opentype;
 // Re-export styled text types
 pub const StyledText = document.StyledText;
 pub const Span = document.Span;
+pub const BreakPoint = document.BreakPoint;
 
 // ============================================================================
 // Units - all measurements in PDF are in points (1pt = 1/72 inch)
