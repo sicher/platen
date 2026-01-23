@@ -349,105 +349,104 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
+| `init(allocator)` | Create a new PDF document |
 | `deinit()` | Free all document resources |
-| `init()` | Create a new PDF document |
-| `output()` | Generate PDF output |
+| `output() -> []u8` | Generate PDF output |
 
 ### Document
 
 | Method | Description |
 |--------|-------------|
 | `addPage()` | Add a new page using the current page size |
-| `getPageTextBox()` | Returns a region for the current page respecting document margins |
-| `pageNo()` | Get current page number (1-based) |
-| `setPageSize()` | Set the page size for subsequent addPage() calls |
-| `setMargins()` | Set document margins |
-| `setMetadata()` | Set document metadata (title, author, subject, etc.) |
+| `setPageSize(PageSize)` | Set the page size for subsequent pages |
+| `setMargins(Margins)` | Set document margins |
+| `setMetadata(DocumentMetadata)` | Set document metadata (title, author, etc.) |
+| `getPageRegion() -> Region` | Get a region for the current page respecting margins |
+| `pageNo() -> usize` | Get current page number (1-based) |
 
 ### Fonts
 
 | Method | Description |
 |--------|-------------|
-| `getFontMetrics()` | Get font metrics for the current font, scaled to the current font size |
-| `getTextStyle()` | Get current text style for measurement |
-| `loadFont()` | Load a TrueType font from file |
-| `setEmbeddedFont()` | Set an embedded font as current |
-| `setFeature()` | Set OpenType feature for all embedded fonts |
-| `setFont()` | Set the current font and size (standard font) |
-| `setFontFeature()` | Set OpenType feature for a specific embedded font |
+| `setFont(StandardFont, size)` | Set the current font (standard font) |
+| `loadFont(path) -> *EmbeddedFont` | Load a TrueType/OpenType font |
+| `setEmbeddedFont(*EmbeddedFont, size)` | Set an embedded font as current |
+| `setFeature(Feature, enabled)` | Set OpenType feature for all fonts |
+| `setFontFeature(*EmbeddedFont, Feature, enabled)` | Set feature for specific font |
+| `getFontMetrics() -> FontMetrics` | Get metrics for current font/size |
+| `getTextStyle() -> TextStyle` | Get current text style |
 
 ### Text
 
 | Method | Description |
 |--------|-------------|
-| `drawRegion()` | Draws a region's border and fill (without text) |
-| `getTextWidth()` | Measures text width using current font (standard or embedded) |
-| `measureText()` | Measure text dimensions without rendering |
-| `measureTextWidth()` | Measure text width in points |
-| `measureWrappedText()` | Measures how wrapped text would be laid out without rendering |
-| `write()` | Writes text at the current cursor position |
-| `writeAt()` | Writes text at the specified position |
-| `writeFlow()` | Write text with automatic pagination |
-| `writeLine()` | Writes a single line of text into a content area |
-| `writeParagraph()` | Writes wrapped text into a region |
+| `writeAt(x, y, str) -> Rect` | Write text at position, returns bounding rect |
+| `write(*Region, str, WriteOptions) -> WriteResult` | Write text with wrapping |
+| `writeLine(*Region, str, LineOptions) -> WriteResult` | Write single line |
+| `writeParagraph(*Region, str, ParagraphOptions) -> WriteResult` | Write wrapped paragraph |
+| `writeFlow(str, FlowOptions) -> usize` | Write with auto-pagination |
+| `getTextWidth(str) -> f64` | Measure text width in points |
+| `measureText(str) -> TextMetrics` | Measure text dimensions |
+| `measureWrappedText(str, MeasureOptions) -> WrappedTextMetrics` | Measure wrapped layout |
+| `drawRegion(Region)` | Draw region's border and fill |
 
 ### Text Styling
 
 | Method | Description |
 |--------|-------------|
-| `getLineHeightPts()` | Get current line height in points |
-| `setCharSpacing()` | Set character spacing (extra space between characters, in points) |
-| `setLineHeight()` | Set line height (as multiple of font size, e.g. 1.2 = 120%) |
-| `setTextColor()` | Set text color |
-| `setTextStyle()` | Set text style (color and decoration) |
+| `setTextColor(Color)` | Set text color |
+| `setTextStyle(TextStyleOptions)` | Set color and decoration (underline, strikethrough) |
+| `setCharSpacing(f64)` | Set extra space between characters (points) |
+| `setLineHeight(f64)` | Set line height multiplier (e.g., 1.2 = 120%) |
+| `getLineHeightPts() -> f64` | Get current line height in points |
 
 ### Cursor Position
 
 | Method | Description |
 |--------|-------------|
-| `getPosition()` | Get cursor position (in points from top-left) |
-| `setPosition()` | Set cursor position (in points from top-left) |
+| `setPosition(Point)` | Set cursor position |
+| `getPosition() -> Point` | Get cursor position |
 
 ### Navigation
 
 | Method | Description |
 |--------|-------------|
-| `addExternalLink()` | Add an external link (clickable area that opens a URL) |
-| `addLink()` | Add an internal link (clickable area that jumps to another page position) |
-| `addOutlineItem()` | Adds an outline item to the document (shown in PDF viewer's table of contents) |
-| `currentDestination()` | Get a destination for the current cursor position |
-| `setPageLabel()` | Sets a page label range starting at the specified page index |
+| `currentDestination() -> ?Destination` | Get destination for current position |
+| `addLink(Rect, Destination)` | Add internal link (jumps to destination) |
+| `addExternalLink(Rect, url)` | Add external link (opens URL) |
+| `addOutlineItem(title, Destination, ?parent) -> *Outline` | Add bookmark/outline item |
+| `setPageLabel(page_index, PageLabel)` | Set page label range |
 
 ### Images & SVG
 
 | Method | Description |
 |--------|-------------|
-| `drawImage()` | Draw an image at the specified position |
-| `drawSvg()` | Draw an SVG at the specified position |
-| `loadImage()` | Load an image from file (JPEG or PNG) |
-| `loadSvg()` | Load an SVG from file |
+| `loadImage(path) -> *Image` | Load JPEG or PNG image |
+| `drawImage(*Image, x, y, w, h)` | Draw image (0 for w or h = auto aspect) |
+| `loadSvg(path) -> *Svg` | Load SVG file |
+| `drawSvg(*Svg, x, y, w, h)` | Draw SVG (0,0 = original size) |
 
 ### Graphics
 
 | Method | Description |
 |--------|-------------|
-| `createPath()` | Create a new path builder |
-| `drawCircle()` | Draw a circle (special case of ellipse) |
-| `drawEllipse()` | Draw an ellipse using 4 cubic Bezier curves |
-| `drawLine()` | Draw a line between two points |
-| `drawPath()` | Draw a path with the specified style |
-| `drawPolygon()` | Draw a closed polygon |
-| `drawRect()` | Draw a rectangle |
-| `drawRoundedRect()` | Draw a rectangle with rounded corners |
-| `setDrawStyle()` | Set drawing style (stroke/fill colors, line width, cap, join, dash pattern) |
+| `setDrawStyle(DrawStyleOptions)` | Set stroke/fill colors, line width, dash, etc. |
+| `drawLine(x1, y1, x2, y2)` | Draw a line |
+| `drawRect(x, y, w, h, DrawStyle)` | Draw rectangle |
+| `drawRoundedRect(x, y, w, h, radius, DrawStyle)` | Draw rounded rectangle |
+| `drawCircle(x, y, radius, DrawStyle)` | Draw circle |
+| `drawEllipse(x, y, w, h, DrawStyle)` | Draw ellipse |
+| `drawPolygon([]Point, DrawStyle)` | Draw closed polygon |
+| `createPath() -> Path` | Create a path builder |
+| `drawPath(*Path, DrawStyle)` | Draw a path |
 
 ### Gradients
 
 | Method | Description |
 |--------|-------------|
-| `addLinearGradient()` | Add a linear gradient to the document and return its index |
-| `addRadialGradient()` | Add a radial gradient to the document and return its index |
-| `fillRectGradient()` | Fill a rectangle with a gradient |
+| `addLinearGradient(LinearGradient) -> usize` | Register linear gradient |
+| `addRadialGradient(RadialGradient) -> usize` | Register radial gradient |
+| `fillRectGradient(x, y, w, h, gradient_idx)` | Fill rect with gradient |
 
 
 ## Requirements
