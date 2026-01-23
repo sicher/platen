@@ -20,13 +20,13 @@ EXCLUDE_METHODS = {
 CATEGORY_RULES = [
     # Exact matches first
     (['init', 'deinit', 'output'], 'Core'),
-    (['pageNo', 'addPage', 'addPageWithSize', 'setDefaultPageSize',
-      'setMetadata', 'setMargins', 'getPageTextBox'], 'Document'),
+    (['pageNo', 'addPage', 'setPageSize',
+      'setMetadata', 'setMargins', 'getPageRegion'], 'Document'),
     (['loadFont', 'setFont', 'setEmbeddedFont', 'setFeature',
       'setFontFeature', 'getFontMetrics', 'getTextStyle'], 'Fonts'),
     (['write', 'writeLine', 'writeParagraph', 'writeFlow', 'writeAt',
       'measureText', 'measureTextWidth', 'getTextWidth', 'measureWrappedText',
-      'drawTextBox'], 'Text'),
+      'drawRegion'], 'Text'),
     (['setTextColor', 'setTextStyle', 'setCharSpacing', 'setLineHeight', 'getLineHeightPts'], 'Text Styling'),
     (['setPosition', 'getPosition'], 'Cursor Position'),
     (['currentDestination', 'addLink', 'addExternalLink',
@@ -43,22 +43,30 @@ PREFIX_CATEGORIES = {
 }
 
 
-def extract_methods(source_path: Path) -> dict[str, str]:
-    """Extract pub fn methods with their doc comments from Document struct."""
+def extract_methods(source_path: Path) -> dict[str, tuple[str, str]]:
+    """Extract pub fn methods with their signatures and doc comments from Document struct.
+
+    Returns dict mapping method name to (signature, description).
+    """
     content = source_path.read_text()
 
-    # Pattern: optional doc comment(s), then pub fn with self or allocator parameter
+    # Pattern: optional doc comment(s), then full pub fn signature
     # Doc comments are /// lines immediately before the function
     # Match both `self` methods and `init(allocator)` constructor
-    pattern = r'((?:\s*///[^\n]*\n)+)?\s*pub fn (\w+)\((?:self|allocator)[^)]*\)'
+    pattern = r'((?:\s*///[^\n]*\n)+)?\s*pub fn (\w+)\(((?:self|allocator)[^)]*)\)([^{]*)'
 
     methods = {}
     for match in re.finditer(pattern, content):
         doc_comment = match.group(1)
         name = match.group(2)
+        params = match.group(3)
+        return_part = match.group(4).strip()
 
         if name in EXCLUDE_METHODS:
             continue
+
+        # Build signature
+        signature = format_signature(name, params, return_part)
 
         # Extract first line of doc comment as description
         if doc_comment:
@@ -70,9 +78,74 @@ def extract_methods(source_path: Path) -> dict[str, str]:
         else:
             description = f'TODO: add doc comment for {name}'
 
-        methods[name] = description
+        methods[name] = (signature, description)
 
     return methods
+
+
+def format_signature(name: str, params: str, return_part: str) -> str:
+    """Format a method signature for display in docs."""
+    # Parse parameters (skip self, simplify types)
+    param_list = []
+    for param in params.split(','):
+        param = param.strip()
+        if param in ('self', 'self: *Document', 'self: *const Document'):
+            continue
+        if param.startswith('allocator'):
+            param_list.append('allocator')
+            continue
+        # Extract param name and simplify type
+        if ':' in param:
+            pname, ptype = param.split(':', 1)
+            pname = pname.strip()
+            ptype = ptype.strip()
+            # Simplify common types
+            ptype = simplify_type(ptype)
+            param_list.append(f'{ptype}' if ptype else pname)
+
+    # Parse return type
+    ret_type = ''
+    if return_part:
+        # Handle "!Type" (error union) and "Type"
+        return_part = return_part.lstrip('!')
+        if return_part and return_part != 'void':
+            ret_type = simplify_type(return_part)
+
+    # Build signature string
+    params_str = ', '.join(param_list)
+    if ret_type:
+        return f'{name}({params_str}) -> {ret_type}'
+    else:
+        return f'{name}({params_str})'
+
+
+def simplify_type(t: str) -> str:
+    """Simplify a Zig type for documentation."""
+    t = t.strip()
+    # Remove module prefixes
+    if '.' in t and not t.startswith('*'):
+        t = t.split('.')[-1]
+    # Handle pointers
+    if t.startswith('*const '):
+        inner = t[7:]
+        if '.' in inner:
+            inner = inner.split('.')[-1]
+        return f'*{inner}'
+    if t.startswith('*'):
+        inner = t[1:]
+        if '.' in inner:
+            inner = inner.split('.')[-1]
+        return f'*{inner}'
+    # Handle slices
+    if t.startswith('[]const u8'):
+        return 'str'
+    if t.startswith('[]'):
+        return t
+    # Handle optionals
+    if t.startswith('?'):
+        inner = simplify_type(t[1:])
+        return f'?{inner}'
+    return t
 
 
 def categorize_method(name: str) -> str:
@@ -90,16 +163,16 @@ def categorize_method(name: str) -> str:
     return 'Other'
 
 
-def generate_api_reference(methods: dict[str, str]) -> str:
+def generate_api_reference(methods: dict[str, tuple[str, str]]) -> str:
     """Generate markdown API reference tables."""
     # Group methods by category
-    categories: dict[str, list[tuple[str, str]]] = {}
+    categories: dict[str, list[tuple[str, str, str]]] = {}
 
-    for name, desc in methods.items():
+    for name, (signature, desc) in methods.items():
         cat = categorize_method(name)
         if cat not in categories:
             categories[cat] = []
-        categories[cat].append((name, desc))
+        categories[cat].append((name, signature, desc))
 
     # Define category order
     category_order = [
@@ -119,8 +192,8 @@ def generate_api_reference(methods: dict[str, str]) -> str:
 
         lines.extend(['', f'### {category}', '', '| Method | Description |', '|--------|-------------|'])
 
-        for name, desc in methods_in_cat:
-            lines.append(f'| `{name}()` | {desc} |')
+        for name, signature, desc in methods_in_cat:
+            lines.append(f'| `{signature}` | {desc} |')
 
     return '\n'.join(lines)
 
@@ -144,9 +217,9 @@ def update_readme(readme_path: Path, api_reference: str) -> None:
     print(f"Updated {readme_path}")
 
 
-def check_missing_docs(methods: dict[str, str]) -> None:
+def check_missing_docs(methods: dict[str, tuple[str, str]]) -> None:
     """Report methods missing doc comments."""
-    missing = [name for name, desc in methods.items() if desc.startswith('TODO:')]
+    missing = [name for name, (sig, desc) in methods.items() if desc.startswith('TODO:')]
     if missing:
         print(f"\nMethods missing doc comments:")
         for name in sorted(missing):
