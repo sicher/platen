@@ -171,33 +171,6 @@ pub const WriteResult = struct {
     rect: Rect,
 };
 
-/// Result of measuring wrapped text without rendering.
-pub const WrappedTextMetrics = struct {
-    /// Total height needed (line_count * line_height).
-    height: f64,
-    /// Number of lines the text would occupy.
-    line_count: usize,
-    /// Width of the widest line (useful for centering blocks).
-    max_line_width: f64,
-
-    /// Check if text would fit in given height.
-    pub fn fitsInHeight(self: WrappedTextMetrics, available_height: f64) bool {
-        return self.height <= available_height;
-    }
-};
-
-/// Options for measureWrappedText.
-pub const MeasureOptions = struct {
-    /// Available width for text wrapping (required).
-    width: f64,
-    /// First line indent in points.
-    first_indent: f64 = 0,
-    /// Allow breaking after regular hyphens in compound words.
-    break_on_hyphens: bool = true,
-    /// Line breaking algorithm.
-    line_breaking: LineBreaking = .greedy,
-};
-
 /// Options for write() (flowing text with cursor tracking).
 pub const WriteOptions = struct {
     /// If true, only measure text without rendering. Cursor is still updated.
@@ -213,6 +186,8 @@ pub const WriteOptions = struct {
 
 /// Options for writeStyled (wrapped text with alignment).
 pub const ParagraphOptions = struct {
+    /// If true, only measure text without rendering. Cursor is still updated.
+    measure_only: bool = false,
     /// Horizontal text alignment.
     alignment: Align = .left,
     /// Vertical text alignment within line height.

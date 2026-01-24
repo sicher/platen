@@ -97,10 +97,10 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Vertical alignment | ✅ | ✅ | top/middle/bottom |
 | Soft hyphen support | ✅ | ✅ | U+00AD |
 | Regular hyphen breaking | - | ✅ `break_on_hyphens` | zpdf feature |
-| First line indent | ✅ | ⚠️ | `measureWrappedText()` only |
+| First line indent | ✅ | ⚠️ | Not yet implemented |
 | Optimal line breaking | - | ✅ Knuth-Plass | zpdf feature |
 | Text width measurement | `get_string_width()` | ✅ `getTextWidth()` | |
-| Wrapped text measurement | - | ✅ `measureWrappedText()` | zpdf feature |
+| Wrapped text measurement | - | ✅ `write(.measure_only=true)` | zpdf feature |
 | Line height control | ✅ | ✅ `setLineHeight()` | |
 | HTML rendering | `write_html()` | — | Not planned |
 | Markdown in cells | ✅ bold/italic/strike/underline | — | Not planned |
@@ -366,7 +366,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 
 ### zpdf Advantages (Features NOT in fpdf2)
 1. **Knuth-Plass optimal line breaking** - better paragraph layout
-2. **Wrapped text measurement** - `measureWrappedText()` before rendering
+2. **Wrapped text measurement** - `write(.measure_only=true)` uses same code path as rendering
 3. **More OpenType features** - tnum/pnum, frac, zero, dlig exposed
 4. **Break on hyphens option** - control regular hyphen breaking
 5. **Region-based layout** - explicit region model with overflow

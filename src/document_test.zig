@@ -1235,161 +1235,6 @@ test "writeStyled greedy and optimal both render successfully" {
     try std.testing.expectEqual(@as(usize, 7), optimal_result.lines_written);
 }
 
-// ============================================================================
-// measureWrappedText tests
-// ============================================================================
-
-test "measureWrappedText basic" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
-    const text = "Hello world";
-    const result = doc.measureWrappedText(text, .{ .width = 200 });
-
-    try std.testing.expectEqual(@as(usize, 1), result.line_count);
-    try std.testing.expect(result.height > 0);
-    try std.testing.expect(result.max_line_width > 0);
-    try std.testing.expect(result.max_line_width <= 200);
-}
-
-test "measureWrappedText multiple lines" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.courier, 12);
-
-    // Courier at 12pt: each char is 7.2pt wide
-    // "AAAA BBBB" = 9 chars = 64.8pt, so 50pt width should wrap
-    const text = "AAAA BBBB CCCC";
-    const result = doc.measureWrappedText(text, .{ .width = 50 });
-
-    try std.testing.expect(result.line_count > 1);
-}
-
-test "measureWrappedText empty text" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
-    const result = doc.measureWrappedText("", .{ .width = 200 });
-
-    try std.testing.expectEqual(@as(usize, 0), result.line_count);
-    try std.testing.expectEqual(@as(f64, 0), result.height);
-    try std.testing.expectEqual(@as(f64, 0), result.max_line_width);
-}
-
-test "measureWrappedText matches writeStyled line count" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
-    const text = "The quick brown fox jumps over the lazy dog. This is a longer text that should wrap across multiple lines when rendered in a narrow region.";
-    const width: f64 = 150;
-
-    // Measure
-    const metrics = doc.measureWrappedText(text, .{ .width = width });
-
-    // Actually render
-    var region = Region{ .x = 0, .y = 0, .width = width, .height = 1000 };
-    var st = doc.createStyledText();
-    defer st.deinit();
-    try st.append(text, .{});
-    const result = try doc.writeStyled(&region, &st, .{});
-
-    try std.testing.expectEqual(result.lines_written, metrics.line_count);
-}
-
-test "measureWrappedText first_indent reduces first line" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.courier, 12);
-
-    // Text that fits on one line at width 100
-    const text = "AAAA BBBB CCCC";
-    const width: f64 = 110;
-
-    // Without indent - should fit on one line
-    const no_indent = doc.measureWrappedText(text, .{ .width = width });
-
-    // With large indent - should wrap
-    const with_indent = doc.measureWrappedText(text, .{ .width = width, .first_indent = 50 });
-
-    try std.testing.expect(with_indent.line_count > no_indent.line_count);
-}
-
-test "measureWrappedText fitsInHeight" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
-    const text = "Line one. Line two. Line three.";
-    const metrics = doc.measureWrappedText(text, .{ .width = 50 });
-
-    // Should fit in large height
-    try std.testing.expect(metrics.fitsInHeight(500));
-
-    // Should not fit in tiny height
-    try std.testing.expect(!metrics.fitsInHeight(5));
-}
-
-test "measureWrappedText with newlines" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
-    const text = "Line one\nLine two\nLine three";
-    const metrics = doc.measureWrappedText(text, .{ .width = 500 }); // Wide enough for no wrapping
-
-    try std.testing.expectEqual(@as(usize, 3), metrics.line_count);
-}
-
-test "measureWrappedText auto_height scenario" {
-    // Tests that measureWrappedText and write() agree on text fitting
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    try doc.setFont(.helvetica, 11);
-
-    const sample_text = "This box height is automatically calculated based on the text content. " ++
-        "The text wraps within the specified width, and the box grows to fit.";
-    const box_width: f64 = 250;
-    const box_padding: f64 = 8;
-    const content_width = box_width - 2 * box_padding;
-
-    // Measure text to get required height
-    const metrics = doc.measureWrappedText(sample_text, .{ .width = content_width });
-    try std.testing.expectEqual(@as(usize, 3), metrics.line_count);
-
-    // Create box with measured height + padding
-    const box_height = metrics.height + 2 * box_padding;
-    var region = Region{
-        .x = 50,
-        .y = 80,
-        .width = box_width,
-        .height = box_height,
-        .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
-    };
-
-    // Write should fit without overflow
-    const result = try doc.write(&region, sample_text, .{});
-    try std.testing.expect(result.overflow == null);
-}
-
 test "mark positioning with Tm absolute coordinates" {
     // This test verifies Tm-based absolute positioning for mark glyphs.
     // Each glyph gets: "1 0 0 1 x y Tm <glyph> Tj"
@@ -2428,7 +2273,7 @@ test "Region.newLine resets cursor_x and advances cursor_y" {
     try std.testing.expectApproxEqAbs(@as(f64, 34.4), region.cursor_y, 0.01);
 }
 
-test "write() with measure_only tracks cursor without rendering" {
+test "write() with measure_only is side-effect free" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -2437,21 +2282,19 @@ test "write() with measure_only tracks cursor without rendering" {
 
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
 
-    // Measure pass - cursor should advance but no text rendered
-    _ = try doc.write(&region, "Hello ", .{ .measure_only = true });
-    const cursor_after_measure = region.cursor_x;
-    try std.testing.expect(cursor_after_measure > 0);
+    // Measure pass - cursor should be unchanged (side-effect free)
+    const result = try doc.write(&region, "Hello World", .{ .measure_only = true });
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
+    try std.testing.expect(result.lines_written >= 1);
 
     // Check no text was rendered (page content should be empty)
     const page = &doc.pages.items[0];
     try std.testing.expectEqual(@as(usize, 0), page.commands.items.len);
 
-    // Reset cursor and write for real
-    region.cursor_x = 0;
-    _ = try doc.write(&region, "Hello ", .{});
-
-    // Cursor should match the measured position
-    try std.testing.expectApproxEqAbs(cursor_after_measure, region.cursor_x, 0.01);
+    // Write for real - cursor should now advance
+    _ = try doc.write(&region, "Hello World", .{});
+    try std.testing.expect(region.cursor_x > 0 or region.cursor_y > 0);
 
     // Now there should be commands
     try std.testing.expect(page.commands.items.len > 0);
@@ -2703,4 +2546,44 @@ test "writeStyled character-level breaking for long word without hyphens" {
 
     // Should break into multiple lines via repeated character breaking
     try std.testing.expect(result.lines_written >= 4);
+}
+
+test "writeStyled measure_only is side-effect free" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage();
+    try doc.setFont(.helvetica, 12);
+
+    var text = doc.createStyledText();
+    defer text.deinit();
+    try text.append("This is a test paragraph that should wrap to multiple lines in a narrow region.", .{});
+
+    // Measure the text
+    var measure_region = Region{ .x = 50, .y = 50, .width = 150, .height = 1000 };
+    const measure_result = try doc.writeStyled(&measure_region, &text, .{ .measure_only = true });
+
+    // Should have counted lines
+    try std.testing.expect(measure_result.lines_written > 1);
+    // Cursor should be unchanged (measure_only is side-effect free)
+    try std.testing.expectEqual(@as(f64, 0), measure_region.cursor_x);
+    try std.testing.expectEqual(@as(f64, 0), measure_region.cursor_y);
+    // No overflow
+    try std.testing.expectEqual(null, measure_result.overflow);
+
+    // Now render into a region with same dimensions
+    var text2 = doc.createStyledText();
+    defer text2.deinit();
+    try text2.append("This is a test paragraph that should wrap to multiple lines in a narrow region.", .{});
+
+    var render_region = Region{ .x = 50, .y = 50, .width = 150, .height = 1000 };
+    const render_result = try doc.writeStyled(&render_region, &text2, .{});
+
+    // Should get the same line count
+    try std.testing.expectEqual(measure_result.lines_written, render_result.lines_written);
+
+    // PDF should be generated successfully
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(pdf.len > 0);
 }

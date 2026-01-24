@@ -145,21 +145,35 @@ if (result.overflow) |_| {
 
 ### Measure Text Before Rendering
 
+Use `write()` or `writeStyled()` with `.measure_only = true` to measure without rendering.
+Measurement is side-effect free - the region's cursor is unchanged after the call.
+
 ```zig
-const metrics = doc.measureWrappedText(text, .{
+var region = zpdf.Region{
+    .x = 50,
+    .y = 100,
     .width = 200,
-    .first_indent = 20,
-});
+    .height = 10000, // Large height for measurement
+    .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
+};
 
-// metrics.height     - total height needed
-// metrics.line_count - number of lines
-// metrics.max_line_width - widest line
+// Measure plain text (cursor unchanged after this call)
+const result = try doc.write(&region, text, .{ .measure_only = true });
 
-if (metrics.fitsInHeight(region.remainingHeight())) {
-    var st = doc.createStyledText();
-    defer st.deinit();
-    try st.append(text, .{});
-    _ = try doc.writeStyled(&region, &st, .{});
+// Or measure styled text
+var styled = doc.createStyledText();
+try styled.append("Hello ", .{});
+try styled.append("World", .{ .color = zpdf.Color.blue });
+const styled_result = try doc.writeStyled(&region, &styled, .{ .measure_only = true });
+
+// Calculate height from lines_written
+const line_height = doc.getLineHeightPts();
+const content_height = @as(f64, @floatFromInt(result.lines_written)) * line_height;
+const box_height = content_height + 16; // Add padding
+
+// Render (no need to reset cursor - measure_only didn't change it)
+if (box_height <= region.remainingHeight()) {
+    _ = try doc.write(&region, text, .{});
 }
 ```
 
@@ -272,17 +286,33 @@ try doc.drawSvg(svg, 300, 50, 150, 150);
 ### Gradients
 
 ```zig
-// Linear gradient
-var linear = zpdf.LinearGradient.init(0, 0, 200, 0);  // left to right
-linear.addStop(0.0, zpdf.Color.rgb(255, 0, 0));       // red
-linear.addStop(1.0, zpdf.Color.rgb(0, 0, 255));       // blue
-try doc.drawLinearGradient(&linear, 50, 50, 200, 100);
+// Define color stops
+const stops = [_]zpdf.ColorStop{
+    .{ .offset = 0.0, .color = zpdf.Color.red },
+    .{ .offset = 1.0, .color = zpdf.Color.blue },
+};
 
-// Radial gradient
-var radial = zpdf.RadialGradient.init(100, 100, 50);  // center, radius
-radial.addStop(0.0, zpdf.Color.rgb(255, 255, 0));     // yellow center
-radial.addStop(1.0, zpdf.Color.rgb(255, 0, 0));       // red edge
-try doc.drawRadialGradient(&radial, 50, 200, 100, 100);
+// Linear gradient (from point to point)
+const linear = zpdf.LinearGradient{
+    .x0 = 50, .y0 = 50,    // start point
+    .x1 = 250, .y1 = 50,   // end point
+    .stops = &stops,
+};
+const linear_idx = try doc.addLinearGradient(linear);
+try doc.fillRectGradient(50, 50, 200, 100, linear_idx);
+
+// Radial gradient (from inner circle to outer circle)
+const radial_stops = [_]zpdf.ColorStop{
+    .{ .offset = 0.0, .color = zpdf.Color.yellow },
+    .{ .offset = 1.0, .color = zpdf.Color.red },
+};
+const radial = zpdf.RadialGradient{
+    .x0 = 150, .y0 = 250, .r0 = 0,    // inner circle (center, radius 0)
+    .x1 = 150, .y1 = 250, .r1 = 50,   // outer circle (same center, radius 50)
+    .stops = &radial_stops,
+};
+const radial_idx = try doc.addRadialGradient(radial);
+try doc.fillRectGradient(100, 200, 100, 100, radial_idx);
 ```
 
 ### Page Sizes
@@ -351,109 +381,208 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 ## API Reference
 
-### Core
+### Document Lifecycle
 
 | Method | Description |
 |--------|-------------|
+| `Document.init(allocator)` | Create a new PDF document |
 | `deinit()` | Free all document resources |
-| `init(allocator) -> Document` | Create a new PDF document |
-| `output() -> []u8` | Generate PDF output |
+| `output() -> []u8` | Generate PDF output as bytes |
 
-### Document
+### Pages & Layout
 
 | Method | Description |
 |--------|-------------|
-| `addPage()` | Add a new page using the current page size (set via setPageSize, default A4) |
-| `getPageRegion() -> Region` | Returns a region for the current page respecting document margins |
-| `pageNo() -> usize` | Get current page number (1-based) |
+| `addPage()` | Add a new page (uses current page size, default A4) |
+| `setPageSize(PageSize)` | Set page size for subsequent pages |
 | `setMargins(Margins)` | Set document margins |
-| `setMetadata(DocumentMetadata)` | Set document metadata (title, author, subject, etc.) |
-| `setPageSize(PageSize)` | Set the page size for subsequent addPage() calls |
+| `getPageRegion() -> Region` | Get drawable region respecting margins |
+| `pageNo() -> usize` | Get current page number (1-based) |
+| `setMetadata(DocumentMetadata)` | Set title, author, subject, keywords, etc. |
 
 ### Fonts
 
 | Method | Description |
 |--------|-------------|
-| `getFontMetrics() -> FontMetrics` | Get font metrics for the current font, scaled to the current font size |
-| `getTextStyle() -> TextStyle` | Get current text style for measurement |
-| `loadFont(str) -> *EmbeddedFont` | Load a TrueType font from file |
-| `setEmbeddedFont(*EmbeddedFont, f64)` | Set an embedded font as current |
-| `setFeature(Feature, bool)` | Set OpenType feature for all embedded fonts |
-| `setFont(StandardFont, f64)` | Set the current font and size (standard font) |
-| `setFontFeature(*EmbeddedFont, Feature, bool)` | Set OpenType feature for a specific embedded font |
+| `setFont(StandardFont, size)` | Set standard font (Helvetica, Times, Courier, etc.) |
+| `loadFont(path) -> *EmbeddedFont` | Load TTF/OTF font from file |
+| `setEmbeddedFont(*EmbeddedFont, size)` | Set embedded font as current |
+| `setFeature(Feature, bool)` | Enable/disable OpenType feature globally |
+| `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable feature for specific font |
+| `getFontMetrics() -> FontMetrics` | Get metrics (ascender, descender, etc.) for current font |
+| `getFontStyle() -> FontStyle` | Get current font style info |
 
-### Text
+### Text Output
 
 | Method | Description |
 |--------|-------------|
-| `drawRegion(Region)` | Draws a region's border and fill (without text) |
-| `getTextWidth(str) -> f64` | Measures text width using current font (standard or embedded) |
-| `measureText(str) -> TextMetrics` | Measure text dimensions without rendering |
-| `measureTextWidth(str) -> f64` | Measure text width in points |
-| `measureWrappedText(str, MeasureOptions) -> WrappedTextMetrics` | Measures how wrapped text would be laid out without rendering |
-| `write(*Region, str, WriteOptions) -> WriteResult` | Writes flowing text into a region with word wrapping |
-| `writeAt(f64, f64, str) -> Rect` | Writes text at the specified position |
-| `writeFlow(str, FlowOptions) -> usize` | Write text with automatic pagination |
-| `writeStyled(*Region, *StyledText, ParagraphOptions) -> WriteResult` | Writes styled text into a region with word wrapping |
+| `writeAt(x, y, str) -> Rect` | Write text at position, returns bounding rect |
+| `write(*Region, str, WriteOptions) -> WriteResult` | Write with word wrapping into region |
+| `writeStyled(*Region, *StyledText, ParagraphOptions) -> WriteResult` | Write styled text with wrapping |
+| `createStyledText() -> StyledText` | Create styled text builder for mixed formatting |
+
+### Text Measurement
+
+| Method | Description |
+|--------|-------------|
+| `getTextWidth(str) -> f64` | Measure text width in points |
+| `measureText(str) -> TextMetrics` | Get width and height |
+| `write(*Region, str, .{ .measure_only = true })` | Measure plain text layout without rendering |
+| `writeStyled(*Region, *StyledText, .{ .measure_only = true })` | Measure styled text layout without rendering |
 
 ### Text Styling
 
 | Method | Description |
 |--------|-------------|
-| `getLineHeightPts() -> f64` | Get current line height in points |
-| `setCharSpacing(f64)` | Set character spacing (extra space between characters, in points) |
-| `setLineHeight(f64)` | Set line height (as multiple of font size, e.g. 1.2 = 120%) |
 | `setTextColor(Color)` | Set text color |
-| `setTextStyle(TextStyleOptions)` | Set text style (color and decoration) |
+| `setTextStyle(TextStyleOptions)` | Set color and decoration (underline, strikethrough) |
+| `setCharSpacing(f64)` | Set extra space between characters (points) |
+| `setLineHeight(f64)` | Set line height multiplier (e.g., 1.2 = 120%) |
+| `getLineHeightPts() -> f64` | Get current line height in points |
 
-### Cursor Position
-
-| Method | Description |
-|--------|-------------|
-| `getPosition() -> Point` | Get cursor position (in points from top-left) |
-| `setPosition(Point)` | Set cursor position (in points from top-left) |
-
-### Navigation
+### Cursor & Position
 
 | Method | Description |
 |--------|-------------|
-| `addExternalLink(Rect, str)` | Add an external link (clickable area that opens a URL) |
-| `addLink(Rect, Destination)` | Add an internal link (clickable area that jumps to another page position) |
-| `addOutlineItem(str, Destination, ?*Outline) -> *Outline` | Adds an outline item to the document (shown in PDF viewer's table of contents) |
-| `currentDestination() -> ?Destination` | Get a destination for the current cursor position |
-| `setPageLabel(usize, PageLabel)` | Sets a page label range starting at the specified page index |
+| `setPosition(Point)` | Set cursor position (top-left origin) |
+| `getPosition() -> Point` | Get cursor position |
+
+### Navigation & Links
+
+| Method | Description |
+|--------|-------------|
+| `currentDestination() -> ?Destination` | Get destination for current position |
+| `addLink(Rect, Destination)` | Add internal link (jumps to page/position) |
+| `addExternalLink(Rect, url)` | Add external link (opens URL) |
+| `addOutlineItem(title, Destination, ?parent) -> *Outline` | Add to table of contents |
+| `setPageLabel(page_index, PageLabel)` | Set page numbering style |
 
 ### Images & SVG
 
 | Method | Description |
 |--------|-------------|
-| `drawImage(*Image, f64, f64, f64, f64)` | Draw an image at the specified position |
-| `drawSvg(*Svg, f64, f64, f64, f64)` | Draw an SVG at the specified position |
-| `loadImage(str) -> *Image` | Load an image from file (JPEG or PNG) |
-| `loadSvg(str) -> *Svg` | Load an SVG from file |
+| `loadImage(path) -> *Image` | Load JPEG or PNG image |
+| `drawImage(*Image, x, y, w, h)` | Draw image (use 0 for w or h to auto-scale) |
+| `loadSvg(path) -> *Svg` | Load SVG file |
+| `drawSvg(*Svg, x, y, w, h)` | Draw SVG (use 0, 0 for original size) |
 
-### Graphics
+### Drawing Shapes
 
 | Method | Description |
 |--------|-------------|
-| `createPath() -> Path` | Create a new path builder |
-| `drawCircle(f64, f64, f64, DrawStyle)` | Draw a circle (special case of ellipse) |
-| `drawEllipse(f64, f64, f64, f64, DrawStyle)` | Draw an ellipse using 4 cubic Bezier curves |
-| `drawLine(f64, f64, f64, f64)` | Draw a line between two points |
-| `drawPath(*Path, DrawStyle)` | Draw a path with the specified style |
-| `drawPolygon([]const Point, DrawStyle)` | Draw a closed polygon |
-| `drawRect(f64, f64, f64, f64, DrawStyle)` | Draw a rectangle |
-| `drawRoundedRect(f64, f64, f64, f64, f64, DrawStyle)` | Draw a rectangle with rounded corners |
-| `setDrawStyle(DrawStyleOptions)` | Set drawing style (stroke/fill colors, line width, cap, join, dash pattern) |
+| `setDrawStyle(DrawStyleOptions)` | Set stroke/fill colors, line width, etc. |
+| `drawLine(x1, y1, x2, y2)` | Draw a line |
+| `drawRect(x, y, w, h, DrawStyle)` | Draw rectangle |
+| `drawRoundedRect(x, y, w, h, radius, DrawStyle)` | Draw rounded rectangle |
+| `drawCircle(x, y, radius, DrawStyle)` | Draw circle |
+| `drawEllipse(x, y, w, h, DrawStyle)` | Draw ellipse |
+| `drawPolygon([]Point, DrawStyle)` | Draw closed polygon |
+| `drawRegion(Region)` | Draw region border and background |
+
+### Path API
+
+| Method | Description |
+|--------|-------------|
+| `createPath() -> Path` | Create path builder |
+| `drawPath(*Path, DrawStyle)` | Render path |
+
+**Path methods:**
+| Method | Description |
+|--------|-------------|
+| `moveTo(x, y)` | Move without drawing |
+| `lineTo(x, y)` | Line to point |
+| `curveTo(x1, y1, x2, y2, x, y)` | Cubic Bezier curve |
+| `quadTo(x1, y1, x, y)` | Quadratic Bezier curve |
+| `closePath()` | Close subpath |
+| `deinit()` | Free path resources |
 
 ### Gradients
 
 | Method | Description |
 |--------|-------------|
-| `addLinearGradient(LinearGradient) -> usize` | Add a linear gradient to the document and return its index |
-| `addRadialGradient(RadialGradient) -> usize` | Add a radial gradient to the document and return its index |
-| `fillRectGradient(f64, f64, f64, f64, usize)` | Fill a rectangle with a gradient |
+| `addLinearGradient(LinearGradient) -> usize` | Register linear gradient |
+| `addRadialGradient(RadialGradient) -> usize` | Register radial gradient |
+| `fillRectGradient(x, y, w, h, gradient_idx)` | Fill rect with gradient |
 
+### StyledText Builder
+
+Create with `doc.createStyledText()`, then:
+
+| Method | Description |
+|--------|-------------|
+| `append(text, TextStyleOptions)` | Add text span with style |
+| `appendOwned(text, TextStyleOptions)` | Add text span (takes ownership) |
+| `isEmpty() -> bool` | Check if empty |
+| `totalLength() -> usize` | Get total text length |
+| `deinit()` | Free resources |
+
+### Unit Conversions
+
+All measurements in zpdf are in points (1 pt = 1/72 inch).
+
+```zig
+const x = zpdf.inches(1.5);  // 108 points
+const y = zpdf.mm(25.4);     // 72 points (1 inch)
+const z = zpdf.cm(2.54);     // 72 points (1 inch)
+
+// Constants
+zpdf.pt_per_inch  // 72.0
+zpdf.pt_per_mm    // 2.834...
+zpdf.pt_per_cm    // 28.34...
+```
+
+### Types Reference
+
+**Page & Layout:**
+- `PageSize` - Predefined sizes: `.A3`, `.A4`, `.A5`, `.Letter`, `.Legal`, `.Tabloid` (use `.landscape()` for landscape)
+- `Region` - Drawable area with position, size, and remaining height tracking
+- `Rect` - Simple rectangle (x, y, width, height)
+- `Point` - 2D point (x, y)
+- `Margins` / `Padding` - Edge spacing (top, right, bottom, left)
+
+**Text:**
+- `Align` - Horizontal: `.left`, `.center`, `.right`, `.justify`
+- `VAlign` - Vertical: `.top`, `.middle`, `.bottom`
+- `TextDecoration` - `.none`, `.underline`, `.strikethrough`, `.underline_strikethrough`
+- `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
+- `WriteOptions` / `ParagraphOptions` - Text layout options
+- `WriteResult` - Result with lines_written, overflow text, and bounding rect
+- `TextMetrics` / `FontMetrics` - Measurement results
+
+**Fonts:**
+- `StandardFont` - `.helvetica`, `.helvetica_bold`, `.helvetica_italic`, `.helvetica_bold_italic`, `.times_roman`, `.times_bold`, `.times_italic`, `.times_bold_italic`, `.courier`, `.courier_bold`, `.courier_italic`, `.courier_bold_italic`, `.symbol`, `.zapfdingbats`
+- `EmbeddedFont` - Loaded TTF/OTF font (set `.encoding = .identity` for Unicode)
+
+**Graphics:**
+- `DrawStyle` - `.stroke`, `.fill`, `.fill_stroke`
+- `LineCap` - `.butt`, `.round`, `.square`
+- `LineJoin` - `.miter`, `.round`, `.bevel`
+- `DashPattern` - Line dash pattern (dash, gap, phase)
+- `Color` - RGB/CMYK/grayscale color (see Colors section)
+
+**Gradients:**
+- `LinearGradient` - Axial gradient between two points
+- `RadialGradient` - Circular gradient between two circles
+- `ColorStop` - Color at position (offset 0.0-1.0, color)
+
+**Navigation:**
+- `Destination` - Page location for internal links
+- `Outline` - Table of contents entry
+- `PageLabel` / `PageLabelStyle` - Page numbering (roman, arabic, etc.)
+
+**OpenType Features:**
+```zig
+// Available via zpdf.opentype.Feature
+.kern    // Kerning
+.liga    // Standard ligatures (fi, fl, etc.)
+.calt    // Contextual alternates
+.smcp    // Small caps
+.onum    // Old-style numerals
+.lnum    // Lining numerals
+.tnum    // Tabular numerals
+.pnum    // Proportional numerals
+// ... and more
+```
 
 ## Requirements
 

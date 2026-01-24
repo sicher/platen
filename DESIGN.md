@@ -235,31 +235,31 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 | `write(str)` | Write at cursor position |
 | `writeAt(x, y, str)` | Write at specific position |
 | `writeStyled(&region, *StyledText, opts)` | Styled text in region, returns overflow |
-| `writeFlow(str, opts)` | Convenience: auto-adds pages on overflow |
-| `measureWrappedText(str, opts)` | Measure text layout without rendering |
+| `write(&region, str, .{ .measure_only = true })` | Measure layout without rendering |
 
 ### Text Measurement
 
-Measure how wrapped text would be laid out without actually rendering it.
-Useful for calculating layout, checking if text fits, reserving space, etc.
+Use `write()` or `writeStyled()` with `.measure_only = true` to measure text layout without rendering.
+Measurement is side-effect free - cursor position is unchanged. Uses the same code path as rendering.
 
 ```zig
-const metrics = doc.measureWrappedText(text, .{
-    .width = 200,           // Available width for wrapping
-    .first_indent = 20,     // First line indent (optional)
-    .break_on_hyphens = true, // Break at hyphens (optional)
-});
+var region = zpdf.Region{
+    .x = 50, .y = 100,
+    .width = 200, .height = 10000,
+    .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
+};
 
-// metrics.height      - Total height needed (line_count * line_height)
-// metrics.line_count  - Number of lines
-// metrics.max_line_width - Width of widest line
+// Measure (cursor unchanged after this call)
+const result = try doc.write(&region, text, .{ .measure_only = true });
 
-// Check if text would fit in a text box
-if (metrics.fitsInHeight(box.remainingHeight())) {
-    var st = doc.createStyledText();
-    defer st.deinit();
-    try st.append(text, .{});
-    _ = try doc.writeStyled(&box, &st, .{});
+// Calculate height from lines_written
+const line_height = doc.getLineHeightPts();
+const content_height = @as(f64, @floatFromInt(result.lines_written)) * line_height;
+const box_height = content_height + 16; // + padding
+
+// Render (no reset needed - measure_only is side-effect free)
+if (box_height <= region.remainingHeight()) {
+    _ = try doc.write(&region, text, .{});
 }
 ```
 

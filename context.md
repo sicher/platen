@@ -1,7 +1,32 @@
 # zpdf Context
 
 ## Current Focus
-All planned features complete. Performance optimized.
+API cleanup complete. All planned features done.
+
+## What We Did (Session 2026-01-24 #3)
+- **Removed redundant measurement APIs**:
+  - Removed `measureWrappedText()` (~150 lines) - duplicated `write()` logic
+  - Removed `measureTextWidth()` - duplicate of `getTextWidth()`
+  - Removed `MeasureOptions` and `WrappedTextMetrics` types
+  - Updated zpdf.zig exports
+
+- **Added `measure_only` to `writeStyled()`** for consistency with `write()`
+
+- **Made `measure_only` side-effect free**:
+  - Cursor position is now restored after measurement
+  - No need to call `region.reset()` after measuring
+  - Result still contains accurate `lines_written`, `rect`, and `overflow`
+
+- **New measurement pattern** using `write(.measure_only=true)`:
+  ```zig
+  const result = try doc.write(&region, text, .{ .measure_only = true });
+  // Cursor unchanged - measurement is side-effect free
+  const content_height = @as(f64, @floatFromInt(result.lines_written)) * doc.getLineHeightPts();
+  ```
+  - Uses same code path as actual rendering (guaranteed accuracy)
+  - Use `result.lines_written * line_height` for height calculation
+
+- **Updated documentation**: README.md, DESIGN.md, API_COMPARISON.md, API_REVIEW.md
 
 ## What We Did (Session 2026-01-24 #2)
 - **Removed writeParagraph** in favor of writeStyled API

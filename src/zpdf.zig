@@ -67,10 +67,8 @@ pub const Outline = document.Outline;
 pub const PageLabelStyle = document.PageLabelStyle;
 pub const PageLabel = document.PageLabel;
 pub const WriteResult = document.WriteResult;
-pub const WrappedTextMetrics = document.WrappedTextMetrics;
 pub const WriteOptions = document.WriteOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
-pub const MeasureOptions = document.MeasureOptions;
 pub const PageSize = document.PageSize;
 
 // Re-export graphics types

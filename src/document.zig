@@ -63,10 +63,8 @@ pub const Outline = layout.Outline;
 pub const PageLabelStyle = layout.PageLabelStyle;
 pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
-pub const WrappedTextMetrics = layout.WrappedTextMetrics;
 pub const WriteOptions = layout.WriteOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
-pub const MeasureOptions = layout.MeasureOptions;
 pub const PageSize = layout.PageSize;
 
 // Graphics types
@@ -846,11 +844,6 @@ pub const Document = struct {
         return metrics.measureText(text_str, self.getFontStyle());
     }
 
-    /// Measure text width in points
-    pub fn measureTextWidth(self: *Document, text_str: []const u8) f64 {
-        return metrics.measureTextWidth(text_str, self.getFontStyle());
-    }
-
     /// Set cursor position (in points from top-left).
     pub fn setPosition(self: *Document, pos: Point) void {
         self.x = pos.x;
@@ -1435,6 +1428,10 @@ pub const Document = struct {
             // Check if we have room for a line (only check at start of new line)
             // Use small epsilon for floating point comparison
             if (region.cursor_x == 0 and region.remainingHeight() < line_height - 0.01) {
+                if (opts.measure_only) {
+                    region.cursor_x = start_cursor_x;
+                    region.cursor_y = start_cursor_y;
+                }
                 return .{
                     .lines_written = lines_written,
                     .overflow = remaining,
@@ -1591,6 +1588,12 @@ pub const Document = struct {
         else
             0;
 
+        // Restore cursor if measure_only (measurement should be side-effect free)
+        if (opts.measure_only) {
+            region.cursor_x = start_cursor_x;
+            region.cursor_y = start_cursor_y;
+        }
+
         return .{
             .lines_written = final_lines,
             .overflow = null,
@@ -1682,153 +1685,6 @@ pub const Document = struct {
         return null;
     }
 
-    /// Measures how wrapped text would be laid out without rendering.
-    /// Returns total height, line count, and max line width.
-    /// Useful for calculating layout before rendering, checking if text fits, etc.
-    pub fn measureWrappedText(self: *Document, str: []const u8, opts: MeasureOptions) WrappedTextMetrics {
-        const line_height = self.getLineHeightPts();
-        const space_width = self.getTextWidth(" ");
-        var line_count: usize = 0;
-        var max_line_width: f64 = 0;
-        var is_first_line = true;
-
-        // Handle empty text
-        if (str.len == 0) {
-            return .{ .height = 0, .line_count = 0, .max_line_width = 0 };
-        }
-
-        // Greedy algorithm: process text word by word
-        var remaining = str;
-        while (remaining.len > 0) {
-            // Calculate available width for this line
-            const indent = if (is_first_line) opts.first_indent else 0;
-            const line_width = opts.width - indent;
-
-            // Build a line by collecting words
-            var line_end: usize = 0;
-            var current_width: f64 = 0;
-            var word_start: usize = 0;
-            var in_word = false;
-            var actual_line_width: f64 = 0;
-
-            for (remaining, 0..) |c, i| {
-                const is_space = c == ' ' or c == '\t' or c == '\n';
-
-                if (is_space and in_word) {
-                    // End of word - check if it fits
-                    const word = remaining[word_start..i];
-                    const word_width = self.getTextWidth(word);
-
-                    if (current_width + word_width <= line_width + 0.01) {
-                        // Word fits
-                        actual_line_width = current_width + word_width;
-                        current_width += word_width + space_width;
-                        line_end = i;
-                    } else if (line_end == 0) {
-                        // First word doesn't fit - try breaking
-                        if (opts.break_on_hyphens) {
-                            if (self.findHyphenBreak(word, line_width)) |break_pos| {
-                                const broken = remaining[word_start .. word_start + break_pos];
-                                actual_line_width = self.getTextWidth(broken);
-                                line_end = word_start + break_pos;
-                                break;
-                            }
-                        }
-                        if (self.findSoftHyphenBreak(word, line_width)) |break_pos| {
-                            const broken = remaining[word_start .. word_start + break_pos];
-                            actual_line_width = self.getTextWidth(broken) + self.getTextWidth("-");
-                            line_end = word_start + break_pos;
-                        } else if (self.findCharacterBreak(word, line_width)) |break_pos| {
-                            const broken = remaining[word_start .. word_start + break_pos];
-                            actual_line_width = self.getTextWidth(broken);
-                            line_end = word_start + break_pos;
-                        } else {
-                            actual_line_width = word_width;
-                            line_end = i;
-                        }
-                        break;
-                    } else {
-                        // Word doesn't fit, wrap to next line
-                        break;
-                    }
-                    in_word = false;
-
-                    if (c == '\n') {
-                        line_end = i;
-                        break;
-                    }
-                } else if (!is_space and !in_word) {
-                    word_start = i;
-                    in_word = true;
-                }
-            }
-
-            // Handle last word if still in one
-            if (in_word) {
-                const word = remaining[word_start..];
-                const word_width = self.getTextWidth(word);
-
-                if (current_width + word_width <= line_width + 0.01) {
-                    actual_line_width = current_width + word_width;
-                    line_end = remaining.len;
-                } else if (line_end == 0) {
-                    if (opts.break_on_hyphens) {
-                        if (self.findHyphenBreak(word, line_width)) |break_pos| {
-                            const broken = remaining[word_start .. word_start + break_pos];
-                            actual_line_width = self.getTextWidth(broken);
-                            line_end = word_start + break_pos;
-                        }
-                    }
-                    if (line_end == 0) {
-                        if (self.findSoftHyphenBreak(word, line_width)) |break_pos| {
-                            const broken = remaining[word_start .. word_start + break_pos];
-                            actual_line_width = self.getTextWidth(broken) + self.getTextWidth("-");
-                            line_end = word_start + break_pos;
-                        } else if (self.findCharacterBreak(word, line_width)) |break_pos| {
-                            const broken = remaining[word_start .. word_start + break_pos];
-                            actual_line_width = self.getTextWidth(broken);
-                            line_end = word_start + break_pos;
-                        } else {
-                            actual_line_width = word_width;
-                            line_end = remaining.len;
-                        }
-                    }
-                }
-            }
-
-            if (line_end == 0) break;
-
-            // Count this line
-            line_count += 1;
-            if (actual_line_width > max_line_width) {
-                max_line_width = actual_line_width;
-            }
-
-            // Check for soft-hyphen break (0xC2 0xAD in UTF-8)
-            const soft_hyphen_break = line_end >= 2 and
-                remaining[line_end - 2] == 0xC2 and remaining[line_end - 1] == 0xAD;
-
-            // Advance past the line
-            if (soft_hyphen_break) {
-                remaining = remaining[@min(line_end + 2, remaining.len)..];
-            } else {
-                remaining = remaining[line_end..];
-            }
-
-            // Skip leading whitespace for next line
-            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
-                remaining = remaining[1..];
-            }
-
-            is_first_line = false;
-        }
-
-        return .{
-            .height = @as(f64, @floatFromInt(line_count)) * line_height,
-            .line_count = line_count,
-            .max_line_width = max_line_width,
-        };
-    }
 
     /// Draws a region's border and fill (without text).
     pub fn drawRegion(self: *Document, region: Region) !void {
@@ -2144,6 +2000,10 @@ pub const Document = struct {
         const line_height = self.getLineHeightPts();
         const line_width = region.contentWidth();
 
+        // Save original cursor for measure_only restore
+        const saved_cursor_x = region.cursor_x;
+        const saved_cursor_y = region.cursor_y;
+
         // Prepare text (preprocesses words with width measurement)
         // Note: We always prepare for middle/bottom valign to count lines accurately
         try text.prepare(styledTextMeasure, @ptrCast(self));
@@ -2182,6 +2042,7 @@ pub const Document = struct {
         // For middle, use .top per-line positioning (block offset handles centering)
         // For bottom, use .bottom per-line positioning (baseline flush with edge)
         const render_opts = ParagraphOptions{
+            .measure_only = opts.measure_only,
             .alignment = opts.alignment,
             .valign = if (opts.valign == .middle) .top else opts.valign,
             .break_on_hyphens = opts.break_on_hyphens,
@@ -2196,7 +2057,12 @@ pub const Document = struct {
 
         // Use optimal or greedy line breaking based on options
         if (render_opts.line_breaking == .optimal) {
-            return self.writeStyledOptimal(region, text, render_opts, line_height, space_width, line_width, start_cursor_y);
+            const result = try self.writeStyledOptimal(region, text, render_opts, line_height, space_width, line_width, start_cursor_y);
+            if (opts.measure_only) {
+                region.cursor_x = saved_cursor_x;
+                region.cursor_y = saved_cursor_y;
+            }
+            return result;
         }
 
         // Greedy algorithm
@@ -2207,6 +2073,10 @@ pub const Document = struct {
             // Check if we have room for another line
             if (region.remainingHeight() < line_height) {
                 // Return overflow - remaining words
+                if (opts.measure_only) {
+                    region.cursor_x = saved_cursor_x;
+                    region.cursor_y = saved_cursor_y;
+                }
                 return .{
                     .lines_written = lines_written,
                     .overflow = self.getStyledTextFromWord(text, word_idx),
@@ -2385,11 +2255,21 @@ pub const Document = struct {
             else
                 render_opts.alignment;
 
-            // Render the line
-            try self.renderStyledLine(region, text, line_start, line_end, line_alignment, render_opts.valign, line_width, space_width, current_width);
+            // Render the line (or just advance cursor if measure_only)
+            if (render_opts.measure_only) {
+                region.cursor_y += line_height;
+            } else {
+                try self.renderStyledLine(region, text, line_start, line_end, line_alignment, render_opts.valign, line_width, space_width, current_width);
+            }
             lines_written += 1;
 
             word_idx = line_end;
+        }
+
+        // Restore cursor if measure_only (measurement should be side-effect free)
+        if (opts.measure_only) {
+            region.cursor_x = saved_cursor_x;
+            region.cursor_y = saved_cursor_y;
         }
 
         return .{
@@ -2824,16 +2704,17 @@ pub const Document = struct {
             while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t' or line[line.len - 1] == '\n'))
                 line = line[0 .. line.len - 1];
 
-            // Render line
+            // Render line (or just advance cursor if measure_only)
             if (line.len > 0) {
-                // CSS-style valign: baseline = cursor_y + (line_height + ascender - descender) / 2
-                const y_pos = switch (opts.valign) {
-                    .top => region.y + region.padding.top + region.cursor_y + (line_height + ascender - descender) / 2,
-                    .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + cap_height / 2,
-                    .bottom => region.y + region.padding.top + region.cursor_y + line_height,
-                };
-
-                _ = try self.writeAt(region.x + region.padding.left, y_pos, line);
+                if (!opts.measure_only) {
+                    // CSS-style valign: baseline = cursor_y + (line_height + ascender - descender) / 2
+                    const y_pos = switch (opts.valign) {
+                        .top => region.y + region.padding.top + region.cursor_y + (line_height + ascender - descender) / 2,
+                        .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + cap_height / 2,
+                        .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+                    };
+                    _ = try self.writeAt(region.x + region.padding.left, y_pos, line);
+                }
                 region.newLine(line_height);
                 lines_written += 1;
             }
@@ -2903,7 +2784,12 @@ pub const Document = struct {
             else
                 opts.alignment;
 
-            try self.renderStyledLine(region, text, line_start, line_end, line_alignment, opts.valign, line_width, space_width, content_width);
+            // Render the line (or just advance cursor if measure_only)
+            if (opts.measure_only) {
+                region.cursor_y += line_height;
+            } else {
+                try self.renderStyledLine(region, text, line_start, line_end, line_alignment, opts.valign, line_width, space_width, content_width);
+            }
             lines_written += 1;
             line_start = line_end;
         }

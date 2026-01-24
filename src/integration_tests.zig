@@ -2461,14 +2461,23 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.setFont(.helvetica, 11);
     const box_width: f64 = 250;
     const box_padding: f64 = 8;
-    const content_width = box_width - 2 * box_padding;
 
     const sample_text = "This box height is automatically calculated based on the text content. " ++
         "The text wraps within the specified width, and the box grows to fit.";
 
-    // Measure text to get required height
-    const metrics = doc.measureWrappedText(sample_text, .{ .width = content_width });
-    const box_height = metrics.height + 2 * box_padding;
+    // Measure text to get required height using write with measure_only
+    var measure_region = zpdf.Region{
+        .x = 50,
+        .y = 80,
+        .width = box_width,
+        .height = 10000, // Large enough to fit all text for measurement
+        .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
+    };
+    const measure_result = try doc.write(&measure_region, sample_text, .{ .measure_only = true });
+    // Use lines_written to calculate height (cursor_y may be off by one line)
+    const line_height = doc.getLineHeightPts();
+    const content_height = @as(f64, @floatFromInt(measure_result.lines_written)) * line_height;
+    const box_height = content_height + 2 * box_padding;
 
     // Draw box with calculated height
     const box_y: f64 = 80;
