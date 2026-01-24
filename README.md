@@ -251,10 +251,14 @@ try doc.drawPolygon(&points, .{ .stroke = .{}, .fill = .{} });
 var path = doc.createPath();
 defer path.deinit();
 
-try path.moveTo(100, 100);
-try path.lineTo(200, 100);
-try path.curveTo(250, 100, 250, 200, 200, 200);  // cubic bezier
-try path.lineTo(100, 200);
+try path.moveTo(.{ .x = 100, .y = 100 });
+try path.lineTo(.{ .x = 200, .y = 100 });
+try path.curveTo(
+    .{ .x = 250, .y = 100 },  // control point 1
+    .{ .x = 250, .y = 200 },  // control point 2
+    .{ .x = 200, .y = 200 },  // end point
+);
+try path.lineTo(.{ .x = 100, .y = 200 });
 try path.closePath();
 
 try doc.drawPath(&path, .{
@@ -503,10 +507,10 @@ try doc.addLink(toc_rect, chapter1_dest);
 **Path methods:**
 | Method | Description |
 |--------|-------------|
-| `moveTo(x, y)` | Move without drawing |
-| `lineTo(x, y)` | Line to point |
-| `curveTo(x1, y1, x2, y2, x, y)` | Cubic Bezier curve |
-| `quadTo(x1, y1, x, y)` | Quadratic Bezier curve |
+| `moveTo(Point)` | Move without drawing |
+| `lineTo(Point)` | Line to point |
+| `curveTo(cp1, cp2, end)` | Cubic Bezier curve (3 Points) |
+| `quadTo(cp, end)` | Quadratic Bezier curve (2 Points) |
 | `closePath()` | Close subpath |
 | `deinit()` | Free path resources |
 
@@ -516,7 +520,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 |--------|-------------|
 | `addLinearGradient(LinearGradient) -> usize` | Register linear gradient |
 | `addRadialGradient(RadialGradient) -> usize` | Register radial gradient |
-| `fillRectGradient(x, y, w, h, gradient_idx)` | Fill rect with gradient |
+| `fillRectGradient(Rect, gradient_idx)` | Fill rect with gradient |
 
 ### StyledText Builder
 

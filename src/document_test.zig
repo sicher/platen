@@ -1625,9 +1625,9 @@ test "drawPath basic triangle" {
     var path = doc.createPath();
     defer path.deinit();
 
-    try path.moveTo(100, 100);
-    try path.lineTo(200, 100);
-    try path.lineTo(150, 50);
+    try path.moveTo(.{ .x = 100, .y = 100 });
+    try path.lineTo(.{ .x = 200, .y = 100 });
+    try path.lineTo(.{ .x = 150, .y = 50 });
     try path.closePath();
 
     try doc.drawPath(&path, .{ .stroke = .{} });
@@ -1647,9 +1647,9 @@ test "drawPath with bezier curve" {
     var path = doc.createPath();
     defer path.deinit();
 
-    try path.moveTo(100, 200);
-    try path.curveTo(150, 100, 250, 100, 300, 200);
-    try path.lineTo(100, 200);
+    try path.moveTo(.{ .x = 100, .y = 200 });
+    try path.curveTo(.{ .x = 150, .y = 100 }, .{ .x = 250, .y = 100 }, .{ .x = 300, .y = 200 });
+    try path.lineTo(.{ .x = 100, .y = 200 });
     try path.closePath();
 
     try doc.drawPath(&path, .{ .stroke = .{}, .fill = .{} });
@@ -1684,7 +1684,7 @@ test "drawPath without page returns error" {
 
     var path = doc.createPath();
     defer path.deinit();
-    try path.moveTo(0, 0);
+    try path.moveTo(.{ .x = 0, .y = 0 });
 
     try std.testing.expectError(error.NoPage, doc.drawPath(&path, .{ .stroke = .{} }));
 }

@@ -1548,9 +1548,9 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     var path = doc.createPath();
     defer path.deinit();
-    try path.moveTo(100, y);
-    try path.lineTo(180, y);
-    try path.lineTo(140, y + 60);
+    try path.moveTo(.{ .x = 100, .y = y });
+    try path.lineTo(.{ .x = 180, .y = y });
+    try path.lineTo(.{ .x = 140, .y = y + 60 });
     try path.closePath();
     try doc.drawPath(&path, .{
         .stroke = .{ .color = zpdf.Color.rgb(0, 0, 255), .width = 2 },
@@ -1565,8 +1565,8 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     var bezier = doc.createPath();
     defer bezier.deinit();
-    try bezier.moveTo(50, y + 50);
-    try bezier.curveTo(100, y, 200, y, 250, y + 50);
+    try bezier.moveTo(.{ .x = 50, .y = y + 50 });
+    try bezier.curveTo(.{ .x = 100, .y = y }, .{ .x = 200, .y = y }, .{ .x = 250, .y = y + 50 });
     try doc.drawPath(&bezier, .{
         .stroke = .{ .color = zpdf.Color.rgb(255, 0, 0), .width = 2 },
     });
@@ -1583,15 +1583,15 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     // Left half of heart
     var left_heart = doc.createPath();
     defer left_heart.deinit();
-    try left_heart.moveTo(hx, hy);
-    try left_heart.curveTo(hx - 30, hy - 30, hx - 50, hy + 10, hx, hy + 50);
+    try left_heart.moveTo(.{ .x = hx, .y = hy });
+    try left_heart.curveTo(.{ .x = hx - 30, .y = hy - 30 }, .{ .x = hx - 50, .y = hy + 10 }, .{ .x = hx, .y = hy + 50 });
     try doc.drawPath(&left_heart, .{ .fill = .{ .color = zpdf.Color.rgb(255, 0, 0) } });
 
     // Right half of heart
     var right_heart = doc.createPath();
     defer right_heart.deinit();
-    try right_heart.moveTo(hx, hy);
-    try right_heart.curveTo(hx + 30, hy - 30, hx + 50, hy + 10, hx, hy + 50);
+    try right_heart.moveTo(.{ .x = hx, .y = hy });
+    try right_heart.curveTo(.{ .x = hx + 30, .y = hy - 30 }, .{ .x = hx + 50, .y = hy + 10 }, .{ .x = hx, .y = hy + 50 });
     try doc.drawPath(&right_heart, .{ .fill = .{ .color = zpdf.Color.rgb(255, 0, 0) } });
     y += 95; // Extra spacing to avoid overlap with zigzag label
 
@@ -1602,12 +1602,12 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     var zigzag = doc.createPath();
     defer zigzag.deinit();
-    try zigzag.moveTo(50, y);
+    try zigzag.moveTo(.{ .x = 50, .y = y });
     var i: usize = 0;
     while (i < 8) : (i += 1) {
         const px = 50 + @as(f64, @floatFromInt(i + 1)) * 25;
         const py = if (i % 2 == 0) y + 30 else y;
-        try zigzag.lineTo(px, py);
+        try zigzag.lineTo(.{ .x = px, .y = py });
     }
     try doc.drawPath(&zigzag, .{ .stroke = .{ .color = zpdf.Color.rgb(0, 128, 0), .width = 3 } });
 

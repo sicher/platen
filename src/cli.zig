@@ -568,9 +568,9 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     var triangle = doc.createPath();
     defer triangle.deinit();
-    try triangle.moveTo(100, y);
-    try triangle.lineTo(180, y);
-    try triangle.lineTo(140, y + 60);
+    try triangle.moveTo(.{ .x = 100, .y = y });
+    try triangle.lineTo(.{ .x = 180, .y = y });
+    try triangle.lineTo(.{ .x = 140, .y = y + 60 });
     try triangle.closePath();
     try doc.drawPath(&triangle, .{
         .stroke = .{ .color = zpdf.Color.blue, .width = 2 },
@@ -585,10 +585,10 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     var bezier = doc.createPath();
     defer bezier.deinit();
-    try bezier.moveTo(50, y + 50);
-    try bezier.curveTo(100, y, 200, y, 250, y + 50);
-    try bezier.lineTo(250, y + 80);
-    try bezier.curveTo(200, y + 30, 100, y + 30, 50, y + 80);
+    try bezier.moveTo(.{ .x = 50, .y = y + 50 });
+    try bezier.curveTo(.{ .x = 100, .y = y }, .{ .x = 200, .y = y }, .{ .x = 250, .y = y + 50 });
+    try bezier.lineTo(.{ .x = 250, .y = y + 80 });
+    try bezier.curveTo(.{ .x = 200, .y = y + 30 }, .{ .x = 100, .y = y + 30 }, .{ .x = 50, .y = y + 80 });
     try bezier.closePath();
     try doc.drawPath(&bezier, .{
         .stroke = .{ .color = zpdf.Color.red },
@@ -605,9 +605,9 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     defer heart.deinit();
     const hx: f64 = 140;
     const hy: f64 = y + 60;
-    try heart.moveTo(hx, hy);
-    try heart.curveTo(hx - 50, hy - 50, hx - 80, hy + 10, hx, hy + 60);
-    try heart.curveTo(hx + 80, hy + 10, hx + 50, hy - 50, hx, hy);
+    try heart.moveTo(.{ .x = hx, .y = hy });
+    try heart.curveTo(.{ .x = hx - 50, .y = hy - 50 }, .{ .x = hx - 80, .y = hy + 10 }, .{ .x = hx, .y = hy + 60 });
+    try heart.curveTo(.{ .x = hx + 80, .y = hy + 10 }, .{ .x = hx + 50, .y = hy - 50 }, .{ .x = hx, .y = hy });
     try doc.drawPath(&heart, .{
         .stroke = .{ .color = zpdf.Color.rgb(200, 0, 0) },
         .fill = .{ .color = zpdf.Color.red },
@@ -621,12 +621,12 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     var zigzag = doc.createPath();
     defer zigzag.deinit();
-    try zigzag.moveTo(50, y);
+    try zigzag.moveTo(.{ .x = 50, .y = y });
     var i: usize = 0;
     while (i < 8) : (i += 1) {
         const px = 50 + @as(f64, @floatFromInt(i + 1)) * 25;
         const py = if (i % 2 == 0) y + 30 else y;
-        try zigzag.lineTo(px, py);
+        try zigzag.lineTo(.{ .x = px, .y = py });
     }
     try doc.drawPath(&zigzag, .{
         .stroke = .{ .color = zpdf.Color.rgb(0, 128, 0), .width = 3 },

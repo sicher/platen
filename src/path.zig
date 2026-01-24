@@ -18,19 +18,14 @@ pub const Command = union(enum) {
 };
 
 pub const CubicBezier = struct {
-    x1: f64,
-    y1: f64,
-    x2: f64,
-    y2: f64,
-    x: f64,
-    y: f64,
+    cp1: Point, // First control point
+    cp2: Point, // Second control point
+    end: Point, // End point
 };
 
 pub const QuadBezier = struct {
-    x1: f64,
-    y1: f64,
-    x: f64,
-    y: f64,
+    cp: Point, // Control point
+    end: Point, // End point
 };
 
 /// Path builder for constructing vector paths.
@@ -49,42 +44,37 @@ pub const Path = struct {
     }
 
     /// Move to a new position without drawing.
-    pub fn moveTo(self: *Path, x: f64, y: f64) !void {
-        try self.commands.append(self.allocator, .{ .move_to = .{ .x = x, .y = y } });
-        self.current = .{ .x = x, .y = y };
-        self.start = self.current;
+    pub fn moveTo(self: *Path, p: Point) !void {
+        try self.commands.append(self.allocator, .{ .move_to = p });
+        self.current = p;
+        self.start = p;
     }
 
-    /// Draw a line from current position to (x, y).
-    pub fn lineTo(self: *Path, x: f64, y: f64) !void {
-        try self.commands.append(self.allocator, .{ .line_to = .{ .x = x, .y = y } });
-        self.current = .{ .x = x, .y = y };
+    /// Draw a line from current position to the given point.
+    pub fn lineTo(self: *Path, p: Point) !void {
+        try self.commands.append(self.allocator, .{ .line_to = p });
+        self.current = p;
     }
 
     /// Draw a cubic Bezier curve.
-    /// (x1, y1) and (x2, y2) are control points, (x, y) is the end point.
-    pub fn curveTo(self: *Path, x1: f64, y1: f64, x2: f64, y2: f64, x: f64, y: f64) !void {
+    /// cp1 and cp2 are control points, end is the end point.
+    pub fn curveTo(self: *Path, cp1: Point, cp2: Point, end: Point) !void {
         try self.commands.append(self.allocator, .{ .curve_to = .{
-            .x1 = x1,
-            .y1 = y1,
-            .x2 = x2,
-            .y2 = y2,
-            .x = x,
-            .y = y,
+            .cp1 = cp1,
+            .cp2 = cp2,
+            .end = end,
         } });
-        self.current = .{ .x = x, .y = y };
+        self.current = end;
     }
 
     /// Draw a quadratic Bezier curve.
-    /// (x1, y1) is the control point, (x, y) is the end point.
-    pub fn quadTo(self: *Path, x1: f64, y1: f64, x: f64, y: f64) !void {
+    /// cp is the control point, end is the end point.
+    pub fn quadTo(self: *Path, cp: Point, end: Point) !void {
         try self.commands.append(self.allocator, .{ .quad_to = .{
-            .x1 = x1,
-            .y1 = y1,
-            .x = x,
-            .y = y,
+            .cp = cp,
+            .end = end,
         } });
-        self.current = .{ .x = x, .y = y };
+        self.current = end;
     }
 
     /// Close the current subpath by drawing a line to the start.
@@ -108,11 +98,11 @@ pub const Path = struct {
                 },
                 .curve_to => |c| {
                     // Convert all Y coordinates
-                    const pdf_y1 = page_height - c.y1;
-                    const pdf_y2 = page_height - c.y2;
-                    const pdf_y = page_height - c.y;
+                    const pdf_y1 = page_height - c.cp1.y;
+                    const pdf_y2 = page_height - c.cp2.y;
+                    const pdf_y = page_height - c.end.y;
                     try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-                        c.x1, pdf_y1, c.x2, pdf_y2, c.x, pdf_y,
+                        c.cp1.x, pdf_y1, c.cp2.x, pdf_y2, c.end.x, pdf_y,
                     });
                 },
                 .quad_to => |q| {
@@ -121,11 +111,11 @@ pub const Path = struct {
                     // We need current point for this conversion
                     // For now, approximate by using the quad control point for both
                     // TODO: proper conversion requires tracking current point during render
-                    const pdf_y1 = page_height - q.y1;
-                    const pdf_y = page_height - q.y;
+                    const pdf_y1 = page_height - q.cp.y;
+                    const pdf_y = page_height - q.end.y;
                     // Simple approximation: use control point for both cubic control points
                     try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-                        q.x1, pdf_y1, q.x1, pdf_y1, q.x, pdf_y,
+                        q.cp.x, pdf_y1, q.cp.x, pdf_y1, q.end.x, pdf_y,
                     });
                 },
                 .close => {
@@ -146,9 +136,9 @@ test "path basic operations" {
     var p = Path.init(allocator);
     defer p.deinit();
 
-    try p.moveTo(100, 100);
-    try p.lineTo(200, 100);
-    try p.lineTo(200, 200);
+    try p.moveTo(.{ .x = 100, .y = 100 });
+    try p.lineTo(.{ .x = 200, .y = 100 });
+    try p.lineTo(.{ .x = 200, .y = 200 });
     try p.closePath();
 
     try std.testing.expectEqual(@as(usize, 4), p.commands.items.len);
@@ -161,8 +151,8 @@ test "path pdf output" {
     var p = Path.init(allocator);
     defer p.deinit();
 
-    try p.moveTo(100, 100);
-    try p.lineTo(200, 100);
+    try p.moveTo(.{ .x = 100, .y = 100 });
+    try p.lineTo(.{ .x = 200, .y = 100 });
     try p.closePath();
 
     var buf: [256]u8 = undefined;
