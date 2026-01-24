@@ -1218,39 +1218,8 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     }
 
     // Build new hmtx (horizontal metrics)
-    var new_hmtx = std.ArrayListUnmanaged(u8){};
-    defer new_hmtx.deinit(allocator);
-
-    for (glyph_ids) |old_gid| {
-        // Get advance width and lsb
-        var advance: u16 = 0;
-        var lsb: i16 = 0;
-
-        if (old_gid < hhea.num_of_long_hor_metrics) {
-            const off = @as(usize, old_gid) * 4;
-            if (off + 4 <= orig_hmtx.len) {
-                advance = readU16(orig_hmtx, off);
-                lsb = readI16(orig_hmtx, off + 2);
-            }
-        } else {
-            // Use last advance width
-            if (hhea.num_of_long_hor_metrics > 0) {
-                const off = (@as(usize, hhea.num_of_long_hor_metrics) - 1) * 4;
-                if (off + 2 <= orig_hmtx.len) {
-                    advance = readU16(orig_hmtx, off);
-                }
-            }
-            // lsb from separate array
-            const lsb_idx = old_gid - hhea.num_of_long_hor_metrics;
-            const lsb_off = @as(usize, hhea.num_of_long_hor_metrics) * 4 + @as(usize, lsb_idx) * 2;
-            if (lsb_off + 2 <= orig_hmtx.len) {
-                lsb = readI16(orig_hmtx, lsb_off);
-            }
-        }
-
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, advance)));
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, lsb)));
-    }
+    const new_hmtx = try buildHmtxForGlyphs(allocator, orig_hmtx, hhea.num_of_long_hor_metrics, glyph_ids);
+    defer allocator.free(new_hmtx);
 
     // Build cmap with both Format 0 (MacRoman) and Format 4 (Windows Unicode BMP)
     // PDF viewers with WinAnsiEncoding use Platform 3, Encoding 1 (Format 4)
@@ -1413,7 +1382,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     const head_padded = padTo4(new_head.len);
     const hhea_padded = padTo4(new_hhea.len);
     const maxp_padded = padTo4(new_maxp.len);
-    const hmtx_padded = padTo4(new_hmtx.items.len);
+    const hmtx_padded = padTo4(new_hmtx.len);
     const cmap_padded = padTo4(new_cmap.items.len);
     const loca_padded = padTo4(new_loca.items.len);
     const glyf_padded = padTo4(new_glyf.items.len);
@@ -1465,7 +1434,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
     writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
     writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
-    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.items.len));
+    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.len));
     writeTableEntry(output, &dir_offset, "loca", loca_offset, @intCast(new_loca.items.len));
     writeTableEntry(output, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
     writeTableEntry(output, &dir_offset, "name", name_offset, @intCast(name_len));
@@ -1475,7 +1444,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     @memcpy(output[head_offset..][0..new_head.len], new_head);
     @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
     @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
-    @memcpy(output[hmtx_offset..][0..new_hmtx.items.len], new_hmtx.items);
+    @memcpy(output[hmtx_offset..][0..new_hmtx.len], new_hmtx);
     @memcpy(output[cmap_offset..][0..new_cmap.items.len], new_cmap.items);
     @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
     @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
@@ -1903,36 +1872,8 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Build compact hmtx
-    var new_hmtx = std.ArrayListUnmanaged(u8){};
-    defer new_hmtx.deinit(allocator);
-
-    for (glyph_list.items) |orig_gid| {
-        var advance: u16 = 0;
-        var lsb: i16 = 0;
-
-        if (orig_gid < hhea.num_of_long_hor_metrics) {
-            const off = @as(usize, orig_gid) * 4;
-            if (off + 4 <= orig_hmtx.len) {
-                advance = readU16(orig_hmtx, off);
-                lsb = readI16(orig_hmtx, off + 2);
-            }
-        } else {
-            if (hhea.num_of_long_hor_metrics > 0) {
-                const off = (@as(usize, hhea.num_of_long_hor_metrics) - 1) * 4;
-                if (off + 2 <= orig_hmtx.len) {
-                    advance = readU16(orig_hmtx, off);
-                }
-            }
-            const lsb_idx = orig_gid - hhea.num_of_long_hor_metrics;
-            const lsb_off = @as(usize, hhea.num_of_long_hor_metrics) * 4 + @as(usize, lsb_idx) * 2;
-            if (lsb_off + 2 <= orig_hmtx.len) {
-                lsb = readI16(orig_hmtx, lsb_off);
-            }
-        }
-
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, advance)));
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, lsb)));
-    }
+    const new_hmtx = try buildHmtxForGlyphs(allocator, orig_hmtx, hhea.num_of_long_hor_metrics, glyph_list.items);
+    defer allocator.free(new_hmtx);
 
     // Build minimal cmap (same as CID version)
     var new_cmap = std.ArrayListUnmanaged(u8){};
@@ -1983,7 +1924,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const head_padded = padTo4(new_head.len);
     const hhea_padded = padTo4(new_hhea.len);
     const maxp_padded = padTo4(new_maxp.len);
-    const hmtx_padded = padTo4(new_hmtx.items.len);
+    const hmtx_padded = padTo4(new_hmtx.len);
     const cmap_padded = padTo4(new_cmap.items.len);
     const loca_padded = padTo4(new_loca.items.len);
     const glyf_padded = padTo4(new_glyf.items.len);
@@ -2028,7 +1969,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
     writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
     writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
-    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.items.len));
+    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.len));
     writeTableEntry(output, &dir_offset, "loca", loca_offset, @intCast(new_loca.items.len));
     writeTableEntry(output, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
     writeTableEntry(output, &dir_offset, "name", name_offset, @intCast(name_len));
@@ -2037,7 +1978,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     @memcpy(output[head_offset..][0..new_head.len], new_head);
     @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
     @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
-    @memcpy(output[hmtx_offset..][0..new_hmtx.items.len], new_hmtx.items);
+    @memcpy(output[hmtx_offset..][0..new_hmtx.len], new_hmtx);
     @memcpy(output[cmap_offset..][0..new_cmap.items.len], new_cmap.items);
     @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
     @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);

@@ -20,6 +20,7 @@ pub const svg = @import("svg.zig");
 pub const pathmod = @import("path.zig");
 pub const gradient = @import("gradient.zig");
 pub const styled_text = @import("styled_text.zig");
+pub const graphics = @import("graphics.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -1908,54 +1909,22 @@ pub const Document = struct {
     // Graphics Primitives
     // ========================================================================
 
-    /// Write graphics state operators (line width, dash pattern, colors).
-    /// Used internally by shape drawing methods.
-    fn writeGraphicsState(self: *Document, buf: []u8, style: DrawStyle) usize {
-        var len: usize = 0;
-
-        // Line width
-        len += (std.fmt.bufPrint(buf[len..], "{d:.3} w\n", .{self.line_width}) catch unreachable).len;
-
-        // Dash pattern
-        if (self.dash_pattern.dash > 0) {
-            len += (std.fmt.bufPrint(buf[len..], "[{d:.3} {d:.3}] {d:.3} d\n", .{ self.dash_pattern.dash, self.dash_pattern.gap, self.dash_pattern.phase }) catch unreachable).len;
-        } else {
-            len += (std.fmt.bufPrint(buf[len..], "[] 0 d\n", .{}) catch unreachable).len;
-        }
-
-        // Line cap and join
-        len += (std.fmt.bufPrint(buf[len..], "{d} J {d} j\n", .{ @intFromEnum(self.line_cap), @intFromEnum(self.line_join) }) catch unreachable).len;
-
-        // Stroke color (for stroke and fill_stroke)
-        if (style == .stroke or style == .fill_stroke) {
-            var color_buf: [64]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&color_buf);
-            self.draw_color.writeStroke(fbs.writer()) catch unreachable;
-            const color_str = fbs.getWritten();
-            @memcpy(buf[len .. len + color_str.len], color_str);
-            len += color_str.len;
-        }
-
-        // Fill color (for fill and fill_stroke)
-        if (style == .fill or style == .fill_stroke) {
-            var color_buf: [64]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&color_buf);
-            self.fill_color.writeFill(fbs.writer()) catch unreachable;
-            const color_str = fbs.getWritten();
-            @memcpy(buf[len .. len + color_str.len], color_str);
-            len += color_str.len;
-        }
-
-        return len;
+    /// Get current graphics state as a GraphicsState struct.
+    fn getGraphicsState(self: *const Document) graphics.GraphicsState {
+        return .{
+            .line_width = self.line_width,
+            .dash_pattern = self.dash_pattern,
+            .line_cap = self.line_cap,
+            .line_join = self.line_join,
+            .stroke_color = self.draw_color,
+            .fill_color = self.fill_color,
+        };
     }
 
-    /// Get PDF path operator for the given draw style.
-    fn getPathOperator(style: DrawStyle) []const u8 {
-        return switch (style) {
-            .stroke => "S\n",
-            .fill => "f\n",
-            .fill_stroke => "B\n",
-        };
+    /// Write graphics state operators (line width, dash pattern, colors).
+    /// Used internally by shape drawing methods.
+    fn writeGraphicsState(self: *const Document, buf: []u8, style: DrawStyle) usize {
+        return graphics.writeGraphicsState(self.getGraphicsState(), buf, style);
     }
 
     /// Draw a line between two points.
@@ -2011,7 +1980,7 @@ pub const Document = struct {
 
         // Rectangle path and operator
         len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re ", .{ x, pdf_y, w, h }) catch unreachable).len;
-        const op = getPathOperator(style);
+        const op = graphics.getPathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -2040,13 +2009,7 @@ pub const Document = struct {
 
         var page = &self.pages.items[self.pages.items.len - 1];
         const page_height = self.page_size.height;
-
-        // Convert from top-left to PDF coordinates (bottom-left origin)
-        const pdf_y = page_height - y - h;
-
-        // Kappa constant for approximating quarter circles with cubic Bezier curves
-        const KAPPA: f64 = 0.5522847498307936;
-        const k = radius * KAPPA;
+        const pdf_y = page_height - y - h; // Convert to PDF coords
 
         var buf: [1024]u8 = undefined;
         var len: usize = 0;
@@ -2057,53 +2020,13 @@ pub const Document = struct {
         // Graphics state
         len += self.writeGraphicsState(buf[len..], style);
 
-        // Build path: start at top-left corner, after the rounded part
-        // Move to start point (top edge, after top-left corner)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ x + radius, pdf_y + h }) catch unreachable).len;
+        // Rounded rectangle path (includes close path "h ")
+        len += graphics.writeRoundedRectPath(buf[len..], x, pdf_y, w, h, radius);
 
-        // Top edge (left to right)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + w - radius, pdf_y + h }) catch unreachable).len;
-
-        // Top-right corner (curve)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            x + w - radius + k, pdf_y + h,
-            x + w,              pdf_y + h - radius + k,
-            x + w,              pdf_y + h - radius,
-        }) catch unreachable).len;
-
-        // Right edge (top to bottom)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + w, pdf_y + radius }) catch unreachable).len;
-
-        // Bottom-right corner (curve)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            x + w,              pdf_y + radius - k,
-            x + w - radius + k, pdf_y,
-            x + w - radius,     pdf_y,
-        }) catch unreachable).len;
-
-        // Bottom edge (right to left)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + radius, pdf_y }) catch unreachable).len;
-
-        // Bottom-left corner (curve)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            x + radius - k, pdf_y,
-            x,              pdf_y + radius - k,
-            x,              pdf_y + radius,
-        }) catch unreachable).len;
-
-        // Left edge (bottom to top)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x, pdf_y + h - radius }) catch unreachable).len;
-
-        // Top-left corner (curve)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            x,              pdf_y + h - radius + k,
-            x + radius - k, pdf_y + h,
-            x + radius,     pdf_y + h,
-        }) catch unreachable).len;
-
-        // Close path and apply style
-        const op = getPathOperator(style);
-        len += (std.fmt.bufPrint(buf[len..], "h {s}", .{op}) catch unreachable).len;
+        // Apply style
+        const op = graphics.getPathOperator(style);
+        @memcpy(buf[len .. len + op.len], op);
+        len += op.len;
 
         // Restore graphics state
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
@@ -2124,18 +2047,8 @@ pub const Document = struct {
         // Calculate center and radii from bounding box
         const rx = w / 2.0;
         const ry = h / 2.0;
-        const cx = x + rx; // center x
-        const cy = y + ry; // center y (in top-origin coords)
-
-        // Convert center from top-left to PDF coordinates (bottom-left origin)
-        const pdf_cy = page_height - cy;
-
-        // Kappa constant for approximating circles with cubic Bezier curves
-        // This is (4/3)*tan(pi/8) ≈ 0.5522847498
-        const KAPPA: f64 = 0.5522847498307936;
-
-        const kx = rx * KAPPA;
-        const ky = ry * KAPPA;
+        const cx = x + rx;
+        const pdf_cy = page_height - (y + ry); // Convert to PDF coords
 
         var buf: [1024]u8 = undefined;
         var len: usize = 0;
@@ -2146,51 +2059,11 @@ pub const Document = struct {
         // Graphics state
         len += self.writeGraphicsState(buf[len..], style);
 
-        // Start at right-most point (cx + rx, cy)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ cx + rx, pdf_cy }) catch unreachable).len;
+        // Ellipse path
+        len += graphics.writeEllipsePath(buf[len..], cx, pdf_cy, rx, ry);
 
-        // Top-right quadrant: from (cx+rx, cy) to (cx, cy+ry)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            cx + rx,
-            pdf_cy + ky,
-            cx + kx,
-            pdf_cy + ry,
-            cx,
-            pdf_cy + ry,
-        }) catch unreachable).len;
-
-        // Top-left quadrant: from (cx, cy+ry) to (cx-rx, cy)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            cx - kx,
-            pdf_cy + ry,
-            cx - rx,
-            pdf_cy + ky,
-            cx - rx,
-            pdf_cy,
-        }) catch unreachable).len;
-
-        // Bottom-left quadrant: from (cx-rx, cy) to (cx, cy-ry)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            cx - rx,
-            pdf_cy - ky,
-            cx - kx,
-            pdf_cy - ry,
-            cx,
-            pdf_cy - ry,
-        }) catch unreachable).len;
-
-        // Bottom-right quadrant: from (cx, cy-ry) to (cx+rx, cy)
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            cx + kx,
-            pdf_cy - ry,
-            cx + rx,
-            pdf_cy - ky,
-            cx + rx,
-            pdf_cy,
-        }) catch unreachable).len;
-
-        // Close path and apply style
-        const op = getPathOperator(style);
+        // Apply style
+        const op = graphics.getPathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -2245,7 +2118,7 @@ pub const Document = struct {
         len += (std.fmt.bufPrint(buf[len..], "h ", .{}) catch unreachable).len;
 
         // Apply style
-        const op = getPathOperator(style);
+        const op = graphics.getPathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -3146,7 +3019,7 @@ pub const Document = struct {
         try p.toPdfContent(page_height, writer);
 
         // Apply style
-        const op = getPathOperator(style);
+        const op = graphics.getPathOperator(style);
         try writer.writeAll(op);
 
         // Restore graphics state
