@@ -1124,6 +1124,16 @@ fn decodeFontName(raw: []const u8) []const u8 {
     return raw;
 }
 
+/// Append a loca table entry in the correct format (short or long).
+fn appendLocaEntry(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, offset: u32, loca_format: i16) !void {
+    if (loca_format == 0) {
+        // Short format: offset / 2
+        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(offset / 2))));
+    } else {
+        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, offset)));
+    }
+}
+
 /// Create a subset TTF containing only the used glyphs
 fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]const u8 {
     const font = &emb.font;
@@ -1193,12 +1203,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     for (glyph_ids) |old_gid| {
         // Record offset in new loca
         const offset: u32 = @intCast(new_glyf.items.len);
-        if (loca_format == 0) {
-            // Short format: offset / 2
-            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(offset / 2))));
-        } else {
-            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, offset)));
-        }
+        try appendLocaEntry(&new_loca, allocator, offset, loca_format);
 
         // Get glyph bounds from original loca
         const glyph_start = getLocaOffset(orig_loca, old_gid, loca_format);
@@ -1212,11 +1217,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     // Final loca entry (end of last glyph)
     const final_offset: u32 = @intCast(new_glyf.items.len);
-    if (loca_format == 0) {
-        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(final_offset / 2))));
-    } else {
-        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, final_offset)));
-    }
+    try appendLocaEntry(&new_loca, allocator, final_offset, loca_format);
 
     // Build new hmtx (horizontal metrics)
     const new_hmtx = try buildHmtxForGlyphs(allocator, orig_hmtx, hhea.num_of_long_hor_metrics, glyph_ids);
@@ -1518,11 +1519,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     while (gid <= max_gid) : (gid += 1) {
         // Record offset in new loca
         const offset: u32 = @intCast(new_glyf.items.len);
-        if (loca_format == 0) {
-            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(offset / 2))));
-        } else {
-            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, offset)));
-        }
+        try appendLocaEntry(&new_loca, allocator, offset, loca_format);
 
         // Only include glyph data if this glyph is used
         if (glyph_set.contains(gid)) {
@@ -1539,11 +1536,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
 
     // Final loca entry (end of last glyph)
     const final_offset: u32 = @intCast(new_glyf.items.len);
-    if (loca_format == 0) {
-        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(final_offset / 2))));
-    } else {
-        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, final_offset)));
-    }
+    try appendLocaEntry(&new_loca, allocator, final_offset, loca_format);
 
     // Build new hmtx (horizontal metrics) for all glyphs 0..max_gid
     var new_hmtx = std.ArrayListUnmanaged(u8){};
@@ -1581,38 +1574,8 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     }
 
     // Build minimal cmap (Format 4 with just .notdef mapping)
-    // CID mode uses glyph IDs directly, but some PDF readers still want a cmap
-    var new_cmap = std.ArrayListUnmanaged(u8){};
-    defer new_cmap.deinit(allocator);
-
-    // cmap header
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // version
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // numTables
-
-    // Encoding record for Windows Unicode BMP
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 3))); // platformID
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // encodingID
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, 12))); // offset
-
-    // Minimal Format 4 subtable (just final segment 0xFFFF)
-    const seg_count: u16 = 1;
-    const seg_count_x2: u16 = seg_count * 2;
-    const search_range: u16 = 2;
-    const entry_selector: u16 = 0;
-    const range_shift: u16 = 0;
-
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 4))); // format
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 32))); // length
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, seg_count_x2)));
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, search_range)));
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, entry_selector)));
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, range_shift)));
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // endCode
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // reservedPad
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // startCode
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, 1))); // idDelta
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // idRangeOffset
+    const new_cmap = try buildMinimalCmap(allocator);
+    defer allocator.free(new_cmap);
 
     // Assemble the final TTF
     const table_count: u16 = 9;
@@ -1644,7 +1607,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     const hhea_padded = padTo4(new_hhea.len);
     const maxp_padded = padTo4(new_maxp.len);
     const hmtx_padded = padTo4(new_hmtx.items.len);
-    const cmap_padded = padTo4(new_cmap.items.len);
+    const cmap_padded = padTo4(new_cmap.len);
     const loca_padded = padTo4(new_loca.items.len);
     const glyf_padded = padTo4(new_glyf.items.len);
     const name_len = if (orig_name) |n| n.len else 0;
@@ -1690,7 +1653,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
 
     // Write table directory
     var dir_offset: usize = 12;
-    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.items.len));
+    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.len));
     writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
     writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
     writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
@@ -1705,7 +1668,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
     @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
     @memcpy(output[hmtx_offset..][0..new_hmtx.items.len], new_hmtx.items);
-    @memcpy(output[cmap_offset..][0..new_cmap.items.len], new_cmap.items);
+    @memcpy(output[cmap_offset..][0..new_cmap.len], new_cmap);
     @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
     @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
     if (orig_name) |name_data| {
@@ -1792,11 +1755,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     for (glyph_list.items) |orig_gid| {
         // Record offset
         const offset: u32 = @intCast(new_glyf.items.len);
-        if (loca_format == 0) {
-            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(offset / 2))));
-        } else {
-            try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, offset)));
-        }
+        try appendLocaEntry(&new_loca, allocator, offset, loca_format);
 
         // Get original glyph data
         if (orig_gid < orig_maxp.num_glyphs) {
@@ -1824,39 +1783,15 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Final loca entry
     const final_offset: u32 = @intCast(new_glyf.items.len);
-    if (loca_format == 0) {
-        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(final_offset / 2))));
-    } else {
-        try new_loca.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, final_offset)));
-    }
+    try appendLocaEntry(&new_loca, allocator, final_offset, loca_format);
 
     // Build compact hmtx
     const new_hmtx = try buildHmtxForGlyphs(allocator, orig_hmtx, hhea.num_of_long_hor_metrics, glyph_list.items);
     defer allocator.free(new_hmtx);
 
     // Build minimal cmap (same as CID version)
-    var new_cmap = std.ArrayListUnmanaged(u8){};
-    defer new_cmap.deinit(allocator);
-
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // version
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // numTables
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 3))); // platformID
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // encodingID
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, 12))); // offset
-
-    // Minimal Format 4
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 4))); // format
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 32))); // length
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 2))); // segCountX2
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 2))); // searchRange
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // entrySelector
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // rangeShift
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // endCode
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // reservedPad
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // startCode
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, 1))); // idDelta
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // idRangeOffset
+    const new_cmap = try buildMinimalCmap(allocator);
+    defer allocator.free(new_cmap);
 
     // Assemble TTF
     const table_count: u16 = 9;
@@ -1884,7 +1819,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const hhea_padded = padTo4(new_hhea.len);
     const maxp_padded = padTo4(new_maxp.len);
     const hmtx_padded = padTo4(new_hmtx.len);
-    const cmap_padded = padTo4(new_cmap.items.len);
+    const cmap_padded = padTo4(new_cmap.len);
     const loca_padded = padTo4(new_loca.items.len);
     const glyf_padded = padTo4(new_glyf.items.len);
     const name_len = if (orig_name) |n| n.len else 0;
@@ -1924,7 +1859,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     std.mem.writeInt(u16, output[10..12], table_count * 16 - 128, .big); // rangeShift
 
     var dir_offset: usize = 12;
-    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.items.len));
+    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.len));
     writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
     writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
     writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
@@ -1938,7 +1873,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
     @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
     @memcpy(output[hmtx_offset..][0..new_hmtx.len], new_hmtx);
-    @memcpy(output[cmap_offset..][0..new_cmap.items.len], new_cmap.items);
+    @memcpy(output[cmap_offset..][0..new_cmap.len], new_cmap);
     @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
     @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
     if (orig_name) |name_data| {
@@ -1951,6 +1886,29 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     return output;
+}
+
+/// Build a CFF INDEX structure containing a single item.
+/// CFF INDEX format: count(2) + offSize(1) + offsets(offSize * (count+1)) + data
+fn appendCffSingleItemIndex(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, data: []const u8) !void {
+    // Count = 1 (big-endian u16)
+    try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+
+    // Determine offset size (1 byte if data fits, 2 bytes otherwise)
+    const off_size: u8 = if (data.len < 256) 1 else 2;
+    try list.append(allocator, off_size);
+
+    // Offsets: first offset is always 1, second is data.len + 1
+    if (off_size == 1) {
+        try list.append(allocator, 1);
+        try list.append(allocator, @intCast(data.len + 1));
+    } else {
+        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(data.len + 1))));
+    }
+
+    // Data
+    try list.appendSlice(allocator, data);
 }
 
 /// Create a subset CFF for CID mode (preserves glyph IDs)
@@ -2146,18 +2104,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // Build new Top DICT INDEX
     var new_topdict_index = std.ArrayListUnmanaged(u8){};
     defer new_topdict_index.deinit(allocator);
-
-    try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // count
-    const td_off_size: u8 = if (new_topdict.items.len < 256) 1 else 2;
-    try new_topdict_index.append(allocator, td_off_size);
-    if (td_off_size == 1) {
-        try new_topdict_index.append(allocator, 1);
-        try new_topdict_index.append(allocator, @intCast(new_topdict.items.len + 1));
-    } else {
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_topdict.items.len + 1))));
-    }
-    try new_topdict_index.appendSlice(allocator, new_topdict.items);
+    try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
     // Now we need to recalculate because Top DICT size changed
     // This changes all subsequent offsets... let's iterate
@@ -2191,17 +2138,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     // Rebuild Top DICT INDEX with new data
     new_topdict_index.clearRetainingCapacity();
-    try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-    const td_off_size2: u8 = if (new_topdict.items.len < 256) 1 else 2;
-    try new_topdict_index.append(allocator, td_off_size2);
-    if (td_off_size2 == 1) {
-        try new_topdict_index.append(allocator, 1);
-        try new_topdict_index.append(allocator, @intCast(new_topdict.items.len + 1));
-    } else {
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_topdict.items.len + 1))));
-    }
-    try new_topdict_index.appendSlice(allocator, new_topdict.items);
+    try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
     // Assemble final CFF
     const total_size = hdr_size + name_index_data.len + new_topdict_index.items.len +
@@ -2569,17 +2506,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Rebuild Top DICT INDEX
     new_topdict_index.clearRetainingCapacity();
-    try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-    const td_off_size2: u8 = if (new_topdict.items.len < 256) 1 else 2;
-    try new_topdict_index.append(allocator, td_off_size2);
-    if (td_off_size2 == 1) {
-        try new_topdict_index.append(allocator, 1);
-        try new_topdict_index.append(allocator, @intCast(new_topdict.items.len + 1));
-    } else {
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_topdict.items.len + 1))));
-    }
-    try new_topdict_index.appendSlice(allocator, new_topdict.items);
+    try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
     // Assemble final CFF
     const gsubr_len = if (use_desubroutinization) empty_gsubr_index.len else orig_gsubr_index_data.len;
