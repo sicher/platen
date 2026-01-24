@@ -23,13 +23,16 @@ Performance profiling on 2026-01-20 achieved **6x speedup** for OpenType text sh
 ```
 Font loading:      1ms   (0%)
 Simple text:      39ms   (6%)
-OpenType heavy:  204ms  (31%)
-Unicode/marks:   105ms  (16%)
-Text flow:        33ms   (5%)
-PDF output:      277ms  (42%)
+OpenType heavy:  213ms  (30%)
+Unicode/marks:   135ms  (19%)
+Text flow:        35ms   (5%)
+PDF output:      279ms  (40%)
 --------------------------
-TOTAL:           660ms
+TOTAL:           704ms
 ```
+
+Note: Slight increase from 660ms baseline due to kerning in text measurement
+(required for correct text positioning in writeStyled API).
 
 ### PDF Output Breakdown
 
@@ -172,6 +175,23 @@ cmap_format: u16 = 0,
 // ASCII glyph cache for O(1) lookup
 ascii_glyphs: [128]u16 = [_]u16{0} ** 128,
 has_ascii_cache: bool = false,
+```
+
+### 14. Hmtx Cache and ASCII Width Table (ttf.zig, embedded.zig)
+
+**Problem**: After adding kerning to `measureTextWidth` for correct text positioning, performance regressed 25% (660ms → 823ms). Each `getGlyphWidth()` call did an O(n) table search via `getTable("hmtx")`.
+
+**Solution**: Cache the hmtx table pointer during font parse. Additionally, pre-populate a 128-entry ASCII width lookup table for O(1) width access. Refactored `measureTextWidth` to use caches and single-pass width+kerning calculation.
+
+**Impact**: **14% improvement** (823ms → 704ms). Simple text recovered to original 39ms baseline.
+
+```zig
+// Cached hmtx table pointer
+hmtx_data: ?[]const u8 = null,
+
+// ASCII width cache for O(1) lookup (in font units)
+ascii_widths: [128]u16 = [_]u16{0} ** 128,
+has_ascii_widths: bool = false,
 ```
 
 ## Shaping Microbenchmark Results

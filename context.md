@@ -1,7 +1,41 @@
 # zpdf Context
 
 ## Current Focus
-Implemented `StyledText` builder API for styled paragraphs. All 288 tests pass.
+All planned features complete. Performance optimized.
+
+## What We Did (Session 2026-01-24 #2)
+- **Removed writeParagraph** in favor of writeStyled API
+- **Fixed spacing bug in writeStyled**:
+  - Root cause: measureTextWidth didn't include kerning, but rendering did
+  - Word positions drifted as kerning adjustments accumulated
+  - Fix: Added kerning to measureTextWidth for identity encoding
+- **Fixed file size bloat**: Added fast path for single-style lines in renderStyledLine
+- **Optimized measureTextWidth performance** (recovered 14% regression from kerning fix):
+  - Added hmtx_data cache to Font struct (avoids O(n) table search per glyph)
+  - Added ascii_widths[128] cache for O(1) width lookup of common characters
+  - Single-pass width+kerning calculation
+  - Result: 823ms → 704ms (simple text back to 39ms baseline)
+
+## What We Did (Session 2026-01-24)
+- **Fixed measureTextWidth for identity encoding**:
+  - Bug: measureTextWidth used byte-indexed WinAnsi width table for ALL text
+  - For identity encoding, UTF-8 bytes were being looked up in WinAnsi table
+  - Vietnamese characters like "Ớờ" measured as 29pt (wrong) instead of ~10pt (correct)
+  - Fix: Decode UTF-8 and use actual glyph widths for identity encoding
+
+- **CSS-style vertical alignment improvements**:
+  - Changed .top valign to use half-leading calculation: `(line_height + ascender - descender) / 2`
+  - Changed .middle valign to use cap_height for centering visual text mass
+  - Added y_max field to FontMetrics for bounding box info
+  - Get CapHeight from OS/2 table when available
+
+- **Changed default font encoding to identity**:
+  - Identity encoding preserves composite glyphs and supports full Unicode
+  - Better default for modern text rendering
+
+- **Migrated integration tests from writeParagraph to writeStyled**:
+  - Created writeText helper for plain text via writeStyled
+  - Updated reference PDFs for new valign calculation
 
 ## What We Did (Session 2026-01-23 #2)
 - **Implemented `StyledText` builder API for styled paragraphs**:
