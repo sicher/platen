@@ -34,6 +34,13 @@ pub const Font = struct {
     ascii_glyphs: [128]u16 = [_]u16{0} ** 128,
     has_ascii_cache: bool = false,
 
+    // Cached hmtx table data for fast width lookups
+    hmtx_data: ?[]const u8 = null,
+
+    // ASCII width cache for O(1) width lookup of common characters (in font units)
+    ascii_widths: [128]u16 = [_]u16{0} ** 128,
+    has_ascii_widths: bool = false,
+
     /// Load a font from file
     pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !struct { font: Font, data: []const u8 } {
         const file = try std.fs.cwd().openFile(path, .{});
@@ -83,6 +90,9 @@ pub const Font = struct {
 
         // Initialize cmap cache for fast glyph lookups
         font.initCmapCache();
+
+        // Initialize hmtx cache for fast width lookups
+        font.initHmtxCache();
 
         return font;
     }
@@ -135,6 +145,34 @@ pub const Font = struct {
             }
             self.has_ascii_cache = true;
         }
+    }
+
+    /// Initialize hmtx cache - cache table pointer and ASCII widths
+    fn initHmtxCache(self: *Font) void {
+        self.hmtx_data = self.getTable("hmtx".*);
+        const hmtx = self.hmtx_data orelse return;
+        const hhea = self.hhea orelse return;
+
+        // Only cache if we have ASCII glyph cache
+        if (!self.has_ascii_cache) return;
+
+        // Populate ASCII width cache
+        for (0..128) |i| {
+            const gid = self.ascii_glyphs[i];
+            if (gid < hhea.num_of_long_hor_metrics) {
+                const offset = @as(usize, gid) * 4;
+                if (offset + 2 <= hmtx.len) {
+                    self.ascii_widths[i] = readU16(hmtx, offset);
+                }
+            } else if (hhea.num_of_long_hor_metrics > 0) {
+                // Use last advanceWidth for glyphs beyond longHorMetrics
+                const offset = (@as(usize, hhea.num_of_long_hor_metrics) - 1) * 4;
+                if (offset + 2 <= hmtx.len) {
+                    self.ascii_widths[i] = readU16(hmtx, offset);
+                }
+            }
+        }
+        self.has_ascii_widths = true;
     }
 
     /// Check if this is a CFF-based font (OTF with PostScript outlines)
@@ -238,7 +276,7 @@ pub const Font = struct {
     /// Get glyph width (in font units)
     pub fn getGlyphWidth(self: *const Font, glyph_id: u16) ?u16 {
         const hhea = self.hhea orelse return null;
-        const hmtx_data = self.getTable("hmtx".*) orelse return null;
+        const hmtx_data = self.hmtx_data orelse return null;
 
         // hmtx has two parts:
         // 1. longHorMetric[numOfLongHorMetrics] - 4 bytes each (advanceWidth + lsb)
@@ -255,6 +293,16 @@ pub const Font = struct {
             if (offset + 2 > hmtx_data.len) return null;
             return readU16(hmtx_data, offset);
         }
+    }
+
+    /// Get glyph width with ASCII fast path (in font units)
+    pub fn getGlyphWidthFast(self: *const Font, glyph_id: u16, codepoint: u21) ?u16 {
+        // ASCII fast path: use cached width
+        if (self.has_ascii_widths and codepoint < 128) {
+            const w = self.ascii_widths[codepoint];
+            return if (w != 0) w else self.getGlyphWidth(glyph_id);
+        }
+        return self.getGlyphWidth(glyph_id);
     }
 
     /// Get glyph ID for a Unicode codepoint

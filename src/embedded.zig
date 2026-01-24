@@ -811,36 +811,61 @@ pub const EmbeddedFont = struct {
     /// For WinAnsi encoding, uses byte-indexed width table.
     pub fn measureTextWidth(self: *const EmbeddedFont, text: []const u8, size: f64) f64 {
         if (self.encoding == .identity) {
-            // Identity encoding: decode UTF-8 and sum actual glyph widths
-            var total: u32 = 0;
+            // Identity encoding: decode UTF-8, sum widths with optional kerning
+            const units_per_em = self.font.head.?.units_per_em;
+            const em: i32 = @intCast(units_per_em);
+            const has_ascii_widths = self.font.has_ascii_widths;
+            const do_kerning = self.feature_flags.kern and self.has_kern_data and self.ot_features != null;
+
+            var total: i32 = 0;
+            var prev_gid: u16 = 0;
+            var has_prev: bool = false;
+
             var i: usize = 0;
             while (i < text.len) {
                 const byte = text[i];
-                if (byte < 0x80) {
-                    // ASCII: direct glyph lookup
-                    if (self.font.getCharWidth(@intCast(byte))) |w| {
-                        // Scale from font units to 1/1000 em
-                        const units_per_em = self.font.head.?.units_per_em;
-                        total += @intFromFloat(@round(@as(f64, @floatFromInt(w)) * 1000.0 / @as(f64, @floatFromInt(units_per_em))));
+                var gid: u16 = 0;
+                var width: u16 = 0;
+
+                if (byte < 128) {
+                    // ASCII fast path: use cached width directly
+                    if (has_ascii_widths) {
+                        width = self.font.ascii_widths[byte];
+                        gid = self.font.ascii_glyphs[byte];
+                    } else if (self.font.has_ascii_cache) {
+                        gid = self.font.ascii_glyphs[byte];
+                        width = self.font.getGlyphWidth(gid) orelse 0;
+                    } else {
+                        gid = self.font.getGlyphId(byte) orelse 0;
+                        width = self.font.getGlyphWidth(gid) orelse 0;
                     }
                     i += 1;
                 } else {
                     // Multi-byte UTF-8
                     const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
                     if (i + len > text.len) break;
-
                     const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
                         i += 1;
                         continue;
                     };
-
-                    if (self.font.getCharWidth(codepoint)) |w| {
-                        const units_per_em = self.font.head.?.units_per_em;
-                        total += @intFromFloat(@round(@as(f64, @floatFromInt(w)) * 1000.0 / @as(f64, @floatFromInt(units_per_em))));
-                    }
+                    gid = self.font.getGlyphId(codepoint) orelse 0;
+                    width = self.font.getGlyphWidth(gid) orelse 0;
                     i += len;
                 }
+
+                // Add glyph width (scaled to 1/1000 em)
+                total += @divTrunc(@as(i32, @intCast(width)) * 1000, em);
+
+                // Add kerning from previous glyph
+                if (do_kerning and has_prev) {
+                    const kern = self.ot_features.?.getKerning(prev_gid, gid);
+                    total += @divTrunc(@as(i32, kern) * 1000, em);
+                }
+
+                prev_gid = gid;
+                has_prev = true;
             }
+
             return @as(f64, @floatFromInt(total)) * size / 1000.0;
         }
 
