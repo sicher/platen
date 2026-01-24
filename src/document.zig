@@ -349,6 +349,11 @@ fn fontResourceName(font: StandardFont) []const u8 {
     };
 }
 
+/// Generic resource name lookup helper
+fn resourceName(names: []const []const u8, idx: usize, fallback: []const u8) []const u8 {
+    return if (idx < names.len) names[idx] else fallback;
+}
+
 /// Static resource names for embedded fonts (E1, E2, etc.)
 const embedded_font_names = [_][]const u8{
     "E1",  "E2",  "E3",  "E4",  "E5",  "E6",  "E7",  "E8",
@@ -357,13 +362,8 @@ const embedded_font_names = [_][]const u8{
     "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32",
 };
 
-/// Get a short resource name for an embedded font by index
 fn embeddedFontResourceName(idx: usize) []const u8 {
-    if (idx < embedded_font_names.len) {
-        return embedded_font_names[idx];
-    }
-    // Fallback - this shouldn't happen with reasonable font counts
-    return "E99";
+    return resourceName(&embedded_font_names, idx, "E99");
 }
 
 // Static image resource names to avoid dangling pointer issues
@@ -375,10 +375,7 @@ const image_names = [_][]const u8{
 };
 
 fn imageResourceName(idx: usize) []const u8 {
-    if (idx < image_names.len) {
-        return image_names[idx];
-    }
-    return "Im99";
+    return resourceName(&image_names, idx, "Im99");
 }
 
 // Static SVG resource names (Form XObjects)
@@ -390,10 +387,7 @@ const svg_names = [_][]const u8{
 };
 
 fn svgResourceName(idx: usize) []const u8 {
-    if (idx < svg_names.len) {
-        return svg_names[idx];
-    }
-    return "Sv99";
+    return resourceName(&svg_names, idx, "Sv99");
 }
 
 // Static ExtGState names for SVG transparency
@@ -405,10 +399,7 @@ const extgstate_names = [_][]const u8{
 };
 
 fn extgstateResourceName(idx: usize) []const u8 {
-    if (idx < extgstate_names.len) {
-        return extgstate_names[idx];
-    }
-    return "GS99";
+    return resourceName(&extgstate_names, idx, "GS99");
 }
 
 // Static shading names for gradients
@@ -418,10 +409,7 @@ const shading_names = [_][]const u8{
 };
 
 fn shadingResourceName(idx: usize) []const u8 {
-    if (idx < shading_names.len) {
-        return shading_names[idx];
-    }
-    return "Sh99";
+    return resourceName(&shading_names, idx, "Sh99");
 }
 
 /// Stored gradient definition

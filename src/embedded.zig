@@ -1647,6 +1647,49 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     });
 }
 
+/// Parsed CFF file layout with offsets to each section.
+const CFFLayout = struct {
+    hdr_size: usize,
+    name_end: usize,
+    topdict_start: usize,
+    topdict_end: usize,
+    string_start: usize,
+    string_end: usize,
+    gsubr_start: usize,
+    gsubr_end: usize,
+
+    fn parse(cff_data: []const u8) CFFLayout {
+        const hdr_size: usize = cff_data[2];
+        const name_end = skipCFFIndex(cff_data, hdr_size);
+        const topdict_end = skipCFFIndex(cff_data, name_end);
+        const string_end = skipCFFIndex(cff_data, topdict_end);
+        const gsubr_end = skipCFFIndex(cff_data, string_end);
+        return .{
+            .hdr_size = hdr_size,
+            .name_end = name_end,
+            .topdict_start = name_end,
+            .topdict_end = topdict_end,
+            .string_start = topdict_end,
+            .string_end = string_end,
+            .gsubr_start = string_end,
+            .gsubr_end = gsubr_end,
+        };
+    }
+};
+
+/// Append a CFF offset value with the specified size (1, 2, or 3 bytes).
+fn appendCffOffset(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, off: u32, off_size: u8) !void {
+    switch (off_size) {
+        1 => try list.append(allocator, @intCast(off)),
+        2 => try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off)))),
+        3 => {
+            const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, off));
+            try list.appendSlice(allocator, off_bytes[1..4]);
+        },
+        else => unreachable,
+    }
+}
+
 /// Build a CFF INDEX structure containing a single item.
 /// CFF INDEX format: count(2) + offSize(1) + offsets(offSize * (count+1)) + data
 fn appendCffSingleItemIndex(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, data: []const u8) !void {
@@ -1658,13 +1701,8 @@ fn appendCffSingleItemIndex(list: *std.ArrayListUnmanaged(u8), allocator: std.me
     try list.append(allocator, off_size);
 
     // Offsets: first offset is always 1, second is data.len + 1
-    if (off_size == 1) {
-        try list.append(allocator, 1);
-        try list.append(allocator, @intCast(data.len + 1));
-    } else {
-        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(data.len + 1))));
-    }
+    try appendCffOffset(list, allocator, 1, off_size);
+    try appendCffOffset(list, allocator, @intCast(data.len + 1), off_size);
 
     // Data
     try list.appendSlice(allocator, data);
@@ -1701,25 +1739,10 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     }
 
     // Parse CFF structure
-    const hdr_size = cff_data[2];
-
-    // Skip Name INDEX
-    const name_end = skipCFFIndex(cff_data, hdr_size);
-
-    // Skip Top DICT INDEX (but remember its location for later)
-    const topdict_start = name_end;
-    const topdict_end = skipCFFIndex(cff_data, topdict_start);
-
-    // Skip String INDEX
-    const string_start = topdict_end;
-    const string_end = skipCFFIndex(cff_data, string_start);
-
-    // Skip Global Subr INDEX
-    const gsubr_start = string_end;
-    const gsubr_end = skipCFFIndex(cff_data, gsubr_start);
+    const cff = CFFLayout.parse(cff_data);
 
     // Parse Top DICT to find CharStrings offset
-    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, topdict_start) orelse
+    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, cff.topdict_start) orelse
         return error.InvalidCFF;
 
     // Parse CharStrings INDEX
@@ -1759,14 +1782,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         const orig_off = readCFFOffset(cff_data, cs_offsets_start, gid, cs_off_size);
         // Rebase offset relative to first glyph
         const new_off: u32 = @intCast(orig_off - orig_first_offset + 1);
-        if (new_cs_off_size == 1) {
-            try new_charstrings.append(allocator, @intCast(new_off));
-        } else if (new_cs_off_size == 2) {
-            try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_off))));
-        } else {
-            const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, new_off));
-            try new_charstrings.appendSlice(allocator, off_bytes[1..4]);
-        }
+        try appendCffOffset(&new_charstrings, allocator, new_off, new_cs_off_size);
     }
 
     // Copy CharStrings data for glyphs 0 to num_glyphs-1
@@ -1777,11 +1793,11 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // For simplicity, keep everything before CharStrings, replace CharStrings, keep Private
 
     // Calculate new CharStrings offset
-    const new_charstrings_offset = gsubr_end;
+    const new_charstrings_offset = cff.gsubr_end;
 
     // Get original charset info and copy it (preserves correct SIDs for glyph names)
     const orig_charset_offset = parseCFFDictForOperator(
-        cff_data[topdict_start + 3 + 2 * cff_data[topdict_start + 2] ..][0 .. readCFFOffset(cff_data, topdict_start + 3, 1, cff_data[topdict_start + 2]) - 1],
+        cff_data[cff.topdict_start + 3 + 2 * cff_data[cff.topdict_start + 2] ..][0 .. readCFFOffset(cff_data, cff.topdict_start + 3, 1, cff_data[cff.topdict_start + 2]) - 1],
         15,
     ) orelse return error.InvalidCFF;
 
@@ -1829,7 +1845,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     const new_charstrings_actual_offset = new_charstrings_offset + subset_charset_size;
 
     // Get original Private DICT info
-    const private_info = parseCFFTopDictForPrivate(cff_data, topdict_start);
+    const private_info = parseCFFTopDictForPrivate(cff_data, cff.topdict_start);
     const orig_private_size = private_info.size;
     const orig_private_offset = private_info.offset;
 
@@ -1853,7 +1869,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     defer new_topdict.deinit(allocator);
 
     // Copy original Top DICT entries except charset, CharStrings, Private
-    try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+    try buildUpdatedTopDict(allocator, cff_data, cff.topdict_start, &new_topdict, .{
         .charset = @intCast(new_charstrings_offset), // charset at gsubr_end
         .charstrings = @intCast(new_charstrings_actual_offset),
         .private_size = orig_private_size,
@@ -1867,12 +1883,12 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     // Now we need to recalculate because Top DICT size changed
     // This changes all subsequent offsets... let's iterate
-    const name_index_data = cff_data[hdr_size..name_end];
-    const string_index_data = cff_data[string_start..string_end];
-    const gsubr_index_data = cff_data[gsubr_start..gsubr_end];
+    const name_index_data = cff_data[cff.hdr_size..cff.name_end];
+    const string_index_data = cff_data[cff.string_start..cff.string_end];
+    const gsubr_index_data = cff_data[cff.gsubr_start..cff.gsubr_end];
 
     // Calculate actual offsets
-    var final_offset: usize = hdr_size;
+    var final_offset: usize = cff.hdr_size;
     final_offset += name_index_data.len;
     final_offset += new_topdict_index.items.len;
     final_offset += string_index_data.len;
@@ -1888,7 +1904,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     // Rebuild Top DICT with correct offsets
     new_topdict.clearRetainingCapacity();
-    try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+    try buildUpdatedTopDict(allocator, cff_data, cff.topdict_start, &new_topdict, .{
         .charset = @intCast(final_charset_offset),
         .charstrings = @intCast(final_charstrings_offset),
         .private_size = orig_private_size,
@@ -1900,7 +1916,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
     // Assemble final CFF
-    const total_size = hdr_size + name_index_data.len + new_topdict_index.items.len +
+    const total_size = cff.hdr_size + name_index_data.len + new_topdict_index.items.len +
         string_index_data.len + gsubr_index_data.len +
         subset_charset_size + new_charstrings.items.len + total_private_size;
 
@@ -1910,8 +1926,8 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     var pos: usize = 0;
 
     // Header
-    @memcpy(output[0..hdr_size], cff_data[0..hdr_size]);
-    pos = hdr_size;
+    @memcpy(output[0..cff.hdr_size], cff_data[0..cff.hdr_size]);
+    pos = cff.hdr_size;
 
     // Name INDEX
     @memcpy(output[pos..][0..name_index_data.len], name_index_data);
@@ -1998,19 +2014,13 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const num_glyphs: u16 = @intCast(glyph_list.items.len);
 
     // Parse CFF structure
-    const hdr_size = cff_data[2];
-    const name_end = skipCFFIndex(cff_data, hdr_size);
-    const topdict_start = name_end;
-    const topdict_end = skipCFFIndex(cff_data, topdict_start);
-    const string_start = topdict_end;
-    const string_end = skipCFFIndex(cff_data, string_start);
-    const gsubr_start = string_end;
+    const cff = CFFLayout.parse(cff_data);
 
     // Parse Global Subrs INDEX
-    const global_subrs = parseCFFIndex(cff_data, gsubr_start);
+    const global_subrs = parseCFFIndex(cff_data, cff.gsubr_start);
 
     // Parse CharStrings INDEX location
-    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, topdict_start) orelse
+    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, cff.topdict_start) orelse
         return error.InvalidCFF;
 
     const cs_count = readU16(cff_data, charstrings_offset);
@@ -2021,7 +2031,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const cs_data_start = cs_offsets_start + (@as(usize, cs_count) + 1) * cs_off_size;
 
     // Get Private DICT info to find Local Subrs
-    const private_info = parseCFFTopDictForPrivate(cff_data, topdict_start);
+    const private_info = parseCFFTopDictForPrivate(cff_data, cff.topdict_start);
     var local_subrs: ?CFFIndex = null;
     if (private_info.size > 0 and private_info.offset + private_info.size <= cff_data.len) {
         const private_dict_data = cff_data[private_info.offset..][0..private_info.size];
@@ -2079,14 +2089,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     try new_charstrings.append(allocator, new_cs_off_size);
 
     for (cs_offsets.items) |off| {
-        if (new_cs_off_size == 1) {
-            try new_charstrings.append(allocator, @intCast(off));
-        } else if (new_cs_off_size == 2) {
-            try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off))));
-        } else {
-            const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, off));
-            try new_charstrings.appendSlice(allocator, off_bytes[1..4]);
-        }
+        try appendCffOffset(&new_charstrings, allocator, off, new_cs_off_size);
     }
     try new_charstrings.appendSlice(allocator, cs_data_buf.items);
 
@@ -2097,7 +2100,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Get original charset offset
     const orig_charset_offset = parseCFFDictForOperator(
-        cff_data[topdict_start + 3 + 2 * cff_data[topdict_start + 2] ..][0 .. readCFFOffset(cff_data, topdict_start + 3, 1, cff_data[topdict_start + 2]) - 1],
+        cff_data[cff.topdict_start + 3 + 2 * cff_data[cff.topdict_start + 2] ..][0 .. readCFFOffset(cff_data, cff.topdict_start + 3, 1, cff_data[cff.topdict_start + 2]) - 1],
         15,
     ) orelse return error.InvalidCFF;
 
@@ -2111,7 +2114,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Collect SIDs used in Top DICT
-    var topdict_sids = try collectTopDictSIDs(allocator, cff_data, topdict_start);
+    var topdict_sids = try collectTopDictSIDs(allocator, cff_data, cff.topdict_start);
     defer topdict_sids.deinit(allocator);
 
     // Combine all used SIDs
@@ -2121,7 +2124,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     try all_used_sids.appendSlice(allocator, topdict_sids.items);
 
     // Build subset String INDEX with SID remapping
-    const string_subset = try buildSubsetStringIndex(allocator, cff_data, string_start, all_used_sids.items);
+    const string_subset = try buildSubsetStringIndex(allocator, cff_data, cff.string_start, all_used_sids.items);
     defer allocator.free(string_subset.data);
     var sid_remap = string_subset.remap;
     defer sid_remap.deinit(allocator);
@@ -2129,7 +2132,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     // String INDEX subsetting removes unused strings and remaps SIDs in Top DICT.
     // Charset SIDs are preserved (standard SIDs < 391 don't need remapping).
     const use_string_subsetting = true;
-    const string_index_data = if (use_string_subsetting) string_subset.data else cff_data[string_start..string_end];
+    const string_index_data = if (use_string_subsetting) string_subset.data else cff_data[cff.string_start..cff.string_end];
 
     // Build format 0 charset with remapped SIDs
     // Standard SIDs (< 391) don't need remapping, but custom strings do
@@ -2169,15 +2172,14 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Get original Name INDEX (keep as-is)
-    const name_index_data = cff_data[hdr_size..name_end];
+    const name_index_data = cff_data[cff.hdr_size..cff.name_end];
 
     // Global Subrs INDEX - empty if desubroutinizing, keep original otherwise
-    const gsubr_end = skipCFFIndex(cff_data, gsubr_start);
-    const orig_gsubr_index_data = cff_data[gsubr_start..gsubr_end];
+    const orig_gsubr_index_data = cff_data[cff.gsubr_start..cff.gsubr_end];
     const empty_gsubr_index = [_]u8{ 0, 0 };
 
     // Calculate final offsets (we need to do this twice due to Top DICT size changes)
-    var final_offset: usize = hdr_size + name_index_data.len;
+    var final_offset: usize = cff.hdr_size + name_index_data.len;
 
     // Estimate Top DICT INDEX size for first pass
     var new_topdict = std.ArrayListUnmanaged(u8){};
@@ -2201,14 +2203,14 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const total_private_size = new_private.items.len + local_subrs_size;
 
     if (use_string_subsetting) {
-        try buildUpdatedTopDictWithSIDRemap(allocator, cff_data, topdict_start, &new_topdict, .{
+        try buildUpdatedTopDictWithSIDRemap(allocator, cff_data, cff.topdict_start, &new_topdict, .{
             .charset = @intCast(est_charset_offset),
             .charstrings = @intCast(est_charstrings_offset),
             .private_size = total_private_size,
             .private_offset = @intCast(est_private_offset),
         }, &sid_remap);
     } else {
-        try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+        try buildUpdatedTopDict(allocator, cff_data, cff.topdict_start, &new_topdict, .{
             .charset = @intCast(est_charset_offset),
             .charstrings = @intCast(est_charstrings_offset),
             .private_size = total_private_size,
@@ -2219,21 +2221,10 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     // Build Top DICT INDEX
     var new_topdict_index = std.ArrayListUnmanaged(u8){};
     defer new_topdict_index.deinit(allocator);
-
-    try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-    const td_off_size: u8 = if (new_topdict.items.len < 256) 1 else 2;
-    try new_topdict_index.append(allocator, td_off_size);
-    if (td_off_size == 1) {
-        try new_topdict_index.append(allocator, 1);
-        try new_topdict_index.append(allocator, @intCast(new_topdict.items.len + 1));
-    } else {
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
-        try new_topdict_index.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(new_topdict.items.len + 1))));
-    }
-    try new_topdict_index.appendSlice(allocator, new_topdict.items);
+    try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
     // Recalculate with actual Top DICT INDEX size
-    final_offset = hdr_size + name_index_data.len + new_topdict_index.items.len;
+    final_offset = cff.hdr_size + name_index_data.len + new_topdict_index.items.len;
     final_offset += string_index_data.len;
     final_offset += if (use_desubroutinization) empty_gsubr_index.len else orig_gsubr_index_data.len;
 
@@ -2248,14 +2239,14 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     // Rebuild Top DICT with correct offsets
     new_topdict.clearRetainingCapacity();
     if (use_string_subsetting) {
-        try buildUpdatedTopDictWithSIDRemap(allocator, cff_data, topdict_start, &new_topdict, .{
+        try buildUpdatedTopDictWithSIDRemap(allocator, cff_data, cff.topdict_start, &new_topdict, .{
             .charset = @intCast(final_charset_offset),
             .charstrings = @intCast(final_charstrings_offset),
             .private_size = total_private_size,
             .private_offset = @intCast(final_private_offset),
         }, &sid_remap);
     } else {
-        try buildUpdatedTopDict(allocator, cff_data, topdict_start, &new_topdict, .{
+        try buildUpdatedTopDict(allocator, cff_data, cff.topdict_start, &new_topdict, .{
             .charset = @intCast(final_charset_offset),
             .charstrings = @intCast(final_charstrings_offset),
             .private_size = total_private_size,
@@ -2269,7 +2260,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Assemble final CFF
     const gsubr_len = if (use_desubroutinization) empty_gsubr_index.len else orig_gsubr_index_data.len;
-    const total_size = hdr_size + name_index_data.len + new_topdict_index.items.len +
+    const total_size = cff.hdr_size + name_index_data.len + new_topdict_index.items.len +
         string_index_data.len + gsubr_len +
         new_charset.items.len + new_charstrings.items.len + total_private_size;
 
@@ -2279,8 +2270,8 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     var pos: usize = 0;
 
     // Header
-    @memcpy(output[0..hdr_size], cff_data[0..hdr_size]);
-    pos = hdr_size;
+    @memcpy(output[0..cff.hdr_size], cff_data[0..cff.hdr_size]);
+    pos = cff.hdr_size;
 
     // Name INDEX
     @memcpy(output[pos..][0..name_index_data.len], name_index_data);
