@@ -290,6 +290,41 @@ pub fn getCompositeComponents(glyf: []const u8, loca: []const u8, loca_format: i
     return components;
 }
 
+/// Recursively expand a glyph set to include all composite glyph components.
+/// Keeps expanding until no new glyphs are added.
+pub fn expandCompositeGlyphs(
+    allocator: std.mem.Allocator,
+    glyph_set: *std.AutoHashMapUnmanaged(u16, void),
+    glyf: []const u8,
+    loca: []const u8,
+    loca_format: i16,
+    max_glyphs: u16,
+) !void {
+    var changed = true;
+    while (changed) {
+        changed = false;
+
+        // Collect current glyphs to check (can't modify while iterating)
+        var glyphs_to_check = std.ArrayListUnmanaged(u16){};
+        defer glyphs_to_check.deinit(allocator);
+
+        var check_iter = glyph_set.keyIterator();
+        while (check_iter.next()) |gid| {
+            try glyphs_to_check.append(allocator, gid.*);
+        }
+
+        for (glyphs_to_check.items) |gid| {
+            const components = getCompositeComponents(glyf, loca, loca_format, gid);
+            for (components) |comp_gid| {
+                if (comp_gid != 0 and comp_gid < max_glyphs and !glyph_set.contains(comp_gid)) {
+                    try glyph_set.put(allocator, comp_gid, {});
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
 /// Rewrite composite glyph component IDs using the remap table
 pub fn rewriteCompositeGlyphIDs(glyph_data: []u8, remap: *const std.AutoArrayHashMapUnmanaged(u16, u16)) !void {
     if (glyph_data.len < 10) return;

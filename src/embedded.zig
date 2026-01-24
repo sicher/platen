@@ -23,6 +23,7 @@ const buildMinimalCmap = ttf_subset.buildMinimalCmap;
 const assembleTTF = ttf_subset.assembleTTF;
 const TTFTables = ttf_subset.TTFTables;
 const getCompositeComponents = ttf_subset.getCompositeComponents;
+const expandCompositeGlyphs = ttf_subset.expandCompositeGlyphs;
 const rewriteCompositeGlyphIDs = ttf_subset.rewriteCompositeGlyphIDs;
 
 const CFFIndex = cff_subset.CFFIndex;
@@ -1488,29 +1489,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     }
 
     // Recursively add component glyphs referenced by composite glyphs
-    // Keep expanding until no new glyphs are added
-    var changed = true;
-    while (changed) {
-        changed = false;
-        // Collect current glyphs to check (can't modify while iterating)
-        var glyphs_to_check = std.ArrayListUnmanaged(u16){};
-        defer glyphs_to_check.deinit(allocator);
-
-        var check_iter = glyph_set.keyIterator();
-        while (check_iter.next()) |gid| {
-            try glyphs_to_check.append(allocator, gid.*);
-        }
-
-        for (glyphs_to_check.items) |gid| {
-            const components = getCompositeComponents(orig_glyf, orig_loca, loca_format, gid);
-            for (components) |comp_gid| {
-                if (comp_gid < orig_maxp.num_glyphs and !glyph_set.contains(comp_gid)) {
-                    try glyph_set.put(allocator, comp_gid, {});
-                    changed = true;
-                }
-            }
-        }
-    }
+    try expandCompositeGlyphs(allocator, &glyph_set, orig_glyf, orig_loca, loca_format, orig_maxp.num_glyphs);
 
     // Find max glyph ID
     var max_gid: u16 = 0;
@@ -1776,27 +1755,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Recursively add composite glyph components
-    var changed = true;
-    while (changed) {
-        changed = false;
-        var glyphs_to_check = std.ArrayListUnmanaged(u16){};
-        defer glyphs_to_check.deinit(allocator);
-
-        var check_iter = glyph_set.keyIterator();
-        while (check_iter.next()) |gid| {
-            try glyphs_to_check.append(allocator, gid.*);
-        }
-
-        for (glyphs_to_check.items) |gid| {
-            const components = getCompositeComponents(orig_glyf, orig_loca, loca_format, gid);
-            for (components) |comp_gid| {
-                if (comp_gid < orig_maxp.num_glyphs and !glyph_set.contains(comp_gid)) {
-                    try glyph_set.put(allocator, comp_gid, {});
-                    changed = true;
-                }
-            }
-        }
-    }
+    try expandCompositeGlyphs(allocator, &glyph_set, orig_glyf, orig_loca, loca_format, orig_maxp.num_glyphs);
 
     // Build sorted glyph list (0 first, then ascending order)
     var glyph_list = std.ArrayListUnmanaged(u16){};
