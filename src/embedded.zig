@@ -1351,116 +1351,28 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // Append Format 4 subtable
     try new_cmap.appendSlice(allocator, format4.items);
 
-    // Now assemble the final TTF
-    // Tables needed: head, hhea, maxp, hmtx, cmap, loca, glyf, name, post
-    const table_count: u16 = 9;
-
-    // Calculate table sizes and offsets
-    const header_size: usize = 12 + @as(usize, table_count) * 16;
-
-    // Copy and modify required tables
+    // Assemble the final TTF
     const orig_head = font.getTable("head".*) orelse return error.MissingTable;
     const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
     const orig_name = font.getTable("name".*);
     const orig_post = font.getTable("post".*);
 
-    // Modify head: update checksum adjustment later
-    const new_head = try allocator.alloc(u8, orig_head.len);
-    defer allocator.free(new_head);
-    @memcpy(new_head, orig_head);
-
-    // Modify hhea: update numOfLongHorMetrics
-    const new_hhea = try allocator.alloc(u8, orig_hhea.len);
+    // assembleTTF needs mutable hhea to update numOfLongHorMetrics
+    const new_hhea = try allocator.dupe(u8, orig_hhea);
     defer allocator.free(new_hhea);
-    @memcpy(new_hhea, orig_hhea);
-    std.mem.writeInt(u16, new_hhea[34..36], num_glyphs, .big);
 
-    // Build maxp
-    var new_maxp: [6]u8 = undefined;
-    std.mem.writeInt(u32, new_maxp[0..4], 0x00005000, .big); // version 0.5
-    std.mem.writeInt(u16, new_maxp[4..6], num_glyphs, .big);
-
-    // Pad tables to 4-byte boundaries
-    const head_padded = padTo4(new_head.len);
-    const hhea_padded = padTo4(new_hhea.len);
-    const maxp_padded = padTo4(new_maxp.len);
-    const hmtx_padded = padTo4(new_hmtx.len);
-    const cmap_padded = padTo4(new_cmap.items.len);
-    const loca_padded = padTo4(new_loca.items.len);
-    const glyf_padded = padTo4(new_glyf.items.len);
-    const name_len = if (orig_name) |n| n.len else 0;
-    const name_padded = padTo4(name_len);
-    const post_len = if (orig_post) |p| @min(p.len, 32) else 32;
-    const post_padded = padTo4(post_len);
-
-    var offset: u32 = @intCast(header_size);
-    const head_offset = offset;
-    offset += @intCast(head_padded);
-    const hhea_offset = offset;
-    offset += @intCast(hhea_padded);
-    const maxp_offset = offset;
-    offset += @intCast(maxp_padded);
-    const hmtx_offset = offset;
-    offset += @intCast(hmtx_padded);
-    const cmap_offset = offset;
-    offset += @intCast(cmap_padded);
-    const loca_offset = offset;
-    offset += @intCast(loca_padded);
-    const glyf_offset = offset;
-    offset += @intCast(glyf_padded);
-    const name_offset = offset;
-    offset += @intCast(name_padded);
-    const post_offset = offset;
-    offset += @intCast(post_padded);
-
-    const total_size = offset;
-
-    // Allocate output buffer
-    var output = try allocator.alloc(u8, total_size);
-    @memset(output, 0);
-
-    // Write TTF header
-    std.mem.writeInt(u32, output[0..4], 0x00010000, .big); // sfnt version
-    std.mem.writeInt(u16, output[4..6], table_count, .big);
-    // searchRange, entrySelector, rangeShift for table directory
-    const ttf_search_range: u16 = 128; // 8 * 16
-    const ttf_entry_selector: u16 = 3; // log2(8)
-    const ttf_range_shift: u16 = table_count * 16 - ttf_search_range;
-    std.mem.writeInt(u16, output[6..8], ttf_search_range, .big);
-    std.mem.writeInt(u16, output[8..10], ttf_entry_selector, .big);
-    std.mem.writeInt(u16, output[10..12], ttf_range_shift, .big);
-
-    // Write table directory
-    var dir_offset: usize = 12;
-    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.items.len));
-    writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
-    writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
-    writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
-    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.len));
-    writeTableEntry(output, &dir_offset, "loca", loca_offset, @intCast(new_loca.items.len));
-    writeTableEntry(output, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
-    writeTableEntry(output, &dir_offset, "name", name_offset, @intCast(name_len));
-    writeTableEntry(output, &dir_offset, "post", post_offset, @intCast(post_len));
-
-    // Copy table data
-    @memcpy(output[head_offset..][0..new_head.len], new_head);
-    @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
-    @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
-    @memcpy(output[hmtx_offset..][0..new_hmtx.len], new_hmtx);
-    @memcpy(output[cmap_offset..][0..new_cmap.items.len], new_cmap.items);
-    @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
-    @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
-    if (orig_name) |name_data| {
-        @memcpy(output[name_offset..][0..name_data.len], name_data);
-    }
-    if (orig_post) |post_data| {
-        @memcpy(output[post_offset..][0..post_len], post_data[0..post_len]);
-    } else {
-        // Minimal post table (version 3.0 - no glyph names)
-        std.mem.writeInt(u32, output[post_offset..][0..4], 0x00030000, .big);
-    }
-
-    return output;
+    return assembleTTF(allocator, .{
+        .head = orig_head,
+        .hhea = new_hhea,
+        .maxp = &[_]u8{}, // Built internally by assembleTTF
+        .hmtx = new_hmtx,
+        .cmap = new_cmap.items,
+        .loca = new_loca.items,
+        .glyf = new_glyf.items,
+        .name = orig_name,
+        .post = orig_post,
+        .num_glyphs = num_glyphs,
+    });
 }
 
 /// Create a subset TTF for CID mode (preserves glyph IDs, no remapping)
@@ -1578,109 +1490,27 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     defer allocator.free(new_cmap);
 
     // Assemble the final TTF
-    const table_count: u16 = 9;
-    const header_size: usize = 12 + @as(usize, table_count) * 16;
-
     const orig_head = font.getTable("head".*) orelse return error.MissingTable;
     const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
     const orig_name = font.getTable("name".*);
     const orig_post = font.getTable("post".*);
 
-    // Copy and modify head
-    const new_head = try allocator.alloc(u8, orig_head.len);
-    defer allocator.free(new_head);
-    @memcpy(new_head, orig_head);
-
-    // Copy and modify hhea: update numOfLongHorMetrics
-    const new_hhea = try allocator.alloc(u8, orig_hhea.len);
+    // assembleTTF needs mutable hhea to update numOfLongHorMetrics
+    const new_hhea = try allocator.dupe(u8, orig_hhea);
     defer allocator.free(new_hhea);
-    @memcpy(new_hhea, orig_hhea);
-    std.mem.writeInt(u16, new_hhea[34..36], num_glyphs, .big);
 
-    // Build maxp
-    var new_maxp: [6]u8 = undefined;
-    std.mem.writeInt(u32, new_maxp[0..4], 0x00005000, .big);
-    std.mem.writeInt(u16, new_maxp[4..6], num_glyphs, .big);
-
-    // Calculate padded sizes and offsets
-    const head_padded = padTo4(new_head.len);
-    const hhea_padded = padTo4(new_hhea.len);
-    const maxp_padded = padTo4(new_maxp.len);
-    const hmtx_padded = padTo4(new_hmtx.items.len);
-    const cmap_padded = padTo4(new_cmap.len);
-    const loca_padded = padTo4(new_loca.items.len);
-    const glyf_padded = padTo4(new_glyf.items.len);
-    const name_len = if (orig_name) |n| n.len else 0;
-    const name_padded = padTo4(name_len);
-    const post_len = if (orig_post) |p| @min(p.len, 32) else 32;
-    const post_padded = padTo4(post_len);
-
-    var offset: u32 = @intCast(header_size);
-    const head_offset = offset;
-    offset += @intCast(head_padded);
-    const hhea_offset = offset;
-    offset += @intCast(hhea_padded);
-    const maxp_offset = offset;
-    offset += @intCast(maxp_padded);
-    const hmtx_offset = offset;
-    offset += @intCast(hmtx_padded);
-    const cmap_offset = offset;
-    offset += @intCast(cmap_padded);
-    const loca_offset = offset;
-    offset += @intCast(loca_padded);
-    const glyf_offset = offset;
-    offset += @intCast(glyf_padded);
-    const name_offset = offset;
-    offset += @intCast(name_padded);
-    const post_offset = offset;
-    offset += @intCast(post_padded);
-
-    const total_size = offset;
-
-    // Allocate and build output
-    var output = try allocator.alloc(u8, total_size);
-    @memset(output, 0);
-
-    // Write TTF header
-    std.mem.writeInt(u32, output[0..4], 0x00010000, .big);
-    std.mem.writeInt(u16, output[4..6], table_count, .big);
-    const ttf_search_range: u16 = 128;
-    const ttf_entry_selector: u16 = 3;
-    const ttf_range_shift: u16 = table_count * 16 - ttf_search_range;
-    std.mem.writeInt(u16, output[6..8], ttf_search_range, .big);
-    std.mem.writeInt(u16, output[8..10], ttf_entry_selector, .big);
-    std.mem.writeInt(u16, output[10..12], ttf_range_shift, .big);
-
-    // Write table directory
-    var dir_offset: usize = 12;
-    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.len));
-    writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
-    writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
-    writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
-    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.items.len));
-    writeTableEntry(output, &dir_offset, "loca", loca_offset, @intCast(new_loca.items.len));
-    writeTableEntry(output, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
-    writeTableEntry(output, &dir_offset, "name", name_offset, @intCast(name_len));
-    writeTableEntry(output, &dir_offset, "post", post_offset, @intCast(post_len));
-
-    // Copy table data
-    @memcpy(output[head_offset..][0..new_head.len], new_head);
-    @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
-    @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
-    @memcpy(output[hmtx_offset..][0..new_hmtx.items.len], new_hmtx.items);
-    @memcpy(output[cmap_offset..][0..new_cmap.len], new_cmap);
-    @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
-    @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
-    if (orig_name) |name_data| {
-        @memcpy(output[name_offset..][0..name_data.len], name_data);
-    }
-    if (orig_post) |post_data| {
-        @memcpy(output[post_offset..][0..post_len], post_data[0..post_len]);
-    } else {
-        std.mem.writeInt(u32, output[post_offset..][0..4], 0x00030000, .big);
-    }
-
-    return output;
+    return assembleTTF(allocator, .{
+        .head = orig_head,
+        .hhea = new_hhea,
+        .maxp = &[_]u8{}, // Built internally by assembleTTF
+        .hmtx = new_hmtx.items,
+        .cmap = new_cmap,
+        .loca = new_loca.items,
+        .glyf = new_glyf.items,
+        .name = orig_name,
+        .post = orig_post,
+        .num_glyphs = num_glyphs,
+    });
 }
 
 /// Create a compact TTF subset with glyph ID remapping
@@ -1793,99 +1623,28 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const new_cmap = try buildMinimalCmap(allocator);
     defer allocator.free(new_cmap);
 
-    // Assemble TTF
-    const table_count: u16 = 9;
-    const header_size: usize = 12 + @as(usize, table_count) * 16;
-
+    // Assemble the final TTF
     const orig_head = font.getTable("head".*) orelse return error.MissingTable;
     const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
     const orig_name = font.getTable("name".*);
     const orig_post = font.getTable("post".*);
 
-    const new_head = try allocator.alloc(u8, orig_head.len);
-    defer allocator.free(new_head);
-    @memcpy(new_head, orig_head);
-
-    const new_hhea = try allocator.alloc(u8, orig_hhea.len);
+    // assembleTTF needs mutable hhea to update numOfLongHorMetrics
+    const new_hhea = try allocator.dupe(u8, orig_hhea);
     defer allocator.free(new_hhea);
-    @memcpy(new_hhea, orig_hhea);
-    std.mem.writeInt(u16, new_hhea[34..36], num_glyphs, .big);
 
-    var new_maxp: [6]u8 = undefined;
-    std.mem.writeInt(u32, new_maxp[0..4], 0x00005000, .big);
-    std.mem.writeInt(u16, new_maxp[4..6], num_glyphs, .big);
-
-    const head_padded = padTo4(new_head.len);
-    const hhea_padded = padTo4(new_hhea.len);
-    const maxp_padded = padTo4(new_maxp.len);
-    const hmtx_padded = padTo4(new_hmtx.len);
-    const cmap_padded = padTo4(new_cmap.len);
-    const loca_padded = padTo4(new_loca.items.len);
-    const glyf_padded = padTo4(new_glyf.items.len);
-    const name_len = if (orig_name) |n| n.len else 0;
-    const name_padded = padTo4(name_len);
-    const post_len = if (orig_post) |p| @min(p.len, 32) else 32;
-    const post_padded = padTo4(post_len);
-
-    var offset: u32 = @intCast(header_size);
-    const head_offset = offset;
-    offset += @intCast(head_padded);
-    const hhea_offset = offset;
-    offset += @intCast(hhea_padded);
-    const maxp_offset = offset;
-    offset += @intCast(maxp_padded);
-    const hmtx_offset = offset;
-    offset += @intCast(hmtx_padded);
-    const cmap_offset = offset;
-    offset += @intCast(cmap_padded);
-    const loca_offset = offset;
-    offset += @intCast(loca_padded);
-    const glyf_offset = offset;
-    offset += @intCast(glyf_padded);
-    const name_offset = offset;
-    offset += @intCast(name_padded);
-    const post_offset = offset;
-    offset += @intCast(post_padded);
-
-    const total_size = offset;
-
-    var output = try allocator.alloc(u8, total_size);
-    @memset(output, 0);
-
-    std.mem.writeInt(u32, output[0..4], 0x00010000, .big);
-    std.mem.writeInt(u16, output[4..6], table_count, .big);
-    std.mem.writeInt(u16, output[6..8], 128, .big); // searchRange
-    std.mem.writeInt(u16, output[8..10], 3, .big); // entrySelector
-    std.mem.writeInt(u16, output[10..12], table_count * 16 - 128, .big); // rangeShift
-
-    var dir_offset: usize = 12;
-    writeTableEntry(output, &dir_offset, "cmap", cmap_offset, @intCast(new_cmap.len));
-    writeTableEntry(output, &dir_offset, "glyf", glyf_offset, @intCast(new_glyf.items.len));
-    writeTableEntry(output, &dir_offset, "head", head_offset, @intCast(new_head.len));
-    writeTableEntry(output, &dir_offset, "hhea", hhea_offset, @intCast(new_hhea.len));
-    writeTableEntry(output, &dir_offset, "hmtx", hmtx_offset, @intCast(new_hmtx.len));
-    writeTableEntry(output, &dir_offset, "loca", loca_offset, @intCast(new_loca.items.len));
-    writeTableEntry(output, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
-    writeTableEntry(output, &dir_offset, "name", name_offset, @intCast(name_len));
-    writeTableEntry(output, &dir_offset, "post", post_offset, @intCast(post_len));
-
-    @memcpy(output[head_offset..][0..new_head.len], new_head);
-    @memcpy(output[hhea_offset..][0..new_hhea.len], new_hhea);
-    @memcpy(output[maxp_offset..][0..new_maxp.len], &new_maxp);
-    @memcpy(output[hmtx_offset..][0..new_hmtx.len], new_hmtx);
-    @memcpy(output[cmap_offset..][0..new_cmap.len], new_cmap);
-    @memcpy(output[loca_offset..][0..new_loca.items.len], new_loca.items);
-    @memcpy(output[glyf_offset..][0..new_glyf.items.len], new_glyf.items);
-    if (orig_name) |name_data| {
-        @memcpy(output[name_offset..][0..name_data.len], name_data);
-    }
-    if (orig_post) |post_data| {
-        @memcpy(output[post_offset..][0..post_len], post_data[0..post_len]);
-    } else {
-        std.mem.writeInt(u32, output[post_offset..][0..4], 0x00030000, .big);
-    }
-
-    return output;
+    return assembleTTF(allocator, .{
+        .head = orig_head,
+        .hhea = new_hhea,
+        .maxp = &[_]u8{}, // Built internally by assembleTTF
+        .hmtx = new_hmtx,
+        .cmap = new_cmap,
+        .loca = new_loca.items,
+        .glyf = new_glyf.items,
+        .name = orig_name,
+        .post = orig_post,
+        .num_glyphs = num_glyphs,
+    });
 }
 
 /// Build a CFF INDEX structure containing a single item.
