@@ -2194,7 +2194,8 @@ test "write() advances cursor_x" {
     try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
     try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
 
-    _ = try doc.write(&region, "Hello", .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.write(&region, "Hello", style, .{});
 
     // cursor_x should have advanced
     try std.testing.expect(region.cursor_x > 0);
@@ -2213,7 +2214,8 @@ test "write() wraps to next line" {
     var region = Region{ .x = 50, .y = 50, .width = 60, .height = 100 };
 
     // "Hello World" won't fit on one 60pt line (Hello ~27pt, World ~31pt, space ~3pt)
-    _ = try doc.write(&region, "Hello World", .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.write(&region, "Hello World", style, .{});
 
     // Should have wrapped - cursor_y should have advanced
     try std.testing.expect(region.cursor_y > 0);
@@ -2228,14 +2230,17 @@ test "write() with multiple styled chunks" {
 
     var region = Region{ .x = 50, .y = 50, .width = 300, .height = 100 };
 
+    const normal_style = TextStyle{ .font = Font.helvetica, .size = 12 };
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "Normal ", .{});
+    _ = try doc.write(&region, "Normal ", normal_style, .{});
 
+    const red_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red };
     doc.setTextStyle(.{ .color = Color.red });
-    _ = try doc.write(&region, "red ", .{});
+    _ = try doc.write(&region, "red ", red_style, .{});
 
+    const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
     doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    _ = try doc.write(&region, "underlined", .{});
+    _ = try doc.write(&region, "underlined", underline_style, .{});
 
     // Should have 3 text commands
     const page = &doc.pages.items[0];
@@ -2256,7 +2261,8 @@ test "write() returns overflow when region is full" {
     // Very small region - only fits one line
     var region = Region{ .x = 50, .y = 50, .width = 100, .height = 15 };
 
-    const result = try doc.write(&region, "This is a long text that will overflow the small region", .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const result = try doc.write(&region, "This is a long text that will overflow the small region", style, .{});
 
     // Should have overflow
     try std.testing.expect(result.overflow != null);
@@ -2282,8 +2288,10 @@ test "write() with measure_only is side-effect free" {
 
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
 
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
     // Measure pass - cursor should be unchanged (side-effect free)
-    const result = try doc.write(&region, "Hello World", .{ .measure_only = true });
+    const result = try doc.write(&region, "Hello World", style, .{ .measure_only = true });
     try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
     try std.testing.expectEqual(@as(f64, 0), region.cursor_y);
     try std.testing.expect(result.lines_written >= 1);
@@ -2293,7 +2301,7 @@ test "write() with measure_only is side-effect free" {
     try std.testing.expectEqual(@as(usize, 0), page.commands.items.len);
 
     // Write for real - cursor should now advance
-    _ = try doc.write(&region, "Hello World", .{});
+    _ = try doc.write(&region, "Hello World", style, .{});
     try std.testing.expect(region.cursor_x > 0 or region.cursor_y > 0);
 
     // Now there should be commands
@@ -2310,7 +2318,8 @@ test "write() with wrap=false stays on one line" {
     // Narrow region that would normally wrap
     var region = Region{ .x = 50, .y = 50, .width = 60, .height = 100 };
 
-    _ = try doc.write(&region, "Hello World Test", .{ .wrap = false });
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.write(&region, "Hello World Test", style, .{ .wrap = false });
 
     // With wrap=false, cursor_y should stay at 0 (no line wrapping)
     try std.testing.expectEqual(@as(f64, 0), region.cursor_y);

@@ -871,6 +871,39 @@ pub const Document = struct {
         }
     }
 
+    /// Get font metrics for a specific TextStyle.
+    pub fn getFontMetricsStyled(_: *Document, style: TextStyle) FontMetrics {
+        const size = style.size;
+        const scale = size / 1000.0;
+
+        switch (style.font) {
+            .embedded => |emb| {
+                return .{
+                    .ascender = @as(f64, @floatFromInt(emb.ascent)) * scale,
+                    .descender = @as(f64, @floatFromInt(emb.descent)) * scale,
+                    .cap_height = @as(f64, @floatFromInt(emb.cap_height)) * scale,
+                    .x_height = @as(f64, @floatFromInt(emb.cap_height)) * scale * 0.7,
+                    .y_max = @as(f64, @floatFromInt(emb.bbox[3])) * scale,
+                    .font_size = size,
+                    .units_per_em = emb.font.head.?.units_per_em,
+                };
+            },
+            .family, .symbol, .zapf_dingbats => {
+                const std_font = style.standardFont() orelse .helvetica;
+                const m = metrics.getStandardFontMetrics(std_font);
+                return .{
+                    .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
+                    .descender = @as(f64, @floatFromInt(m.descender)) * scale,
+                    .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
+                    .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
+                    .y_max = @as(f64, @floatFromInt(m.ascender)) * scale,
+                    .font_size = size,
+                    .units_per_em = 1000,
+                };
+            },
+        }
+    }
+
     /// Measure text dimensions without rendering
     pub fn measureText(self: *Document, text_str: []const u8) TextMetrics {
         return metrics.measureText(text_str, self.getFontStyle());
@@ -1509,12 +1542,13 @@ pub const Document = struct {
     /// Options:
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
     /// - wrap: If false, text stays on one line without wrapping
-    pub fn write(self: *Document, region: *Region, str: []const u8, opts: WriteOptions) !WriteResult {
-        const line_height = self.getLineHeightPts();
-        const font_metrics = self.getFontMetrics();
+    /// - line_height: Line height multiplier (default 1.0)
+    pub fn write(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: WriteOptions) !WriteResult {
+        const line_height = style.size * opts.line_height;
+        const font_metrics = self.getFontMetricsStyled(style);
         const ascender = font_metrics.ascender;
         const descender = @abs(font_metrics.descender);
-        const space_width = self.getTextWidth(" ");
+        const space_width = self.getTextWidthStyled(" ", style);
 
         // Helper to compute y position based on valign (CSS-style)
         // For .top: baseline = cursor_y + half_leading + ascender
@@ -1585,7 +1619,7 @@ pub const Document = struct {
             }
 
             const word = remaining[0..word_end];
-            const word_width = self.getTextWidth(word);
+            const word_width = self.getTextWidthStyled(word, style);
             const available_width = region.remainingWidth();
 
             // Check if word fits on current line
@@ -1594,8 +1628,7 @@ pub const Document = struct {
                 if (!opts.measure_only) {
                     const abs_x = region.x + region.padding.left + region.cursor_x;
                     const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                    self.setPosition(.{ .x = abs_x, .y = abs_y });
-                    try self.writeAtCursor(word);
+                    try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
                 }
 
                 region.cursor_x += word_width;
@@ -1625,8 +1658,7 @@ pub const Document = struct {
                 if (!opts.measure_only) {
                     const abs_x = region.x + region.padding.left + region.cursor_x;
                     const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                    self.setPosition(.{ .x = abs_x, .y = abs_y });
-                    try self.writeAtCursor(word);
+                    try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
                 }
                 region.cursor_x += word_width;
                 if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -1638,43 +1670,41 @@ pub const Document = struct {
             } else if (region.cursor_x == 0) {
                 // Word doesn't fit and we're at start of line - must write it anyway
                 // Try soft-hyphen break first
-                if (self.findSoftHyphenBreak(word, available_width)) |break_pos| {
+                if (self.findSoftHyphenBreakStyled(word, available_width, style)) |break_pos| {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                        self.setPosition(.{ .x = abs_x, .y = abs_y });
-                        try self.writeAtCursor(prefix);
-                        try self.writeAtCursor("-");
+                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
+                        const hyphen_x = abs_x + self.getTextWidthStyled(prefix, style);
+                        try self.writeTextStyled(.{ .x = hyphen_x, .y = abs_y }, "-", style, 0);
                     }
-                    region.cursor_x = self.getTextWidth(prefix) + self.getTextWidth("-");
+                    region.cursor_x = self.getTextWidthStyled(prefix, style) + self.getTextWidthStyled("-", style);
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
                     region.newLine(line_height);
                     lines_written += 1;
                     remaining = remaining[break_pos + 2 ..]; // Skip soft-hyphen (2 bytes)
-                } else if (opts.break_on_hyphens and self.findHyphenBreak(word, available_width) != null) {
-                    const break_pos = self.findHyphenBreak(word, available_width).?;
+                } else if (opts.break_on_hyphens and self.findHyphenBreakStyled(word, available_width, style) != null) {
+                    const break_pos = self.findHyphenBreakStyled(word, available_width, style).?;
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                        self.setPosition(.{ .x = abs_x, .y = abs_y });
-                        try self.writeAtCursor(prefix);
+                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                     }
-                    region.cursor_x = self.getTextWidth(prefix);
+                    region.cursor_x = self.getTextWidthStyled(prefix, style);
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
                     region.newLine(line_height);
                     lines_written += 1;
                     remaining = remaining[break_pos..];
-                } else if (self.findCharacterBreak(word, available_width)) |break_pos| {
+                } else if (self.findCharacterBreakStyled(word, available_width, style)) |break_pos| {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                        self.setPosition(.{ .x = abs_x, .y = abs_y });
-                        try self.writeAtCursor(prefix);
+                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                     }
-                    region.cursor_x = self.getTextWidth(prefix);
+                    region.cursor_x = self.getTextWidthStyled(prefix, style);
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
                     region.newLine(line_height);
                     lines_written += 1;
@@ -1684,8 +1714,7 @@ pub const Document = struct {
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                        self.setPosition(.{ .x = abs_x, .y = abs_y });
-                        try self.writeAtCursor(word);
+                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
                     }
                     region.cursor_x = word_width;
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -1753,6 +1782,27 @@ pub const Document = struct {
         return best_break;
     }
 
+    /// Find a soft-hyphen break point with explicit style.
+    pub fn findSoftHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
+        var best_break: ?usize = null;
+        var i: usize = 0;
+        while (i + 1 < word.len) {
+            if (word[i] == 0xC2 and word[i + 1] == 0xAD) {
+                const prefix = word[0..i];
+                const prefix_width = self.getTextWidthStyled(prefix, style) + self.getTextWidthStyled("-", style);
+                if (prefix_width <= max_width) {
+                    best_break = i;
+                } else {
+                    break;
+                }
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        return best_break;
+    }
+
     /// Find a regular hyphen break point in a word that fits within max_width.
     /// Regular hyphens stay visible; we break AFTER the hyphen (e.g., "state-" / "of-the-art").
     /// Returns the byte position after the hyphen where to split.
@@ -1767,6 +1817,23 @@ pub const Document = struct {
                     best_break = i + 1; // Position after the hyphen
                 } else {
                     break; // Prefix too wide, no point checking further
+                }
+            }
+        }
+        return best_break;
+    }
+
+    /// Find a regular hyphen break point with explicit style.
+    pub fn findHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
+        var best_break: ?usize = null;
+        for (word, 0..) |c, i| {
+            if (c == '-' and i > 0 and i + 1 < word.len) {
+                const prefix = word[0 .. i + 1];
+                const prefix_width = self.getTextWidthStyled(prefix, style);
+                if (prefix_width <= max_width) {
+                    best_break = i + 1;
+                } else {
+                    break;
                 }
             }
         }
@@ -1807,6 +1874,33 @@ pub const Document = struct {
         return null;
     }
 
+    /// Find a character break point with explicit style.
+    fn findCharacterBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
+        var best_break: ?usize = null;
+        var current_width: f64 = 0;
+        var i: usize = 0;
+
+        while (i < word.len) {
+            const char_len = std.unicode.utf8ByteSequenceLength(word[i]) catch 1;
+            const char_end = @min(i + char_len, word.len);
+            const prefix_width = self.getTextWidthStyled(word[0..char_end], style);
+
+            if (prefix_width <= max_width) {
+                best_break = char_end;
+                current_width = prefix_width;
+                i = char_end;
+            } else {
+                break;
+            }
+        }
+
+        if (best_break) |pos| {
+            if (pos > 0 and pos < word.len) {
+                return pos;
+            }
+        }
+        return null;
+    }
 
     /// Draws a region's border and fill (without text).
     pub fn drawRegion(self: *Document, region: Region) !void {

@@ -248,6 +248,8 @@ pub const WriteOptions = struct {
     valign: VAlign = .top,
     /// Allow breaking after regular hyphens in compound words (e.g., "state-of-the-art").
     break_on_hyphens: bool = true,
+    /// Line height multiplier (1.2 = default, 1.0 = single spacing, 1.5 = 150%, etc.).
+    line_height: f64 = 1.2,
 };
 
 /// Options for writeStyled (wrapped text with alignment).

@@ -2344,41 +2344,43 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     // Write styled text using write() - text flows and wraps automatically
     try doc.setFont(.helvetica, 11);
 
+    const base_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "The ", .{});
+    _ = try doc.write(&region, "The ", base_style, .{});
 
     doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.6, 0.3, 0) }); // brown
-    _ = try doc.write(&region, "quick brown fox ", .{});
+    _ = try doc.write(&region, "quick brown fox ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0.6, 0.3, 0) }, .{});
 
     doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    _ = try doc.write(&region, "jumps ", .{});
+    _ = try doc.write(&region, "jumps ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .decoration = .{ .underline = true } }, .{});
 
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "over the ", .{});
+    _ = try doc.write(&region, "over the ", base_style, .{});
 
     doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } });
-    _ = try doc.write(&region, "lazy ", .{});
+    _ = try doc.write(&region, "lazy ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } }, .{});
 
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "dog, demonstrating how ", .{});
+    _ = try doc.write(&region, "dog, demonstrating how ", base_style, .{});
 
     doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 0.8) });
-    _ = try doc.write(&region, "different ", .{});
+    _ = try doc.write(&region, "different ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0, 0, 0.8) }, .{});
 
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "words can have ", .{});
+    _ = try doc.write(&region, "words can have ", base_style, .{});
 
     doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } });
-    _ = try doc.write(&region, "unique colors ", .{});
+    _ = try doc.write(&region, "unique colors ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } }, .{});
 
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "and ", .{});
+    _ = try doc.write(&region, "and ", base_style, .{});
 
     doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } });
-    _ = try doc.write(&region, "decorations ", .{});
+    _ = try doc.write(&region, "decorations ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } }, .{});
 
     doc.setTextStyle(.{});
-    _ = try doc.write(&region, "within the same wrapped paragraph.", .{});
+    _ = try doc.write(&region, "within the same wrapped paragraph.", base_style, .{});
 
     return doc.output();
 }
@@ -2409,7 +2411,8 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
         .height = 10000, // Large enough to fit all text for measurement
         .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
     };
-    const measure_result = try doc.write(&measure_region, sample_text, .{ .measure_only = true });
+    const text_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const measure_result = try doc.write(&measure_region, sample_text, text_style, .{ .measure_only = true });
     // Use lines_written to calculate height (cursor_y may be off by one line)
     const line_height = doc.getLineHeightPts();
     const content_height = @as(f64, @floatFromInt(measure_result.lines_written)) * line_height;
@@ -2434,7 +2437,7 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
         .height = box_height,
         .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
     };
-    _ = try doc.write(&region, sample_text, .{});
+    _ = try doc.write(&region, sample_text, text_style, .{});
 
     return doc.output();
 }
