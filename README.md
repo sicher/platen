@@ -209,24 +209,31 @@ Available presets: `black`, `white`, `red`, `green`, `blue`, `cyan`, `magenta`, 
 ```zig
 try doc.addPage();
 
-// Set drawing style (stroke color, fill color, line width, etc.)
-doc.setDrawStyle(.{
-    .stroke_color = zpdf.Color.black,
-    .fill_color = zpdf.Color.lightgray,
-    .line_width = 1.5,
-});
+// Line with explicit style
+try doc.drawLine(
+    .{ .x = 50, .y = 100 },
+    .{ .x = 200, .y = 100 },
+    .{ .color = zpdf.Color.black, .width = 1.5 },
+);
 
-// Line
-try doc.drawLine(50, 100, 200, 100);
+// Rectangle with stroke and fill
+try doc.drawRect(
+    .{ .x = 50, .y = 120, .width = 100, .height = 50 },
+    .{
+        .stroke = .{ .color = zpdf.Color.black },
+        .fill = .{ .color = zpdf.Color.lightgray },
+    },
+);
 
-// Rectangle (stroke, fill, or fill_stroke)
-try doc.drawRect(50, 120, 100, 50, .fill_stroke);
+// Rounded rectangle (stroke only)
+try doc.drawRoundedRect(
+    .{ .x = 50, .y = 180, .width = 100, .height = 50 },
+    10,  // corner radius
+    .{ .stroke = .{ .color = zpdf.Color.blue, .width = 2 } },
+);
 
-// Rounded rectangle
-try doc.drawRoundedRect(50, 180, 100, 50, 10, .fill_stroke);
-
-// Circle
-try doc.drawCircle(200, 200, 30, .fill);
+// Circle (fill only)
+try doc.drawCircle(.{ .x = 200, .y = 200 }, 30, .{ .fill = .{ .color = zpdf.Color.red } });
 
 // Polygon
 const points = [_]zpdf.Point{
@@ -234,7 +241,7 @@ const points = [_]zpdf.Point{
     .{ .x = 350, .y = 200 },
     .{ .x = 250, .y = 200 },
 };
-try doc.drawPolygon(&points, .fill_stroke);
+try doc.drawPolygon(&points, .{ .stroke = .{}, .fill = .{} });
 ```
 
 ### Path API
@@ -250,7 +257,10 @@ try path.curveTo(250, 100, 250, 200, 200, 200);  // cubic bezier
 try path.lineTo(100, 200);
 try path.closePath();
 
-try doc.drawPath(&path, .fill_stroke);
+try doc.drawPath(&path, .{
+    .stroke = .{ .color = zpdf.Color.blue },
+    .fill = .{ .color = zpdf.Color.lightblue },
+});
 ```
 
 ### Images
@@ -470,21 +480,25 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `setDrawStyle(DrawStyleOptions)` | Set stroke/fill colors, line width, etc. |
-| `drawLine(x1, y1, x2, y2)` | Draw a line |
-| `drawRect(x, y, w, h, DrawStyle)` | Draw rectangle |
-| `drawRoundedRect(x, y, w, h, radius, DrawStyle)` | Draw rounded rectangle |
-| `drawCircle(x, y, radius, DrawStyle)` | Draw circle |
-| `drawEllipse(x, y, w, h, DrawStyle)` | Draw ellipse |
-| `drawPolygon([]Point, DrawStyle)` | Draw closed polygon |
+| `drawLine(Point, Point, StrokeStyle)` | Draw a line |
+| `drawRect(Rect, ShapeStyle)` | Draw rectangle |
+| `drawRoundedRect(Rect, radius, ShapeStyle)` | Draw rounded rectangle |
+| `drawCircle(Point, radius, ShapeStyle)` | Draw circle (center + radius) |
+| `drawEllipse(Rect, ShapeStyle)` | Draw ellipse (bounding box) |
+| `drawPolygon([]Point, ShapeStyle)` | Draw closed polygon |
 | `drawRegion(Region)` | Draw region border and background |
+
+**Style types:**
+- `StrokeStyle` - color, width, cap, join, dash
+- `FillStyle` - color
+- `ShapeStyle` - optional stroke + optional fill
 
 ### Path API
 
 | Method | Description |
 |--------|-------------|
 | `createPath() -> Path` | Create path builder |
-| `drawPath(*Path, DrawStyle)` | Render path |
+| `drawPath(*Path, ShapeStyle)` | Render path |
 
 **Path methods:**
 | Method | Description |
@@ -554,10 +568,14 @@ zpdf.pt_per_cm    // 28.34...
 - `EmbeddedFont` - Loaded TTF/OTF font (set `.encoding = .identity` for Unicode)
 
 **Graphics:**
-- `DrawStyle` - `.stroke`, `.fill`, `.fill_stroke`
+- `StrokeStyle` - Stroke settings (color, width, cap, join, dash)
+- `FillStyle` - Fill settings (color)
+- `ShapeStyle` - Combined stroke and/or fill (`.{ .stroke = .{} }`, `.{ .fill = .{} }`, `.{ .stroke = .{}, .fill = .{} }`)
 - `LineCap` - `.butt`, `.round`, `.square`
 - `LineJoin` - `.miter`, `.round`, `.bevel`
 - `DashPattern` - Line dash pattern (dash, gap, phase)
+- `Point` - 2D point (x, y coordinates)
+- `Rect` - Rectangle (x, y, width, height)
 - `Color` - RGB/CMYK/grayscale color (see Colors section)
 
 **Gradients:**

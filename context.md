@@ -1,37 +1,43 @@
 # zpdf Context
 
 ## Current Focus
-Graphics API redesign complete. Consider adding opacity support next.
+Graphics API redesign complete. Documentation updated.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
 - Consider adding saveState()/restoreState() for transforms and clipping
-- Update API_REVIEW.md to reflect completed graphics API changes
+- Add `loadFontFromBytes()`, `loadImageFromBytes()`, `loadSvgFromString()`
+
+## What We Did (Session 2026-01-24 #6)
+- **Updated documentation**:
+  - README.md: Updated Graphics types section (StrokeStyle, FillStyle, ShapeStyle, Point, Rect)
+  - API_REVIEW.md: Added Graphics API Changes section, updated method signatures, marked completed items
 
 ## What We Did (Session 2026-01-24 #5)
+- **Removed deprecated stateful graphics API**:
+  - Removed `setDrawStyle()` method
+  - Removed `DrawStyle`, `DrawStyleOptions`, `GraphicsState` types
+  - Removed document fields: `line_width`, `line_cap`, `line_join`, `dash_pattern`, `draw_color`, `fill_color`
+
 - **Implemented explicit graphics API**:
-  - New `StrokeStyle` struct with color, width, cap, join, dash
+  - New `StrokeStyle` struct with color, width (default 0.567), cap (default .square), join, dash
   - New `FillStyle` struct with color
   - New `ShapeStyle` combining optional stroke and fill
   - Style passed directly to draw methods (not stateful)
 
-- **Updated all drawing methods**:
-  - `drawRect(rect: Rect, style: ShapeStyle)` - uses Rect instead of x,y,w,h
+- **Updated all drawing methods to use Rect/Point types**:
+  - `drawRect(rect: Rect, style: ShapeStyle)`
   - `drawRoundedRect(rect: Rect, radius, style: ShapeStyle)`
-  - `drawLine(p1: Point, p2: Point, style: StrokeStyle)` - uses Point
-  - `drawCircle(center: Point, radius, style: ShapeStyle)` - uses Point for center
-  - `drawEllipse(rect: Rect, style: ShapeStyle)` - bounding box as Rect
+  - `drawLine(p1: Point, p2: Point, style: StrokeStyle)`
+  - `drawCircle(center: Point, radius, style: ShapeStyle)`
+  - `drawEllipse(rect: Rect, style: ShapeStyle)`
   - `drawPolygon(points, style: ShapeStyle)`
   - `drawPath(path, style: ShapeStyle)`
   - `fillRectGradient(rect: Rect, gradient_idx)`
 
-- **Breaking API changes** (all drawing methods changed signatures):
-  - Old: `drawRect(x, y, w, h, DrawStyle)` where DrawStyle was `.stroke`/`.fill`/`.fill_stroke`
-  - New: `drawRect(Rect, ShapeStyle)` where ShapeStyle has optional stroke/fill
-
 - **Example usage**:
   ```zig
-  // Stroke only
+  // Stroke only (default 0.567pt width, square cap)
   try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{ .stroke = .{} });
 
   // Fill only with color
@@ -46,8 +52,6 @@ Graphics API redesign complete. Consider adding opacity support next.
   // Line with style
   try doc.drawLine(.{ .x = 0, .y = 0 }, .{ .x = 100, .y = 100 }, .{ .color = Color.blue, .width = 2 });
   ```
-
-- **setDrawStyle still exists** but is now less relevant (styles passed to draw methods)
 
 ## What We Did (Session 2026-01-24 #4)
 - Discussed graphics API design - decided on explicit/stateless approach

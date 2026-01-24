@@ -127,6 +127,32 @@ The following changes have been implemented:
 5. ✅ **Added `measure_only` to `writeStyled`** - consistent with `write`
 6. ✅ **Made `measure_only` side-effect free** - no need to reset cursor after measuring
 
+### Graphics API Changes (COMPLETED)
+
+The following changes have been implemented:
+
+1. ✅ **Removed `setDrawStyle()`** - stateful approach replaced by explicit styles
+2. ✅ **Added `StrokeStyle`** - stroke settings (color, width, cap, join, dash)
+3. ✅ **Added `FillStyle`** - fill settings (color)
+4. ✅ **Added `ShapeStyle`** - combined optional stroke + optional fill
+5. ✅ **Updated drawing methods to use `Rect`/`Point` types** - cleaner API
+6. ✅ **Removed deprecated types** - `DrawStyle`, `DrawStyleOptions`, `GraphicsState`
+
+**New usage pattern:**
+```zig
+// Stroke only (default width 0.567pt, square cap)
+try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 50 }, .{ .stroke = .{} });
+
+// Fill only
+try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 50 }, .{ .fill = .{ .color = Color.blue } });
+
+// Stroke and fill
+try doc.drawRect(rect, .{ .stroke = .{ .width = 2, .color = Color.black }, .fill = .{ .color = Color.yellow } });
+
+// Line with custom style
+try doc.drawLine(.{ .x = 0, .y = 0 }, .{ .x = 100, .y = 100 }, .{ .width = 1.5, .dash = .{ .dash = 5, .gap = 3 } });
+```
+
 ## 1. Missing Getters (Asymmetric API)
 
 Several setters lack corresponding getters, making it difficult to read back current state:
@@ -138,7 +164,7 @@ Several setters lack corresponding getters, making it difficult to read back cur
 | `setLineHeight(f64)` | `getLineHeight()` | Currently only `getLineHeightPts()` exists (computed value) |
 | `setMargins(Margins)` | `getMargins()` | Need to read document margins |
 | `setPageSize(PageSize)` | `getPageSize()` | Need to read current page size setting |
-| `setDrawStyle(DrawStyleOptions)` | `getDrawStyle()` | Need to read current draw style |
+| ~~`setDrawStyle(DrawStyleOptions)`~~ | ~~`getDrawStyle()`~~ | **REMOVED** - replaced by explicit `ShapeStyle` parameter on each draw call |
 | `setMetadata(DocumentMetadata)` | `getMetadata()` | Need to read document metadata |
 
 **Recommendation**: Add getters for all setters to enable symmetric read/write access.
@@ -191,35 +217,40 @@ doc.getFontSize() -> f64           // Current font size
 
 ## 4. Parameter Inconsistencies
 
-### Drawing Method Signatures
+### Drawing Method Signatures (UPDATED)
+All drawing methods now use explicit style parameters with `Rect`/`Point` types:
 ```zig
-// No style parameter:
-drawLine(x1, y1, x2, y2)
+// Line takes explicit StrokeStyle:
+drawLine(p1: Point, p2: Point, style: StrokeStyle)
 
-// Has style parameter:
-drawRect(x, y, w, h, style)
-drawCircle(x, y, radius, style)
-drawEllipse(x, y, w, h, style)
-drawPolygon(points, style)
-drawPath(path, style)
+// Shapes take ShapeStyle (optional stroke + optional fill):
+drawRect(rect: Rect, style: ShapeStyle)
+drawRoundedRect(rect: Rect, radius: f64, style: ShapeStyle)
+drawCircle(center: Point, radius: f64, style: ShapeStyle)
+drawEllipse(rect: Rect, style: ShapeStyle)
+drawPolygon(points: []const Point, style: ShapeStyle)
+drawPath(path: *const Path, style: ShapeStyle)
 
-// Different naming:
-fillRectGradient(x, y, w, h, gradient_idx)
+// Gradients:
+fillRectGradient(rect: Rect, gradient_idx: usize)
 ```
 
-**Recommendation**:
-- Add optional style to `drawLine()` or document why it only strokes
-- Rename `fillRectGradient()` to `drawRectGradient()` for consistency
+✅ **COMPLETED**: Explicit styles replace stateful `setDrawStyle()`
 
 ### Position Parameters
-Some methods take separate x, y; others take Point:
+Drawing methods now use Point/Rect types for geometric parameters:
 ```zig
-writeAt(x, y, str)        // Separate coordinates
-setPosition(Point)        // Point struct
-drawImage(img, x, y, w, h) // Separate coordinates
+// Drawing uses Point/Rect:
+drawLine(p1: Point, p2: Point, style)      // Point structs
+drawRect(rect: Rect, style)                 // Rect struct
+drawCircle(center: Point, radius, style)    // Point + scalar
+
+// Text still uses separate coordinates:
+writeAt(x, y, str)                          // Separate coordinates
+drawImage(img, x, y, w, h)                  // Separate coordinates
 ```
 
-**Recommendation**: Accept both forms via overloading or keep consistent (separate coordinates for drawing, Point for cursor).
+**Note**: Text and image methods still use separate x,y coordinates for simplicity.
 
 ## 5. API Friction
 
@@ -228,16 +259,16 @@ drawImage(img, x, y, w, h) // Separate coordinates
 // Current: two-step process
 const grad = LinearGradient{ .x0 = 0, .y0 = 0, .x1 = 100, .y1 = 0, .stops = &stops };
 const idx = try doc.addLinearGradient(grad);
-try doc.fillRectGradient(50, 50, 100, 50, idx);
+try doc.fillRectGradient(.{ .x = 50, .y = 50, .width = 100, .height = 50 }, idx);
 
-// Shapes are single step
-try doc.drawRect(50, 50, 100, 50, .fill);
+// Shapes are single step with explicit style
+try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 50 }, .{ .fill = .{ .color = Color.blue } });
 ```
 
 **Recommendation**: Add convenience methods:
 ```zig
-try doc.drawLinearGradient(grad, x, y, w, h);
-try doc.drawRadialGradient(grad, x, y, w, h);
+try doc.drawLinearGradient(grad, rect);
+try doc.drawRadialGradient(grad, rect);
 ```
 
 ### No Method Chaining
@@ -291,32 +322,39 @@ try doc.scale(sx, sy);
 ## 7. Documentation Gaps
 
 - No doc comments on many public types in `zpdf.zig` re-exports
-- `WriteOptions`, `ParagraphOptions`, `MeasureOptions` fields not documented in README
+- `WriteOptions`, `ParagraphOptions` fields not documented in README
 - OpenType features list incomplete in README
 
 ## Priority Recommendations
 
+### Completed ✅
+- ~~Remove duplicate `measureTextWidth()`~~ - kept `getTextWidth()` only
+- ~~Remove `measureWrappedText()`~~ - use `write/writeStyled(.measure_only=true)`
+- ~~Refactor graphics API~~ - explicit `ShapeStyle` replaces stateful `setDrawStyle()`
+
 ### High Priority (API completeness)
 1. Add missing getters for all setters
 2. Add `loadFontFromBytes()`, `loadImageFromBytes()`, `loadSvgFromString()`
-3. Remove duplicate `getTextWidth()` (keep `measureTextWidth()`)
 
 ### Medium Priority (Consistency)
-4. Rename `fillRectGradient()` to `drawRectGradient()`
-5. Add `getPageCount()`, `getCurrentPageIndex()`
-6. Standardize getter naming (`pageNo()` → `getPageNumber()`)
+3. Rename `fillRectGradient()` to `drawRectGradient()`
+4. Add `getPageCount()`, `getCurrentPageIndex()`
+5. Standardize getter naming (`pageNo()` → `getPageNumber()`)
 
 ### Low Priority (Nice to have)
-7. Add `saveState()` / `restoreState()`
-8. Add convenience gradient drawing methods
-9. Add clipping API
-10. Add transform API
+6. Add `saveState()` / `restoreState()`
+7. Add convenience gradient drawing methods
+8. Add clipping API
+9. Add transform API
 
 ## Summary
 
-The API is functional and covers the core PDF generation needs well. The main issues are:
+The API is functional and covers the core PDF generation needs well. Recent improvements:
+- ✅ **Measurement API**: Unified via `measure_only` flag, side-effect free
+- ✅ **Graphics API**: Explicit styles replace stateful `setDrawStyle()`
+
+Remaining issues:
 - **Asymmetric access**: Many setters lack getters
-- **Naming inconsistencies**: Mixed conventions for similar operations
 - **Missing memory loading**: Can only load resources from files
 - **Two-step gradients**: More friction than necessary
 
