@@ -127,12 +127,16 @@ var region = zpdf.Region{
 
 const text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit...";
 
-// Write wrapped text (returns overflow if text doesn't fit)
-const result = try doc.writeParagraph(&region, text, .{
+// Create styled text and write with word wrapping
+var st = doc.createStyledText();
+defer st.deinit();
+try st.append(text, .{});
+
+const result = try doc.writeStyled(&region, &st, .{
     .alignment = .justify,
 });
 
-if (result.overflow) |remaining| {
+if (result.overflow) |_| {
     // Handle text that didn't fit
     try doc.addPage();
     // ... continue with remaining text
@@ -152,7 +156,10 @@ const metrics = doc.measureWrappedText(text, .{
 // metrics.max_line_width - widest line
 
 if (metrics.fitsInHeight(region.remainingHeight())) {
-    _ = try doc.writeParagraph(&region, text, .{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append(text, .{});
+    _ = try doc.writeStyled(&region, &st, .{});
 }
 ```
 
@@ -387,7 +394,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 | `write(*Region, str, WriteOptions) -> WriteResult` | Writes flowing text into a region with word wrapping |
 | `writeAt(f64, f64, str) -> Rect` | Writes text at the specified position |
 | `writeFlow(str, FlowOptions) -> usize` | Write text with automatic pagination |
-| `writeParagraph(*Region, str, ParagraphOptions) -> WriteResult` | Writes wrapped text into a region |
+| `writeStyled(*Region, *StyledText, ParagraphOptions) -> WriteResult` | Writes styled text into a region with word wrapping |
 
 ### Text Styling
 

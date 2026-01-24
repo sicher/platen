@@ -161,7 +161,7 @@ pub const Region = struct {
     }
 };
 
-/// Result of writeParagraph.
+/// Result of writeStyled.
 pub const WriteResult = struct {
     /// Number of lines rendered.
     lines_written: usize,
@@ -211,7 +211,7 @@ pub const WriteOptions = struct {
     break_on_hyphens: bool = true,
 };
 
-/// Options for writeParagraph (wrapped text with alignment).
+/// Options for writeStyled (wrapped text with alignment).
 pub const ParagraphOptions = struct {
     /// Horizontal text alignment.
     alignment: Align = .left,

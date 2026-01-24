@@ -89,8 +89,8 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 |---------|-------|------|-------|
 | Simple text at position | `text()` | ✅ `writeAt()` | |
 | Write text (flowing) | `write()` | ✅ `write()` | |
-| Cell | `cell()` | ⚠️ | `Region` with `border`/`fill` + `writeParagraph` |
-| Multi-cell | `multi_cell()` | ✅ | `Region` with `border`/`fill` + `writeParagraph` |
+| Cell | `cell()` | ⚠️ | `Region` with `border`/`fill` + `writeStyled` |
+| Multi-cell | `multi_cell()` | ✅ | `Region` with `border`/`fill` + `writeStyled` |
 | Word wrapping | ✅ | ✅ | |
 | Character wrapping | `wrapmode="CHAR"` | ✅ | fallback for long words |
 | Text alignment (L/C/R/J) | ✅ | ✅ | |
@@ -116,7 +116,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Region with padding | - | ✅ `Padding` | |
 | Region with border | - | ✅ `Border` | |
 | Region fill | - | ✅ fill color | |
-| Write to region | `text_columns()` | ✅ `writeParagraph()` | |
+| Write to region | `text_columns()` | ✅ `writeStyled()` | |
 | Overflow handling | ✅ | ✅ `WriteResult.overflow` | |
 | Auto pagination | ✅ | ✅ `writeFlow()` | |
 | Multi-column layout | `text_columns()` | — | Not planned (manual) |

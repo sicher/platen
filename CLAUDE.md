@@ -2,7 +2,8 @@
 
 We are going to write a library for creating PDF documents. It is supposed to be used by applications that need to produce PDF document output, but a command line tool should be provided for testing the library functionality.
 
-The library should be based on the python fpdf2: https://github.com/py-pdf/fpdf2
+The library is a low level library.
+
 
 All code should be written in Zig 0.15. It should be self contained. Users clone the repo and build, nothing more!
 
@@ -33,9 +34,10 @@ Check what's already installed in the local .venv python environment, like fontt
 If doing refactoring, start by running "zigmap" and "simgrep" to get good overview data before digging into details.
 
 ## Testing
-- Bring in as many of the fpdf2 tests as possible.
 
-- Generate REFERENCE pdf:s with fpdf2, then integration tests that generate the same with zpdf and compares them.
+- If a test fails. Never EVER do a "quick fix" to get the test to pass. Always investigate the cause of the fail. Reason and ask the user when wondering about direction!
+
+- If possible, generate REFERENCE pdf:s with the python fpdf2 library, then integration tests that generate the same with zpdf and compares them.
 
 - Make sure to keep a command line tool up to date, allowing access to all library innards so they can be tested!
 

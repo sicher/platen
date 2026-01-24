@@ -234,7 +234,7 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 |----------|---------|
 | `write(str)` | Write at cursor position |
 | `writeAt(x, y, str)` | Write at specific position |
-| `writeParagraph(&region, opts)` | Wrapped text in region, returns overflow |
+| `writeStyled(&region, *StyledText, opts)` | Styled text in region, returns overflow |
 | `writeFlow(str, opts)` | Convenience: auto-adds pages on overflow |
 | `measureWrappedText(str, opts)` | Measure text layout without rendering |
 
@@ -256,7 +256,10 @@ const metrics = doc.measureWrappedText(text, .{
 
 // Check if text would fit in a text box
 if (metrics.fitsInHeight(box.remainingHeight())) {
-    _ = try doc.writeParagraph(&box, text, .{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append(text, .{});
+    _ = try doc.writeStyled(&box, &st, .{});
 }
 ```
 
@@ -366,7 +369,7 @@ const TextBox = struct {
     pub fn fits(self: TextBox, m: TextMetrics) bool;
 };
 
-/// Result of writeParagraph
+/// Result of writeStyled
 const WriteResult = struct {
     lines_written: usize,       // number of lines rendered
     overflow: ?[]const u8,      // text that didn't fit (null if all fit)
@@ -388,7 +391,7 @@ const LineBreaking = enum {
     optimal,  // Knuth-Plass: minimize total badness across all lines
 };
 
-/// Options for writeParagraph (wrapped text)
+/// Options for writeStyled (wrapped text)
 const ParagraphOptions = struct {
     alignment: Align = .left,
     valign: VAlign = .top,
@@ -408,7 +411,7 @@ const FlowOptions = struct {
 ```zig
 fn write(self: *Document, text: []const u8) !void
 fn writeAt(self: *Document, x: f64, y: f64, text: []const u8) !void
-fn writeParagraph(self: *Document, box: *Region, text: []const u8, opts: ParagraphOptions) !WriteResult
+fn writeStyled(self: *Document, box: *Region, text: *StyledText, opts: ParagraphOptions) !WriteResult
 fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 
 /// Draw text box's border/fill (without text)
@@ -439,15 +442,15 @@ try doc.writeFlow(long_body_text, .{
 **Manual text box control:**
 ```zig
 var box = doc.getPageTextBox();
-var remaining: ?[]const u8 = text;
+var st = doc.createStyledText();
+defer st.deinit();
+try st.append(text, .{});
 
-while (remaining) |txt| {
-    const result = try doc.writeParagraph(&box, txt, .{});
-    remaining = result.overflow;
-    if (remaining != null) {
-        try doc.addPage(null);
-        box = doc.getPageTextBox();
-    }
+const result = try doc.writeStyled(&box, &st, .{});
+if (result.overflow != null) {
+    try doc.addPage(null);
+    box = doc.getPageTextBox();
+    // continue with remaining text...
 }
 ```
 
@@ -456,14 +459,15 @@ while (remaining) |txt| {
 var left = TextBox{ .x = 50, .y = 50, .width = 230, .height = 700 };
 var right = TextBox{ .x = 310, .y = 50, .width = 230, .height = 700 };
 
-var remaining: ?[]const u8 = text;
+var st = doc.createStyledText();
+defer st.deinit();
+try st.append(text, .{});
+
 for ([_]*TextBox{ &left, &right }) |box| {
-    if (remaining) |txt| {
-        const result = try doc.writeParagraph(box, txt, .{});
-        remaining = result.overflow;
-    }
+    const result = try doc.writeStyled(box, &st, .{});
+    if (result.overflow == null) break;
 }
-// remaining still has text? Add page, repeat...
+// result.overflow still has text? Add page, repeat...
 ```
 
 ### Baseline Positioning (VAlign)
@@ -484,7 +488,10 @@ baseline = content_y + cursor_y + line_height
 **fpdf2 compatibility**: Use `.valign = .middle` to match fpdf2's `cell()` and `multi_cell()`:
 
 ```zig
-_ = try doc.writeParagraph(&region, text, .{ .valign = .middle });
+var st = doc.createStyledText();
+defer st.deinit();
+try st.append(text, .{});
+_ = try doc.writeStyled(&region, &st, .{ .valign = .middle });
 ```
 
 ### Design Principles
@@ -494,7 +501,7 @@ _ = try doc.writeParagraph(&region, text, .{ .valign = .middle });
 3. **User controls flow** - Library provides primitives, user handles page/column breaks
 4. **Explicit text boxes** - Margins don't magically affect positioning; ask for `getPageTextBox()`
 5. **Single source of truth** - When using text boxes, the box's cursor is authoritative; don't mix with `setPosition()`
-6. **Layered API** - Simple (`writeFlow`) to powerful (`writeParagraph` + manual text boxes)
+6. **Layered API** - Simple (`writeFlow`) to powerful (`writeStyled` + manual text boxes)
 7. **Explicit over magic** - VAlign provides control; no hidden adjustments
 
 ## Graphics Support
@@ -687,7 +694,7 @@ Prefer general mechanisms that compose well:
 - Works for: first-line indent, bullet offsets, nested blocks, hanging indents
 
 ### 5. Naming conventions
-- `write*` - text output (write, writeAt, writeParagraph, writeFlow)
+- `write*` - text output (write, writeAt, writeStyled, writeFlow)
 - `draw*` - graphics (drawLine, drawRect, drawCircle, drawPath, drawImage, drawSvg)
 - `load*` - load external resources (loadFont, loadImage, loadSvg)
 - `set*` / `get*` - state configuration
@@ -697,8 +704,11 @@ Prefer general mechanisms that compose well:
 ### 6. Options structs with defaults
 Use structs with sensible defaults for optional parameters:
 ```zig
-_ = try doc.writeParagraph(&box, text, .{});  // all defaults
-_ = try doc.writeParagraph(&box, text, .{ .alignment = .justify });
+var st = doc.createStyledText();
+defer st.deinit();
+try st.append(text, .{});
+_ = try doc.writeStyled(&box, &st, .{});  // all defaults
+_ = try doc.writeStyled(&box, &st, .{ .alignment = .justify });
 ```
 
 ## Zig 0.15 Compatibility Notes

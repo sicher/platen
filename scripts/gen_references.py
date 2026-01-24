@@ -676,7 +676,7 @@ def gen_opentype_features():
 
 
 def gen_text_flow():
-    """Text Flow API test - regions, margins, writeParagraph."""
+    """Text Flow API test - regions, margins, writeStyled."""
     pdf = make_pdf()
     pdf.set_margins(72, 72, 72)  # 1 inch margins
     pdf.add_page()

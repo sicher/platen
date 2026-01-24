@@ -24,7 +24,7 @@ CATEGORY_RULES = [
       'setMetadata', 'setMargins', 'getPageRegion'], 'Document'),
     (['loadFont', 'setFont', 'setEmbeddedFont', 'setFeature',
       'setFontFeature', 'getFontMetrics', 'getTextStyle'], 'Fonts'),
-    (['write', 'writeParagraph', 'writeFlow', 'writeAt',
+    (['write', 'writeStyled', 'writeFlow', 'writeAt',
       'measureText', 'measureTextWidth', 'getTextWidth', 'measureWrappedText',
       'drawRegion'], 'Text'),
     (['setTextColor', 'setTextStyle', 'setCharSpacing', 'setLineHeight', 'getLineHeightPts'], 'Text Styling'),

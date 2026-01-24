@@ -8,7 +8,7 @@ const zpdf = @import("zpdf.zig");
 const testing = @import("testing.zig");
 const embedded = @import("embedded.zig");
 
-/// Helper to write plain text using writeStyled (replaces writeParagraph)
+/// Helper to write plain text using writeStyled
 fn writeText(doc: *zpdf.Document, region: *zpdf.Region, text: []const u8, opts: zpdf.ParagraphOptions) !zpdf.WriteResult {
     var st = doc.createStyledText();
     defer st.deinit();
