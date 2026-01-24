@@ -2075,7 +2075,134 @@ def gen_valign():
     print("  valign.pdf")
 
 
+def gen_kerning():
+    """Kerning test - extensive kerning pair coverage."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Load Charter font (has good kerning data)
+    pdf.add_font(family="Charter", fname="test/fonts/Charter/Charter Regular.ttf")
+    pdf.add_font(family="Charter", style="B", fname="test/fonts/Charter/Charter Bold.ttf")
+    pdf.add_font(family="Charter", style="I", fname="test/fonts/Charter/Charter Italic.ttf")
+
+    # Enable text shaping with kerning
+    pdf.set_text_shaping(True, features={"kern": True})
+
+    y = 30
+
+    # Title
+    pdf.set_font("Charter", "B", size=16)
+    shaped_text(pdf, 50, y, "Kerning Test")
+    y += 24
+
+    # Section 1: Classic kerning pairs
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Classic Kerning Pairs:")
+    y += 14
+
+    pdf.set_font("Charter", "", size=14)
+    # AV, AW, AY, AT combinations
+    shaped_text(pdf, 50, y, "AV AW AY AT Av Aw Ay At")
+    y += 18
+    # To, Ta, Te, Ti, Tr, Ty, Tu, Tw
+    shaped_text(pdf, 50, y, "To Ta Te Ti Tr Ty Tu Tw")
+    y += 18
+    # VA, Vo, WA, Wa, We, Ya, Yo
+    shaped_text(pdf, 50, y, "VA Vo WA Wa We Ya Yo")
+    y += 18
+    # LT, LV, LY, LA, PA
+    shaped_text(pdf, 50, y, "LT LV LY LA PA")
+    y += 18
+    # Punctuation kerning
+    shaped_text(pdf, 50, y, "T. V. W. Y. F. P. r. f.")
+    y += 24
+
+    # Section 2: Words with kerning
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Words with Kerning:")
+    y += 14
+
+    pdf.set_font("Charter", "", size=14)
+    shaped_text(pdf, 50, y, "AVATAR WAVE TYPEWRITER")
+    y += 18
+    shaped_text(pdf, 50, y, "Today Tomorrow Typography")
+    y += 18
+    shaped_text(pdf, 50, y, "Water Weather Welcome")
+    y += 18
+    shaped_text(pdf, 50, y, "Yellow Yield Youth")
+    y += 24
+
+    # Section 3: Sentence with many kerning opportunities
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Sentence with Kerning:")
+    y += 14
+
+    pdf.set_font("Charter", "", size=12)
+    shaped_text(pdf, 50, y, "The AVATAR watched TypeWriter keys Today.")
+    y += 16
+    shaped_text(pdf, 50, y, "We Welcome You To This Typography Test.")
+    y += 20
+
+    # Section 4: Comparison - same text at different sizes
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Size Comparison (kerning scales):")
+    y += 14
+
+    for size in [10, 14, 18, 24]:
+        pdf.set_font("Charter", "", size=size)
+        shaped_text(pdf, 50, y, "AWAY Today")
+        y += size + 4
+
+    y += 8
+
+    # Section 5: Italic kerning
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Italic Kerning:")
+    y += 14
+
+    pdf.set_font("Charter", "I", size=14)
+    shaped_text(pdf, 50, y, "AV AW To Ta Typography WAVE")
+    y += 20
+
+    # Section 6: Bold kerning
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Bold Kerning:")
+    y += 14
+
+    pdf.set_font("Charter", "B", size=14)
+    shaped_text(pdf, 50, y, "AV AW To Ta Typography WAVE")
+    y += 20
+
+    # Section 7: Numbers and punctuation
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Numbers and Punctuation:")
+    y += 14
+
+    pdf.set_font("Charter", "", size=14)
+    shaped_text(pdf, 50, y, "1. 2. 3. 4. 5. 6. 7. 8. 9. 0.")
+    y += 18
+    shaped_text(pdf, 50, y, '"Quote" (Paren) [Bracket]')
+    y += 20
+
+    # Section 8: Long paragraph to show cumulative effect
+    pdf.set_font("Charter", "B", size=11)
+    shaped_text(pdf, 50, y, "Paragraph (cumulative kerning):")
+    y += 14
+
+    # Use individual lines to match zpdf's writeAt positioning
+    pdf.set_font("Charter", "", size=11)
+    shaped_text(pdf, 50, y, "Typography is the art of arranging type to make written")
+    y += 11 * 1.2
+    shaped_text(pdf, 50, y, "language legible and appealing. WATER flows Today as")
+    y += 11 * 1.2
+    shaped_text(pdf, 50, y, "WAVES crash Tomorrow. The Yellow sun Yields warmth.")
+
+    pdf.output(OUTPUT_DIR / "kerning.pdf")
+    print("  kerning.pdf")
+
+
 GENERATORS = {
+    "kerning": gen_kerning,
     "text_decorations": gen_text_decorations,
     "text_style": gen_text_style,
     "auto_height": gen_auto_height,
