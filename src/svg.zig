@@ -1792,6 +1792,11 @@ const NumberIterator = struct {
     }
 };
 
+/// Clamp a float value to 0-255 and convert to u8.
+fn clampToU8(val: f64) u8 {
+    return @intFromFloat(@max(0, @min(255, val)));
+}
+
 /// Parse SVG color value
 fn parseColor(str: []const u8) ?Color {
     if (str.len == 0) return null;
@@ -1827,19 +1832,12 @@ fn parseColor(str: []const u8) ?Color {
         const b_val = iter.next() orelse return null;
 
         // Check if percentages (simple heuristic: look for %)
-        if (std.mem.indexOf(u8, str, "%") != null) {
-            return Color{
-                .r = @intFromFloat(@max(0, @min(255, r_val * 2.55))),
-                .g = @intFromFloat(@max(0, @min(255, g_val * 2.55))),
-                .b = @intFromFloat(@max(0, @min(255, b_val * 2.55))),
-            };
-        } else {
-            return Color{
-                .r = @intFromFloat(@max(0, @min(255, r_val))),
-                .g = @intFromFloat(@max(0, @min(255, g_val))),
-                .b = @intFromFloat(@max(0, @min(255, b_val))),
-            };
-        }
+        const mult: f64 = if (std.mem.indexOf(u8, str, "%") != null) 2.55 else 1.0;
+        return Color{
+            .r = clampToU8(r_val * mult),
+            .g = clampToU8(g_val * mult),
+            .b = clampToU8(b_val * mult),
+        };
     }
 
     // rgba(r, g, b, a) - alpha is 0.0-1.0
@@ -1851,21 +1849,13 @@ fn parseColor(str: []const u8) ?Color {
         const a_val = iter.next() orelse 1.0;
 
         // Check if percentages for RGB values
-        if (std.mem.indexOf(u8, str, "%") != null) {
-            return Color{
-                .r = @intFromFloat(@max(0, @min(255, r_val * 2.55))),
-                .g = @intFromFloat(@max(0, @min(255, g_val * 2.55))),
-                .b = @intFromFloat(@max(0, @min(255, b_val * 2.55))),
-                .a = @intFromFloat(@max(0, @min(255, a_val * 255))),
-            };
-        } else {
-            return Color{
-                .r = @intFromFloat(@max(0, @min(255, r_val))),
-                .g = @intFromFloat(@max(0, @min(255, g_val))),
-                .b = @intFromFloat(@max(0, @min(255, b_val))),
-                .a = @intFromFloat(@max(0, @min(255, a_val * 255))),
-            };
-        }
+        const mult: f64 = if (std.mem.indexOf(u8, str, "%") != null) 2.55 else 1.0;
+        return Color{
+            .r = clampToU8(r_val * mult),
+            .g = clampToU8(g_val * mult),
+            .b = clampToU8(b_val * mult),
+            .a = clampToU8(a_val * 255),
+        };
     }
 
     // Named colors (common subset)

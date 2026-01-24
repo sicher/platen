@@ -1352,27 +1352,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     try new_cmap.appendSlice(allocator, format4.items);
 
     // Assemble the final TTF
-    const orig_head = font.getTable("head".*) orelse return error.MissingTable;
-    const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
-    const orig_name = font.getTable("name".*);
-    const orig_post = font.getTable("post".*);
-
-    // assembleTTF needs mutable hhea to update numOfLongHorMetrics
-    const new_hhea = try allocator.dupe(u8, orig_hhea);
-    defer allocator.free(new_hhea);
-
-    return assembleTTF(allocator, .{
-        .head = orig_head,
-        .hhea = new_hhea,
-        .maxp = &[_]u8{}, // Built internally by assembleTTF
-        .hmtx = new_hmtx,
-        .cmap = new_cmap.items,
-        .loca = new_loca.items,
-        .glyf = new_glyf.items,
-        .name = orig_name,
-        .post = orig_post,
-        .num_glyphs = num_glyphs,
-    });
+    return finishTTFSubset(allocator, font, new_hmtx, new_cmap.items, new_loca.items, new_glyf.items, num_glyphs);
 }
 
 /// Create a subset TTF for CID mode (preserves glyph IDs, no remapping)
@@ -1490,27 +1470,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     defer allocator.free(new_cmap);
 
     // Assemble the final TTF
-    const orig_head = font.getTable("head".*) orelse return error.MissingTable;
-    const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
-    const orig_name = font.getTable("name".*);
-    const orig_post = font.getTable("post".*);
-
-    // assembleTTF needs mutable hhea to update numOfLongHorMetrics
-    const new_hhea = try allocator.dupe(u8, orig_hhea);
-    defer allocator.free(new_hhea);
-
-    return assembleTTF(allocator, .{
-        .head = orig_head,
-        .hhea = new_hhea,
-        .maxp = &[_]u8{}, // Built internally by assembleTTF
-        .hmtx = new_hmtx.items,
-        .cmap = new_cmap,
-        .loca = new_loca.items,
-        .glyf = new_glyf.items,
-        .name = orig_name,
-        .post = orig_post,
-        .num_glyphs = num_glyphs,
-    });
+    return finishTTFSubset(allocator, font, new_hmtx.items, new_cmap, new_loca.items, new_glyf.items, num_glyphs);
 }
 
 /// Create a compact TTF subset with glyph ID remapping
@@ -1624,6 +1584,19 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     defer allocator.free(new_cmap);
 
     // Assemble the final TTF
+    return finishTTFSubset(allocator, font, new_hmtx, new_cmap, new_loca.items, new_glyf.items, num_glyphs);
+}
+
+/// Helper to finish TTF subset assembly - gets required tables from font and calls assembleTTF.
+fn finishTTFSubset(
+    allocator: std.mem.Allocator,
+    font: *const ttf.Font,
+    hmtx: []const u8,
+    cmap: []const u8,
+    loca: []const u8,
+    glyf: []const u8,
+    num_glyphs: u16,
+) ![]const u8 {
     const orig_head = font.getTable("head".*) orelse return error.MissingTable;
     const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
     const orig_name = font.getTable("name".*);
@@ -1637,10 +1610,10 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
         .head = orig_head,
         .hhea = new_hhea,
         .maxp = &[_]u8{}, // Built internally by assembleTTF
-        .hmtx = new_hmtx,
-        .cmap = new_cmap,
-        .loca = new_loca.items,
-        .glyf = new_glyf.items,
+        .hmtx = hmtx,
+        .cmap = cmap,
+        .loca = loca,
+        .glyf = glyf,
         .name = orig_name,
         .post = orig_post,
         .num_glyphs = num_glyphs,

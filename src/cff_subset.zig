@@ -87,16 +87,8 @@ pub fn collectTopDictSIDs(
     var sids = std.ArrayListUnmanaged(u16){};
     errdefer sids.deinit(allocator);
 
-    const count = readU16(cff_data, topdict_index_start);
-    if (count == 0) return sids;
-
-    const off_size = cff_data[topdict_index_start + 2];
-    const offsets_start = topdict_index_start + 3;
-    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
-
-    const first_off = readCFFOffset(cff_data, offsets_start, 0, off_size);
-    const second_off = readCFFOffset(cff_data, offsets_start, 1, off_size);
-    const dict_data = cff_data[data_start + first_off - 1 .. data_start + second_off - 1];
+    const index = parseCFFIndex(cff_data, topdict_index_start) orelse return sids;
+    const dict_data = index.getEntry(0) orelse return sids;
 
     // Parse dict, tracking operands
     var operands: [48]i32 = undefined;
@@ -305,31 +297,14 @@ pub const TopDictOffsets = struct {
 };
 
 pub fn parseCFFTopDictForCharStrings(data: []const u8, topdict_index_start: usize) ?usize {
-    const count = readU16(data, topdict_index_start);
-    if (count == 0) return null;
-
-    const off_size = data[topdict_index_start + 2];
-    const offsets_start = topdict_index_start + 3;
-    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
-
-    const first_off = readCFFOffset(data, offsets_start, 0, off_size);
-    const second_off = readCFFOffset(data, offsets_start, 1, off_size);
-    const dict_data = data[data_start + first_off - 1 .. data_start + second_off - 1];
-
+    const index = parseCFFIndex(data, topdict_index_start) orelse return null;
+    const dict_data = index.getEntry(0) orelse return null;
     return parseCFFDictForOperator(dict_data, 17); // 17 = CharStrings
 }
 
 pub fn parseCFFTopDictForPrivate(data: []const u8, topdict_index_start: usize) PrivateInfo {
-    const count = readU16(data, topdict_index_start);
-    if (count == 0) return .{ .size = 0, .offset = 0 };
-
-    const off_size = data[topdict_index_start + 2];
-    const offsets_start = topdict_index_start + 3;
-    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
-
-    const first_off = readCFFOffset(data, offsets_start, 0, off_size);
-    const second_off = readCFFOffset(data, offsets_start, 1, off_size);
-    const dict_data = data[data_start + first_off - 1 .. data_start + second_off - 1];
+    const index = parseCFFIndex(data, topdict_index_start) orelse return .{ .size = 0, .offset = 0 };
+    const dict_data = index.getEntry(0) orelse return .{ .size = 0, .offset = 0 };
 
     // Parse for operator 18 (Private) which has two operands: size, offset
     var operands: [2]i32 = .{ 0, 0 };
@@ -420,6 +395,25 @@ pub fn parseCFFDictForOperator(dict_data: []const u8, target_op: u8) ?usize {
 // CFF Charset Handling
 // =============================================================================
 
+/// Search charset range format for a glyph's SID.
+/// nleft_size is 1 for format 1, 2 for format 2.
+fn searchCharsetRange(cff_data: []const u8, charset_offset: usize, glyph_idx: u16, nleft_size: u8) ?u16 {
+    const entry_size: usize = 2 + nleft_size;
+    var pos = charset_offset + 1;
+    var current_gid: u16 = 1;
+    while (pos + entry_size - 1 < cff_data.len) {
+        const first_sid = readU16(cff_data, pos);
+        const nleft: u16 = if (nleft_size == 1) cff_data[pos + 2] else readU16(cff_data, pos + 2);
+        const range_end = current_gid + nleft;
+        if (glyph_idx <= range_end) {
+            return first_sid + (glyph_idx - current_gid);
+        }
+        current_gid = range_end + 1;
+        pos += entry_size;
+    }
+    return null;
+}
+
 /// Get the SID (String ID) for a glyph index from a CFF charset
 pub fn getCharsetSID(cff_data: []const u8, charset_offset: usize, glyph_idx: u16) ?u16 {
     if (glyph_idx == 0) return 0; // .notdef always has SID 0
@@ -432,35 +426,9 @@ pub fn getCharsetSID(cff_data: []const u8, charset_offset: usize, glyph_idx: u16
         if (sid_offset + 1 >= cff_data.len) return null;
         return readU16(cff_data, sid_offset);
     } else if (format == 1) {
-        // Format 1: ranges with 1-byte nLeft
-        var pos = charset_offset + 1;
-        var current_gid: u16 = 1;
-        while (pos + 2 < cff_data.len) {
-            const first_sid = readU16(cff_data, pos);
-            const nleft = cff_data[pos + 2];
-            const range_end = current_gid + nleft;
-            if (glyph_idx <= range_end) {
-                return first_sid + (glyph_idx - current_gid);
-            }
-            current_gid = range_end + 1;
-            pos += 3;
-        }
-        return null;
+        return searchCharsetRange(cff_data, charset_offset, glyph_idx, 1);
     } else if (format == 2) {
-        // Format 2: ranges with 2-byte nLeft
-        var pos = charset_offset + 1;
-        var current_gid: u16 = 1;
-        while (pos + 3 < cff_data.len) {
-            const first_sid = readU16(cff_data, pos);
-            const nleft = readU16(cff_data, pos + 2);
-            const range_end = current_gid + nleft;
-            if (glyph_idx <= range_end) {
-                return first_sid + (glyph_idx - current_gid);
-            }
-            current_gid = range_end + 1;
-            pos += 4;
-        }
-        return null;
+        return searchCharsetRange(cff_data, charset_offset, glyph_idx, 2);
     }
     return null;
 }
@@ -476,16 +444,8 @@ pub fn buildUpdatedTopDict(
     output: *std.ArrayListUnmanaged(u8),
     offsets: TopDictOffsets,
 ) !void {
-    const count = readU16(cff_data, topdict_index_start);
-    if (count == 0) return;
-
-    const off_size = cff_data[topdict_index_start + 2];
-    const offsets_start = topdict_index_start + 3;
-    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
-
-    const first_off = readCFFOffset(cff_data, offsets_start, 0, off_size);
-    const second_off = readCFFOffset(cff_data, offsets_start, 1, off_size);
-    const dict_data = cff_data[data_start + first_off - 1 .. data_start + second_off - 1];
+    const index = parseCFFIndex(cff_data, topdict_index_start) orelse return;
+    const dict_data = index.getEntry(0) orelse return;
 
     // Parse and rebuild, replacing operators 15, 17, 18 and removing 16
     var i: usize = 0;
@@ -554,16 +514,8 @@ pub fn buildUpdatedTopDictWithSIDRemap(
     offsets: TopDictOffsets,
     sid_remap: *const std.AutoHashMapUnmanaged(u16, u16),
 ) !void {
-    const count = readU16(cff_data, topdict_index_start);
-    if (count == 0) return;
-
-    const off_size = cff_data[topdict_index_start + 2];
-    const offsets_start = topdict_index_start + 3;
-    const data_start = offsets_start + (@as(usize, count) + 1) * off_size;
-
-    const first_off = readCFFOffset(cff_data, offsets_start, 0, off_size);
-    const second_off = readCFFOffset(cff_data, offsets_start, 1, off_size);
-    const dict_data = cff_data[data_start + first_off - 1 .. data_start + second_off - 1];
+    const index = parseCFFIndex(cff_data, topdict_index_start) orelse return;
+    const dict_data = index.getEntry(0) orelse return;
 
     // Track operand values (for SID remapping) and byte ranges (for verbatim copy)
     var operand_values: [48]i32 = undefined;
