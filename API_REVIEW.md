@@ -138,6 +138,34 @@ The following changes have been implemented:
 5. ✅ **Updated drawing methods to use `Rect`/`Point` types** - cleaner API
 6. ✅ **Removed deprecated types** - `DrawStyle`, `DrawStyleOptions`, `GraphicsState`
 
+### Font API Changes (COMPLETED)
+
+The following changes have been implemented:
+
+1. ✅ **Added `Font` union type** - unifies standard and embedded fonts
+   ```zig
+   pub const Font = union(enum) {
+       family: FontFamily,     // helvetica, times, courier
+       symbol,
+       zapf_dingbats,
+       embedded: *EmbeddedFont,
+   };
+   ```
+2. ✅ **Added `FontFamily` enum** - `.helvetica`, `.times`, `.courier`
+3. ✅ **Added `Font` convenience constants** - `Font.helvetica`, `Font.times`, `Font.courier`
+4. ✅ **Added `TextStyle` struct** - complete text style with font, size, bold, italic, color, decoration
+5. ✅ **Updated `loadFont()`** - returns `Font`, takes optional encoding parameter
+   ```zig
+   // Old
+   const font = try doc.loadFont("path.ttf");
+   font.encoding = .identity;
+
+   // New (null = identity/Unicode, the default)
+   const font = try doc.loadFont("path.ttf", null);
+   const latin = try doc.loadFont("latin.ttf", .win_ansi);
+   ```
+6. ✅ **Updated `setEmbeddedFont()`** - accepts `Font` type (validates it's embedded)
+
 **New usage pattern:**
 ```zig
 // Stroke only (default width 0.567pt, square cap)
@@ -194,12 +222,12 @@ Some methods use `get`/`set` prefix, others don't:
 Currently only file paths are supported:
 ```zig
 // Current API (file only)
-const font = try doc.loadFont("path/to/font.ttf");
+const font = try doc.loadFont("path/to/font.ttf", null);
 const image = try doc.loadImage("path/to/image.png");
 const svg = try doc.loadSvg("path/to/icon.svg");
 
 // Missing (from memory)
-const font = try doc.loadFontFromBytes(font_data);
+const font = try doc.loadFontFromBytes(font_data, null);
 const image = try doc.loadImageFromBytes(png_data);
 const svg = try doc.loadSvgFromString(svg_string);
 ```
@@ -352,6 +380,7 @@ try doc.scale(sx, sy);
 The API is functional and covers the core PDF generation needs well. Recent improvements:
 - ✅ **Measurement API**: Unified via `measure_only` flag, side-effect free
 - ✅ **Graphics API**: Explicit styles replace stateful `setDrawStyle()`
+- ✅ **Font API**: Unified `Font` type, `loadFont()` returns `Font` with optional encoding
 
 Remaining issues:
 - **Asymmetric access**: Many setters lack getters

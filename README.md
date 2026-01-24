@@ -100,15 +100,15 @@ try doc.writeAt(50, 100, "Monospace code");
 ### Custom Fonts (TrueType/OpenType)
 
 ```zig
-// Load a TTF or OTF font
-const font = try doc.loadFont("fonts/MyFont.ttf");
+// Load a TTF or OTF font (default: identity/Unicode encoding)
+const font = try doc.loadFont("fonts/MyFont.ttf", null);
 
-// For full Unicode support (recommended)
-font.encoding = .identity;
+// Or specify encoding explicitly
+const latin_font = try doc.loadFont("fonts/Latin.ttf", .win_ansi);
 
 try doc.addPage();
 try doc.setEmbeddedFont(font, 14);
-try doc.writeAt(50, 50, "Custom font with Unicode: ");
+try doc.writeAt(50, 50, "Custom font with Unicode: 日本語 🎉");
 ```
 
 ### Text Flow with Word Wrapping
@@ -419,8 +419,8 @@ try doc.addLink(toc_rect, chapter1_dest);
 | Method | Description |
 |--------|-------------|
 | `setFont(StandardFont, size)` | Set standard font (Helvetica, Times, Courier, etc.) |
-| `loadFont(path) -> *EmbeddedFont` | Load TTF/OTF font from file |
-| `setEmbeddedFont(*EmbeddedFont, size)` | Set embedded font as current |
+| `loadFont(path, ?encoding) -> Font` | Load TTF/OTF font from file (null = identity/Unicode) |
+| `setEmbeddedFont(Font, size)` | Set embedded font as current |
 | `setFeature(Feature, bool)` | Enable/disable OpenType feature globally |
 | `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable feature for specific font |
 | `getFontMetrics() -> FontMetrics` | Get metrics (ascender, descender, etc.) for current font |
@@ -568,8 +568,12 @@ zpdf.pt_per_cm    // 28.34...
 - `TextMetrics` / `FontMetrics` - Measurement results
 
 **Fonts:**
+- `Font` - Union type: `.family` (FontFamily), `.symbol`, `.zapf_dingbats`, `.embedded` (*EmbeddedFont)
+- `Font.helvetica`, `Font.times`, `Font.courier` - Convenience constants for standard font families
+- `FontFamily` - `.helvetica`, `.times`, `.courier` (resolved to bold/italic via TextStyle)
 - `StandardFont` - `.helvetica`, `.helvetica_bold`, `.helvetica_italic`, `.helvetica_bold_italic`, `.times_roman`, `.times_bold`, `.times_italic`, `.times_bold_italic`, `.courier`, `.courier_bold`, `.courier_italic`, `.courier_bold_italic`, `.symbol`, `.zapfdingbats`
-- `EmbeddedFont` - Loaded TTF/OTF font (set `.encoding = .identity` for Unicode)
+- `EmbeddedFont` - Loaded TTF/OTF font
+- `TextStyle` - Complete text style (font, size, bold, italic, color, decoration)
 
 **Graphics:**
 - `StrokeStyle` - Stroke settings (color, width, cap, join, dash)
