@@ -15,6 +15,11 @@ pub const DashPattern = layout.DashPattern;
 pub const Color = color.Color;
 pub const Point = layout.Point;
 
+// New explicit style types
+pub const StrokeStyle = layout.StrokeStyle;
+pub const FillStyle = layout.FillStyle;
+pub const ShapeStyle = layout.ShapeStyle;
+
 /// Kappa constant for approximating circles/arcs with cubic Bezier curves.
 /// This is (4/3)*tan(pi/8) ≈ 0.5522847498
 pub const KAPPA: f64 = 0.5522847498307936;
@@ -79,6 +84,73 @@ pub fn writeGraphicsState(state: GraphicsState, buf: []u8, style: DrawStyle) usi
         var color_buf: [64]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&color_buf);
         state.fill_color.writeFill(fbs.writer()) catch unreachable;
+        const color_str = fbs.getWritten();
+        @memcpy(buf[len .. len + color_str.len], color_str);
+        len += color_str.len;
+    }
+
+    return len;
+}
+
+/// Get PDF path operator for a ShapeStyle.
+/// Returns the appropriate operator based on stroke/fill settings.
+pub fn getShapePathOperator(style: ShapeStyle) []const u8 {
+    const has_stroke = style.stroke != null;
+    const has_fill = style.fill != null;
+
+    if (has_stroke and has_fill) {
+        return "B\n"; // Fill and stroke
+    } else if (has_fill) {
+        return "f\n"; // Fill only
+    } else {
+        return "S\n"; // Stroke only (default if neither specified)
+    }
+}
+
+/// Write graphics state operators for a ShapeStyle.
+/// Returns number of bytes written.
+pub fn writeShapeGraphicsState(style: ShapeStyle, buf: []u8) usize {
+    var len: usize = 0;
+
+    // Get stroke settings (use defaults if stroking without explicit style)
+    const stroke = style.stroke orelse if (style.fill == null) StrokeStyle{} else null;
+
+    // Write stroke settings if stroking
+    if (stroke) |s| {
+        // Line width
+        len += (std.fmt.bufPrint(buf[len..], "{d:.3} w\n", .{s.width}) catch unreachable).len;
+
+        // Dash pattern
+        if (s.dash.dash > 0) {
+            len += (std.fmt.bufPrint(buf[len..], "[{d:.3} {d:.3}] {d:.3} d\n", .{
+                s.dash.dash,
+                s.dash.gap,
+                s.dash.phase,
+            }) catch unreachable).len;
+        } else {
+            len += (std.fmt.bufPrint(buf[len..], "[] 0 d\n", .{}) catch unreachable).len;
+        }
+
+        // Line cap and join
+        len += (std.fmt.bufPrint(buf[len..], "{d} J {d} j\n", .{
+            @intFromEnum(s.cap),
+            @intFromEnum(s.join),
+        }) catch unreachable).len;
+
+        // Stroke color
+        var color_buf: [64]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&color_buf);
+        s.color.writeStroke(fbs.writer()) catch unreachable;
+        const color_str = fbs.getWritten();
+        @memcpy(buf[len .. len + color_str.len], color_str);
+        len += color_str.len;
+    }
+
+    // Write fill color if filling
+    if (style.fill) |f| {
+        var color_buf: [64]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&color_buf);
+        f.color.writeFill(fbs.writer()) catch unreachable;
         const color_str = fbs.getWritten();
         @memcpy(buf[len .. len + color_str.len], color_str);
         len += color_str.len;

@@ -74,6 +74,11 @@ pub const LineJoin = layout.LineJoin;
 pub const DashPattern = layout.DashPattern;
 pub const DrawStyleOptions = layout.DrawStyleOptions;
 
+// New explicit graphics style types
+pub const StrokeStyle = layout.StrokeStyle;
+pub const FillStyle = layout.FillStyle;
+pub const ShapeStyle = layout.ShapeStyle;
+
 pub const opentype = embedded.opentype;
 
 // ============================================================================
@@ -1771,17 +1776,27 @@ pub const Document = struct {
         return graphics.writeGraphicsState(self.getGraphicsState(), buf, style);
     }
 
+    /// Write graphics state operators for the new ShapeStyle API.
+    fn writeShapeStyle(_: *const Document, buf: []u8, style: ShapeStyle) usize {
+        return graphics.writeShapeGraphicsState(style, buf);
+    }
+
+    /// Write graphics state operators for stroke-only operations (e.g., lines).
+    fn writeStrokeStyle(_: *const Document, buf: []u8, style: StrokeStyle) usize {
+        return graphics.writeShapeGraphicsState(.{ .stroke = style }, buf);
+    }
+
     /// Draw a line between two points.
     /// Coordinates are from top-left origin.
-    pub fn drawLine(self: *Document, x1: f64, y1: f64, x2: f64, y2: f64) !void {
+    pub fn drawLine(self: *Document, p1: Point, p2: Point, style: StrokeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
         const page_height = self.page_size.height;
 
         // Convert from top-left to PDF coordinates (bottom-left origin)
-        const pdf_y1 = page_height - y1;
-        const pdf_y2 = page_height - y2;
+        const pdf_y1 = page_height - p1.y;
+        const pdf_y2 = page_height - p2.y;
 
         var buf: [512]u8 = undefined;
         var len: usize = 0;
@@ -1789,11 +1804,11 @@ pub const Document = struct {
         // Save graphics state
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
 
-        // Graphics state (line width, dash, colors)
-        len += self.writeGraphicsState(buf[len..], .stroke);
+        // Write stroke style
+        len += self.writeStrokeStyle(buf[len..], style);
 
         // Move to start, line to end, stroke
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ x1, pdf_y1, x2, pdf_y2 }) catch unreachable).len;
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ p1.x, pdf_y1, p2.x, pdf_y2 }) catch unreachable).len;
 
         // Restore graphics state
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
@@ -1804,14 +1819,15 @@ pub const Document = struct {
 
     /// Draw a rectangle.
     /// Coordinates are from top-left origin.
-    pub fn drawRect(self: *Document, x: f64, y: f64, w: f64, h: f64, style: DrawStyle) !void {
+    /// Style controls stroke and/or fill. If both are null, defaults to stroke with black.
+    pub fn drawRect(self: *Document, rect: Rect, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
         const page_height = self.page_size.height;
 
         // Convert from top-left to PDF coordinates (bottom-left origin)
-        const pdf_y = page_height - y - h;
+        const pdf_y = page_height - rect.y - rect.height;
 
         var buf: [512]u8 = undefined;
         var len: usize = 0;
@@ -1819,12 +1835,12 @@ pub const Document = struct {
         // Save graphics state
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
 
-        // Graphics state
-        len += self.writeGraphicsState(buf[len..], style);
+        // Graphics state from explicit style
+        len += self.writeShapeStyle(buf[len..], style);
 
         // Rectangle path and operator
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re ", .{ x, pdf_y, w, h }) catch unreachable).len;
-        const op = graphics.getPathOperator(style);
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re ", .{ rect.x, pdf_y, rect.width, rect.height }) catch unreachable).len;
+        const op = graphics.getShapePathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -1836,24 +1852,23 @@ pub const Document = struct {
     }
 
     /// Draw a rectangle with rounded corners.
-    /// Parameters: (x, y) is upper-left corner, (w, h) is width/height, r is corner radius.
     /// If radius is 0 or larger than half the smallest dimension, falls back to regular rect.
     /// Coordinates are from top-left origin.
-    pub fn drawRoundedRect(self: *Document, x: f64, y: f64, w: f64, h: f64, r: f64, style: DrawStyle) !void {
+    pub fn drawRoundedRect(self: *Document, rect: Rect, radius: f64, style: ShapeStyle) !void {
         // Clamp radius to half of smallest dimension
-        const max_r = @min(w, h) / 2.0;
-        const radius = @min(r, max_r);
+        const max_r = @min(rect.width, rect.height) / 2.0;
+        const r = @min(radius, max_r);
 
         // If radius is effectively 0, use regular rectangle
-        if (radius < 0.01) {
-            return self.drawRect(x, y, w, h, style);
+        if (r < 0.01) {
+            return self.drawRect(rect, style);
         }
 
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
         const page_height = self.page_size.height;
-        const pdf_y = page_height - y - h; // Convert to PDF coords
+        const pdf_y = page_height - rect.y - rect.height; // Convert to PDF coords
 
         var buf: [1024]u8 = undefined;
         var len: usize = 0;
@@ -1861,14 +1876,14 @@ pub const Document = struct {
         // Save graphics state
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
 
-        // Graphics state
-        len += self.writeGraphicsState(buf[len..], style);
+        // Graphics state from explicit style
+        len += self.writeShapeStyle(buf[len..], style);
 
         // Rounded rectangle path (includes close path "h ")
-        len += graphics.writeRoundedRectPath(buf[len..], x, pdf_y, w, h, radius);
+        len += graphics.writeRoundedRectPath(buf[len..], rect.x, pdf_y, rect.width, rect.height, r);
 
         // Apply style
-        const op = graphics.getPathOperator(style);
+        const op = graphics.getShapePathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -1880,19 +1895,19 @@ pub const Document = struct {
     }
 
     /// Draw an ellipse using 4 cubic Bezier curves.
-    /// Parameters match fpdf2: (x, y) is upper-left of bounding box, (w, h) is full width/height.
+    /// Rect defines the bounding box of the ellipse.
     /// Coordinates are from top-left origin.
-    pub fn drawEllipse(self: *Document, x: f64, y: f64, w: f64, h: f64, style: DrawStyle) !void {
+    pub fn drawEllipse(self: *Document, rect: Rect, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
         const page_height = self.page_size.height;
 
         // Calculate center and radii from bounding box
-        const rx = w / 2.0;
-        const ry = h / 2.0;
-        const cx = x + rx;
-        const pdf_cy = page_height - (y + ry); // Convert to PDF coords
+        const rx = rect.width / 2.0;
+        const ry = rect.height / 2.0;
+        const cx = rect.x + rx;
+        const pdf_cy = page_height - (rect.y + ry); // Convert to PDF coords
 
         var buf: [1024]u8 = undefined;
         var len: usize = 0;
@@ -1900,14 +1915,14 @@ pub const Document = struct {
         // Save graphics state
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
 
-        // Graphics state
-        len += self.writeGraphicsState(buf[len..], style);
+        // Graphics state from explicit style
+        len += self.writeShapeStyle(buf[len..], style);
 
         // Ellipse path
         len += graphics.writeEllipsePath(buf[len..], cx, pdf_cy, rx, ry);
 
         // Apply style
-        const op = graphics.getPathOperator(style);
+        const op = graphics.getShapePathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -1919,18 +1934,22 @@ pub const Document = struct {
     }
 
     /// Draw a circle (special case of ellipse).
-    /// Parameters match fpdf2: (x, y) is the CENTER of the circle, radius is the circle radius.
+    /// Center is the center point of the circle.
     /// Coordinates are from top-left origin.
-    pub fn drawCircle(self: *Document, x: f64, y: f64, radius: f64, style: DrawStyle) !void {
-        // fpdf2 circle(x, y, r) takes center coordinates
-        // Convert to bounding box for drawEllipse
+    pub fn drawCircle(self: *Document, center: Point, radius: f64, style: ShapeStyle) !void {
+        // Convert center + radius to bounding box for drawEllipse
         const diameter = radius * 2.0;
-        return self.drawEllipse(x - radius, y - radius, diameter, diameter, style);
+        return self.drawEllipse(.{
+            .x = center.x - radius,
+            .y = center.y - radius,
+            .width = diameter,
+            .height = diameter,
+        }, style);
     }
 
     /// Draw a closed polygon.
     /// Coordinates are from top-left origin.
-    pub fn drawPolygon(self: *Document, points: []const Point, style: DrawStyle) !void {
+    pub fn drawPolygon(self: *Document, points: []const Point, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
         if (points.len < 3) return; // Need at least 3 points for a polygon
 
@@ -1945,8 +1964,8 @@ pub const Document = struct {
         // Save graphics state
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
 
-        // Graphics state
-        len += self.writeGraphicsState(buf[len..], style);
+        // Graphics state from explicit style
+        len += self.writeShapeStyle(buf[len..], style);
 
         // Move to first point
         const pdf_y0 = page_height - points[0].y;
@@ -1962,7 +1981,7 @@ pub const Document = struct {
         len += (std.fmt.bufPrint(buf[len..], "h ", .{}) catch unreachable).len;
 
         // Apply style
-        const op = graphics.getPathOperator(style);
+        const op = graphics.getShapePathOperator(style);
         @memcpy(buf[len .. len + op.len], op);
         len += op.len;
 
@@ -2868,7 +2887,8 @@ pub const Document = struct {
 
     /// Draw a path with the specified style.
     /// Coordinates are from top-left origin.
-    pub fn drawPath(self: *Document, p: *const Path, style: DrawStyle) !void {
+    /// Draw a path with the given style.
+    pub fn drawPath(self: *Document, p: *const Path, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
         if (p.isEmpty()) return;
 
@@ -2884,16 +2904,16 @@ pub const Document = struct {
         // Save graphics state
         try writer.writeAll("q\n");
 
-        // Graphics state
+        // Graphics state from explicit style
         var gs_buf: [256]u8 = undefined;
-        const gs_len = self.writeGraphicsState(&gs_buf, style);
+        const gs_len = self.writeShapeStyle(&gs_buf, style);
         try writer.writeAll(gs_buf[0..gs_len]);
 
         // Path commands
         try p.toPdfContent(page_height, writer);
 
         // Apply style
-        const op = graphics.getPathOperator(style);
+        const op = graphics.getShapePathOperator(style);
         try writer.writeAll(op);
 
         // Restore graphics state
@@ -2919,7 +2939,7 @@ pub const Document = struct {
 
     /// Fill a rectangle with a gradient.
     /// The gradient index must have been obtained from addLinearGradient or addRadialGradient.
-    pub fn fillRectGradient(self: *Document, x: f64, y: f64, w: f64, h: f64, gradient_idx: usize) !void {
+    pub fn fillRectGradient(self: *Document, rect: Rect, gradient_idx: usize) !void {
         if (self.pages.items.len == 0) return error.NoPage;
         if (gradient_idx >= self.gradients.items.len) return error.InvalidGradient;
 
@@ -2930,14 +2950,14 @@ pub const Document = struct {
         try page.used_gradients.put(self.allocator, gradient_idx, {});
 
         // Convert from top-left to PDF coordinates
-        const pdf_y = page_height - y - h;
+        const pdf_y = page_height - rect.y - rect.height;
 
         var buf: [256]u8 = undefined;
         var len: usize = 0;
 
         // Save graphics state, set clip path, paint shading, restore
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re W n\n", .{ x, pdf_y, w, h }) catch unreachable).len;
+        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re W n\n", .{ rect.x, pdf_y, rect.width, rect.height }) catch unreachable).len;
         len += (std.fmt.bufPrint(buf[len..], "/{s} sh\n", .{shadingResourceName(gradient_idx)}) catch unreachable).len;
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
 

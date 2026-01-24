@@ -1446,7 +1446,7 @@ test "drawLine basic" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.drawLine(50, 50, 200, 200);
+    try doc.drawLine(.{ .x = 50, .y = 50 }, .{ .x = 200, .y = 200 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1460,7 +1460,7 @@ test "drawLine without page returns error" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try std.testing.expectError(error.NoPage, doc.drawLine(0, 0, 100, 100));
+    try std.testing.expectError(error.NoPage, doc.drawLine(.{ .x = 0, .y = 0 }, .{ .x = 100, .y = 100 }, .{}));
 }
 
 test "drawRect stroke" {
@@ -1468,7 +1468,7 @@ test "drawRect stroke" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.drawRect(50, 50, 100, 80, .stroke);
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1483,7 +1483,7 @@ test "drawRect fill" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.drawRect(50, 50, 100, 80, .fill);
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{ .fill = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1496,7 +1496,7 @@ test "drawRect fill_stroke" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.drawRect(50, 50, 100, 80, .fill_stroke);
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{ .stroke = .{}, .fill = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1509,7 +1509,7 @@ test "drawRoundedRect basic" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.drawRoundedRect(50, 50, 100, 80, 10, .stroke);
+    try doc.drawRoundedRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, 10, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1525,7 +1525,7 @@ test "drawRoundedRect zero radius falls back to rect" {
 
     try doc.addPage();
     // Zero radius should use regular rect (re command)
-    try doc.drawRoundedRect(50, 50, 100, 80, 0, .stroke);
+    try doc.drawRoundedRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, 0, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1541,7 +1541,7 @@ test "drawRoundedRect radius clamped to half min dimension" {
 
     try doc.addPage();
     // Radius 100 is larger than half of min(100, 80) = 40, so clamped to 40
-    try doc.drawRoundedRect(50, 50, 100, 80, 100, .fill);
+    try doc.drawRoundedRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, 100, .{ .fill = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1556,7 +1556,7 @@ test "drawCircle basic" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.drawCircle(200, 300, 50, .stroke);
+    try doc.drawCircle(.{ .x = 200, .y = 300 }, 50, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1570,8 +1570,8 @@ test "drawEllipse basic" {
     defer doc.deinit();
 
     try doc.addPage();
-    // drawEllipse(x, y, w, h) - bounding box upper-left at (200, 300), size 80x40
-    try doc.drawEllipse(200, 300, 80, 40, .fill);
+    // drawEllipse(rect) - bounding box upper-left at (200, 300), size 80x40
+    try doc.drawEllipse(.{ .x = 200, .y = 300, .width = 80, .height = 40 }, .{ .fill = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1589,7 +1589,7 @@ test "drawPolygon triangle" {
         .{ .x = 200, .y = 100 },
         .{ .x = 150, .y = 50 },
     };
-    try doc.drawPolygon(&points, .stroke);
+    try doc.drawPolygon(&points, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1607,7 +1607,7 @@ test "drawPolygon less than 3 points does nothing" {
         .{ .x = 200, .y = 100 },
     };
     // Should not error, just do nothing
-    try doc.drawPolygon(&points, .stroke);
+    try doc.drawPolygon(&points, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1630,7 +1630,7 @@ test "drawPath basic triangle" {
     try path.lineTo(150, 50);
     try path.closePath();
 
-    try doc.drawPath(&path, .stroke);
+    try doc.drawPath(&path, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1652,7 +1652,7 @@ test "drawPath with bezier curve" {
     try path.lineTo(100, 200);
     try path.closePath();
 
-    try doc.drawPath(&path, .fill_stroke);
+    try doc.drawPath(&path, .{ .stroke = .{}, .fill = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1670,7 +1670,7 @@ test "drawPath empty path does nothing" {
     defer path.deinit();
 
     // Empty path should not error
-    try doc.drawPath(&path, .stroke);
+    try doc.drawPath(&path, .{ .stroke = .{} });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1686,7 +1686,7 @@ test "drawPath without page returns error" {
     defer path.deinit();
     try path.moveTo(0, 0);
 
-    try std.testing.expectError(error.NoPage, doc.drawPath(&path, .stroke));
+    try std.testing.expectError(error.NoPage, doc.drawPath(&path, .{ .stroke = .{} }));
 }
 
 test "setDrawStyle sets all values" {
@@ -1727,21 +1727,21 @@ test "setDrawStyle with partial values uses defaults" {
 }
 
 test "graphics state used in output" {
-    // Test that the document with graphics state produces valid PDF
+    // Test that explicit graphics style produces valid PDF
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
-    doc.setDrawStyle(.{
-        .line_width = 3.0,
-        .dash_pattern = .{ .dash = 5, .gap = 3 },
-        .line_cap = .round,
-        .line_join = .bevel,
-        .stroke_color = Color.red,
-        .fill_color = Color.blue,
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .stroke = .{
+            .color = Color.red,
+            .width = 3.0,
+            .dash = .{ .dash = 5, .gap = 3 },
+            .cap = .round,
+            .join = .bevel,
+        },
+        .fill = .{ .color = Color.blue },
     });
-
-    try doc.drawRect(50, 50, 100, 80, .fill_stroke);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);

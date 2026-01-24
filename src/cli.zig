@@ -566,31 +566,22 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     _ = try doc.writeAt(50, y, "Triangle (moveTo, lineTo, closePath):");
     y += 15;
 
-    doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.blue,
-        .fill_color = zpdf.Color.rgb(200, 200, 255),
-        .line_width = 2,
-    });
-
     var triangle = doc.createPath();
     defer triangle.deinit();
     try triangle.moveTo(100, y);
     try triangle.lineTo(180, y);
     try triangle.lineTo(140, y + 60);
     try triangle.closePath();
-    try doc.drawPath(&triangle, .fill_stroke);
+    try doc.drawPath(&triangle, .{
+        .stroke = .{ .color = zpdf.Color.blue, .width = 2 },
+        .fill = .{ .color = zpdf.Color.rgb(200, 200, 255) },
+    });
     y += 80;
 
     // Bezier curve
     try doc.setFont(.helvetica, 10);
-    doc.setDrawStyle(.{});
     _ = try doc.writeAt(50, y, "Cubic Bezier curve (curveTo):");
     y += 15;
-
-    doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.red,
-        .fill_color = zpdf.Color.rgb(255, 200, 200),
-    });
 
     var bezier = doc.createPath();
     defer bezier.deinit();
@@ -599,19 +590,16 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     try bezier.lineTo(250, y + 80);
     try bezier.curveTo(200, y + 30, 100, y + 30, 50, y + 80);
     try bezier.closePath();
-    try doc.drawPath(&bezier, .fill_stroke);
+    try doc.drawPath(&bezier, .{
+        .stroke = .{ .color = zpdf.Color.red },
+        .fill = .{ .color = zpdf.Color.rgb(255, 200, 200) },
+    });
     y += 100;
 
     // Heart shape using curves
     try doc.setFont(.helvetica, 10);
-    doc.setDrawStyle(.{});
     _ = try doc.writeAt(50, y, "Heart shape (multiple curveTo):");
     y += 15;
-
-    doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.rgb(200, 0, 0),
-        .fill_color = zpdf.Color.red,
-    });
 
     var heart = doc.createPath();
     defer heart.deinit();
@@ -620,19 +608,16 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     try heart.moveTo(hx, hy);
     try heart.curveTo(hx - 50, hy - 50, hx - 80, hy + 10, hx, hy + 60);
     try heart.curveTo(hx + 80, hy + 10, hx + 50, hy - 50, hx, hy);
-    try doc.drawPath(&heart, .fill_stroke);
+    try doc.drawPath(&heart, .{
+        .stroke = .{ .color = zpdf.Color.rgb(200, 0, 0) },
+        .fill = .{ .color = zpdf.Color.red },
+    });
     y += 90;
 
     // Stroke only path
     try doc.setFont(.helvetica, 10);
-    doc.setDrawStyle(.{});
     _ = try doc.writeAt(50, y, "Stroke only (zigzag):");
     y += 15;
-
-    doc.setDrawStyle(.{
-        .stroke_color = zpdf.Color.rgb(0, 128, 0),
-        .line_width = 3,
-    });
 
     var zigzag = doc.createPath();
     defer zigzag.deinit();
@@ -643,7 +628,9 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
         const py = if (i % 2 == 0) y + 30 else y;
         try zigzag.lineTo(px, py);
     }
-    try doc.drawPath(&zigzag, .stroke);
+    try doc.drawPath(&zigzag, .{
+        .stroke = .{ .color = zpdf.Color.rgb(0, 128, 0), .width = 3 },
+    });
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -681,7 +668,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .y1 = y,
         .stops = &lin_stops1,
     });
-    try doc.fillRectGradient(50, y, 200, 50, grad1);
+    try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 50 }, grad1);
     y += 70;
 
     // Linear gradient vertical
@@ -700,7 +687,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .y1 = y + 50,
         .stops = &lin_stops2,
     });
-    try doc.fillRectGradient(50, y, 200, 50, grad2);
+    try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 50 }, grad2);
     y += 70;
 
     // Linear gradient 3 colors
@@ -720,7 +707,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .y1 = y,
         .stops = &lin_stops3,
     });
-    try doc.fillRectGradient(50, y, 200, 50, grad3);
+    try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 50 }, grad3);
     y += 70;
 
     // Radial gradient
@@ -741,7 +728,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .r1 = 60,
         .stops = &rad_stops,
     });
-    try doc.fillRectGradient(50, y, 200, 80, grad4);
+    try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 80 }, grad4);
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

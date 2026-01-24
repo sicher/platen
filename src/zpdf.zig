@@ -79,6 +79,11 @@ pub const DashPattern = document.DashPattern;
 pub const DrawStyleOptions = document.DrawStyleOptions;
 pub const Point = document.Point;
 
+// New explicit graphics style types
+pub const StrokeStyle = document.StrokeStyle;
+pub const FillStyle = document.FillStyle;
+pub const ShapeStyle = document.ShapeStyle;
+
 // Re-export gradient types
 pub const LinearGradient = document.LinearGradient;
 pub const RadialGradient = document.RadialGradient;

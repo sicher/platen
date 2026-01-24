@@ -348,3 +348,37 @@ pub const DrawStyleOptions = struct {
     /// Fill color.
     fill_color: Color = Color.black,
 };
+
+// ============================================================================
+// Explicit Graphics Styles (new API)
+// ============================================================================
+
+/// Style for stroking (outlining) shapes.
+pub const StrokeStyle = struct {
+    /// Stroke color.
+    color: Color = Color.black,
+    /// Line width in points (0.567 = 0.2mm, matching fpdf2 default).
+    width: f64 = 0.567,
+    /// Line cap style (how line ends are drawn).
+    cap: LineCap = .square,
+    /// Line join style (how corners are drawn).
+    join: LineJoin = .miter,
+    /// Dash pattern (solid by default).
+    dash: DashPattern = .solid,
+};
+
+/// Style for filling shapes.
+pub const FillStyle = struct {
+    /// Fill color.
+    color: Color = Color.black,
+};
+
+/// Combined style for drawing shapes.
+/// Set stroke and/or fill to control rendering.
+/// If both are null, defaults to stroke with black color.
+pub const ShapeStyle = struct {
+    /// Stroke style, or null for no stroke.
+    stroke: ?StrokeStyle = null,
+    /// Fill style, or null for no fill.
+    fill: ?FillStyle = null,
+};
