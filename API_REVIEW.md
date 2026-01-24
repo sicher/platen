@@ -31,6 +31,7 @@ pub const WriteOptions = struct {
     wrap: bool = true,                 // Wrap text to next line
     valign: VAlign = .top,             // Vertical alignment
     break_on_hyphens: bool = true,     // Break at regular hyphens
+    line_height: f64 = 1.2,            // Line height multiplier
 };
 ```
 
@@ -57,13 +58,14 @@ pub const WriteResult = struct {
 **Usage pattern for measurement:**
 ```zig
 var region = doc.getPageRegion();
-const result = try doc.write(&region, text, .{ .measure_only = true });
+const style = TextStyle{ .font = Font.helvetica, .size = 11 };
+const result = try doc.write(&region, text, style, .{ .measure_only = true });
 // Cursor is unchanged - measure_only is side-effect free
 // result.lines_written = number of lines
-// Calculate height: lines_written * doc.getLineHeightPts()
+// Calculate height: lines_written * style.size * 1.2
 
 // Render directly (no reset needed)
-_ = try doc.write(&region, text, .{});
+_ = try doc.write(&region, text, style, .{});
 ```
 
 ### Font Metrics
@@ -165,6 +167,34 @@ The following changes have been implemented:
    const latin = try doc.loadFont("latin.ttf", .win_ansi);
    ```
 6. ✅ **Updated `setEmbeddedFont()`** - accepts `Font` type (validates it's embedded)
+
+### Text Method API Changes (COMPLETED)
+
+The following changes have been implemented:
+
+1. ✅ **Updated `writeAt()`** - takes `Point` and `TextStyle` instead of separate x,y and document state
+   ```zig
+   // Old
+   try doc.setFont(.helvetica, 12);
+   _ = try doc.writeAt(50, 50, "Hello");
+
+   // New
+   const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+   _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", style);
+   ```
+2. ✅ **Updated `write()`** - takes `TextStyle` parameter for explicit styling
+   ```zig
+   // Old
+   try doc.setFont(.helvetica, 11);
+   _ = try doc.write(&region, text, .{});
+
+   // New
+   const style = TextStyle{ .font = Font.helvetica, .size = 11 };
+   _ = try doc.write(&region, text, style, .{});
+   ```
+3. ✅ **Added `line_height` to `WriteOptions`** - line height multiplier (default 1.2)
+4. ✅ **Added `getFontMetricsStyled()`** - get font metrics for a specific TextStyle
+5. ✅ **Added `getTextWidthStyled()`** - measure text width with explicit style
 
 **New usage pattern:**
 ```zig
@@ -381,6 +411,7 @@ The API is functional and covers the core PDF generation needs well. Recent impr
 - ✅ **Measurement API**: Unified via `measure_only` flag, side-effect free
 - ✅ **Graphics API**: Explicit styles replace stateful `setDrawStyle()`
 - ✅ **Font API**: Unified `Font` type, `loadFont()` returns `Font` with optional encoding
+- ✅ **Text API**: `writeAt()` and `write()` take explicit `TextStyle` parameter
 
 Remaining issues:
 - **Asymmetric access**: Many setters lack getters

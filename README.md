@@ -157,8 +157,11 @@ var region = zpdf.Region{
     .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
 };
 
+// Define text style
+const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+
 // Measure plain text (cursor unchanged after this call)
-const result = try doc.write(&region, text, .{ .measure_only = true });
+const result = try doc.write(&region, text, style, .{ .measure_only = true });
 
 // Or measure styled text
 var styled = doc.createStyledText();
@@ -173,7 +176,7 @@ const box_height = content_height + 16; // Add padding
 
 // Render (no need to reset cursor - measure_only didn't change it)
 if (box_height <= region.remainingHeight()) {
-    _ = try doc.write(&region, text, .{});
+    _ = try doc.write(&region, text, style, .{});
 }
 ```
 
@@ -430,8 +433,8 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `writeAt(x, y, str) -> Rect` | Write text at position, returns bounding rect |
-| `write(*Region, str, WriteOptions) -> WriteResult` | Write with word wrapping into region |
+| `writeAt(Point, str, TextStyle) -> Rect` | Write text at position with explicit style |
+| `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Write with word wrapping into region |
 | `writeStyled(*Region, *StyledText, ParagraphOptions) -> WriteResult` | Write styled text with wrapping |
 | `createStyledText() -> StyledText` | Create styled text builder for mixed formatting |
 
@@ -441,7 +444,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 |--------|-------------|
 | `getTextWidth(str) -> f64` | Measure text width in points |
 | `measureText(str) -> TextMetrics` | Get width and height |
-| `write(*Region, str, .{ .measure_only = true })` | Measure plain text layout without rendering |
+| `write(*Region, str, style, .{ .measure_only = true })` | Measure plain text layout without rendering |
 | `writeStyled(*Region, *StyledText, .{ .measure_only = true })` | Measure styled text layout without rendering |
 
 ### Text Styling
