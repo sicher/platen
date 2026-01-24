@@ -8,14 +8,13 @@ const std = @import("std");
 const layout = @import("layout.zig");
 const color = @import("color.zig");
 
-pub const DrawStyle = layout.DrawStyle;
 pub const LineCap = layout.LineCap;
 pub const LineJoin = layout.LineJoin;
 pub const DashPattern = layout.DashPattern;
 pub const Color = color.Color;
 pub const Point = layout.Point;
 
-// New explicit style types
+// Explicit style types
 pub const StrokeStyle = layout.StrokeStyle;
 pub const FillStyle = layout.FillStyle;
 pub const ShapeStyle = layout.ShapeStyle;
@@ -23,74 +22,6 @@ pub const ShapeStyle = layout.ShapeStyle;
 /// Kappa constant for approximating circles/arcs with cubic Bezier curves.
 /// This is (4/3)*tan(pi/8) ≈ 0.5522847498
 pub const KAPPA: f64 = 0.5522847498307936;
-
-/// Graphics state for drawing operations.
-/// Aggregates all drawing parameters needed to generate PDF graphics state operators.
-pub const GraphicsState = struct {
-    line_width: f64 = 0.567,
-    dash_pattern: DashPattern = .{},
-    line_cap: LineCap = .square,
-    line_join: LineJoin = .miter,
-    stroke_color: Color = Color.black,
-    fill_color: Color = Color.black,
-};
-
-/// Get PDF path operator for the given draw style.
-pub fn getPathOperator(style: DrawStyle) []const u8 {
-    return switch (style) {
-        .stroke => "S\n",
-        .fill => "f\n",
-        .fill_stroke => "B\n",
-    };
-}
-
-/// Write graphics state operators to buffer.
-/// Returns number of bytes written.
-pub fn writeGraphicsState(state: GraphicsState, buf: []u8, style: DrawStyle) usize {
-    var len: usize = 0;
-
-    // Line width
-    len += (std.fmt.bufPrint(buf[len..], "{d:.3} w\n", .{state.line_width}) catch unreachable).len;
-
-    // Dash pattern
-    if (state.dash_pattern.dash > 0) {
-        len += (std.fmt.bufPrint(buf[len..], "[{d:.3} {d:.3}] {d:.3} d\n", .{
-            state.dash_pattern.dash,
-            state.dash_pattern.gap,
-            state.dash_pattern.phase,
-        }) catch unreachable).len;
-    } else {
-        len += (std.fmt.bufPrint(buf[len..], "[] 0 d\n", .{}) catch unreachable).len;
-    }
-
-    // Line cap and join
-    len += (std.fmt.bufPrint(buf[len..], "{d} J {d} j\n", .{
-        @intFromEnum(state.line_cap),
-        @intFromEnum(state.line_join),
-    }) catch unreachable).len;
-
-    // Stroke color (for stroke and fill_stroke)
-    if (style == .stroke or style == .fill_stroke) {
-        var color_buf: [64]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&color_buf);
-        state.stroke_color.writeStroke(fbs.writer()) catch unreachable;
-        const color_str = fbs.getWritten();
-        @memcpy(buf[len .. len + color_str.len], color_str);
-        len += color_str.len;
-    }
-
-    // Fill color (for fill and fill_stroke)
-    if (style == .fill or style == .fill_stroke) {
-        var color_buf: [64]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&color_buf);
-        state.fill_color.writeFill(fbs.writer()) catch unreachable;
-        const color_str = fbs.getWritten();
-        @memcpy(buf[len .. len + color_str.len], color_str);
-        len += color_str.len;
-    }
-
-    return len;
-}
 
 /// Get PDF path operator for a ShapeStyle.
 /// Returns the appropriate operator based on stroke/fill settings.
@@ -290,19 +221,20 @@ pub fn writePolygonPath(buf: []u8, points: []const Point) usize {
 // Tests
 // ============================================================================
 
-test "getPathOperator" {
+test "getShapePathOperator" {
     const testing = std.testing;
-    try testing.expectEqualStrings("S\n", getPathOperator(.stroke));
-    try testing.expectEqualStrings("f\n", getPathOperator(.fill));
-    try testing.expectEqualStrings("B\n", getPathOperator(.fill_stroke));
+    try testing.expectEqualStrings("S\n", getShapePathOperator(.{ .stroke = .{} }));
+    try testing.expectEqualStrings("f\n", getShapePathOperator(.{ .fill = .{} }));
+    try testing.expectEqualStrings("B\n", getShapePathOperator(.{ .stroke = .{}, .fill = .{} }));
+    // Default (neither set) should stroke
+    try testing.expectEqualStrings("S\n", getShapePathOperator(.{}));
 }
 
-test "writeGraphicsState basic" {
+test "writeShapeGraphicsState stroke" {
     const testing = std.testing;
     var buf: [512]u8 = undefined;
 
-    const state = GraphicsState{};
-    const len = writeGraphicsState(state, &buf, .stroke);
+    const len = writeShapeGraphicsState(.{ .stroke = .{} }, &buf);
 
     // Should contain line width, dash, cap/join, and stroke color
     const output = buf[0..len];

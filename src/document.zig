@@ -68,13 +68,9 @@ pub const ParagraphOptions = layout.ParagraphOptions;
 pub const PageSize = layout.PageSize;
 
 // Graphics types
-pub const DrawStyle = layout.DrawStyle;
 pub const LineCap = layout.LineCap;
 pub const LineJoin = layout.LineJoin;
 pub const DashPattern = layout.DashPattern;
-pub const DrawStyleOptions = layout.DrawStyleOptions;
-
-// New explicit graphics style types
 pub const StrokeStyle = layout.StrokeStyle;
 pub const FillStyle = layout.FillStyle;
 pub const ShapeStyle = layout.ShapeStyle;
@@ -446,18 +442,6 @@ pub const Document = struct {
     text_color: Color = Color.black,
     /// Text decoration (underline, strikethrough).
     text_decoration: TextDecoration = .none,
-    /// Fill color for shapes (default black).
-    fill_color: Color = Color.black,
-    /// Stroke/draw color for lines and borders (default black).
-    draw_color: Color = Color.black,
-    /// Line width for strokes in points (default 0.567pt = 0.2mm, fpdf2 default).
-    line_width: f64 = 0.567,
-    /// Dash pattern for stroked lines.
-    dash_pattern: layout.DashPattern = .{},
-    /// Line cap style (fpdf2 default is square/projecting).
-    line_cap: layout.LineCap = .square,
-    /// Line join style.
-    line_join: layout.LineJoin = .miter,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
     // Track all embedded fonts
@@ -740,16 +724,6 @@ pub const Document = struct {
     pub fn setTextStyle(self: *Document, opts: TextStyleOptions) void {
         self.text_color = opts.color;
         self.text_decoration = opts.decoration;
-    }
-
-    /// Set drawing style (stroke/fill colors, line width, cap, join, dash pattern).
-    pub fn setDrawStyle(self: *Document, opts: layout.DrawStyleOptions) void {
-        self.line_width = opts.line_width;
-        self.line_cap = opts.line_cap;
-        self.line_join = opts.line_join;
-        self.dash_pattern = opts.dash_pattern;
-        self.draw_color = opts.stroke_color;
-        self.fill_color = opts.fill_color;
     }
 
     /// Set document margins.
@@ -1758,25 +1732,7 @@ pub const Document = struct {
     // Graphics Primitives
     // ========================================================================
 
-    /// Get current graphics state as a GraphicsState struct.
-    fn getGraphicsState(self: *const Document) graphics.GraphicsState {
-        return .{
-            .line_width = self.line_width,
-            .dash_pattern = self.dash_pattern,
-            .line_cap = self.line_cap,
-            .line_join = self.line_join,
-            .stroke_color = self.draw_color,
-            .fill_color = self.fill_color,
-        };
-    }
-
-    /// Write graphics state operators (line width, dash pattern, colors).
-    /// Used internally by shape drawing methods.
-    fn writeGraphicsState(self: *const Document, buf: []u8, style: DrawStyle) usize {
-        return graphics.writeGraphicsState(self.getGraphicsState(), buf, style);
-    }
-
-    /// Write graphics state operators for the new ShapeStyle API.
+    /// Write graphics state operators for the ShapeStyle API.
     fn writeShapeStyle(_: *const Document, buf: []u8, style: ShapeStyle) usize {
         return graphics.writeShapeGraphicsState(style, buf);
     }

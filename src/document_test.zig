@@ -1689,43 +1689,6 @@ test "drawPath without page returns error" {
     try std.testing.expectError(error.NoPage, doc.drawPath(&path, .{ .stroke = .{} }));
 }
 
-test "setDrawStyle sets all values" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    doc.setDrawStyle(.{
-        .line_width = 2.5,
-        .line_cap = .round,
-        .line_join = .bevel,
-        .dash_pattern = .{ .dash = 5, .gap = 3, .phase = 1 },
-        .stroke_color = Color.red,
-        .fill_color = Color.blue,
-    });
-
-    try std.testing.expectEqual(@as(f64, 2.5), doc.line_width);
-    try std.testing.expectEqual(document.LineCap.round, doc.line_cap);
-    try std.testing.expectEqual(document.LineJoin.bevel, doc.line_join);
-    try std.testing.expectEqual(@as(f64, 5), doc.dash_pattern.dash);
-    try std.testing.expectEqual(@as(f64, 3), doc.dash_pattern.gap);
-    try std.testing.expectEqual(@as(f64, 1), doc.dash_pattern.phase);
-    try std.testing.expectEqual(Color.red, doc.draw_color);
-    try std.testing.expectEqual(Color.blue, doc.fill_color);
-}
-
-test "setDrawStyle with partial values uses defaults" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    // Set only line_width, everything else uses defaults
-    doc.setDrawStyle(.{ .line_width = 3.0 });
-
-    try std.testing.expectEqual(@as(f64, 3.0), doc.line_width);
-    try std.testing.expectEqual(document.LineCap.square, doc.line_cap); // default
-    try std.testing.expectEqual(document.LineJoin.miter, doc.line_join); // default
-    try std.testing.expectEqual(Color.black, doc.draw_color); // default
-    try std.testing.expectEqual(Color.black, doc.fill_color); // default
-}
-
 test "graphics state used in output" {
     // Test that explicit graphics style produces valid PDF
     var doc = Document.init(std.testing.allocator);

@@ -72,14 +72,10 @@ pub const ParagraphOptions = document.ParagraphOptions;
 pub const PageSize = document.PageSize;
 
 // Re-export graphics types
-pub const DrawStyle = document.DrawStyle;
 pub const LineCap = document.LineCap;
 pub const LineJoin = document.LineJoin;
 pub const DashPattern = document.DashPattern;
-pub const DrawStyleOptions = document.DrawStyleOptions;
 pub const Point = document.Point;
-
-// New explicit graphics style types
 pub const StrokeStyle = document.StrokeStyle;
 pub const FillStyle = document.FillStyle;
 pub const ShapeStyle = document.ShapeStyle;

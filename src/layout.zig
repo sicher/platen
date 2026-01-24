@@ -290,16 +290,6 @@ pub const PageLabel = struct {
 // Graphics Types
 // ============================================================================
 
-/// Drawing style for shapes.
-pub const DrawStyle = enum {
-    /// Only stroke the outline (S operator).
-    stroke,
-    /// Only fill the interior (f operator).
-    fill,
-    /// Fill and stroke (B operator).
-    fill_stroke,
-};
-
 /// Line cap style (PDF J operator).
 pub const LineCap = enum(u8) {
     /// Butt cap: line ends at endpoint.
@@ -332,26 +322,6 @@ pub const DashPattern = struct {
     /// Solid line (no dashing).
     pub const solid = DashPattern{};
 };
-
-/// Options for configuring drawing style (lines and fills).
-pub const DrawStyleOptions = struct {
-    /// Line width in points.
-    line_width: f64 = 0.567,
-    /// Line cap style.
-    line_cap: LineCap = .square,
-    /// Line join style.
-    line_join: LineJoin = .miter,
-    /// Dash pattern for stroked lines.
-    dash_pattern: DashPattern = .solid,
-    /// Stroke (outline) color.
-    stroke_color: Color = Color.black,
-    /// Fill color.
-    fill_color: Color = Color.black,
-};
-
-// ============================================================================
-// Explicit Graphics Styles (new API)
-// ============================================================================
 
 /// Style for stroking (outlining) shapes.
 pub const StrokeStyle = struct {
