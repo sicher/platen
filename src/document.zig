@@ -30,7 +30,10 @@ const Value = objects.Value;
 
 // Type aliases
 pub const StandardFont = fonts.StandardFont;
-pub const Font = fonts.Font;
+pub const FontFamily = fonts.Family;
+pub const Font = layout.Font;
+pub const FontEncoding = layout.FontEncoding;
+pub const TextStyle = layout.TextStyle;
 pub const TextMetrics = metrics.TextMetrics;
 pub const FontStyle = metrics.FontStyle;
 pub const FontMetrics = metrics.FontMetrics;
@@ -532,23 +535,30 @@ pub const Document = struct {
         try self.used_fonts.put(self.allocator, font, {});
     }
 
-    /// Load a TrueType font from file
-    pub fn loadFont(self: *Document, path: []const u8) !*EmbeddedFont {
-        const font = try EmbeddedFont.fromFile(self.allocator, path);
-        try self.embedded_fonts.append(self.allocator, font);
-        return font;
+    /// Load a TrueType font from file.
+    /// Returns a Font that can be used in TextStyle.
+    /// Encoding defaults to .identity (Unicode). Pass .win_ansi for legacy 256-char mode.
+    pub fn loadFont(self: *Document, path: []const u8, encoding: ?FontEncoding) !Font {
+        const emb = try EmbeddedFont.fromFile(self.allocator, path);
+        emb.encoding = encoding orelse .identity;
+        try self.embedded_fonts.append(self.allocator, emb);
+        return Font{ .embedded = emb };
     }
 
-    /// Set an embedded font as current
-    pub fn setEmbeddedFont(self: *Document, font: *EmbeddedFont, size: f64) !void {
-        self.current_embedded = font;
+    /// Set an embedded font as current (deprecated - use TextStyle instead)
+    pub fn setEmbeddedFont(self: *Document, font: Font, size: f64) !void {
+        const emb = switch (font) {
+            .embedded => |e| e,
+            else => return error.NotEmbeddedFont,
+        };
+        self.current_embedded = emb;
         self.current_font = null; // Clear standard font
         self.font_size = size;
         // Ensure font is in our list
         for (self.embedded_fonts.items) |f| {
-            if (f == font) return;
+            if (f == emb) return;
         }
-        try self.embedded_fonts.append(self.allocator, font);
+        try self.embedded_fonts.append(self.allocator, emb);
     }
 
     /// Get index of embedded font (for resource naming)

@@ -160,7 +160,7 @@ fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    const emb = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    const emb = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     emb.encoding = .identity;
 
     // Test strings of varying complexity
@@ -232,17 +232,17 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         defer timing_doc.deinit();
 
         // Load multiple fonts to measure parsing time
-        const inter = try timing_doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+        const inter = try timing_doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
         inter.encoding = .identity;
-        const inter_bold = try timing_doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
+        const inter_bold = try timing_doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
         inter_bold.encoding = .identity;
-        const inter_italic = try timing_doc.loadFont("test/fonts/Inter/Inter-Italic.ttf");
+        const inter_italic = try timing_doc.loadFont("test/fonts/Inter/Inter-Italic.ttf", null);
         inter_italic.encoding = .identity;
-        const charter = try timing_doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
+        const charter = try timing_doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
         charter.encoding = .identity;
-        const gentium = try timing_doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
+        const gentium = try timing_doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
         gentium.encoding = .identity;
-        const courier = try timing_doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+        const courier = try timing_doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
         courier.encoding = .identity;
 
         result.font_load_ms = t.endPrint(config.quiet);
@@ -250,17 +250,17 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     }
 
     // Load fonts for actual use in main document
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     inter.encoding = .identity;
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
     inter_bold.encoding = .identity;
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
     charter.encoding = .identity;
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
     gentium.encoding = .identity;
 
     // Font with all OpenType features enabled
-    const inter_ot = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    const inter_ot = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     inter_ot.encoding = .identity;
     inter_ot.setFeature(.liga, true);
     inter_ot.setFeature(.dlig, true);
@@ -272,7 +272,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 2. Simple text test (minimal OpenType)
     {
         const t = Timer.begin("Simple text");
-        const simple_font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
+        const simple_font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
         simple_font.encoding = .identity;
         simple_font.setFeature(.kern, false);
         simple_font.setFeature(.liga, false);

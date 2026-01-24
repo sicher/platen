@@ -154,23 +154,15 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load font families (use win_ansi to match fpdf2 reference)
-    const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    courier_regular.encoding = .win_ansi;
-    const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf");
-    courier_bold.encoding = .win_ansi;
-    const courier_italic = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Italic.ttf");
-    courier_italic.encoding = .win_ansi;
-    const courier_bold_italic = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold Italic.ttf");
-    courier_bold_italic.encoding = .win_ansi;
+    const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
+    const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf", .win_ansi);
+    const courier_italic = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Italic.ttf", .win_ansi);
+    const courier_bold_italic = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold Italic.ttf", .win_ansi);
 
-    const charter_regular = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
-    charter_regular.encoding = .win_ansi;
-    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
-    charter_bold.encoding = .win_ansi;
-    const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf");
-    charter_italic.encoding = .win_ansi;
-    const charter_bold_italic = try doc.loadFont("test/fonts/Charter/Charter Bold Italic.ttf");
-    charter_bold_italic.encoding = .win_ansi;
+    const charter_regular = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .win_ansi);
+    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", .win_ansi);
+    const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf", .win_ansi);
+    const charter_bold_italic = try doc.loadFont("test/fonts/Charter/Charter Bold Italic.ttf", .win_ansi);
 
     try doc.addPage();
     var y: f64 = 50;
@@ -254,13 +246,11 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Load fonts and set to CID (Identity-H) mode for full Unicode
     // Disable kerning to match fpdf2 reference (which uses text() without shaping)
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
-    charter.encoding = .identity;
-    charter.setFeature(.kern, false);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
+    charter.embedded.setFeature(.kern, false);
 
-    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    courier.encoding = .identity;
-    courier.setFeature(.kern, false);
+    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    courier.embedded.setFeature(.kern, false);
 
     try doc.addPage();
     var y: f64 = 50;
@@ -297,9 +287,8 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 24;
 
     // Compare with WinAnsi mode (should look the same for basic chars)
-    const charter_winansi = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
-    charter_winansi.setFeature(.kern, false);
-    // Default is .win_ansi
+    const charter_winansi = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", .win_ansi);
+    charter_winansi.embedded.setFeature(.kern, false);
 
     try doc.setEmbeddedFont(charter_winansi, 12);
     _ = try doc.writeAt(50, y, "WinAnsi comparison: The quick brown fox");
@@ -316,64 +305,50 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load all font variants
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter.encoding = .identity;
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
-    inter_bold.encoding = .identity;
-    const inter_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf");
-    inter_italic.encoding = .identity;
-    const inter_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf");
-    inter_bolditalic.encoding = .identity;
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
+    const inter_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf", null);
+    const inter_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf", null);
 
     // Feature comparison fonts
-    const inter_no_kern = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_no_kern.encoding = .identity;
-    inter_no_kern.setFeature(.kern, false);
+    const inter_no_kern = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_no_kern.embedded.setFeature(.kern, false);
 
-    const inter_no_mark = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_no_mark.encoding = .identity;
-    inter_no_mark.setFeature(.mark, false);
-    inter_no_mark.setFeature(.mkmk, false);
+    const inter_no_mark = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_no_mark.embedded.setFeature(.mark, false);
+    inter_no_mark.embedded.setFeature(.mkmk, false);
 
     // Contextual alternates comparison (calt is ON by default now)
-    const inter_no_calt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_no_calt.encoding = .identity;
-    inter_no_calt.setFeature(.calt, false);
+    const inter_no_calt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_no_calt.embedded.setFeature(.calt, false);
 
     // Discretionary ligatures comparison (dlig is OFF by default)
-    const inter_dlig = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_dlig.encoding = .identity;
-    inter_dlig.setFeature(.dlig, true);
+    const inter_dlig = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_dlig.embedded.setFeature(.dlig, true);
 
     // Tabular figures comparison (tnum is OFF by default - proportional is default)
-    const inter_tnum = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_tnum.encoding = .identity;
-    inter_tnum.setFeature(.tnum, true);
+    const inter_tnum = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_tnum.embedded.setFeature(.tnum, true);
 
     // Fractions comparison (frac is OFF by default)
-    const inter_frac = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_frac.encoding = .identity;
-    inter_frac.setFeature(.frac, true);
+    const inter_frac = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_frac.embedded.setFeature(.frac, true);
 
     // Slashed zero comparison (zero is OFF by default)
-    const inter_zero = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_zero.encoding = .identity;
-    inter_zero.setFeature(.zero, true);
+    const inter_zero = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_zero.embedded.setFeature(.zero, true);
 
     // Case-sensitive forms comparison - need calt OFF for proper OFF display
     // (calt contextually applies case-like substitutions near uppercase)
-    const inter_nocalt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_nocalt.encoding = .identity;
-    inter_nocalt.setFeature(.calt, false);
+    const inter_nocalt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_nocalt.embedded.setFeature(.calt, false);
 
-    const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_case.encoding = .identity;
-    inter_case.setFeature(.case, true);
+    const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_case.embedded.setFeature(.case, true);
 
     // Stylistic set 1 comparison (ss01 is OFF by default)
-    const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter_ss01.encoding = .identity;
-    inter_ss01.setFeature(.ss01, true);
+    const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_ss01.embedded.setFeature(.ss01, true);
 
     try doc.addPage();
     var y: f64 = 32;
@@ -593,12 +568,9 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
-    gentium.encoding = .identity;
-    const gentium_bold = try doc.loadFont("test/fonts/Gentium/Gentium-Bold.ttf");
-    gentium_bold.encoding = .identity;
-    const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf");
-    gentium_italic.encoding = .identity;
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
+    const gentium_bold = try doc.loadFont("test/fonts/Gentium/Gentium-Bold.ttf", null);
+    const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf", null);
 
     try doc.addPage();
     var y: f64 = 32;
@@ -794,27 +766,20 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Satoshi has liga (fi, fl, ff, ffi, ffl), kern, tnum, pnum
-    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf");
-    satoshi.encoding = .identity;
-    const satoshi_bold = try doc.loadFont("test/fonts/Satoshi/Satoshi-Bold.otf");
-    satoshi_bold.encoding = .identity;
-    const satoshi_italic = try doc.loadFont("test/fonts/Satoshi/Satoshi-Italic.otf");
-    satoshi_italic.encoding = .identity;
+    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", null);
+    const satoshi_bold = try doc.loadFont("test/fonts/Satoshi/Satoshi-Bold.otf", null);
+    const satoshi_italic = try doc.loadFont("test/fonts/Satoshi/Satoshi-Italic.otf", null);
 
     // Charter has kern but no liga
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
-    charter.encoding = .identity;
-    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
-    charter_bold.encoding = .identity;
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
+    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", null);
 
     // Inter has tnum, pnum, zero features
     // Note: Disable kerning for Inter - fpdf2 reference uses text() without shaping for these
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter.encoding = .identity;
-    inter.setFeature(.kern, false);
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf");
-    inter_bold.encoding = .identity;
-    inter_bold.setFeature(.kern, false);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter.embedded.setFeature(.kern, false);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
+    inter_bold.embedded.setFeature(.kern, false);
 
     try doc.addPage();
     var y: f64 = 25;
@@ -2644,8 +2609,8 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load embedded fonts (identity encoding is now default)
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
 
     try doc.addPage();
 
@@ -2668,14 +2633,14 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
     };
 
     // Font configurations: null means use built-in Helvetica
-    const FontConfig = struct { embedded: ?*zpdf.EmbeddedFont, label: []const u8 };
-    const fonts = [_]FontConfig{
-        .{ .embedded = null, .label = "Helvetica (built-in):" },
-        .{ .embedded = inter, .label = "Inter (embedded):" },
-        .{ .embedded = gentium, .label = "Gentium (embedded):" },
+    const FontConfig = struct { font: ?zpdf.Font, label: []const u8 };
+    const fonts_config = [_]FontConfig{
+        .{ .font = null, .label = "Helvetica (built-in):" },
+        .{ .font = inter, .label = "Inter (embedded):" },
+        .{ .font = gentium, .label = "Gentium (embedded):" },
     };
 
-    for (fonts, 0..) |f, row| {
+    for (fonts_config, 0..) |f, row| {
         const y = 60 + @as(f64, @floatFromInt(row)) * 150;
 
         // Row label
@@ -2700,8 +2665,8 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
             try doc.drawLine(.{ .x = x, .y = y + box_height - padding }, .{ .x = x + box_width, .y = y + box_height - padding }, .{ .color = zpdf.Color.rgb(0, 180, 0), .width = 0.3 });
 
             // Set font (built-in or embedded)
-            if (f.embedded) |emb| {
-                try doc.setEmbeddedFont(emb, 11);
+            if (f.font) |fnt| {
+                try doc.setEmbeddedFont(fnt, 11);
             } else {
                 try doc.setFont(.helvetica, 11);
             }
@@ -2730,9 +2695,9 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load Charter font (has good kerning data)
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf");
-    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf");
-    const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf");
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
+    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", null);
+    const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf", null);
 
     // Kerning is enabled by default
     try doc.addPage();
@@ -3066,12 +3031,12 @@ test "debug: font metrics" {
     std.debug.print("\nHelvetica 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ hm.ascender, hm.y_max, hm.cap_height });
 
     // Embedded fonts
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     try doc.setEmbeddedFont(inter, 11);
     const im = doc.getFontMetrics();
     std.debug.print("Inter 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ im.ascender, im.y_max, im.cap_height });
 
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf");
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
     try doc.setEmbeddedFont(gentium, 11);
     const gm = doc.getFontMetrics();
     std.debug.print("Gentium 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ gm.ascender, gm.y_max, gm.cap_height });

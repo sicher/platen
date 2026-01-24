@@ -230,7 +230,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     defer doc.deinit();
 
     // Load the embedded font
-    const custom_font = doc.loadFont(font_path) catch |err| {
+    const custom_font = doc.loadFont(font_path, null) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -244,7 +244,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     // Show font info
     try doc.setFont(.helvetica, 12);
     var info_buf: [256]u8 = undefined;
-    const info = std.fmt.bufPrint(&info_buf, "Font: {s}", .{custom_font.name}) catch "Font: Unknown";
+    const info = std.fmt.bufPrint(&info_buf, "Font: {s}", .{custom_font.embedded.name}) catch "Font: Unknown";
     _ = try doc.writeAt(50, 80, info);
 
     // Use embedded font at various sizes
@@ -307,18 +307,18 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     var metrics_buf: [256]u8 = undefined;
 
     const ascent_info = std.fmt.bufPrint(&metrics_buf, "Ascent: {d}, Descent: {d}, CapHeight: {d}", .{
-        custom_font.ascent,
-        custom_font.descent,
-        custom_font.cap_height,
+        custom_font.embedded.ascent,
+        custom_font.embedded.descent,
+        custom_font.embedded.cap_height,
     }) catch "Metrics unavailable";
     _ = try doc.writeAt(50, y, ascent_info);
     y += 15;
 
     const bbox_info = std.fmt.bufPrint(&metrics_buf, "BBox: [{d}, {d}, {d}, {d}]", .{
-        custom_font.bbox[0],
-        custom_font.bbox[1],
-        custom_font.bbox[2],
-        custom_font.bbox[3],
+        custom_font.embedded.bbox[0],
+        custom_font.embedded.bbox[1],
+        custom_font.embedded.bbox[2],
+        custom_font.embedded.bbox[3],
     }) catch "BBox unavailable";
     _ = try doc.writeAt(50, y, bbox_info);
 
@@ -335,11 +335,10 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     defer doc.deinit();
 
     // Load font with identity encoding (CID mode for full Unicode)
-    const font = doc.loadFont(font_path) catch |err| {
+    const font = doc.loadFont(font_path, null) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
-    font.encoding = .identity; // Enable CID mode
 
     try doc.addPage();
 
@@ -359,14 +358,14 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     try file.writeAll(pdf);
 
     // Show stats
-    const cff_data = font.font.getTable("CFF ".*) orelse font.font.getTable("CFF2".*);
+    const cff_data = font.embedded.font.getTable("CFF ".*) orelse font.embedded.font.getTable("CFF2".*);
     const orig_size = if (cff_data) |d| d.len else 0;
-    const subset_size = if (font.subset_data) |s| s.len else orig_size;
-    const used_glyphs = font.cid_used_glyphs.count();
+    const subset_size = if (font.embedded.subset_data) |s| s.len else orig_size;
+    const used_glyphs = font.embedded.cid_used_glyphs.count();
 
     // Find max glyph ID
     var max_gid: u16 = 0;
-    for (font.cid_used_glyphs.values()) |gid| {
+    for (font.embedded.cid_used_glyphs.values()) |gid| {
         if (gid > max_gid) max_gid = gid;
     }
 
@@ -382,14 +381,13 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    const font = doc.loadFont(font_path) catch |err| {
+    const font = doc.loadFont(font_path, null) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
-    font.encoding = .identity;
     // Enable mark positioning features
-    font.setFeature(.mark, true);
-    font.setFeature(.mkmk, true);
+    font.embedded.setFeature(.mark, true);
+    font.embedded.setFeature(.mkmk, true);
 
     try doc.addPage();
     var y: f64 = 30;
@@ -440,7 +438,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     try file.writeAll(pdf);
 
     // Show mark/mkmk lookup stats
-    if (font.ot_features) |ot| {
+    if (font.embedded.ot_features) |ot| {
         try print("GPOS stats:\n", .{});
         try print("  Mark-to-Base lookups: {}\n", .{ot.mark_base_lookups.items.len});
         try print("  Mark-to-Mark lookups: {}\n", .{ot.mark_mark_lookups.items.len});
@@ -451,21 +449,19 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    const font = doc.loadFont(font_path) catch |err| {
+    const font = doc.loadFont(font_path, null) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
-    font.encoding = .identity;
     // Enable calt feature
-    font.setFeature(.calt, true);
+    font.embedded.setFeature(.calt, true);
 
     // Also load a version without calt for comparison
-    const font_no_calt = doc.loadFont(font_path) catch |err| {
+    const font_no_calt = doc.loadFont(font_path, null) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
-    font_no_calt.encoding = .identity;
-    font_no_calt.setFeature(.calt, false);
+    font_no_calt.embedded.setFeature(.calt, false);
 
     try doc.addPage();
     var y: f64 = 30;
@@ -542,7 +538,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     try file.writeAll(pdf);
 
     // Show calt lookup stats
-    if (font.ot_features) |ot| {
+    if (font.embedded.ot_features) |ot| {
         try print("GSUB calt stats:\n", .{});
         try print("  Calt ligature lookups: {}\n", .{ot.calt_liga_lookups.items.len});
         try print("  Chain context lookups: {}\n", .{ot.chain_context_lookups.items.len});

@@ -337,31 +337,31 @@ test "load embedded font from file" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     // Verify font was loaded
     try std.testing.expect(doc.embedded_fonts.items.len == 1);
-    try std.testing.expect(doc.embedded_fonts.items[0] == font);
+    try std.testing.expect(doc.embedded_fonts.items[0] == font.embedded);
 
     // Check font name was extracted
-    try std.testing.expect(font.name.len > 0);
+    try std.testing.expect(font.embedded.name.len > 0);
 
     // Check metrics are sensible
-    try std.testing.expect(font.ascent > 0);
-    try std.testing.expect(font.descent < 0); // Descent is negative
+    try std.testing.expect(font.embedded.ascent > 0);
+    try std.testing.expect(font.embedded.descent < 0); // Descent is negative
 }
 
 test "embedded font character widths" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     // Courier Prime is monospace - all visible chars should have same width
-    const width_A = font.widths['A'];
-    const width_Z = font.widths['Z'];
-    const width_a = font.widths['a'];
-    const width_m = font.widths['m'];
+    const width_A = font.embedded.widths['A'];
+    const width_Z = font.embedded.widths['Z'];
+    const width_a = font.embedded.widths['a'];
+    const width_m = font.embedded.widths['m'];
 
     try std.testing.expect(width_A > 0);
     try std.testing.expectEqual(width_A, width_Z);
@@ -369,21 +369,21 @@ test "embedded font character widths" {
     try std.testing.expectEqual(width_A, width_m);
 
     // Space should have a width
-    try std.testing.expect(font.widths[' '] > 0);
+    try std.testing.expect(font.embedded.widths[' '] > 0);
 }
 
 test "embedded font text measurement" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     // Measure text at 12pt
-    const width = font.measureTextWidth("Hello", 12.0);
+    const width = font.embedded.measureTextWidth("Hello", 12.0);
     try std.testing.expect(width > 0);
 
     // "Hello" is 5 chars, monospace - each char same width
-    const char_width = font.measureTextWidth("H", 12.0);
+    const char_width = font.embedded.measureTextWidth("H", 12.0);
     try std.testing.expectApproxEqAbs(char_width * 5, width, 0.01);
 }
 
@@ -391,8 +391,7 @@ test "render text with embedded font" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    font.encoding = .win_ansi; // Test WinAnsi format specifically
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
@@ -426,8 +425,7 @@ test "mix standard and embedded fonts" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const courier_prime = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    courier_prime.encoding = .win_ansi; // Test WinAnsi format specifically
+    const courier_prime = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
 
@@ -459,10 +457,8 @@ test "multiple embedded fonts" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    courier_regular.encoding = .win_ansi; // Test WinAnsi format specifically
-    const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf");
-    courier_bold.encoding = .win_ansi;
+    const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
+    const courier_bold = try doc.loadFont("test/fonts/Courier Prime/Courier Prime Bold.ttf", .win_ansi);
 
     try doc.addPage();
 
@@ -496,8 +492,7 @@ test "embedded font on multiple pages" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    font.encoding = .win_ansi; // Test WinAnsi format specifically
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
@@ -528,31 +523,30 @@ test "embedded font flags - monospace detection" {
     defer doc.deinit();
 
     // Courier Prime is monospace
-    const monospace = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    try std.testing.expect(monospace.flags.fixed_pitch == true);
+    const monospace = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    try std.testing.expect(monospace.embedded.flags.fixed_pitch == true);
 }
 
 test "embedded font bbox scaling" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     // BBox should be scaled to 1000 units
     // x_min should typically be negative or small
     // y_min should be negative (descenders)
     // x_max and y_max should be positive and reasonable for 1000 units
-    try std.testing.expect(font.bbox[3] > 0); // y_max (ascenders)
-    try std.testing.expect(font.bbox[3] <= 1500); // Should be scaled properly
-    try std.testing.expect(font.bbox[1] <= 0); // y_min should be 0 or negative
+    try std.testing.expect(font.embedded.bbox[3] > 0); // y_max (ascenders)
+    try std.testing.expect(font.embedded.bbox[3] <= 1500); // Should be scaled properly
+    try std.testing.expect(font.embedded.bbox[1] <= 0); // y_min should be 0 or negative
 }
 
 test "embedded font widths array in PDF" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
-    font.encoding = .win_ansi; // Test WinAnsi format specifically
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
@@ -574,22 +568,22 @@ test "variable font loading" {
     defer doc.deinit();
 
     // Inter Variable is a variable font - should still load basic metrics
-    const font = doc.loadFont("test/fonts/Inter/InterVariable.ttf") catch |err| {
+    const font = doc.loadFont("test/fonts/Inter/InterVariable.ttf", null) catch |err| {
         // Variable fonts might have extra tables we don't handle yet
         // For now, skip if loading fails
         std.debug.print("Skipping variable font test: {}\n", .{err});
         return;
     };
 
-    try std.testing.expect(font.ascent > 0);
-    try std.testing.expect(font.widths['A'] > 0);
+    try std.testing.expect(font.embedded.ascent > 0);
+    try std.testing.expect(font.embedded.widths['A'] > 0);
 }
 
 test "PDF output is valid with embedded font" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 24);
@@ -1243,8 +1237,7 @@ test "mark positioning with Tm absolute coordinates" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf");
-    inter.encoding = .identity;
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
 
     try doc.addPage();
     try doc.setEmbeddedFont(inter, 14);
@@ -2136,13 +2129,13 @@ test "embedded font decoration metrics from POST/OS2 tables" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf");
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     // Check decoration metrics were loaded
     // Courier Prime should have reasonable values
-    try std.testing.expect(font.underline_position != 0 or font.underline_thickness != 0);
-    try std.testing.expect(font.strikeout_position > 0);
-    try std.testing.expect(font.strikeout_size > 0);
+    try std.testing.expect(font.embedded.underline_position != 0 or font.embedded.underline_thickness != 0);
+    try std.testing.expect(font.embedded.strikeout_position > 0);
+    try std.testing.expect(font.embedded.strikeout_size > 0);
 }
 
 test "write() advances cursor_x" {

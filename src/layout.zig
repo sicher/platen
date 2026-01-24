@@ -2,9 +2,73 @@
 
 const color = @import("color.zig");
 const metrics = @import("metrics.zig");
+const embedded = @import("embedded.zig");
+const fonts = @import("fonts.zig");
 
 pub const Color = color.Color;
 pub const TextMetrics = metrics.TextMetrics;
+pub const EmbeddedFont = embedded.EmbeddedFont;
+pub const FontEncoding = embedded.FontEncoding;
+pub const StandardFont = fonts.StandardFont;
+pub const FontFamily = fonts.Family;
+
+// ============================================================================
+// Font and Text Style Types
+// ============================================================================
+
+/// Reference to a font (standard family, special font, or embedded).
+pub const Font = union(enum) {
+    family: FontFamily,
+    symbol,
+    zapf_dingbats,
+    embedded: *EmbeddedFont,
+
+    // Convenience constants for standard font families
+    pub const helvetica = Font{ .family = .helvetica };
+    pub const times = Font{ .family = .times };
+    pub const courier = Font{ .family = .courier };
+
+    /// Resolve to StandardFont (for standard fonts only).
+    /// Returns null for embedded fonts.
+    pub fn toStandardFont(self: Font, bold: bool, italic: bool) ?StandardFont {
+        return switch (self) {
+            .family => |fam| fonts.StandardFont.fromFamilyStyle(fam, if (bold and italic)
+                .bold_italic
+            else if (bold)
+                .bold
+            else if (italic)
+                .italic
+            else
+                .normal),
+            .symbol => .symbol,
+            .zapf_dingbats => .zapf_dingbats,
+            .embedded => null,
+        };
+    }
+};
+
+/// Complete text style (font, size, weight, color, decoration).
+pub const TextStyle = struct {
+    font: Font,
+    size: f64,
+    bold: bool = false,
+    italic: bool = false,
+    color: Color = Color.black,
+    decoration: TextDecoration = .none,
+
+    /// Get the resolved StandardFont if this is a standard font.
+    pub fn standardFont(self: TextStyle) ?StandardFont {
+        return self.font.toStandardFont(self.bold, self.italic);
+    }
+
+    /// Get the embedded font if this is an embedded font.
+    pub fn embeddedFont(self: TextStyle) ?*EmbeddedFont {
+        return switch (self.font) {
+            .embedded => |emb| emb,
+            else => null,
+        };
+    }
+};
 
 /// Border specification for regions.
 pub const Border = struct {
