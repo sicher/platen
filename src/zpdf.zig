@@ -57,6 +57,7 @@ pub const Align = document.Align;
 pub const VAlign = document.VAlign;
 pub const LineBreaking = document.LineBreaking;
 pub const TextDecoration = document.TextDecoration;
+pub const TextStyle = document.TextStyle;
 pub const TextStyleOptions = document.TextStyleOptions;
 pub const Margins = document.Margins;
 pub const Padding = document.Padding;

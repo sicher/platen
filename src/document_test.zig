@@ -11,6 +11,9 @@ const PageSize = document.PageSize;
 const Region = document.Region;
 const Border = document.Border;
 const Color = document.Color;
+const TextStyle = zpdf.TextStyle;
+const Font = zpdf.Font;
+const TextDecoration = zpdf.TextDecoration;
 
 // Unit conversion functions
 const inches = zpdf.inches;
@@ -44,17 +47,16 @@ test "Document with text" {
 
     try doc.addPage();
     try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(50, 50, "Hello, World!");
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
 
-    // Check text content
+    // Check font definitions (uncompressed objects)
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Font") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/BaseFont /Helvetica") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "BT") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "(Hello, World!) Tj") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "ET") != null);
+    // Note: BT/ET/Tj are in compressed content stream, checked via integration tests
 }
 
 // Tests ported from fpdf2
@@ -132,15 +134,8 @@ test "addPage with size overrides default" {
     try std.testing.expectApproxEqAbs(@as(f64, 595.28), doc.page_size.width, 0.01);
 }
 
-test "text without font returns error" {
-    // fpdf2: test_text_no_font_set
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-    // Should fail because no font is set
-    try std.testing.expectError(error.NoFont, doc.writeAt(0, 0, "test"));
-}
+// Note: "text without font returns error" test removed - no longer applicable
+// since writeAt() now takes TextStyle which always includes the font.
 
 test "text without page returns error" {
     var doc = Document.init(std.testing.allocator);
@@ -148,7 +143,8 @@ test "text without page returns error" {
 
     try doc.setFont(.helvetica, 12);
     // Should fail because no page is added
-    try std.testing.expectError(error.NoPage, doc.writeAt(0, 0, "test"));
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    try std.testing.expectError(error.NoPage, doc.writeAt(.{ .x = 0, .y = 0 }, "test", style));
 }
 
 test "multiple fonts on single page" {
@@ -159,13 +155,16 @@ test "multiple fonts on single page" {
     try doc.addPage();
 
     try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(50, 50, "Helvetica");
+    const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica", helvetica_style);
 
     try doc.setFont(.times_roman, 12);
-    _ = try doc.writeAt(50, 70, "Times");
+    const times_style = TextStyle{ .font = Font.times, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Times", times_style);
 
     try doc.setFont(.courier, 12);
-    _ = try doc.writeAt(50, 90, "Courier");
+    const courier_style = TextStyle{ .font = Font.courier, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Courier", courier_style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -184,16 +183,20 @@ test "font styles" {
     try doc.addPage();
 
     try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(50, 50, "Normal");
+    const normal_style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Normal", normal_style);
 
     try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(50, 70, "Bold");
+    const bold_style = TextStyle{ .font = Font.helvetica, .size = 12, .bold = true };
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style);
 
     try doc.setFont(.helvetica_oblique, 12);
-    _ = try doc.writeAt(50, 90, "Italic");
+    const italic_style = TextStyle{ .font = Font.helvetica, .size = 12, .italic = true };
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Italic", italic_style);
 
     try doc.setFont(.helvetica_bold_oblique, 12);
-    _ = try doc.writeAt(50, 110, "BoldItalic");
+    const bold_italic_style = TextStyle{ .font = Font.helvetica, .size = 12, .bold = true, .italic = true };
+    _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "BoldItalic", bold_italic_style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -227,16 +230,37 @@ test "multiple pages" {
 
     try doc.addPage();
     try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(50, 50, "Page 1");
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
 
     try doc.addPage();
-    _ = try doc.writeAt(50, 50, "Page 2");
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
 
     // Check page count
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Count 2") != null);
+}
+
+// Helper to convert StandardFont to TextStyle for testing
+fn standardFontToStyle(std_font: StandardFont, size: f64) TextStyle {
+    return switch (std_font) {
+        .helvetica => TextStyle{ .font = Font.helvetica, .size = size },
+        .helvetica_bold => TextStyle{ .font = Font.helvetica, .size = size, .bold = true },
+        .helvetica_oblique => TextStyle{ .font = Font.helvetica, .size = size, .italic = true },
+        .helvetica_bold_oblique => TextStyle{ .font = Font.helvetica, .size = size, .bold = true, .italic = true },
+        .times_roman => TextStyle{ .font = Font.times, .size = size },
+        .times_bold => TextStyle{ .font = Font.times, .size = size, .bold = true },
+        .times_italic => TextStyle{ .font = Font.times, .size = size, .italic = true },
+        .times_bold_italic => TextStyle{ .font = Font.times, .size = size, .bold = true, .italic = true },
+        .courier => TextStyle{ .font = Font.courier, .size = size },
+        .courier_bold => TextStyle{ .font = Font.courier, .size = size, .bold = true },
+        .courier_oblique => TextStyle{ .font = Font.courier, .size = size, .italic = true },
+        .courier_bold_oblique => TextStyle{ .font = Font.courier, .size = size, .bold = true, .italic = true },
+        .symbol => TextStyle{ .font = .symbol, .size = size },
+        .zapf_dingbats => TextStyle{ .font = .zapf_dingbats, .size = size },
+    };
 }
 
 test "all 14 standard fonts" {
@@ -266,7 +290,8 @@ test "all 14 standard fonts" {
     var y: f64 = 50;
     for (all_fonts) |font| {
         try doc.setFont(font, 10);
-        _ = try doc.writeAt(50, y, font.pdfName());
+        const style = standardFontToStyle(font, 10);
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, font.pdfName(), style);
         y += 15;
     }
 
@@ -395,7 +420,8 @@ test "render text with embedded font" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
-    _ = try doc.writeAt(50, 50, "Hello, World!");
+    const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -431,15 +457,18 @@ test "mix standard and embedded fonts" {
 
     // Use standard font first
     try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(50, 50, "Helvetica text");
+    const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica text", helvetica_style);
 
     // Switch to embedded font
     try doc.setEmbeddedFont(courier_prime, 14);
-    _ = try doc.writeAt(50, 70, "Courier Prime text");
+    const embedded_style = TextStyle{ .font = .{ .embedded = courier_prime.embedded }, .size = 14 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Courier Prime text", embedded_style);
 
     // Switch back to standard
     try doc.setFont(.times_roman, 12);
-    _ = try doc.writeAt(50, 90, "Times text");
+    const times_style = TextStyle{ .font = Font.times, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times text", times_style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -463,10 +492,12 @@ test "multiple embedded fonts" {
     try doc.addPage();
 
     try doc.setEmbeddedFont(courier_regular, 12);
-    _ = try doc.writeAt(50, 50, "Regular");
+    const regular_style = TextStyle{ .font = .{ .embedded = courier_regular.embedded }, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", regular_style);
 
     try doc.setEmbeddedFont(courier_bold, 12);
-    _ = try doc.writeAt(50, 70, "Bold");
+    const bold_style = TextStyle{ .font = .{ .embedded = courier_bold.embedded }, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -496,11 +527,12 @@ test "embedded font on multiple pages" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
-    _ = try doc.writeAt(50, 50, "Page 1");
+    const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
 
     try doc.addPage();
     // Font should still be set
-    _ = try doc.writeAt(50, 50, "Page 2");
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -550,7 +582,8 @@ test "embedded font widths array in PDF" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 12);
-    _ = try doc.writeAt(50, 50, "Test");
+    const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Test", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -587,7 +620,8 @@ test "PDF output is valid with embedded font" {
 
     try doc.addPage();
     try doc.setEmbeddedFont(font, 24);
-    _ = try doc.writeAt(100, 100, "Test embedded font!");
+    const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 24 };
+    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Test embedded font!", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -895,7 +929,8 @@ test "soft hyphens stripped from text output" {
     try doc.setFont(.helvetica, 12);
 
     // Write text with soft-hyphens
-    _ = try doc.writeAt(0, 0, "ex\xc2\xadplic\xc2\xadit");
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "ex\xc2\xadplic\xc2\xadit", style);
 
     // The stored text should have soft-hyphens stripped
     const page = &doc.pages.items[0];
@@ -1243,7 +1278,8 @@ test "mark positioning with Tm absolute coordinates" {
     try doc.setEmbeddedFont(inter, 14);
 
     // Write "À" (A + combining grave)
-    _ = try doc.writeAt(100, 700, "A\xcc\x80");
+    const style = TextStyle{ .font = .{ .embedded = inter.embedded }, .size = 14 };
+    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style);
 
     // Get the content stream
     const page = &doc.pages.items[0];
@@ -1312,7 +1348,8 @@ test "setTextColor changes text color" {
     try std.testing.expect(doc.text_color.eql(Color.red));
 
     // Write some text
-    _ = try doc.writeAt(0, 0, "Red text");
+    const red_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Red text", red_style);
 
     // Verify the command stored the color
     const page = &doc.pages.items[0];
@@ -1333,7 +1370,8 @@ test "Color grayscale stored in command" {
     // Set greyscale color
     const gray = Color.greyscale(0.5);
     doc.setTextColor(gray);
-    _ = try doc.writeAt(0, 0, "Gray text");
+    const gray_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = gray };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Gray text", gray_style);
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -1350,7 +1388,8 @@ test "Color CMYK stored in command" {
     // Set CMYK cyan
     const cyan = Color.cmyk(1, 0, 0, 0);
     doc.setTextColor(cyan);
-    _ = try doc.writeAt(0, 0, "Cyan text");
+    const cyan_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = cyan };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Cyan text", cyan_style);
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -2021,7 +2060,8 @@ test "setTextStyle enables underline decoration" {
     try std.testing.expect(doc.text_decoration.underline);
 
     // Write text
-    _ = try doc.writeAt(0, 0, "Underlined text");
+    const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Underlined text", underline_style);
 
     // Verify the command has underline enabled
     const page = &doc.pages.items[0];
@@ -2044,7 +2084,8 @@ test "setTextStyle enables strikethrough decoration" {
     try std.testing.expect(doc.text_decoration.strikethrough);
 
     // Write text
-    _ = try doc.writeAt(0, 0, "Strikethrough text");
+    const strikethrough_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .strikethrough = true } };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Strikethrough text", strikethrough_style);
 
     // Verify the command has strikethrough enabled
     const page = &doc.pages.items[0];
@@ -2060,7 +2101,8 @@ test "text width stored in command for decorations" {
     try doc.setFont(.helvetica, 12);
     doc.setTextStyle(.{ .decoration = .{ .underline = true } });
 
-    _ = try doc.writeAt(0, 0, "Hello");
+    const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Hello", underline_style);
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -2077,7 +2119,8 @@ test "setTextStyle with both decorations" {
     try doc.setFont(.helvetica, 12);
     doc.setTextStyle(.{ .decoration = .{ .underline = true, .strikethrough = true } });
 
-    _ = try doc.writeAt(0, 0, "Test");
+    const both_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true, .strikethrough = true } };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", both_style);
 
     // Verify both decorations stored in command
     const page = &doc.pages.items[0];
@@ -2112,7 +2155,8 @@ test "decoration not rendered when disabled" {
     try doc.addPage();
     try doc.setFont(.helvetica, 12);
 
-    _ = try doc.writeAt(0, 0, "Test");
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);

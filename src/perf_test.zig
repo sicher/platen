@@ -278,13 +278,14 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         simple_font.setFeature(.liga, false);
         simple_font.setFeature(.calt, false);
 
+        const simple_style = zpdf.TextStyle{ .font = .{ .embedded = simple_font }, .size = 10 };
         for (0..pages_per_section) |_| {
             try doc.addPage();
             try doc.setEmbeddedFont(simple_font, 10);
             var y: f64 = 30;
             // 50 lines of text per page
             for (0..50) |_| {
-                _ = try doc.writeAt(50, y, "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.", simple_style);
                 y += 14;
             }
         }
@@ -294,6 +295,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 3. OpenType heavy test (ligatures, kerning, contextual alternates)
     {
         const t = Timer.begin("OpenType heavy");
+        const inter_ot_style = zpdf.TextStyle{ .font = .{ .embedded = inter_ot }, .size = 11 };
+        const inter_bold_style = zpdf.TextStyle{ .font = .{ .embedded = inter_bold }, .size = 12 };
         for (0..pages_per_section) |_| {
             try doc.addPage();
             var y: f64 = 30;
@@ -301,26 +304,26 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             // Ligature-heavy text
             try doc.setEmbeddedFont(inter_ot, 11);
             for (0..15) |_| {
-                _ = try doc.writeAt(50, y, "ффи|fi fl ffi ffl|office efficientifficiently buffer difficult fjord");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "ффи|fi fl ffi ffl|office efficientifficiently buffer difficult fjord", inter_ot_style);
                 y += 14;
             }
 
             // Contextual alternates (arrows, math)
             for (0..15) |_| {
-                _ = try doc.writeAt(50, y, "-> => <- <=> --> <-- != == >= <= 3*9 12:34 a--b c++d");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "-> => <- <=> --> <-- != == >= <= 3*9 12:34 a--b c++d", inter_ot_style);
                 y += 14;
             }
 
             // Fractions
             for (0..10) |_| {
-                _ = try doc.writeAt(50, y, "1/2 3/4 5/8 7/16 11/32 1/3 2/3 1/5 2/5 3/5 4/5 99/100");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "1/2 3/4 5/8 7/16 11/32 1/3 2/3 1/5 2/5 3/5 4/5 99/100", inter_ot_style);
                 y += 14;
             }
 
             // Kerning stress (AV, To, Ty, etc.)
             try doc.setEmbeddedFont(inter_bold, 12);
             for (0..10) |_| {
-                _ = try doc.writeAt(50, y, "AVATAR WAVE TYPEWRITER Today Tomorrow Typography WATTAGE");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "AVATAR WAVE TYPEWRITER Today Tomorrow Typography WATTAGE", inter_bold_style);
                 y += 15;
             }
         }
@@ -330,6 +333,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 4. Unicode and diacritics test
     {
         const t = Timer.begin("Unicode/marks");
+        const gentium_style = zpdf.TextStyle{ .font = .{ .embedded = gentium }, .size = 11 };
+        const inter_style = zpdf.TextStyle{ .font = .{ .embedded = inter }, .size = 11 };
         for (0..pages_per_section) |_| {
             try doc.addPage();
             var y: f64 = 30;
@@ -337,32 +342,32 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             // Latin extended with diacritics
             try doc.setEmbeddedFont(gentium, 11);
             for (0..10) |_| {
-                _ = try doc.writeAt(50, y, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞß àáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞß àáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ", gentium_style);
                 y += 14;
             }
 
             // Stacked diacritics (Vietnamese, etc.)
             for (0..10) |_| {
-                _ = try doc.writeAt(50, y, "ẳ ế ộ ỗ ầ ẫ ồ ổ ứ ự ề ể ễ ệ ỉ ị ọ ỏ ố ớ ờ ở ợ ụ ủ ứ ừ");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "ẳ ế ộ ỗ ầ ẫ ồ ổ ứ ự ề ể ễ ệ ỉ ị ọ ỏ ố ớ ờ ở ợ ụ ủ ứ ừ", gentium_style);
                 y += 14;
             }
 
             // Mixed scripts
             for (0..10) |_| {
-                _ = try doc.writeAt(50, y, "Ćçčđ ěęėē ğģġ ħĥ įīĩ ķĸ ĺļľŀł ńņňŉŋ őœ ŕŗř śşšș ţťŧț űů");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ćçčđ ěęėē ğģġ ħĥ įīĩ ķĸ ĺļľŀł ńņňŉŋ őœ ŕŗř śşšș ţťŧț űů", gentium_style);
                 y += 14;
             }
 
             // Currency and symbols
             try doc.setEmbeddedFont(inter, 11);
             for (0..10) |_| {
-                _ = try doc.writeAt(50, y, "€£¥¢₹₽₿ §¶†‡ ©®™ °′″ ±×÷≠≈≤≥ ∞∑∏∫√ ←→↑↓↔ •◦○●■□▲△");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "€£¥¢₹₽₿ §¶†‡ ©®™ °′″ ±×÷≠≈≤≥ ∞∑∏∫√ ←→↑↓↔ •◦○●■□▲△", inter_style);
                 y += 14;
             }
 
             // Greek
             for (0..5) |_| {
-                _ = try doc.writeAt(50, y, "αβγδεζηθικλμνξοπρστυφχψω ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ");
+                _ = try doc.writeAt(.{ .x = 50, .y = y }, "αβγδεζηθικλμνξοπρστυφχψω ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ", inter_style);
                 y += 14;
             }
         }

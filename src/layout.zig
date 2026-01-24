@@ -55,6 +55,8 @@ pub const TextStyle = struct {
     italic: bool = false,
     color: Color = Color.black,
     decoration: TextDecoration = .none,
+    /// Extra space between characters in points (0 = normal).
+    char_spacing: f64 = 0,
 
     /// Get the resolved StandardFont if this is a standard font.
     pub fn standardFont(self: TextStyle) ?StandardFont {

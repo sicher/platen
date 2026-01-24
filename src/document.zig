@@ -780,6 +780,49 @@ pub const Document = struct {
         };
     }
 
+    /// Get the current text style as a TextStyle struct.
+    /// This can be passed to writeAt() to match the current document font settings.
+    pub fn getCurrentTextStyle(self: *Document) TextStyle {
+        const font: Font = if (self.current_embedded) |emb|
+            Font{ .embedded = emb }
+        else if (self.current_font) |std_font|
+            switch (std_font) {
+                .helvetica, .helvetica_bold, .helvetica_oblique, .helvetica_bold_oblique => Font.helvetica,
+                .times_roman, .times_bold, .times_italic, .times_bold_italic => Font.times,
+                .courier, .courier_bold, .courier_oblique, .courier_bold_oblique => Font.courier,
+                .symbol => Font.symbol,
+                .zapf_dingbats => Font.zapf_dingbats,
+            }
+        else
+            Font.helvetica;
+
+        const bold = if (self.current_font) |std_font|
+            switch (std_font) {
+                .helvetica_bold, .helvetica_bold_oblique, .times_bold, .times_bold_italic, .courier_bold, .courier_bold_oblique => true,
+                else => false,
+            }
+        else
+            false;
+
+        const italic = if (self.current_font) |std_font|
+            switch (std_font) {
+                .helvetica_oblique, .helvetica_bold_oblique, .times_italic, .times_bold_italic, .courier_oblique, .courier_bold_oblique => true,
+                else => false,
+            }
+        else
+            false;
+
+        return .{
+            .font = font,
+            .size = self.font_size,
+            .bold = bold,
+            .italic = italic,
+            .color = self.text_color,
+            .decoration = self.text_decoration,
+            .char_spacing = self.char_spacing,
+        };
+    }
+
     /// Get font metrics for the current font, scaled to the current font size.
     /// Returns metrics in points at the current font size.
     pub fn getFontMetrics(self: *Document) FontMetrics {
@@ -1236,19 +1279,102 @@ pub const Document = struct {
         return true;
     }
 
-    /// Writes text at the specified position.
+    /// Writes text at the specified position with explicit style.
     /// Returns the bounding rectangle of the rendered text.
-    pub fn writeAt(self: *Document, x: f64, y: f64, str: []const u8) !Rect {
-        self.setPosition(.{ .x = x, .y = y });
-        try self.writeAtCursor(str);
-        const width = self.getTextWidth(str);
+    pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle) !Rect {
+        try self.writeTextStyled(pos, str, style, 0);
+        const width = self.getTextWidthStyled(str, style);
         // Y is baseline, so rect top is y - font_size (approximate ascender)
         return .{
-            .x = x,
-            .y = y - self.font_size,
+            .x = pos.x,
+            .y = pos.y - style.size,
             .width = width,
-            .height = self.font_size,
+            .height = style.size,
         };
+    }
+
+    /// Internal: Write text at position with explicit style and word spacing.
+    /// pos is in user coordinates (top-left origin), converted to PDF coordinates internally.
+    fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+
+        var page = &self.pages.items[self.pages.items.len - 1];
+        const page_alloc = page.pageAllocator();
+
+        // Create owned copy of text, stripping soft-hyphens (U+00AD)
+        const text_copy = try stripSoftHyphens(page_alloc, str);
+
+        // Determine font reference from style
+        var cached_glyphs: ?[]const u16 = null;
+        const font_ref: FontRef = switch (style.font) {
+            .embedded => |emb| blk: {
+                try page.markEmbeddedUsed(self.allocator, emb);
+                if (emb.encoding == .identity) {
+                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                } else {
+                    emb.markCharsUsed(text_copy);
+                }
+                break :blk .{ .embedded = emb };
+            },
+            .family, .symbol, .zapf_dingbats => blk: {
+                const std_font = style.standardFont() orelse return error.InvalidFont;
+                try page.markFontUsed(self.allocator, std_font);
+                break :blk .{ .standard = std_font };
+            },
+        };
+
+        // Calculate text width for decorations (only if decoration enabled)
+        const text_width = if (style.decoration.underline or style.decoration.strikethrough)
+            self.getTextWidthStyled(text_copy, style)
+        else
+            0;
+
+        // Convert from user coordinates (top-left origin) to PDF coordinates (bottom-left origin)
+        const pdf_y = self.page_size.height - pos.y;
+
+        // Store deferred command
+        try page.commands.append(self.allocator, .{
+            .text = .{
+                .x = pos.x,
+                .y = pdf_y,
+                .font_size = style.size,
+                .char_spacing = style.char_spacing,
+                .word_spacing = word_spacing,
+                .text_data = text_copy,
+                .font = font_ref,
+                .text_color = style.color,
+                .cached_glyphs = cached_glyphs,
+                .text_width = text_width,
+                .underline = style.decoration.underline,
+                .strikethrough = style.decoration.strikethrough,
+            },
+        });
+    }
+
+    /// Measures text width with explicit style.
+    /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
+    pub fn getTextWidthStyled(self: *Document, str: []const u8, style: TextStyle) f64 {
+        _ = self; // Document not needed for measurement with explicit style
+
+        // Fast path: no soft-hyphens
+        if (!containsSoftHyphens(str)) {
+            return measureTextStyled(str, style);
+        }
+
+        // Slow path: filter out soft-hyphens using stack buffer
+        var buf: [4096]u8 = undefined;
+        var j: usize = 0;
+        var i: usize = 0;
+        while (i < str.len and j < buf.len) {
+            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+                i += 2; // Skip soft-hyphen
+            } else {
+                buf[j] = str[i];
+                j += 1;
+                i += 1;
+            }
+        }
+        return measureTextStyled(buf[0..j], style);
     }
 
     /// Measures text width using current font (standard or embedded).
@@ -1281,6 +1407,13 @@ pub const Document = struct {
             return emb.measureTextWidth(filtered, self.font_size);
         }
         return metrics.measureTextWidth(filtered, self.getFontStyle());
+    }
+
+    /// Internal: Write text at position using document state (for write/writeStyled flow).
+    /// Will be removed when write methods are updated to use explicit TextStyle.
+    fn writeAtStateful(self: *Document, x: f64, y: f64, str: []const u8) !void {
+        self.setPosition(.{ .x = x, .y = y });
+        try self.writeAtCursor(str);
     }
 
     /// Internal line writer with indent and valign support.
@@ -1354,7 +1487,7 @@ pub const Document = struct {
         if (word_spacing > 0) {
             try self.writeWithWordSpacing(x, y, str, word_spacing);
         } else {
-            _ = try self.writeAt(x, y, str);
+            try self.writeAtStateful(x, y, str);
         }
 
         // Advance cursor
@@ -2119,8 +2252,8 @@ pub const Document = struct {
                         const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
 
                         const x_pos = region.x + region.padding.left;
-                        _ = try self.writeAt(x_pos, y_pos, clean_prefix);
-                        _ = try self.writeAt(x_pos + bp.width, y_pos, "-");
+                        try self.writeAtStateful(x_pos, y_pos, clean_prefix);
+                        try self.writeAtStateful(x_pos + bp.width, y_pos, "-");
 
                         region.newLine(line_height);
                         lines_written += 1;
@@ -2135,7 +2268,7 @@ pub const Document = struct {
 
                             if (region.remainingHeight() >= line_height) {
                                 const y_pos2 = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
-                                _ = try self.writeAt(region.x + region.padding.left, y_pos2, clean_suffix);
+                                try self.writeAtStateful(region.x + region.padding.left, y_pos2, clean_suffix);
                                 region.newLine(line_height);
                                 lines_written += 1;
                             }
@@ -2161,7 +2294,7 @@ pub const Document = struct {
                         const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
 
                         const x_pos = region.x + region.padding.left;
-                        _ = try self.writeAt(x_pos, y_pos, prefix);
+                        try self.writeAtStateful(x_pos, y_pos, prefix);
 
                         region.newLine(line_height);
                         lines_written += 1;
@@ -2169,7 +2302,7 @@ pub const Document = struct {
                         // Render suffix on next line
                         if (suffix.len > 0 and region.remainingHeight() >= line_height) {
                             const y_pos2 = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
-                            _ = try self.writeAt(region.x + region.padding.left, y_pos2, suffix);
+                            try self.writeAtStateful(region.x + region.padding.left, y_pos2, suffix);
                             region.newLine(line_height);
                             lines_written += 1;
                         }
@@ -2196,7 +2329,7 @@ pub const Document = struct {
                         const remaining_width = self.getTextWidth(remaining_text);
                         if (remaining_width <= line_width + 0.01) {
                             // Fits - render it and we're done
-                            _ = try self.writeAt(x_pos, y_pos, remaining_text);
+                            try self.writeAtStateful(x_pos, y_pos, remaining_text);
                             region.newLine(line_height);
                             lines_written += 1;
                             did_break = true;
@@ -2206,14 +2339,14 @@ pub const Document = struct {
                         // Doesn't fit - find break point
                         if (self.findCharacterBreak(remaining_text, line_width)) |break_pos| {
                             const prefix = remaining_text[0..break_pos];
-                            _ = try self.writeAt(x_pos, y_pos, prefix);
+                            try self.writeAtStateful(x_pos, y_pos, prefix);
                             region.newLine(line_height);
                             lines_written += 1;
                             remaining_text = remaining_text[break_pos..];
                             did_break = true;
                         } else {
                             // Can't break (shouldn't happen) - render what we can
-                            _ = try self.writeAt(x_pos, y_pos, remaining_text);
+                            try self.writeAtStateful(x_pos, y_pos, remaining_text);
                             region.newLine(line_height);
                             lines_written += 1;
                             did_break = true;
@@ -2491,7 +2624,7 @@ pub const Document = struct {
 
                     // Get segment width and render using writeAt
                     const seg_width = self.getTextWidth(segment);
-                    _ = try self.writeAt(current_x, y_pos, segment);
+                    try self.writeAtStateful(current_x, y_pos, segment);
                     current_x += seg_width;
 
                     // Restore style
@@ -2698,7 +2831,7 @@ pub const Document = struct {
                         .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + cap_height / 2,
                         .bottom => region.y + region.padding.top + region.cursor_y + line_height,
                     };
-                    _ = try self.writeAt(region.x + region.padding.left, y_pos, line);
+                    try self.writeAtStateful(region.x + region.padding.left, y_pos, line);
                 }
                 region.newLine(line_height);
                 lines_written += 1;
@@ -4183,4 +4316,23 @@ fn containsSoftHyphens(str: []const u8) bool {
         }
     }
     return false;
+}
+
+/// Measure text width using explicit TextStyle.
+fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
+    switch (style.font) {
+        .embedded => |emb| {
+            return emb.measureTextWidth(str, style.size);
+        },
+        .family, .symbol, .zapf_dingbats => {
+            const std_font = style.standardFont() orelse return 0;
+            const font_style = FontStyle{
+                .font = std_font,
+                .size = style.size,
+                .char_spacing = style.char_spacing,
+                .line_height = 1.0, // Not used for width measurement
+            };
+            return metrics.measureTextWidth(str, font_style);
+        },
+    }
 }
