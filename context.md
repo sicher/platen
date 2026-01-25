@@ -1,10 +1,25 @@
 # zpdf Context
 
 ## Current Focus
-API cleanup and write() optimization **COMPLETED**.
+Memory loading API and API consistency improvements **COMPLETED**.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
+
+## What We Did (Session 2026-01-25 #6)
+- **Added memory loading functions**:
+  - `loadFontFromMemory(data, encoding)` - load font from buffer
+  - `loadFontFamilyFromMemory(opts)` - load font family from buffers
+  - `loadImageFromMemory(data)` - load JPEG/PNG from buffer
+  - `loadSvgFromMemory(data)` - load SVG from buffer
+  - Added tests for all memory loading functions
+
+- **Changed drawImage/drawSvg to take Rect**:
+  - More consistent with other shape drawing functions
+  - `drawImage(*Image, Rect)` instead of `drawImage(*Image, x, y, w, h)`
+  - `drawSvg(*Svg, Rect)` instead of `drawSvg(*Svg, x, y, w, h)`
+  - Rect.width and Rect.height now default to 0 for auto-scaling
+  - Updated all call sites and README
 
 ## What We Did (Session 2026-01-25 #5)
 - **Optimized write() with line-batching** - 2x speedup for rendering:
