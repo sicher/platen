@@ -71,6 +71,7 @@ pub const WriteResult = document.WriteResult;
 pub const WriteOptions = document.WriteOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
 pub const PageSize = document.PageSize;
+pub const PageOptions = document.PageOptions;
 
 // Re-export graphics types
 pub const LineCap = document.LineCap;

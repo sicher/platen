@@ -69,6 +69,7 @@ pub const WriteResult = layout.WriteResult;
 pub const WriteOptions = layout.WriteOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const PageSize = layout.PageSize;
+pub const PageOptions = layout.PageOptions;
 
 // Graphics types
 pub const LineCap = layout.LineCap;
@@ -213,12 +214,13 @@ const Page = struct {
     used_gradients: std.AutoHashMapUnmanaged(usize, void),
     annotations: std.ArrayListUnmanaged(LinkAnnotation), // Link annotations
     size: PageSize, // Page dimensions
+    margins: Margins, // Page margins
 
     // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
     // All page allocations freed at once in deinit - no individual free() calls
     arena: std.heap.ArenaAllocator,
 
-    fn init(backing_allocator: std.mem.Allocator, size: PageSize) Page {
+    fn init(backing_allocator: std.mem.Allocator, opts: PageOptions) Page {
         return .{
             .content = .{},
             .commands = .{},
@@ -228,7 +230,8 @@ const Page = struct {
             .used_svgs = .{},
             .used_gradients = .{},
             .annotations = .{},
-            .size = size,
+            .size = opts.size,
+            .margins = opts.margins,
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };
     }
@@ -428,9 +431,8 @@ pub const GradientDef = union(enum) {
 pub const Document = struct {
     allocator: std.mem.Allocator,
     pages: std.ArrayListUnmanaged(Page),
-    page_size: PageSize,
-    /// Document margins.
-    margins: Margins = .{},
+    /// Index of current page for content operations (0-based).
+    current_page: usize = 0,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
     // Track all embedded fonts
@@ -455,7 +457,6 @@ pub const Document = struct {
         return .{
             .allocator = allocator,
             .pages = .{},
-            .page_size = PageSize.A4,
         };
     }
 
@@ -500,14 +501,29 @@ pub const Document = struct {
         self.metadata = meta;
     }
 
-    /// Set the page size for subsequent addPage() calls.
-    pub fn setPageSize(self: *Document, size: PageSize) void {
-        self.page_size = size;
+    /// Add a new page with the specified options (size, margins).
+    /// The new page becomes the current page for subsequent operations.
+    pub fn addPage(self: *Document, opts: PageOptions) !void {
+        try self.pages.append(self.allocator, Page.init(self.allocator, opts));
+        self.current_page = self.pages.items.len - 1;
     }
 
-    /// Add a new page using the current page size (set via setPageSize, default A4).
-    pub fn addPage(self: *Document) !void {
-        try self.pages.append(self.allocator, Page.init(self.allocator, self.page_size));
+    /// Insert a page at the specified index.
+    /// Pages at and after the index are shifted. The inserted page becomes current.
+    pub fn insertPage(self: *Document, index: usize, opts: PageOptions) !void {
+        try self.pages.insert(self.allocator, index, Page.init(self.allocator, opts));
+        self.current_page = index;
+    }
+
+    /// Select a page by index for subsequent content operations.
+    pub fn selectPage(self: *Document, index: usize) void {
+        std.debug.assert(index < self.pages.items.len);
+        self.current_page = index;
+    }
+
+    /// Get the total number of pages.
+    pub fn pageCount(self: *const Document) usize {
+        return self.pages.items.len;
     }
 
     /// Load a TrueType font from file.
@@ -550,8 +566,8 @@ pub const Document = struct {
     pub fn drawImage(self: *Document, image: *Image, x: f64, y: f64, w: f64, h: f64) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Calculate display dimensions
         var display_w = w;
@@ -622,8 +638,8 @@ pub const Document = struct {
     pub fn drawSvg(self: *Document, s: *Svg, x: f64, y: f64, w: f64, h: f64) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Calculate display dimensions
         var display_w = w;
@@ -674,19 +690,23 @@ pub const Document = struct {
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
     }
 
-    /// Set document margins.
-    pub fn setMargins(self: *Document, m: Margins) void {
-        self.margins = m;
+    /// Returns a region for the current page respecting its margins.
+    /// Returns null if no pages have been added.
+    pub fn getPageRegion(self: *Document) ?Region {
+        if (self.pages.items.len == 0) return null;
+        const page = self.pages.items[self.current_page];
+        return .{
+            .x = page.margins.left,
+            .y = page.margins.top,
+            .width = page.size.width - page.margins.left - page.margins.right,
+            .height = page.size.height - page.margins.top - page.margins.bottom,
+        };
     }
 
-    /// Returns a region for the current page respecting document margins.
-    pub fn getPageRegion(self: *Document) Region {
-        return .{
-            .x = self.margins.left,
-            .y = self.margins.top,
-            .width = self.page_size.width - self.margins.left - self.margins.right,
-            .height = self.page_size.height - self.margins.top - self.margins.bottom,
-        };
+    /// Get current page size. Returns A4 if no pages exist.
+    fn currentPageSize(self: *const Document) PageSize {
+        if (self.pages.items.len == 0) return PageSize.A4;
+        return self.pages.items[self.current_page].size;
     }
 
     /// Set OpenType feature for all embedded fonts
@@ -755,11 +775,12 @@ pub const Document = struct {
     }
 
     /// Get a destination for a y position on the current page.
+    /// Get a destination for a y position on the current page.
     /// Used as target for internal links (e.g., TOC entries).
     /// Returns null if no pages have been added.
     pub fn destination(self: *const Document, y: f64) ?Destination {
         if (self.pages.items.len == 0) return null;
-        return .{ .page_index = self.pages.items.len - 1, .y = y };
+        return .{ .page_index = self.current_page, .y = y };
     }
 
     /// Add an internal link (clickable area that jumps to another page position).
@@ -767,7 +788,7 @@ pub const Document = struct {
     /// The dest specifies the target page and y position.
     pub fn addLink(self: *Document, rect: Rect, dest: Destination) !void {
         if (self.pages.items.len == 0) return error.NoPage;
-        var page = &self.pages.items[self.pages.items.len - 1];
+        var page = &self.pages.items[self.current_page];
         try page.annotations.append(self.allocator, .{
             .internal = .{ .rect = rect, .dest = dest },
         });
@@ -778,7 +799,7 @@ pub const Document = struct {
     /// The url is copied to page-local storage.
     pub fn addExternalLink(self: *Document, rect: Rect, url: []const u8) !void {
         if (self.pages.items.len == 0) return error.NoPage;
-        var page = &self.pages.items[self.pages.items.len - 1];
+        var page = &self.pages.items[self.current_page];
         const page_alloc = page.pageAllocator();
         // Copy URL to page arena (freed when page is destroyed)
         const url_copy = try page_alloc.dupe(u8, url);
@@ -834,7 +855,7 @@ pub const Document = struct {
     fn writeWithWordSpacingStyled(self: *Document, x: f64, y: f64, str: []const u8, word_spacing: f64, style: TextStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
+        var page = &self.pages.items[self.current_page];
         const page_alloc = page.pageAllocator();
 
         // Create owned copy of text, stripping soft-hyphens
@@ -873,7 +894,7 @@ pub const Document = struct {
         try page.commands.append(self.allocator, .{
             .text = .{
                 .x = x,
-                .y = self.page_size.height - y,
+                .y = self.currentPageSize().height - y,
                 .font_size = style.size,
                 .char_spacing = style.char_spacing,
                 .word_spacing = word_spacing,
@@ -1102,7 +1123,7 @@ pub const Document = struct {
     fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
+        var page = &self.pages.items[self.current_page];
         const page_alloc = page.pageAllocator();
 
         // Create owned copy of text, stripping soft-hyphens (U+00AD)
@@ -1135,7 +1156,7 @@ pub const Document = struct {
             0;
 
         // Convert from user coordinates (top-left origin) to PDF coordinates (bottom-left origin)
-        const pdf_y = self.page_size.height - pos.y;
+        const pdf_y = self.currentPageSize().height - pos.y;
 
         // Store deferred command
         try page.commands.append(self.allocator, .{
@@ -1555,10 +1576,10 @@ pub const Document = struct {
     pub fn drawRegion(self: *Document, region: Region) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
+        var page = &self.pages.items[self.current_page];
 
         // Convert from top-left coordinates to PDF coordinates (bottom-left origin)
-        const pdf_y = self.page_size.height - region.y - region.height;
+        const pdf_y = self.currentPageSize().height - region.y - region.height;
 
         // Build raw PDF commands for the region
         // Use q/Q (save/restore) to isolate graphics state changes (colors, etc.)
@@ -1633,8 +1654,8 @@ pub const Document = struct {
     pub fn drawLine(self: *Document, p1: Point, p2: Point, style: StrokeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Convert from top-left to PDF coordinates (bottom-left origin)
         const pdf_y1 = page_height - p1.y;
@@ -1665,8 +1686,8 @@ pub const Document = struct {
     pub fn drawRect(self: *Document, rect: Rect, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Convert from top-left to PDF coordinates (bottom-left origin)
         const pdf_y = page_height - rect.y - rect.height;
@@ -1708,8 +1729,8 @@ pub const Document = struct {
 
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
         const pdf_y = page_height - rect.y - rect.height; // Convert to PDF coords
 
         var buf: [1024]u8 = undefined;
@@ -1742,8 +1763,8 @@ pub const Document = struct {
     pub fn drawEllipse(self: *Document, rect: Rect, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Calculate center and radii from bounding box
         const rx = rect.width / 2.0;
@@ -1795,8 +1816,8 @@ pub const Document = struct {
         if (self.pages.items.len == 0) return error.NoPage;
         if (points.len < 3) return; // Need at least 3 points for a polygon
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Calculate required buffer size: ~50 bytes per point + overhead
         const buf_size = 256 + points.len * 64;
@@ -2498,7 +2519,7 @@ pub const Document = struct {
 
         // Draw all decoration runs as raw commands
         if (deco_count > 0) {
-            var page = &self.pages.items[self.pages.items.len - 1];
+            var page = &self.pages.items[self.current_page];
             const page_alloc = page.pageAllocator();
 
             // Get decoration metrics (scale from 1000 units)
@@ -2537,14 +2558,14 @@ pub const Document = struct {
 
                     // Draw underline
                     if (run.underline) {
-                        const ul_y = self.page_size.height - y_pos + underline_pos * scale;
+                        const ul_y = self.currentPageSize().height - y_pos + underline_pos * scale;
                         const h = underline_thick * scale;
                         len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ run.start_x, ul_y, width, -h }) catch unreachable).len;
                     }
 
                     // Draw strikethrough
                     if (run.strikethrough) {
-                        const st_y = self.page_size.height - y_pos + strikeout_pos * scale;
+                        const st_y = self.currentPageSize().height - y_pos + strikeout_pos * scale;
                         const h = strikeout_thick * scale;
                         len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ run.start_x, st_y, width, -h }) catch unreachable).len;
                     }
@@ -2705,8 +2726,8 @@ pub const Document = struct {
         if (self.pages.items.len == 0) return error.NoPage;
         if (p.isEmpty()) return;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Estimate buffer size: ~60 bytes per command + overhead
         const buf_size = 256 + p.commands.items.len * 64;
@@ -2756,8 +2777,8 @@ pub const Document = struct {
         if (self.pages.items.len == 0) return error.NoPage;
         if (gradient_idx >= self.gradients.items.len) return error.InvalidGradient;
 
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_height = self.page_size.height;
+        var page = &self.pages.items[self.current_page];
+        const page_height = self.currentPageSize().height;
 
         // Track that this page uses gradients
         try page.used_gradients.put(self.allocator, gradient_idx, {});
@@ -3601,8 +3622,8 @@ pub const Document = struct {
 
                             switch (grad_def) {
                                 .linear => |lg| {
-                                    const pdf_y0 = self.page_size.height - lg.y0;
-                                    const pdf_y1 = self.page_size.height - lg.y1;
+                                    const pdf_y0 = self.currentPageSize().height - lg.y0;
+                                    const pdf_y1 = self.currentPageSize().height - lg.y1;
                                     try shading_writer.print("<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2}] /Extend [{s} {s}] /Function ", .{
                                         lg.x0,
                                         pdf_y0,
@@ -3615,8 +3636,8 @@ pub const Document = struct {
                                     try shading_writer.writeAll(" >>");
                                 },
                                 .radial => |rg| {
-                                    const pdf_y0 = self.page_size.height - rg.y0;
-                                    const pdf_y1 = self.page_size.height - rg.y1;
+                                    const pdf_y0 = self.currentPageSize().height - rg.y0;
+                                    const pdf_y1 = self.currentPageSize().height - rg.y1;
                                     try shading_writer.print("<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}] /Extend [{s} {s}] /Function ", .{
                                         rg.x0,
                                         pdf_y0,

@@ -290,6 +290,12 @@ pub const PageSize = struct {
     }
 };
 
+/// Options for creating a new page.
+pub const PageOptions = struct {
+    size: PageSize = PageSize.A4,
+    margins: Margins = .{},
+};
+
 // ============================================================================
 // Navigation Types
 // ============================================================================
