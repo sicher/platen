@@ -1205,8 +1205,6 @@ pub const Document = struct {
         const space_width = self.getTextWidthStyled(" ", style);
 
         // Helper to compute y position based on valign (CSS-style)
-        // For .top: baseline = cursor_y + half_leading + ascender
-        //         = cursor_y + (line_height + ascender - descender) / 2
         const getYPos = struct {
             fn call(reg: *Region, lh: f64, asc: f64, desc: f64, valign: VAlign) f64 {
                 return switch (valign) {
@@ -1227,16 +1225,41 @@ pub const Document = struct {
         var lines_written: usize = 0;
         var remaining = str;
 
+        // Line batching state - accumulate words and render whole line at once
+        var line_text_start: usize = 0; // Byte offset in str where current line starts
+        var line_text_end: usize = 0; // Byte offset where current line ends (after last word)
+        var line_render_x: f64 = region.cursor_x; // X position for rendering the line
+        var line_has_content = false;
+
+        // Helper to flush (render) the current line batch
+        const flushLine = struct {
+            fn call(
+                doc: *Document,
+                text: []const u8,
+                text_start: usize,
+                text_end: usize,
+                render_x: f64,
+                render_y: f64,
+                sty: TextStyle,
+            ) !void {
+                if (text_end <= text_start) return;
+                const line_text = text[text_start..text_end];
+                try doc.writeWithWordSpacingStyled(render_x, render_y, line_text, 0, sty);
+            }
+        }.call;
+
         // Skip leading whitespace only at start of line
         if (region.cursor_x == 0) {
             while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t')) {
                 remaining = remaining[1..];
             }
         }
+        // Update line start after skipping whitespace
+        line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+        line_text_end = line_text_start;
 
         while (remaining.len > 0) {
             // Check if we have room for a line (only check at start of new line)
-            // Use small epsilon for floating point comparison
             if (region.cursor_x == 0 and region.remainingHeight() < line_height - 0.01) {
                 if (opts.measure_only) {
                     region.cursor_x = start_cursor_x;
@@ -1265,10 +1288,20 @@ pub const Document = struct {
             if (word_end == 0) {
                 // Whitespace at start - handle newline or skip space
                 if (is_newline) {
+                    // Flush current line before newline
+                    if (!opts.measure_only and line_has_content) {
+                        const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                        try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                    }
                     region.newLine(line_height);
                     lines_written += 1;
+                    line_has_content = false;
+                    line_render_x = 0;
                 }
                 remaining = remaining[1..];
+                // Update line start for next line
+                line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                line_text_end = line_text_start;
                 continue;
             }
 
@@ -1278,12 +1311,10 @@ pub const Document = struct {
 
             // Check if word fits on current line
             if (word_width <= available_width + 0.01) {
-                // Word fits - write it
-                if (!opts.measure_only) {
-                    const abs_x = region.x + region.padding.left + region.cursor_x;
-                    const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                    try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
-                }
+                // Word fits - add to batch (don't render yet)
+                const word_end_offset = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr) + word_end;
+                line_text_end = word_end_offset;
+                line_has_content = true;
 
                 region.cursor_x += word_width;
                 if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -1293,7 +1324,11 @@ pub const Document = struct {
                 if (remaining.len > 0) {
                     const next_char = remaining[0];
                     if (next_char == '\n') {
-                        // Explicit newline (always respected, even with wrap=false)
+                        // Explicit newline - flush line and move to next
+                        if (!opts.measure_only and line_has_content) {
+                            const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                        }
                         region.newLine(line_height);
                         lines_written += 1;
                         remaining = remaining[1..];
@@ -1301,23 +1336,29 @@ pub const Document = struct {
                         while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t')) {
                             remaining = remaining[1..];
                         }
+                        // Reset line state
+                        line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                        line_text_end = line_text_start;
+                        line_render_x = 0;
+                        line_has_content = false;
                     } else if (next_char == ' ' or next_char == '\t') {
-                        // Add space after word
+                        // Include space in batch, advance cursor
+                        line_text_end = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr) + 1;
                         region.cursor_x += space_width;
                         remaining = remaining[1..];
                     }
                 }
             } else if (!opts.wrap) {
-                // No wrapping - write word at current position even if it overflows
-                if (!opts.measure_only) {
-                    const abs_x = region.x + region.padding.left + region.cursor_x;
-                    const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
-                    try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
-                }
+                // No wrapping - add to batch even if it overflows
+                const word_end_offset = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr) + word_end;
+                line_text_end = word_end_offset;
+                line_has_content = true;
+
                 region.cursor_x += word_width;
                 if (region.cursor_x > max_x) max_x = region.cursor_x;
                 remaining = remaining[word_end..];
                 if (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t')) {
+                    line_text_end = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr) + 1;
                     region.cursor_x += space_width;
                     remaining = remaining[1..];
                 }
@@ -1326,20 +1367,25 @@ pub const Document = struct {
                 // Try soft-hyphen break first
                 if (self.findSoftHyphenBreakStyled(word, available_width, style)) |break_pos| {
                     const prefix = word[0..break_pos];
+                    const prefix_width = self.getTextWidthStyled(prefix, style);
+                    const hyphen_width = self.getTextWidthStyled("-", style);
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
                         try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
-                        const hyphen_x = abs_x + self.getTextWidthStyled(prefix, style);
-                        try self.writeTextStyled(.{ .x = hyphen_x, .y = abs_y }, "-", style, 0);
+                        try self.writeTextStyled(.{ .x = abs_x + prefix_width, .y = abs_y }, "-", style, 0);
                     }
-                    region.cursor_x = self.getTextWidthStyled(prefix, style) + self.getTextWidthStyled("-", style);
+                    region.cursor_x = prefix_width + hyphen_width;
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
                     region.newLine(line_height);
                     lines_written += 1;
                     remaining = remaining[break_pos + 2 ..]; // Skip soft-hyphen (2 bytes)
-                } else if (opts.break_on_hyphens and self.findHyphenBreakStyled(word, available_width, style) != null) {
-                    const break_pos = self.findHyphenBreakStyled(word, available_width, style).?;
+                    // Reset line state after break
+                    line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                    line_text_end = line_text_start;
+                    line_render_x = 0;
+                    line_has_content = false;
+                } else if (if (opts.break_on_hyphens) self.findHyphenBreakStyled(word, available_width, style) else null) |break_pos| {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
@@ -1351,6 +1397,11 @@ pub const Document = struct {
                     region.newLine(line_height);
                     lines_written += 1;
                     remaining = remaining[break_pos..];
+                    // Reset line state after break
+                    line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                    line_text_end = line_text_start;
+                    line_render_x = 0;
+                    line_has_content = false;
                 } else if (self.findCharacterBreakStyled(word, available_width, style)) |break_pos| {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
@@ -1363,6 +1414,11 @@ pub const Document = struct {
                     region.newLine(line_height);
                     lines_written += 1;
                     remaining = remaining[break_pos..];
+                    // Reset line state after break
+                    line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                    line_text_end = line_text_start;
+                    line_render_x = 0;
+                    line_has_content = false;
                 } else {
                     // Nothing fits, write word anyway (will overflow)
                     if (!opts.measure_only) {
@@ -1376,13 +1432,34 @@ pub const Document = struct {
                     if (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
                         remaining = remaining[1..];
                     }
+                    // Reset line state after overflow
+                    line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                    line_text_end = line_text_start;
+                    line_render_x = 0;
+                    line_has_content = false;
                 }
             } else {
                 // Word doesn't fit - wrap to next line
+                // Flush current line before wrapping
+                if (!opts.measure_only and line_has_content) {
+                    const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                    try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                }
                 region.newLine(line_height);
                 lines_written += 1;
+                // Reset line state for new line
+                line_text_start = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr);
+                line_text_end = line_text_start;
+                line_render_x = 0;
+                line_has_content = false;
                 // Don't consume the word, let next iteration handle it
             }
+        }
+
+        // Flush any remaining content on the last line
+        if (!opts.measure_only and line_has_content) {
+            const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
         }
 
         // Calculate actual lines - if cursor moved vertically, that's our line count
