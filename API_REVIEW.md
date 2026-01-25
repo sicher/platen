@@ -10,19 +10,18 @@ The library provides several methods for measuring text and fonts. Here's a comp
 
 | Method | Returns | Use Case |
 |--------|---------|----------|
-| `getTextWidth(str)` | `f64` | **Primary method.** Measures text width in points using current font. Handles soft-hyphens (excludes them from width). Works with both standard and embedded fonts. |
-| `measureText(str)` | `TextMetrics` | Returns width, height, and char_count. Height is font_size × line_height_factor. |
+| `getTextWidthStyled(str, style)` | `f64` | Measures text width in points for given TextStyle. Handles soft-hyphens (excludes them from width). Works with both standard and embedded fonts. |
 
-~~`measureTextWidth(str)`~~ - **REMOVED** (was duplicate of `getTextWidth`)
+All measurement requires explicit `TextStyle` - no stateful font state.
 
 ### Wrapped Text Measurement
 
 | Method | Returns | Use Case |
 |--------|---------|----------|
-| `write(region, str, .{ .measure_only = true })` | `WriteResult` | Measures layout without rendering. Side-effect free (cursor unchanged). |
-| `writeStyled(region, text, .{ .measure_only = true })` | `WriteResult` | Measures styled text layout without rendering. Side-effect free. |
+| `write(region, str, style, .{ .measure_only = true })` | `WriteResult` | Measures layout without rendering. Side-effect free. |
+| `writeStyled(region, text, style, .{ .measure_only = true })` | `WriteResult` | Measures styled text layout without rendering. Side-effect free. |
 
-~~`measureWrappedText(str, MeasureOptions)`~~ - **REMOVED** (use `write/writeStyled` with `measure_only` instead)
+All write methods take explicit `TextStyle` parameter.
 
 **WriteOptions:**
 ```zig
@@ -58,14 +57,13 @@ pub const WriteResult = struct {
 
 **Usage pattern for measurement:**
 ```zig
-var region = doc.getPageRegion();
+var region = doc.getPageRegion().?;
 const style = TextStyle{ .font = Font.helvetica, .size = 11 };
 const result = try doc.write(&region, text, style, .{ .measure_only = true });
-// Cursor is unchanged - measure_only is side-effect free
 // result.lines_written = number of lines
 // Calculate height: lines_written * style.size * 1.2
 
-// Render directly (no reset needed)
+// Render directly
 _ = try doc.write(&region, text, style, .{});
 ```
 
@@ -103,10 +101,10 @@ pub const TextMetrics = struct {
 
 | Method | Returns | Use Case |
 |--------|---------|----------|
-| `findSoftHyphenBreak(word, max_width)` | `?usize` | Find best soft-hyphen (U+00AD) break point that fits within width. Returns byte position. |
-| `findHyphenBreak(word, max_width)` | `?usize` | Find best regular hyphen break point (for compound words like "state-of-the-art"). |
+| `findSoftHyphenBreakStyled(word, max_width, style)` | `?usize` | Find best soft-hyphen (U+00AD) break point that fits within width. Returns byte position. |
+| `findHyphenBreakStyled(word, max_width, style)` | `?usize` | Find best regular hyphen break point (for compound words like "state-of-the-art"). |
 
-These are used internally by `write`/`writeStyled`.
+These are used internally by `write`/`writeStyled` and require explicit `TextStyle`.
 
 ### Internal/Callback
 
@@ -264,22 +262,20 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 
 ## 2. Naming Inconsistencies
 
-### Duplicate Functionality
-- ✅ **RESOLVED**: `measureTextWidth` removed, `getTextWidth` is the single method for text width
+### Resolved Issues
+- ✅ `measureTextWidth` removed - now only `getTextWidthStyled(str, style)`
+- ✅ `getLineHeightPts()` removed - use `style.size * line_height_multiplier`
+- ✅ `pageNo()` renamed to `getPageIndex()` for consistency
 
-### Naming Mismatches
+### Remaining Naming Issues
 | Current | Issue | Suggested |
 |---------|-------|-----------|
-| `getLineHeightPts()` | Returns computed pts, but `setLineHeight()` takes multiplier | Add `getLineHeight()` for multiplier, keep `getLineHeightPts()` for computed |
 | `fillRectGradient()` | Doesn't match `drawRect()` pattern | `drawRectGradient()` or integrate into `drawRect()` |
-| ~~`pageNo()`~~ | ~~Inconsistent with other getters~~ | ✅ Renamed to `getPageIndex()` |
 
-### Inconsistent Prefixes
-Some methods use `get`/`set` prefix, others don't:
-- ~~`pageNo()` vs `getPageRegion()`~~ ✅ Fixed: now `getPageIndex()` vs `getPageRegion()`
-- `destination(y)` vs explicit coordinate methods
-
-**Note**: With the removal of stateful methods (`getPosition()`, `currentDestination()`), this is less of an issue.
+### Naming Conventions
+Method naming is now consistent:
+- `get*` for queries: `getPageIndex()`, `getPageRegion()`, `getTextWidthStyled()`
+- `destination(y)` returns a `Destination` struct (not a getter pattern)
 
 ## 3. Missing Convenience Methods
 
@@ -301,11 +297,10 @@ const svg = try doc.loadSvgFromString(svg_string);
 
 ### Document Queries
 ```zig
-// Missing methods
-doc.getPageCount() -> usize        // Total number of pages
-doc.getCurrentPageIndex() -> usize // 0-based current page index
-doc.getCurrentFont() -> ?FontInfo  // Current font name and size
-doc.getFontSize() -> f64           // Current font size
+// Available methods
+doc.pageCount() -> usize           // ✅ Total number of pages
+doc.getPageIndex() -> usize        // ✅ 0-based current page index
+// Font queries not needed - TextStyle is explicit per-call
 ```
 
 ## 4. Parameter Inconsistencies
@@ -331,19 +326,19 @@ fillRectGradient(rect: Rect, gradient_idx: usize)
 ✅ **COMPLETED**: Explicit styles replace stateful `setDrawStyle()`
 
 ### Position Parameters
-Drawing methods now use Point/Rect types for geometric parameters:
+All methods now use Point/Rect types for geometric parameters:
 ```zig
 // Drawing uses Point/Rect:
 drawLine(p1: Point, p2: Point, style)      // Point structs
 drawRect(rect: Rect, style)                 // Rect struct
 drawCircle(center: Point, radius, style)    // Point + scalar
 
-// Text still uses separate coordinates:
-writeAt(x, y, str)                          // Separate coordinates
-drawImage(img, x, y, w, h)                  // Separate coordinates
+// Text uses Point:
+writeAt(pos: Point, str, style)             // Point struct + TextStyle
+drawImage(img, x, y, w, h)                  // Separate coordinates (could use Rect)
 ```
 
-**Note**: Text and image methods still use separate x,y coordinates for simplicity.
+**Note**: `drawImage` still uses separate x,y,w,h coordinates.
 
 ## 5. API Friction
 
@@ -364,21 +359,13 @@ try doc.drawLinearGradient(grad, rect);
 try doc.drawRadialGradient(grad, rect);
 ```
 
-### No Method Chaining
-Current API doesn't support fluent style:
+### Method Chaining - Not Applicable
+With explicit `TextStyle` parameters, method chaining is no longer relevant:
 ```zig
-// Current
-try doc.setFont(.helvetica, 12);
-doc.setTextColor(Color.blue);
-_ = try doc.writeAt(50, 50, "Hello");
-
-// Could be (if methods returned *Document)
-_ = try doc.setFont(.helvetica, 12)
-          .setTextColor(Color.blue)
-          .writeAt(50, 50, "Hello");
+// All styling is explicit per-call
+const style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.blue };
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", style);
 ```
-
-**Recommendation**: Consider returning `*Document` from setters for optional chaining (low priority).
 
 ## 6. Missing Features
 
@@ -421,24 +408,25 @@ try doc.scale(sx, sy);
 ## Priority Recommendations
 
 ### Completed ✅
-- ~~Remove duplicate `measureTextWidth()`~~ - kept `getTextWidth()` only
+- ~~Remove duplicate `measureTextWidth()`~~ - now only `getTextWidthStyled(str, style)`
 - ~~Remove `measureWrappedText()`~~ - use `write/writeStyled(.measure_only=true)`
 - ~~Refactor graphics API~~ - explicit `ShapeStyle` replaces stateful `setDrawStyle()`
+- ~~Remove stateful text API~~ - all methods now take explicit `TextStyle`
+- ~~Add page navigation~~ - `pageCount()`, `getPageIndex()`, `selectPage()`, `insertPage()`
+- ~~Standardize getter naming~~ - `getPageIndex()`, `getPageRegion()`, `getTextWidthStyled()`
 
 ### High Priority (API completeness)
-1. Add missing getters for all setters
-2. Add `loadFontFromBytes()`, `loadImageFromBytes()`, `loadSvgFromString()`
+1. Add `loadFontFromBytes()`, `loadImageFromBytes()`, `loadSvgFromString()`
+2. Add `getMetadata()` to match `setMetadata()`
 
 ### Medium Priority (Consistency)
 3. Rename `fillRectGradient()` to `drawRectGradient()`
-4. ~~Add `getPageCount()`, `getCurrentPageIndex()`~~ ✅ Added `pageCount()`, `getPageIndex()`
-5. ~~Standardize getter naming (`pageNo()` → `getPageNumber()`)~~ ✅ Done: `getPageIndex()`
 
 ### Low Priority (Nice to have)
-6. Add `saveState()` / `restoreState()`
-7. Add convenience gradient drawing methods
-8. Add clipping API
-9. Add transform API
+4. Add `saveState()` / `restoreState()`
+5. Add convenience gradient drawing methods
+6. Add clipping API
+7. Add transform API
 
 ## Summary
 
@@ -452,8 +440,8 @@ The API is functional and covers the core PDF generation needs well. Recent impr
 The API is now fully explicit - all text styling is done via `TextStyle` parameters passed to each method call. This eliminates hidden state and makes code easier to reason about.
 
 Remaining issues:
-- **Asymmetric access**: A few setters still lack getters (margins, page size, metadata)
+- **Missing `getMetadata()`**: `setMetadata()` has no corresponding getter
 - **Missing memory loading**: Can only load resources from files
 - **Two-step gradients**: More friction than necessary
 
-Addressing the high-priority items would improve API ergonomics without breaking changes.
+The API is clean and explicit. Remaining items are convenience features.

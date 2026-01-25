@@ -1429,29 +1429,6 @@ pub const Document = struct {
     /// Find a soft-hyphen break point in a word that fits within max_width.
     /// Soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) marks optional break points.
     /// Returns the byte position where to break (soft-hyphen will be replaced with visible hyphen).
-    pub fn findSoftHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
-        var best_break: ?usize = null;
-        var i: usize = 0;
-        while (i + 1 < word.len) {
-            // Soft-hyphen in UTF-8 is 0xC2 0xAD
-            if (word[i] == 0xC2 and word[i + 1] == 0xAD) {
-                // Found a soft-hyphen - measure prefix with a visible hyphen substituted
-                const prefix = word[0..i];
-                const prefix_width = self.getTextWidth(prefix) + self.getTextWidth("-");
-                if (prefix_width <= max_width) {
-                    best_break = i; // Position of the soft-hyphen
-                } else {
-                    break; // Prefix too wide, no point checking further
-                }
-                i += 2; // Skip the 2-byte soft-hyphen
-            } else {
-                i += 1;
-            }
-        }
-        return best_break;
-    }
-
-    /// Find a soft-hyphen break point with explicit style.
     pub fn findSoftHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         var i: usize = 0;
@@ -1475,24 +1452,6 @@ pub const Document = struct {
     /// Find a regular hyphen break point in a word that fits within max_width.
     /// Regular hyphens stay visible; we break AFTER the hyphen (e.g., "state-" / "of-the-art").
     /// Returns the byte position after the hyphen where to split.
-    pub fn findHyphenBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
-        var best_break: ?usize = null;
-        for (word, 0..) |c, i| {
-            if (c == '-' and i > 0 and i + 1 < word.len) {
-                // Found a hyphen - measure prefix including the hyphen
-                const prefix = word[0 .. i + 1];
-                const prefix_width = self.getTextWidth(prefix);
-                if (prefix_width <= max_width) {
-                    best_break = i + 1; // Position after the hyphen
-                } else {
-                    break; // Prefix too wide, no point checking further
-                }
-            }
-        }
-        return best_break;
-    }
-
-    /// Find a regular hyphen break point with explicit style.
     pub fn findHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         for (word, 0..) |c, i| {
@@ -1512,38 +1471,6 @@ pub const Document = struct {
     /// Find a character break point in a word that fits within max_width.
     /// This is a last resort when no hyphen or soft-hyphen breaks are available.
     /// Returns the byte position where to break (respecting UTF-8 boundaries).
-    fn findCharacterBreak(self: *Document, word: []const u8, max_width: f64) ?usize {
-        var best_break: ?usize = null;
-        var current_width: f64 = 0;
-        var i: usize = 0;
-
-        while (i < word.len) {
-            // Find the end of the current UTF-8 character
-            const char_len = std.unicode.utf8ByteSequenceLength(word[i]) catch 1;
-            const char_end = @min(i + char_len, word.len);
-
-            // Measure width including this character
-            const prefix_width = self.getTextWidth(word[0..char_end]);
-
-            if (prefix_width <= max_width) {
-                best_break = char_end;
-                current_width = prefix_width;
-                i = char_end;
-            } else {
-                break;
-            }
-        }
-
-        // Only return if we found at least one character that fits
-        if (best_break) |pos| {
-            if (pos > 0 and pos < word.len) {
-                return pos;
-            }
-        }
-        return null;
-    }
-
-    /// Find a character break point with explicit style.
     fn findCharacterBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         var current_width: f64 = 0;
