@@ -16,12 +16,37 @@ pub const FontFamily = fonts.Family;
 // Font and Text Style Types
 // ============================================================================
 
+/// A family of embedded fonts with regular, bold, italic, and bold-italic variants.
+/// Use `Document.loadFontFamily()` to create one.
+pub const EmbeddedFontFamily = struct {
+    regular: *EmbeddedFont,
+    bold: ?*EmbeddedFont = null,
+    italic: ?*EmbeddedFont = null,
+    bold_italic: ?*EmbeddedFont = null,
+
+    /// Resolve to the correct variant based on bold/italic flags.
+    /// Returns error if requested variant is not available.
+    pub fn resolve(self: *const EmbeddedFontFamily, is_bold: bool, is_italic: bool) error{FontVariantNotLoaded}!*EmbeddedFont {
+        if (is_bold and is_italic) {
+            return self.bold_italic orelse return error.FontVariantNotLoaded;
+        }
+        if (is_bold) {
+            return self.bold orelse return error.FontVariantNotLoaded;
+        }
+        if (is_italic) {
+            return self.italic orelse return error.FontVariantNotLoaded;
+        }
+        return self.regular;
+    }
+};
+
 /// Reference to a font (standard family, special font, or embedded).
 pub const Font = union(enum) {
     family: FontFamily,
     symbol,
     zapf_dingbats,
     embedded: *EmbeddedFont,
+    embedded_family: *EmbeddedFontFamily,
 
     // Convenience constants for standard font families
     pub const helvetica = Font{ .family = .helvetica };
@@ -42,7 +67,7 @@ pub const Font = union(enum) {
                 .normal),
             .symbol => .symbol,
             .zapf_dingbats => .zapf_dingbats,
-            .embedded => null,
+            .embedded, .embedded_family => null,
         };
     }
 };
@@ -63,7 +88,19 @@ pub const TextStyle = struct {
         return self.font.toStandardFont(self.bold, self.italic);
     }
 
-    /// Get the embedded font if this is an embedded font.
+    /// Get the embedded font, resolving family variants based on bold/italic.
+    /// Returns null for standard fonts.
+    /// Returns error.FontVariantNotLoaded if a family variant is requested but not loaded.
+    pub fn resolveEmbeddedFont(self: TextStyle) error{FontVariantNotLoaded}!?*EmbeddedFont {
+        return switch (self.font) {
+            .embedded => |emb| emb,
+            .embedded_family => |fam| try fam.resolve(self.bold, self.italic),
+            else => null,
+        };
+    }
+
+    /// Get the embedded font if this is a single embedded font (not a family).
+    /// For families, use resolveEmbeddedFont() instead.
     pub fn embeddedFont(self: TextStyle) ?*EmbeddedFont {
         return switch (self.font) {
             .embedded => |emb| emb,

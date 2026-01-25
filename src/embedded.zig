@@ -196,6 +196,13 @@ pub const EmbeddedFont = struct {
         return try fromParsed(allocator, result.font, result.data, true);
     }
 
+    /// Load and parse a TTF font from memory
+    /// If owns_data is true, this font takes ownership of the data slice
+    pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*EmbeddedFont {
+        const font = try ttf.Font.parse(data);
+        return try fromParsed(allocator, font, data, owns_data);
+    }
+
     /// Create from already-parsed font
     pub fn fromParsed(
         allocator: std.mem.Allocator,

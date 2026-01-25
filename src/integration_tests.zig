@@ -57,6 +57,7 @@ const test_cases = [_]TestCase{
     .{ .name = "styled_text", .generate = generateStyledTextPdf },
     .{ .name = "kerning", .generate = generateKerningPdf },
     .{ .name = "insert_page", .generate = generateInsertPagePdf },
+    .{ .name = "gentium_family", .generate = generateGentiumFamilyPdf },
 };
 
 // ============================================================================
@@ -2629,6 +2630,94 @@ fn generateInsertPagePdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Load main family using the font family API
+    const gentium = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+        .bold = "test/fonts/Gentium/Gentium-Bold.ttf",
+        .italic = "test/fonts/Gentium/Gentium-Italic.ttf",
+        .bold_italic = "test/fonts/Gentium/Gentium-BoldItalic.ttf",
+    });
+
+    // Load extra weights as separate fonts
+    const medium = try doc.loadFont("test/fonts/Gentium/Gentium-Medium.ttf", null);
+    const medium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-MediumItalic.ttf", null);
+    const semibold = try doc.loadFont("test/fonts/Gentium/Gentium-SemiBold.ttf", null);
+    const semibold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-SemiBoldItalic.ttf", null);
+    const extrabold = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBold.ttf", null);
+    const extrabold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBoldItalic.ttf", null);
+
+    // Title style (using family with bold)
+    const title_style = zpdf.TextStyle{ .font = gentium, .size = 24, .bold = true };
+    const section_style = zpdf.TextStyle{ .font = gentium, .size = 14, .bold = true };
+
+    // Main family styles - uses bold/italic flags
+    const regular_style = zpdf.TextStyle{ .font = gentium, .size = 12 };
+    const bold_style = zpdf.TextStyle{ .font = gentium, .size = 12, .bold = true };
+    const italic_style = zpdf.TextStyle{ .font = gentium, .size = 12, .italic = true };
+    const bold_italic_style = zpdf.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
+
+    // Extra weight styles - uses specific fonts
+    const medium_style = zpdf.TextStyle{ .font = medium, .size = 12 };
+    const medium_italic_style = zpdf.TextStyle{ .font = medium_italic, .size = 12 };
+    const semibold_style = zpdf.TextStyle{ .font = semibold, .size = 12 };
+    const semibold_italic_style = zpdf.TextStyle{ .font = semibold_italic, .size = 12 };
+    const extrabold_style = zpdf.TextStyle{ .font = extrabold, .size = 12 };
+    const extrabold_italic_style = zpdf.TextStyle{ .font = extrabold_italic, .size = 12 };
+
+    try doc.addPage(.{});
+    var y: f64 = 40;
+
+    // Title
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gentium Font Family", title_style);
+    y += 40;
+
+    // Main family section
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Main Family (using FontFamily API)", section_style);
+    y += 25;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular: The quick brown fox jumps over the lazy dog.", regular_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: The quick brown fox jumps over the lazy dog.", bold_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic: The quick brown fox jumps over the lazy dog.", italic_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold Italic: The quick brown fox jumps over the lazy dog.", bold_italic_style);
+    y += 35;
+
+    // Extra weights section
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Extra Weights (loaded separately)", section_style);
+    y += 25;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Medium: The quick brown fox jumps over the lazy dog.", medium_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Medium Italic: The quick brown fox jumps over the lazy dog.", medium_italic_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "SemiBold: The quick brown fox jumps over the lazy dog.", semibold_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "SemiBold Italic: The quick brown fox jumps over the lazy dog.", semibold_italic_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ExtraBold: The quick brown fox jumps over the lazy dog.", extrabold_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ExtraBold Italic: The quick brown fox jumps over the lazy dog.", extrabold_italic_style);
+    y += 35;
+
+    // Unicode test
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Unicode Support", section_style);
+    y += 25;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Diacritics: café, naïve, résumé, Zürich, señor", regular_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Greek: Ελληνικά, Αθήνα", regular_style);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cyrillic: Москва, Київ", regular_style);
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2779,6 +2868,11 @@ test "integration: insert_page PDF" {
     // Tests insertPage by building pages in reverse order
     // Reference is generated the normal way with addPage()
     try runIntegrationTest("insert_page", generateInsertPagePdf);
+}
+
+test "integration: gentium_family PDF" {
+    // Tests FontFamily API with all Gentium font weights
+    try runIntegrationTest("gentium_family", generateGentiumFamilyPdf);
 }
 
 const TestOptions = struct {

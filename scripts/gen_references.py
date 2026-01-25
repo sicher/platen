@@ -2216,7 +2216,96 @@ def gen_kerning():
     print("  kerning.pdf")
 
 
+def gen_gentium_family():
+    """PDF demonstrating all Gentium font weights and styles."""
+    pdf = make_pdf()
+    fonts_dir = Path("test/fonts/Gentium")
+
+    # Add all Gentium fonts - main family
+    pdf.add_font("Gentium", "", str(fonts_dir / "Gentium-Regular.ttf"))
+    pdf.add_font("Gentium", "B", str(fonts_dir / "Gentium-Bold.ttf"))
+    pdf.add_font("Gentium", "I", str(fonts_dir / "Gentium-Italic.ttf"))
+    pdf.add_font("Gentium", "BI", str(fonts_dir / "Gentium-BoldItalic.ttf"))
+
+    # Extra weights as separate families
+    pdf.add_font("GentiumMedium", "", str(fonts_dir / "Gentium-Medium.ttf"))
+    pdf.add_font("GentiumMedium", "I", str(fonts_dir / "Gentium-MediumItalic.ttf"))
+    pdf.add_font("GentiumSemiBold", "", str(fonts_dir / "Gentium-SemiBold.ttf"))
+    pdf.add_font("GentiumSemiBold", "I", str(fonts_dir / "Gentium-SemiBoldItalic.ttf"))
+    pdf.add_font("GentiumExtraBold", "", str(fonts_dir / "Gentium-ExtraBold.ttf"))
+    pdf.add_font("GentiumExtraBold", "I", str(fonts_dir / "Gentium-ExtraBoldItalic.ttf"))
+
+    # Enable text shaping with kerning
+    pdf.set_text_shaping(True, features={"kern": True})
+
+    pdf.add_page()
+    y = 40
+
+    # Title
+    pdf.set_font("Gentium", "B", size=24)
+    shaped_text(pdf, 50, y, "Gentium Font Family")
+    y += 40
+
+    # Main family section
+    pdf.set_font("Gentium", "B", size=14)
+    shaped_text(pdf, 50, y, "Main Family (using FontFamily API)")
+    y += 25
+
+    pdf.set_font("Gentium", "", size=12)
+    shaped_text(pdf, 50, y, "Regular: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("Gentium", "B", size=12)
+    shaped_text(pdf, 50, y, "Bold: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("Gentium", "I", size=12)
+    shaped_text(pdf, 50, y, "Italic: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("Gentium", "BI", size=12)
+    shaped_text(pdf, 50, y, "Bold Italic: The quick brown fox jumps over the lazy dog.")
+    y += 35
+
+    # Extra weights section
+    pdf.set_font("Gentium", "B", size=14)
+    shaped_text(pdf, 50, y, "Extra Weights (loaded separately)")
+    y += 25
+
+    pdf.set_font("GentiumMedium", "", size=12)
+    shaped_text(pdf, 50, y, "Medium: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("GentiumMedium", "I", size=12)
+    shaped_text(pdf, 50, y, "Medium Italic: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("GentiumSemiBold", "", size=12)
+    shaped_text(pdf, 50, y, "SemiBold: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("GentiumSemiBold", "I", size=12)
+    shaped_text(pdf, 50, y, "SemiBold Italic: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("GentiumExtraBold", "", size=12)
+    shaped_text(pdf, 50, y, "ExtraBold: The quick brown fox jumps over the lazy dog.")
+    y += 18
+    pdf.set_font("GentiumExtraBold", "I", size=12)
+    shaped_text(pdf, 50, y, "ExtraBold Italic: The quick brown fox jumps over the lazy dog.")
+    y += 35
+
+    # Unicode section
+    pdf.set_font("Gentium", "B", size=14)
+    shaped_text(pdf, 50, y, "Unicode Support")
+    y += 25
+
+    pdf.set_font("Gentium", "", size=12)
+    shaped_text(pdf, 50, y, "Diacritics: café, naïve, résumé, Zürich, señor")
+    y += 18
+    shaped_text(pdf, 50, y, "Greek: Ελληνικά, Αθήνα")
+    y += 18
+    shaped_text(pdf, 50, y, "Cyrillic: Москва, Київ")
+
+    pdf.output(OUTPUT_DIR / "gentium_family.pdf")
+    print("  gentium_family.pdf")
+
+
 GENERATORS = {
+    "gentium_family": gen_gentium_family,
     "kerning": gen_kerning,
     "text_decorations": gen_text_decorations,
     "text_style": gen_text_style,

@@ -34,6 +34,7 @@ pub const StandardFont = fonts.StandardFont;
 pub const FontFamily = fonts.Family;
 pub const Font = layout.Font;
 pub const FontEncoding = layout.FontEncoding;
+pub const EmbeddedFontFamily = layout.EmbeddedFontFamily;
 pub const TextStyle = layout.TextStyle;
 pub const TextMetrics = metrics.TextMetrics;
 pub const FontStyle = metrics.FontStyle;
@@ -440,6 +441,8 @@ pub const Document = struct {
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
     // Track all embedded fonts
     embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .{},
+    // Track all embedded font families
+    embedded_font_families: std.ArrayListUnmanaged(*EmbeddedFontFamily) = .{},
     // Track all loaded images
     loaded_images: std.ArrayListUnmanaged(*Image) = .{},
     // Track all loaded SVGs
@@ -473,6 +476,11 @@ pub const Document = struct {
             font.deinit();
         }
         self.embedded_fonts.deinit(self.allocator);
+        // Clean up embedded font families (fonts already freed above)
+        for (self.embedded_font_families.items) |family| {
+            self.allocator.destroy(family);
+        }
+        self.embedded_font_families.deinit(self.allocator);
         // Clean up loaded images
         for (self.loaded_images.items) |image| {
             image.deinit();
@@ -536,6 +544,148 @@ pub const Document = struct {
         return Font{ .embedded = emb };
     }
 
+    /// Load a TrueType font from memory buffer.
+    /// Returns a Font that can be used in TextStyle.
+    /// The document does NOT take ownership of the data - caller must ensure it outlives the document.
+    pub fn loadFontFromMemory(self: *Document, data: []const u8, encoding: ?FontEncoding) !Font {
+        const emb = try EmbeddedFont.fromMemory(self.allocator, data, false);
+        emb.encoding = encoding orelse .identity;
+        try self.embedded_fonts.append(self.allocator, emb);
+        return Font{ .embedded = emb };
+    }
+
+    /// Options for loading a font family with multiple variants.
+    pub const FontFamilyOptions = struct {
+        /// Path to regular weight font file (required).
+        regular: []const u8,
+        /// Path to bold weight font file (optional).
+        bold: ?[]const u8 = null,
+        /// Path to italic font file (optional).
+        italic: ?[]const u8 = null,
+        /// Path to bold-italic font file (optional).
+        bold_italic: ?[]const u8 = null,
+        /// Font encoding (applies to all variants). null = identity (Unicode).
+        encoding: ?FontEncoding = null,
+    };
+
+    /// Load a font family with regular, bold, italic, and bold-italic variants.
+    /// Only the regular variant is required; others are optional.
+    /// The returned Font can be used with TextStyle.bold and TextStyle.italic
+    /// to automatically select the correct variant.
+    ///
+    /// Example:
+    /// ```
+    /// const gentium = try doc.loadFontFamily(.{
+    ///     .regular = "fonts/Gentium-Regular.ttf",
+    ///     .bold = "fonts/Gentium-Bold.ttf",
+    ///     .italic = "fonts/Gentium-Italic.ttf",
+    ///     .bold_italic = "fonts/Gentium-BoldItalic.ttf",
+    /// });
+    /// const style = TextStyle{ .font = gentium, .size = 12, .bold = true };
+    /// ```
+    pub fn loadFontFamily(self: *Document, opts: FontFamilyOptions) !Font {
+        const encoding = opts.encoding orelse .identity;
+
+        // Load regular (required)
+        const regular = try EmbeddedFont.fromFile(self.allocator, opts.regular);
+        regular.encoding = encoding;
+        try self.embedded_fonts.append(self.allocator, regular);
+
+        // Load optional variants
+        var bold: ?*EmbeddedFont = null;
+        if (opts.bold) |path| {
+            bold = try EmbeddedFont.fromFile(self.allocator, path);
+            bold.?.encoding = encoding;
+            try self.embedded_fonts.append(self.allocator, bold.?);
+        }
+
+        var italic: ?*EmbeddedFont = null;
+        if (opts.italic) |path| {
+            italic = try EmbeddedFont.fromFile(self.allocator, path);
+            italic.?.encoding = encoding;
+            try self.embedded_fonts.append(self.allocator, italic.?);
+        }
+
+        var bold_italic: ?*EmbeddedFont = null;
+        if (opts.bold_italic) |path| {
+            bold_italic = try EmbeddedFont.fromFile(self.allocator, path);
+            bold_italic.?.encoding = encoding;
+            try self.embedded_fonts.append(self.allocator, bold_italic.?);
+        }
+
+        // Create and store the family
+        const family = try self.allocator.create(EmbeddedFontFamily);
+        family.* = .{
+            .regular = regular,
+            .bold = bold,
+            .italic = italic,
+            .bold_italic = bold_italic,
+        };
+        try self.embedded_font_families.append(self.allocator, family);
+
+        return Font{ .embedded_family = family };
+    }
+
+    /// Options for loading a font family from memory buffers.
+    pub const FontFamilyMemoryOptions = struct {
+        /// Font data for regular weight (required).
+        regular: []const u8,
+        /// Font data for bold weight (optional).
+        bold: ?[]const u8 = null,
+        /// Font data for italic (optional).
+        italic: ?[]const u8 = null,
+        /// Font data for bold-italic (optional).
+        bold_italic: ?[]const u8 = null,
+        /// Font encoding (applies to all variants). null = identity (Unicode).
+        encoding: ?FontEncoding = null,
+    };
+
+    /// Load a font family from memory buffers.
+    /// Only the regular variant is required; others are optional.
+    /// The document does NOT take ownership of the data - caller must ensure buffers outlive the document.
+    pub fn loadFontFamilyFromMemory(self: *Document, opts: FontFamilyMemoryOptions) !Font {
+        const encoding = opts.encoding orelse .identity;
+
+        // Load regular (required)
+        const regular = try EmbeddedFont.fromMemory(self.allocator, opts.regular, false);
+        regular.encoding = encoding;
+        try self.embedded_fonts.append(self.allocator, regular);
+
+        // Load optional variants
+        var bold: ?*EmbeddedFont = null;
+        if (opts.bold) |data| {
+            bold = try EmbeddedFont.fromMemory(self.allocator, data, false);
+            bold.?.encoding = encoding;
+            try self.embedded_fonts.append(self.allocator, bold.?);
+        }
+
+        var italic: ?*EmbeddedFont = null;
+        if (opts.italic) |data| {
+            italic = try EmbeddedFont.fromMemory(self.allocator, data, false);
+            italic.?.encoding = encoding;
+            try self.embedded_fonts.append(self.allocator, italic.?);
+        }
+
+        var bold_italic: ?*EmbeddedFont = null;
+        if (opts.bold_italic) |data| {
+            bold_italic = try EmbeddedFont.fromMemory(self.allocator, data, false);
+            bold_italic.?.encoding = encoding;
+            try self.embedded_fonts.append(self.allocator, bold_italic.?);
+        }
+
+        // Create and store the family
+        const family = try self.allocator.create(EmbeddedFontFamily);
+        family.* = .{
+            .regular = regular,
+            .bold = bold,
+            .italic = italic,
+            .bold_italic = bold_italic,
+        };
+        try self.embedded_font_families.append(self.allocator, family);
+
+        return Font{ .embedded_family = family };
+    }
+
     /// Get index of embedded font (for resource naming)
     fn getEmbeddedFontIndex(self: *Document, font: *EmbeddedFont) ?usize {
         for (self.embedded_fonts.items, 0..) |f, i| {
@@ -548,6 +698,15 @@ pub const Document = struct {
     /// Returns a handle that can be used with drawImage().
     pub fn loadImage(self: *Document, path: []const u8) !*Image {
         const image = try Image.fromFile(self.allocator, path);
+        try self.loaded_images.append(self.allocator, image);
+        return image;
+    }
+
+    /// Load an image from memory buffer (JPEG or PNG).
+    /// Returns a handle that can be used with drawImage().
+    /// The document does NOT take ownership of the data - caller must ensure it outlives the document.
+    pub fn loadImageFromMemory(self: *Document, data: []const u8) !*Image {
+        const image = try Image.fromMemory(self.allocator, data, false);
         try self.loaded_images.append(self.allocator, image);
         return image;
     }
@@ -620,6 +779,14 @@ pub const Document = struct {
     /// Returns a handle that can be used with drawSvg().
     pub fn loadSvg(self: *Document, path: []const u8) !*Svg {
         const s = try Svg.fromFile(self.allocator, path);
+        try self.loaded_svgs.append(self.allocator, s);
+        return s;
+    }
+
+    /// Load an SVG from memory buffer.
+    /// Returns a handle that can be used with drawSvg().
+    pub fn loadSvgFromMemory(self: *Document, data: []const u8) !*Svg {
+        const s = try Svg.fromMemory(self.allocator, data);
         try self.loaded_svgs.append(self.allocator, s);
         return s;
     }
@@ -728,31 +895,36 @@ pub const Document = struct {
         const size = style.size;
         const scale = size / 1000.0;
 
-        switch (style.font) {
-            .embedded => |emb| {
-                return .{
-                    .ascender = @as(f64, @floatFromInt(emb.ascent)) * scale,
-                    .descender = @as(f64, @floatFromInt(emb.descent)) * scale,
-                    .cap_height = @as(f64, @floatFromInt(emb.cap_height)) * scale,
-                    .x_height = @as(f64, @floatFromInt(emb.cap_height)) * scale * 0.7,
-                    .y_max = @as(f64, @floatFromInt(emb.bbox[3])) * scale,
-                    .font_size = size,
-                    .units_per_em = emb.font.head.?.units_per_em,
-                };
-            },
-            .family, .symbol, .zapf_dingbats => {
-                const std_font = style.standardFont() orelse .helvetica;
-                const m = metrics.getStandardFontMetrics(std_font);
-                return .{
-                    .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
-                    .descender = @as(f64, @floatFromInt(m.descender)) * scale,
-                    .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
-                    .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
-                    .y_max = @as(f64, @floatFromInt(m.ascender)) * scale,
-                    .font_size = size,
-                    .units_per_em = 1000,
-                };
-            },
+        // Get embedded font - for families, resolve based on bold/italic or fall back to regular
+        const emb: ?*EmbeddedFont = switch (style.font) {
+            .embedded => |e| e,
+            .embedded_family => |fam| fam.resolve(style.bold, style.italic) catch fam.regular,
+            else => null,
+        };
+
+        if (emb) |e| {
+            return .{
+                .ascender = @as(f64, @floatFromInt(e.ascent)) * scale,
+                .descender = @as(f64, @floatFromInt(e.descent)) * scale,
+                .cap_height = @as(f64, @floatFromInt(e.cap_height)) * scale,
+                .x_height = @as(f64, @floatFromInt(e.cap_height)) * scale * 0.7,
+                .y_max = @as(f64, @floatFromInt(e.bbox[3])) * scale,
+                .font_size = size,
+                .units_per_em = e.font.head.?.units_per_em,
+            };
+        } else {
+            // Standard font
+            const std_font = style.standardFont() orelse .helvetica;
+            const m = metrics.getStandardFontMetrics(std_font);
+            return .{
+                .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
+                .descender = @as(f64, @floatFromInt(m.descender)) * scale,
+                .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
+                .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
+                .y_max = @as(f64, @floatFromInt(m.ascender)) * scale,
+                .font_size = size,
+                .units_per_em = 1000,
+            };
         }
     }
 
@@ -851,6 +1023,16 @@ pub const Document = struct {
 
         const font_ref: FontRef = switch (style.font) {
             .embedded => |emb| blk: {
+                try page.markEmbeddedUsed(self.allocator, emb);
+                if (emb.encoding == .identity) {
+                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                } else {
+                    emb.markCharsUsed(text_copy);
+                }
+                break :blk .{ .embedded = emb };
+            },
+            .embedded_family => |fam| blk: {
+                const emb = try fam.resolve(style.bold, style.italic);
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
@@ -1117,6 +1299,16 @@ pub const Document = struct {
         var cached_glyphs: ?[]const u16 = null;
         const font_ref: FontRef = switch (style.font) {
             .embedded => |emb| blk: {
+                try page.markEmbeddedUsed(self.allocator, emb);
+                if (emb.encoding == .identity) {
+                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                } else {
+                    emb.markCharsUsed(text_copy);
+                }
+                break :blk .{ .embedded = emb };
+            },
+            .embedded_family => |fam| blk: {
+                const emb = try fam.resolve(style.bold, style.italic);
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
@@ -4067,6 +4259,11 @@ fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
         .embedded => |emb| {
             return emb.measureTextWidth(str, style.size);
         },
+        .embedded_family => |fam| {
+            // Resolve to correct variant, fall back to regular on error
+            const emb = fam.resolve(style.bold, style.italic) catch fam.regular;
+            return emb.measureTextWidth(str, style.size);
+        },
         .family, .symbol, .zapf_dingbats => {
             const std_font = style.standardFont() orelse return 0;
             const font_style = FontStyle{
@@ -4156,4 +4353,98 @@ test "soft hyphens excluded from text width" {
     const with_soft = doc.getTextWidthStyled("ex\xc2\xadplic\xc2\xadit", style);
     const without_soft = doc.getTextWidthStyled("explicit", style);
     try std.testing.expectEqual(without_soft, with_soft);
+}
+
+test "font family loads and resolves variants" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Load Gentium family with all variants
+    const font = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+        .bold = "test/fonts/Gentium/Gentium-Bold.ttf",
+        .italic = "test/fonts/Gentium/Gentium-Italic.ttf",
+        .bold_italic = "test/fonts/Gentium/Gentium-BoldItalic.ttf",
+    });
+
+    // Extract the family
+    const fam = font.embedded_family;
+
+    // Regular resolves to regular
+    const regular = try fam.resolve(false, false);
+    try std.testing.expect(std.mem.startsWith(u8, regular.name, "Gentium"));
+
+    // Bold resolves to bold
+    const bold = try fam.resolve(true, false);
+    try std.testing.expect(bold != regular);
+
+    // Italic resolves to italic
+    const italic = try fam.resolve(false, true);
+    try std.testing.expect(italic != regular);
+
+    // Bold+italic resolves to bold-italic
+    const bold_italic = try fam.resolve(true, true);
+    try std.testing.expect(bold_italic != bold);
+    try std.testing.expect(bold_italic != italic);
+}
+
+test "font family with missing variant returns error" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Load family with only regular
+    const font = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+    });
+
+    const fam = font.embedded_family;
+
+    // Regular works
+    _ = try fam.resolve(false, false);
+
+    // Bold should fail
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(true, false));
+
+    // Italic should fail
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(false, true));
+
+    // Bold+italic should fail
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(true, true));
+}
+
+test "font family text rendering uses correct variant" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Load Gentium family
+    const font = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+        .bold = "test/fonts/Gentium/Gentium-Bold.ttf",
+        .italic = "test/fonts/Gentium/Gentium-Italic.ttf",
+        .bold_italic = "test/fonts/Gentium/Gentium-BoldItalic.ttf",
+    });
+
+    try doc.addPage(.{});
+
+    // Write text with different styles - should use correct font variant
+    const base_style = TextStyle{ .font = font, .size = 12 };
+    const bold_style = TextStyle{ .font = font, .size = 12, .bold = true };
+    const italic_style = TextStyle{ .font = font, .size = 12, .italic = true };
+    const bold_italic_style = TextStyle{ .font = font, .size = 12, .bold = true, .italic = true };
+
+    // All should succeed without error
+    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Regular text", base_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 120 }, "Bold text", bold_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 140 }, "Italic text", italic_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 160 }, "Bold italic text", bold_italic_style);
+
+    // Generate PDF output
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // PDF should contain font references for all variants
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E3 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E4 ") != null);
 }

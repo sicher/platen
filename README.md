@@ -50,7 +50,7 @@ pub fn main() !void {
     defer doc.deinit();
 
     // Add a page and write text
-    try doc.addPage(null);
+    try doc.addPage(.{});
     const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
@@ -101,7 +101,7 @@ zig build test   # Run tests
 ### Text with Multiple Fonts
 
 ```zig
-try doc.addPage(null);
+try doc.addPage(.{});
 
 const title = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
 const body = zpdf.TextStyle{ .font = zpdf.Font.times, .size = 12 };
@@ -121,15 +121,40 @@ const font = try doc.loadFont("fonts/MyFont.ttf", null);
 // Or specify encoding explicitly
 const latin_font = try doc.loadFont("fonts/Latin.ttf", .win_ansi);
 
-try doc.addPage(null);
+try doc.addPage(.{});
 const style = zpdf.TextStyle{ .font = font, .size = 14 };
 _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Custom font with Unicode: 日本語 🎉", style);
+```
+
+### Font Families (Bold/Italic Variants)
+
+```zig
+// Load a font family with all variants
+const gentium = try doc.loadFontFamily(.{
+    .regular = "fonts/Gentium-Regular.ttf",
+    .bold = "fonts/Gentium-Bold.ttf",
+    .italic = "fonts/Gentium-Italic.ttf",
+    .bold_italic = "fonts/Gentium-BoldItalic.ttf",
+});
+
+try doc.addPage(.{});
+
+// Use bold/italic flags - library selects correct variant automatically
+const body = zpdf.TextStyle{ .font = gentium, .size = 12 };
+const emphasis = zpdf.TextStyle{ .font = gentium, .size = 12, .italic = true };
+const strong = zpdf.TextStyle{ .font = gentium, .size = 12, .bold = true };
+const strong_emphasis = zpdf.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
+
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular text", body);
+_ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Italic text", emphasis);
+_ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Bold text", strong);
+_ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Bold italic text", strong_emphasis);
 ```
 
 ### Text Flow with Word Wrapping
 
 ```zig
-try doc.addPage(null);
+try doc.addPage(.{});
 
 // Define a region for text
 var region = zpdf.Region{
@@ -147,7 +172,7 @@ const result = try doc.write(&region, text, style, .{});
 
 if (result.overflow) |_| {
     // Handle text that didn't fit
-    try doc.addPage(null);
+    try doc.addPage(.{});
     // ... continue with remaining text
 }
 
@@ -232,7 +257,7 @@ Available presets: `black`, `white`, `red`, `green`, `blue`, `cyan`, `magenta`, 
 ### Drawing Shapes
 
 ```zig
-try doc.addPage(null);
+try doc.addPage(.{});
 
 // Line with explicit style
 try doc.drawLine(
@@ -298,7 +323,7 @@ try doc.drawPath(&path, .{
 // Load JPEG or PNG
 const img = try doc.loadImage("photo.jpg");
 
-try doc.addPage(null);
+try doc.addPage(.{});
 
 // Draw at position with explicit size
 try doc.drawImage(img, 50, 50, 200, 150);
@@ -313,7 +338,7 @@ try doc.drawImage(img, 50, 250, 200, 0);  // width=200, height auto
 // Load SVG file
 const svg = try doc.loadSvg("diagram.svg");
 
-try doc.addPage(null);
+try doc.addPage(.{});
 
 // Draw at position (original size if w=0, h=0)
 try doc.drawSvg(svg, 50, 50, 0, 0);
@@ -402,7 +427,7 @@ doc.setMetadata(.{
 ### Links
 
 ```zig
-try doc.addPage(null);
+try doc.addPage(.{});
 
 const body = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
 const heading = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
@@ -418,7 +443,7 @@ const ch1_result = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduct
 const chapter1_dest = doc.destination(ch1_result.y).?;  // save this location
 
 // Later, create a link to that chapter
-try doc.addPage(null);
+try doc.addPage(.{});
 const toc_rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Go to Chapter 1", body);
 try doc.addLink(toc_rect, chapter1_dest);
 ```
@@ -468,6 +493,9 @@ doc.setOutline(&outline);
 | Method | Description |
 |--------|-------------|
 | `loadFont(path, ?encoding) -> Font` | Load TTF/OTF font from file (null = identity/Unicode) |
+| `loadFontFromMemory(data, ?encoding) -> Font` | Load TTF/OTF font from memory buffer |
+| `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
+| `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
 | `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable OpenType feature for specific font |
 | `getFontMetricsStyled(TextStyle) -> FontMetrics` | Get metrics (ascender, descender, etc.) for a style |
 
@@ -528,9 +556,11 @@ try st.append("red", .{ .color = zpdf.Color.red });
 
 | Method | Description |
 |--------|-------------|
-| `loadImage(path) -> *Image` | Load JPEG or PNG image |
+| `loadImage(path) -> *Image` | Load JPEG or PNG image from file |
+| `loadImageFromMemory(data) -> *Image` | Load JPEG or PNG image from memory buffer |
 | `drawImage(*Image, x, y, w, h)` | Draw image (use 0 for w or h to auto-scale) |
-| `loadSvg(path) -> *Svg` | Load SVG file |
+| `loadSvg(path) -> *Svg` | Load SVG from file |
+| `loadSvgFromMemory(data) -> *Svg` | Load SVG from memory buffer |
 | `drawSvg(*Svg, x, y, w, h)` | Draw SVG (use 0, 0 for original size) |
 
 ### Drawing Shapes
@@ -621,11 +651,12 @@ zpdf.pt_per_cm    // 28.34...
 - `TextMetrics` / `FontMetrics` - Measurement results
 
 **Fonts:**
-- `Font` - Union type: `.family` (FontFamily), `.symbol`, `.zapf_dingbats`, `.embedded` (*EmbeddedFont)
+- `Font` - Union type: `.family` (FontFamily), `.symbol`, `.zapf_dingbats`, `.embedded` (*EmbeddedFont), `.embedded_family` (*EmbeddedFontFamily)
 - `Font.helvetica`, `Font.times`, `Font.courier` - Convenience constants for standard font families
 - `FontFamily` - `.helvetica`, `.times`, `.courier` (resolved to bold/italic via TextStyle)
 - `StandardFont` - `.helvetica`, `.helvetica_bold`, `.helvetica_italic`, `.helvetica_bold_italic`, `.times_roman`, `.times_bold`, `.times_italic`, `.times_bold_italic`, `.courier`, `.courier_bold`, `.courier_italic`, `.courier_bold_italic`, `.symbol`, `.zapfdingbats`
 - `EmbeddedFont` - Loaded TTF/OTF font
+- `EmbeddedFontFamily` - Font family with regular/bold/italic/bold-italic variants (from `loadFontFamily`)
 - `TextStyle` - Complete text style (font, size, bold, italic, color, decoration)
 
 **Graphics:**
