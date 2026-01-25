@@ -34,9 +34,9 @@ pub fn main() !void {
     defer doc.deinit();
 
     // Add a page and write text
-    try doc.addPage();
-    try doc.setFont(.helvetica, 24);
-    try doc.writeAt(50, 50, "Hello, World!");
+    try doc.addPage(null);
+    const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
     // Save to file
     const pdf_data = try doc.output();
@@ -85,16 +85,15 @@ zig build test   # Run tests
 ### Text with Multiple Fonts
 
 ```zig
-try doc.addPage();
+try doc.addPage(null);
 
-try doc.setFont(.helvetica_bold, 16);
-try doc.writeAt(50, 50, "Title");
+const title = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+const body = zpdf.TextStyle{ .font = zpdf.Font.times, .size = 12 };
+const code = zpdf.TextStyle{ .font = zpdf.Font.courier, .size = 10 };
 
-try doc.setFont(.times_roman, 12);
-try doc.writeAt(50, 80, "Body text in Times Roman");
-
-try doc.setFont(.courier, 10);
-try doc.writeAt(50, 100, "Monospace code");
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Title", title);
+_ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Body text in Times Roman", body);
+_ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Monospace code", code);
 ```
 
 ### Custom Fonts (TrueType/OpenType)
@@ -106,16 +105,15 @@ const font = try doc.loadFont("fonts/MyFont.ttf", null);
 // Or specify encoding explicitly
 const latin_font = try doc.loadFont("fonts/Latin.ttf", .win_ansi);
 
-try doc.addPage();
-try doc.setEmbeddedFont(font, 14);
-try doc.writeAt(50, 50, "Custom font with Unicode: 日本語 🎉");
+try doc.addPage(null);
+const style = zpdf.TextStyle{ .font = font, .size = 14 };
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Custom font with Unicode: 日本語 🎉", style);
 ```
 
 ### Text Flow with Word Wrapping
 
 ```zig
-try doc.addPage();
-try doc.setFont(.helvetica, 11);
+try doc.addPage(null);
 
 // Define a region for text
 var region = zpdf.Region{
@@ -126,21 +124,25 @@ var region = zpdf.Region{
 };
 
 const text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit...";
+const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
 
-// Create styled text and write with word wrapping
-var st = doc.createStyledText();
-defer st.deinit();
-try st.append(text, .{});
-
-const result = try doc.writeStyled(&region, &st, .{
-    .alignment = .justify,
-});
+// Simple text with word wrapping
+const result = try doc.write(&region, text, style, .{});
 
 if (result.overflow) |_| {
     // Handle text that didn't fit
-    try doc.addPage();
+    try doc.addPage(null);
     // ... continue with remaining text
 }
+
+// Or use styled text for mixed formatting
+var st = doc.createStyledText();
+defer st.deinit();
+try st.append("Normal text ", .{});
+try st.append("bold text ", .{ .bold = true });
+try st.append("colored text", .{ .color = zpdf.Color.blue });
+
+_ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
 ```
 
 ### Measure Text Before Rendering
@@ -159,6 +161,7 @@ var region = zpdf.Region{
 
 // Define text style
 const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+const line_height = style.size * 1.2;  // Default line height multiplier
 
 // Measure plain text (cursor unchanged after this call)
 const result = try doc.write(&region, text, style, .{ .measure_only = true });
@@ -167,10 +170,9 @@ const result = try doc.write(&region, text, style, .{ .measure_only = true });
 var styled = doc.createStyledText();
 try styled.append("Hello ", .{});
 try styled.append("World", .{ .color = zpdf.Color.blue });
-const styled_result = try doc.writeStyled(&region, &styled, .{ .measure_only = true });
+const styled_result = try doc.writeStyled(&region, &styled, style, .{ .measure_only = true });
 
 // Calculate height from lines_written
-const line_height = doc.getLineHeightPts();
 const content_height = @as(f64, @floatFromInt(result.lines_written)) * line_height;
 const box_height = content_height + 16; // Add padding
 
@@ -210,7 +212,7 @@ Available presets: `black`, `white`, `red`, `green`, `blue`, `cyan`, `magenta`, 
 ### Drawing Shapes
 
 ```zig
-try doc.addPage();
+try doc.addPage(null);
 
 // Line with explicit style
 try doc.drawLine(
@@ -276,7 +278,7 @@ try doc.drawPath(&path, .{
 // Load JPEG or PNG
 const img = try doc.loadImage("photo.jpg");
 
-try doc.addPage();
+try doc.addPage(null);
 
 // Draw at position with explicit size
 try doc.drawImage(img, 50, 50, 200, 150);
@@ -291,7 +293,7 @@ try doc.drawImage(img, 50, 250, 200, 0);  // width=200, height auto
 // Load SVG file
 const svg = try doc.loadSvg("diagram.svg");
 
-try doc.addPage();
+try doc.addPage(null);
 
 // Draw at position (original size if w=0, h=0)
 try doc.drawSvg(svg, 50, 50, 0, 0);
@@ -375,24 +377,24 @@ doc.setMetadata(.{
 ### Links
 
 ```zig
-try doc.addPage();
-try doc.setFont(.helvetica, 12);
+try doc.addPage(null);
+
+const body = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+const heading = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
 
 // Write text and get its bounding rectangle
-const rect = try doc.writeAt(50, 50, "Click here for Zig documentation");
+const rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Click here for Zig documentation", body);
 
 // Add external link (URL)
 try doc.addExternalLink(rect, "https://ziglang.org/documentation/");
 
 // Internal links for TOC navigation
-try doc.setFont(.helvetica_bold, 16);
-_ = try doc.writeAt(50, 100, "Chapter 1: Introduction");
+_ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduction", heading);
 const chapter1_dest = doc.currentDestination();  // save this location
 
 // Later, create a link to that chapter
-try doc.addPage();
-try doc.setFont(.helvetica, 12);
-const toc_rect = try doc.writeAt(50, 50, "Go to Chapter 1");
+try doc.addPage(null);
+const toc_rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Go to Chapter 1", body);
 try doc.addLink(toc_rect, chapter1_dest);
 ```
 
@@ -421,48 +423,50 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `setFont(StandardFont, size)` | Set standard font (Helvetica, Times, Courier, etc.) |
 | `loadFont(path, ?encoding) -> Font` | Load TTF/OTF font from file (null = identity/Unicode) |
-| `setEmbeddedFont(Font, size)` | Set embedded font as current |
-| `setFeature(Feature, bool)` | Enable/disable OpenType feature globally |
-| `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable feature for specific font |
-| `getFontMetrics() -> FontMetrics` | Get metrics (ascender, descender, etc.) for current font |
-| `getFontStyle() -> FontStyle` | Get current font style info |
+| `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable OpenType feature for specific font |
+| `getFontMetricsStyled(TextStyle) -> FontMetrics` | Get metrics (ascender, descender, etc.) for a style |
 
 ### Text Output
 
 | Method | Description |
 |--------|-------------|
-| `writeAt(Point, str, TextStyle) -> Rect` | Write text at position with explicit style |
+| `writeAt(Point, str, TextStyle) -> Rect` | Write text at absolute position |
 | `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Write with word wrapping into region |
-| `writeStyled(*Region, *StyledText, ParagraphOptions) -> WriteResult` | Write styled text with wrapping |
-| `createStyledText() -> StyledText` | Create styled text builder for mixed formatting |
+| `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping |
+| `createStyledText() -> StyledText` | Create builder for mixed formatting (bold, colors, etc.) |
 
 ### Text Measurement
 
 | Method | Description |
 |--------|-------------|
-| `getTextWidth(str) -> f64` | Measure text width in points |
-| `measureText(str) -> TextMetrics` | Get width and height |
-| `write(*Region, str, style, .{ .measure_only = true })` | Measure plain text layout without rendering |
-| `writeStyled(*Region, *StyledText, .{ .measure_only = true })` | Measure styled text layout without rendering |
+| `getTextWidthStyled(str, TextStyle) -> f64` | Measure text width in points |
+| `write(*Region, str, style, .{ .measure_only = true })` | Measure layout without rendering (cursor unchanged) |
+| `writeStyled(*Region, *StyledText, style, .{ .measure_only = true })` | Measure styled layout without rendering |
 
 ### Text Styling
 
-| Method | Description |
-|--------|-------------|
-| `setTextColor(Color)` | Set text color |
-| `setTextStyle(TextStyleOptions)` | Set color and decoration (underline, strikethrough) |
-| `setCharSpacing(f64)` | Set extra space between characters (points) |
-| `setLineHeight(f64)` | Set line height multiplier (e.g., 1.2 = 120%) |
-| `getLineHeightPts() -> f64` | Get current line height in points |
+Text styling is done via `TextStyle` struct passed to text methods:
 
-### Cursor & Position
+```zig
+const style = zpdf.TextStyle{
+    .font = zpdf.Font.helvetica,  // or .times, .courier, or embedded font
+    .size = 12,
+    .bold = true,
+    .italic = false,
+    .color = zpdf.Color.navy,
+    .decoration = .underline,
+};
+```
 
-| Method | Description |
-|--------|-------------|
-| `setPosition(Point)` | Set cursor position (top-left origin) |
-| `getPosition() -> Point` | Get cursor position |
+For mixed styles within a paragraph, use `StyledText`:
+
+```zig
+var st = doc.createStyledText();
+try st.append("Normal ", .{});
+try st.append("bold ", .{ .bold = true });
+try st.append("red", .{ .color = zpdf.Color.red });
+```
 
 ### Navigation & Links
 

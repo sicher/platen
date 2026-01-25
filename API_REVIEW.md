@@ -43,6 +43,7 @@ pub const ParagraphOptions = struct {
     valign: VAlign = .top,             // Vertical alignment
     break_on_hyphens: bool = true,     // Break at regular hyphens
     line_breaking: LineBreaking = .greedy,
+    line_height: f64 = 1.2,            // Line height multiplier
 };
 ```
 
@@ -195,6 +196,34 @@ The following changes have been implemented:
 3. ✅ **Added `line_height` to `WriteOptions`** - line height multiplier (default 1.2)
 4. ✅ **Added `getFontMetricsStyled()`** - get font metrics for a specific TextStyle
 5. ✅ **Added `getTextWidthStyled()`** - measure text width with explicit style
+6. ✅ **Updated `writeStyled()`** - takes `TextStyle` parameter for explicit styling
+   ```zig
+   // Old
+   try doc.setFont(.helvetica, 12);
+   _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify });
+
+   // New
+   const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+   _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
+   ```
+7. ✅ **Added `line_height` to `ParagraphOptions`** - line height multiplier (default 1.2)
+
+### Stateful Text API Removal (COMPLETED)
+
+The following stateful methods have been removed in favor of explicit `TextStyle` parameters:
+
+1. ✅ **Removed `setFont()`** - use `TextStyle{ .font = Font.helvetica, .size = 12 }` instead
+2. ✅ **Removed `setEmbeddedFont()`** - use `TextStyle{ .font = embedded_font, .size = 12 }` instead
+3. ✅ **Removed `setTextColor()`** - use `TextStyle{ .color = Color.blue }` instead
+4. ✅ **Removed `setTextStyle()`** - use `TextStyle{ .decoration = .underline }` instead
+5. ✅ **Removed `setCharSpacing()`** - not commonly needed, can be added back if required
+6. ✅ **Removed `setLineHeight()`** - use `WriteOptions{ .line_height = 1.5 }` instead
+7. ✅ **Removed `getLineHeightPts()`** - calculate as `style.size * line_height_multiplier`
+8. ✅ **Removed `getFontMetrics()`** - use `getFontMetricsStyled(style)` instead
+9. ✅ **Removed `getTextWidth()`** - use `getTextWidthStyled(str, style)` instead
+10. ✅ **Removed `measureText()`** - use `write(..., .{ .measure_only = true })` instead
+11. ✅ **Removed `setPosition()`/`getPosition()`** - use explicit coordinates with `writeAt()`
+12. ✅ **Removed `current_font`, `font_size`, `text_color`, etc.** - all state is now explicit
 
 **New usage pattern:**
 ```zig
@@ -213,19 +242,21 @@ try doc.drawLine(.{ .x = 0, .y = 0 }, .{ .x = 100, .y = 100 }, .{ .width = 1.5, 
 
 ## 1. Missing Getters (Asymmetric API)
 
-Several setters lack corresponding getters, making it difficult to read back current state:
+Most stateful setters have been removed in favor of explicit parameters. Remaining setters:
 
 | Setter | Missing Getter | Notes |
 |--------|----------------|-------|
-| `setTextColor(Color)` | `getTextColor()` | Need to read current text color |
-| `setCharSpacing(f64)` | `getCharSpacing()` | Need to read current spacing |
-| `setLineHeight(f64)` | `getLineHeight()` | Currently only `getLineHeightPts()` exists (computed value) |
 | `setMargins(Margins)` | `getMargins()` | Need to read document margins |
 | `setPageSize(PageSize)` | `getPageSize()` | Need to read current page size setting |
-| ~~`setDrawStyle(DrawStyleOptions)`~~ | ~~`getDrawStyle()`~~ | **REMOVED** - replaced by explicit `ShapeStyle` parameter on each draw call |
 | `setMetadata(DocumentMetadata)` | `getMetadata()` | Need to read document metadata |
 
-**Recommendation**: Add getters for all setters to enable symmetric read/write access.
+**Removed setters** (now use explicit parameters):
+- ~~`setFont()`~~ - use `TextStyle` parameter
+- ~~`setTextColor()`~~ - use `TextStyle.color`
+- ~~`setLineHeight()`~~ - use `WriteOptions.line_height`
+- ~~`setDrawStyle()`~~ - use `ShapeStyle` parameter
+
+**Recommendation**: Add getters for remaining setters.
 
 ## 2. Naming Inconsistencies
 
@@ -411,11 +442,14 @@ The API is functional and covers the core PDF generation needs well. Recent impr
 - ✅ **Measurement API**: Unified via `measure_only` flag, side-effect free
 - ✅ **Graphics API**: Explicit styles replace stateful `setDrawStyle()`
 - ✅ **Font API**: Unified `Font` type, `loadFont()` returns `Font` with optional encoding
-- ✅ **Text API**: `writeAt()` and `write()` take explicit `TextStyle` parameter
+- ✅ **Text API**: `writeAt()`, `write()`, `writeStyled()` take explicit `TextStyle` parameter
+- ✅ **Stateful API Removal**: Removed all stateful font/text methods (`setFont`, `setTextColor`, etc.)
+
+The API is now fully explicit - all text styling is done via `TextStyle` parameters passed to each method call. This eliminates hidden state and makes code easier to reason about.
 
 Remaining issues:
-- **Asymmetric access**: Many setters lack getters
+- **Asymmetric access**: A few setters still lack getters (margins, page size, metadata)
 - **Missing memory loading**: Can only load resources from files
 - **Two-step gradients**: More friction than necessary
 
-Addressing the high-priority items would significantly improve the API ergonomics without breaking changes.
+Addressing the high-priority items would improve API ergonomics without breaking changes.
