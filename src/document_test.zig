@@ -679,6 +679,33 @@ test "writeStyled alignment" {
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
 }
 
+test "write alignment" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
+    // Test that write() with alignment works (delegates to writeStyled)
+    {
+        var region = Region{ .x = 100, .y = 100, .width = 200, .height = 50 };
+        _ = try doc.write(&region, "Centered text", style, .{ .alignment = .center });
+    }
+    {
+        var region = Region{ .x = 100, .y = 150, .width = 200, .height = 50 };
+        _ = try doc.write(&region, "Right aligned", style, .{ .alignment = .right });
+    }
+    {
+        var region = Region{ .x = 100, .y = 200, .width = 200, .height = 50 };
+        _ = try doc.write(&region, "Justified text that wraps to multiple lines for testing", style, .{ .alignment = .justify });
+    }
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
 test "writeStyled wraps text to multiple lines" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();

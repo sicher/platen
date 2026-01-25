@@ -1213,6 +1213,20 @@ pub const Document = struct {
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
     pub fn write(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: WriteOptions) !WriteResult {
+        // For non-left alignment, delegate to writeStyled which handles line-based alignment
+        if (opts.alignment != .left) {
+            var st = StyledText.init(self.allocator);
+            defer st.deinit();
+            try st.append(str, .{});
+            return self.writeStyled(region, &st, style, .{
+                .measure_only = opts.measure_only,
+                .alignment = opts.alignment,
+                .valign = opts.valign,
+                .break_on_hyphens = opts.break_on_hyphens,
+                .line_height = opts.line_height,
+            });
+        }
+
         const line_height = style.size * opts.line_height;
         const font_metrics = self.getFontMetricsStyled(style);
         const ascender = font_metrics.ascender;
