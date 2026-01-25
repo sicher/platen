@@ -10,9 +10,79 @@ pub const Color = layout.Color;
 pub const TextDecoration = layout.TextDecoration;
 pub const TextStyleOptions = layout.TextStyleOptions;
 
+// ============================================================================
+// Soft-Hyphen Utilities
+// ============================================================================
+
 /// Check if a soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) starts at position i.
-inline fn isSoftHyphenAt(str: []const u8, i: usize) bool {
+pub inline fn isSoftHyphenAt(str: []const u8, i: usize) bool {
     return i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD;
+}
+
+/// Check if text contains any soft-hyphens.
+pub fn containsSoftHyphens(str: []const u8) bool {
+    return std.mem.indexOf(u8, str, "\xC2\xAD") != null;
+}
+
+/// Strip soft-hyphens (U+00AD) from text.
+/// Soft-hyphens are invisible formatting characters that only appear as visible
+/// hyphens when text breaks at that point. Returns allocated copy without soft-hyphens.
+pub fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
+    // Fast path: check if any soft-hyphens exist
+    if (!containsSoftHyphens(str)) {
+        return allocator.dupe(u8, str);
+    }
+
+    // Slow path: count non-soft-hyphen bytes
+    var count: usize = 0;
+    var i: usize = 0;
+    while (i < str.len) {
+        if (isSoftHyphenAt(str, i)) {
+            i += 2; // Skip soft-hyphen
+        } else {
+            count += 1;
+            i += 1;
+        }
+    }
+
+    // Copy without soft-hyphens
+    const result = try allocator.alloc(u8, count);
+    var j: usize = 0;
+    i = 0;
+    while (i < str.len) {
+        if (isSoftHyphenAt(str, i)) {
+            i += 2; // Skip soft-hyphen
+        } else {
+            result[j] = str[i];
+            j += 1;
+            i += 1;
+        }
+    }
+    return result;
+}
+
+/// Strip soft-hyphens to a provided buffer. Returns slice of buffer used.
+pub fn stripSoftHyphensTo(str: []const u8, buf: []u8) []const u8 {
+    // Fast path: no soft-hyphens
+    if (!containsSoftHyphens(str)) {
+        const len = @min(str.len, buf.len);
+        @memcpy(buf[0..len], str[0..len]);
+        return buf[0..len];
+    }
+
+    // Strip soft-hyphens
+    var j: usize = 0;
+    var i: usize = 0;
+    while (i < str.len and j < buf.len) {
+        if (isSoftHyphenAt(str, i)) {
+            i += 2; // Skip soft-hyphen
+        } else {
+            buf[j] = str[i];
+            j += 1;
+            i += 1;
+        }
+    }
+    return buf[0..j];
 }
 
 /// A span of text with uniform styling.
