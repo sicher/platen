@@ -5,6 +5,9 @@
 
 const std = @import("std");
 const fonts = @import("fonts.zig");
+const layout = @import("layout.zig");
+
+pub const TextStyle = layout.TextStyle;
 
 /// Text measurement result
 pub const TextMetrics = struct {
@@ -138,6 +141,30 @@ pub fn measureText(text: []const u8, style: FontStyle) TextMetrics {
         .height = style.lineHeightPts(),
         .char_count = text.len,
     };
+}
+
+/// Measure text width using TextStyle (handles both embedded and standard fonts).
+pub fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
+    switch (style.font) {
+        .embedded => |emb| {
+            return emb.measureTextWidth(str, style.size);
+        },
+        .embedded_family => |fam| {
+            // Resolve to correct variant, fall back to regular on error
+            const emb = fam.resolve(style.bold, style.italic) catch fam.regular;
+            return emb.measureTextWidth(str, style.size);
+        },
+        .family, .symbol, .zapf_dingbats => {
+            const std_font = style.standardFont() orelse return 0;
+            const font_style = FontStyle{
+                .font = std_font,
+                .size = style.size,
+                .char_spacing = style.char_spacing,
+                .line_height = 1.0, // Not used for width measurement
+            };
+            return measureTextWidth(str, font_style);
+        },
+    }
 }
 
 /// Get the width table for a font

@@ -3513,29 +3513,8 @@ const stripSoftHyphens = styled_text.stripSoftHyphens;
 const stripSoftHyphensTo = styled_text.stripSoftHyphensTo;
 const containsSoftHyphens = styled_text.containsSoftHyphens;
 
-/// Measure text width using explicit TextStyle.
-fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
-    switch (style.font) {
-        .embedded => |emb| {
-            return emb.measureTextWidth(str, style.size);
-        },
-        .embedded_family => |fam| {
-            // Resolve to correct variant, fall back to regular on error
-            const emb = fam.resolve(style.bold, style.italic) catch fam.regular;
-            return emb.measureTextWidth(str, style.size);
-        },
-        .family, .symbol, .zapf_dingbats => {
-            const std_font = style.standardFont() orelse return 0;
-            const font_style = FontStyle{
-                .font = std_font,
-                .size = style.size,
-                .char_spacing = style.char_spacing,
-                .line_height = 1.0, // Not used for width measurement
-            };
-            return metrics.measureTextWidth(str, font_style);
-        },
-    }
-}
+// measureTextStyled is now in metrics.zig
+const measureTextStyled = metrics.measureTextStyled;
 
 // ============================================================================
 // Internal tests for break helpers and text width measurement
