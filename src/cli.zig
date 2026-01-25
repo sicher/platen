@@ -190,7 +190,7 @@ fn generateTestPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -204,7 +204,7 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 });
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "This is zpdf - a PDF library for Zig", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true });
     _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats", zpdf.TextStyle{ .font = zpdf.Font.times, .size = 12 });
@@ -228,7 +228,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         return;
     };
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     // Title with standard font
     const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
@@ -263,7 +263,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     _ = try doc.writeAt(.{ .x = 50, .y = 380 }, "Line 3: Consectetur adipiscing elit.", embed14_style);
 
     // Page 2 - stress test
-    try doc.addPage();
+    try doc.addPage(.{});
     const page2_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: Extended Character Test", page2_title_style);
 
@@ -329,7 +329,7 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
         return;
     };
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     // Just a few characters to test subsetting
     const cff24_style = zpdf.TextStyle{ .font = font, .size = 24 };
@@ -378,7 +378,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     font.embedded.setFeature(.mark, true);
     font.embedded.setFeature(.mkmk, true);
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     const mark24_style = zpdf.TextStyle{ .font = font, .size = 24 };
     const mark14_style = zpdf.TextStyle{ .font = font, .size = 14 };
@@ -453,7 +453,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     };
     font_no_calt.embedded.setFeature(.calt, false);
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     // Define all styles
     const calt24_style = zpdf.TextStyle{ .font = font, .size = 24 };
@@ -536,7 +536,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     const path_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
     const path_label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
@@ -625,7 +625,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     const grad_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
     const grad_label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
@@ -730,7 +730,7 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .creator = "zpdf CLI tool",
     });
 
-    try doc.addPage();
+    try doc.addPage(.{});
 
     const meta_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
     const meta12_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };

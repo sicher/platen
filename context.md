@@ -34,6 +34,12 @@ API cleanup **COMPLETED**. All API is now explicit with per-page options.
   - Added `LineOptions` struct with alignment, valign, line_height, break_on_hyphens
   - Use case: table cells, headers, any text that needs alignment
 
+- **Refactored Outline to builder pattern (like Path)**:
+  - New `Outline` builder struct with `add()` and `addChild()` methods
+  - Renamed old `Outline` to `OutlineItem` (individual entry)
+  - New API: `doc.createOutline()` → build → `doc.setOutline(&outline)`
+  - Cleaner than old `addOutlineItem(title, dest, parent)` pattern
+
 ## What We Did (Session 2026-01-25 #3)
 - **Added per-page size/margins and page navigation API**:
   - New `PageOptions` struct with `size` and `margins` fields

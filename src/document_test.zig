@@ -1749,61 +1749,17 @@ test "no Info dictionary when metadata empty" {
 // Outline Tests
 // ============================================================================
 
-test "addOutlineItem basic" {
+test "outline in PDF output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(.{});
     const dest = document.Destination{ .page_index = 0, .y = 100 };
-    const outline = try doc.addOutlineItem("Chapter 1", dest, null);
 
-    try std.testing.expectEqualStrings("Chapter 1", outline.title);
-    try std.testing.expectEqual(@as(usize, 0), outline.dest.page_index);
-    try std.testing.expectEqual(@as(f64, 100), outline.dest.y);
-    try std.testing.expect(outline.parent == null);
-    try std.testing.expectEqual(@as(usize, 1), doc.outlines.items.len);
-}
-
-test "addOutlineItem nested" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const dest = document.Destination{ .page_index = 0, .y = 0 };
-
-    // Create parent outline item
-    const ch1 = try doc.addOutlineItem("Chapter 1", dest, null);
-    try std.testing.expectEqual(@as(i32, 0), ch1.count);
-
-    // Create child outline items
-    const sec1 = try doc.addOutlineItem("Section 1.1", dest, ch1);
-    try std.testing.expect(sec1.parent == ch1);
-    try std.testing.expect(ch1.first_child == sec1);
-    try std.testing.expect(ch1.last_child == sec1);
-    try std.testing.expectEqual(@as(i32, 1), ch1.count);
-
-    const sec2 = try doc.addOutlineItem("Section 1.2", dest, ch1);
-    try std.testing.expect(sec2.parent == ch1);
-    try std.testing.expect(sec1.next == sec2);
-    try std.testing.expect(sec2.prev == sec1);
-    try std.testing.expect(ch1.first_child == sec1);
-    try std.testing.expect(ch1.last_child == sec2);
-    try std.testing.expectEqual(@as(i32, 2), ch1.count);
-
-    // Another top-level outline item
-    const ch2 = try doc.addOutlineItem("Chapter 2", dest, null);
-    try std.testing.expect(ch2.parent == null);
-
-    try std.testing.expectEqual(@as(usize, 4), doc.outlines.items.len);
-}
-
-test "addOutlineItem in PDF output" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const dest = document.Destination{ .page_index = 0, .y = 100 };
-    _ = try doc.addOutlineItem("Test Outline", dest, null);
+    // Build outline using builder pattern
+    var outline = doc.createOutline();
+    _ = try outline.add("Test Outline", dest);
+    doc.setOutline(&outline);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -1814,17 +1770,20 @@ test "addOutlineItem in PDF output" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "(Test Outline)") != null);
 }
 
-test "addOutlineItem nested in PDF output" {
+test "nested outline in PDF output" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage(.{});
     try doc.addPage(.{});
 
-    const ch1 = try doc.addOutlineItem("Chapter 1", .{ .page_index = 0, .y = 0 }, null);
-    _ = try doc.addOutlineItem("Section 1.1", .{ .page_index = 0, .y = 200 }, ch1);
-    _ = try doc.addOutlineItem("Section 1.2", .{ .page_index = 0, .y = 400 }, ch1);
-    _ = try doc.addOutlineItem("Chapter 2", .{ .page_index = 1, .y = 0 }, null);
+    // Build outline using builder pattern
+    var outline = doc.createOutline();
+    const ch1 = try outline.add("Chapter 1", .{ .page_index = 0, .y = 0 });
+    _ = try outline.addChild(ch1, "Section 1.1", .{ .page_index = 0, .y = 200 });
+    _ = try outline.addChild(ch1, "Section 1.2", .{ .page_index = 0, .y = 400 });
+    _ = try outline.add("Chapter 2", .{ .page_index = 1, .y = 0 });
+    doc.setOutline(&outline);
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);

@@ -314,24 +314,24 @@ pub const PageOptions = struct {
 // Navigation Types
 // ============================================================================
 
-/// Outline item for PDF document outline (table of contents).
-pub const Outline = struct {
+/// Individual outline entry (bookmark) in the document outline.
+pub const OutlineItem = struct {
     /// Displayed title in the outline panel.
     title: []const u8,
     /// Target destination (page and position).
     dest: Destination,
     /// Parent outline item (null for top-level).
-    parent: ?*Outline = null,
+    parent: ?*OutlineItem = null,
 
     // Internal fields - populated during output
     /// First child outline item.
-    first_child: ?*Outline = null,
+    first_child: ?*OutlineItem = null,
     /// Last child outline item.
-    last_child: ?*Outline = null,
+    last_child: ?*OutlineItem = null,
     /// Previous sibling.
-    prev: ?*Outline = null,
+    prev: ?*OutlineItem = null,
     /// Next sibling.
-    next: ?*Outline = null,
+    next: ?*OutlineItem = null,
     /// Number of children (negative if closed).
     count: i32 = 0,
     /// Object ID assigned during output.

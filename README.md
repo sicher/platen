@@ -407,6 +407,24 @@ const toc_rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Go to Chapter 1", body)
 try doc.addLink(toc_rect, chapter1_dest);
 ```
 
+### Table of Contents (Outline)
+
+```zig
+// Create outline builder
+var outline = doc.createOutline();
+
+// Add top-level items
+const ch1 = try outline.add("Chapter 1: Introduction", doc.destination(0).?);
+const ch2 = try outline.add("Chapter 2: Details", doc.destination(100).?);
+
+// Add nested items
+_ = try outline.addChild(ch1, "Section 1.1: Background", doc.destination(50).?);
+_ = try outline.addChild(ch1, "Section 1.2: Overview", doc.destination(75).?);
+
+// Set the outline on the document
+doc.setOutline(&outline);
+```
+
 ## API Reference
 
 ### Document Lifecycle
@@ -486,7 +504,8 @@ try st.append("red", .{ .color = zpdf.Color.red });
 | `destination(y) -> ?Destination` | Get destination at y position on current page |
 | `addLink(Rect, Destination)` | Add internal link (jumps to page/position) |
 | `addExternalLink(Rect, url)` | Add external link (opens URL) |
-| `addOutlineItem(title, Destination, ?parent) -> *Outline` | Add to table of contents |
+| `createOutline() -> Outline` | Create outline builder for table of contents |
+| `setOutline(*Outline)` | Set the document outline (takes ownership) |
 | `setPageLabel(page_index, PageLabel)` | Set page numbering style |
 
 ### Images & SVG
@@ -611,7 +630,8 @@ zpdf.pt_per_cm    // 28.34...
 
 **Navigation:**
 - `Destination` - Page location for internal links
-- `Outline` - Table of contents entry
+- `Outline` - Table of contents builder (add(), addChild())
+- `OutlineItem` - Individual outline entry
 - `PageLabel` / `PageLabelStyle` - Page numbering (roman, arabic, etc.)
 
 **OpenType Features:**

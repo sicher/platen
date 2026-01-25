@@ -65,6 +65,7 @@ pub const Rect = document.Rect;
 pub const Region = document.Region;
 pub const Destination = document.Destination;
 pub const Outline = document.Outline;
+pub const OutlineItem = document.OutlineItem;
 pub const PageLabelStyle = document.PageLabelStyle;
 pub const PageLabel = document.PageLabel;
 pub const WriteResult = document.WriteResult;
@@ -143,4 +144,5 @@ test {
     _ = @import("integration_tests.zig");
     _ = @import("document_test.zig");
     _ = @import("styled_text.zig");
+    _ = @import("outline.zig");
 }

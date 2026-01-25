@@ -1945,18 +1945,21 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     const title_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
     const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
 
+    // Build outline as we go
+    var outline = doc.createOutline();
+
     // Page 1: Title (front matter - roman numeral i)
     try doc.addPage(.{});
     try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
     const title_dest = doc.destination(0).?;
-    _ = try doc.addOutlineItem("Title Page", title_dest, null);
+    _ = try outline.add("Title Page", title_dest);
     _ = try doc.writeAt(.{ .x = 200, .y = 300 }, "My Document", title_24);
     _ = try doc.writeAt(.{ .x = 220, .y = 350 }, "A Sample Book", body_12);
 
     // Page 2: Preface (front matter - roman numeral ii)
     try doc.addPage(.{});
     const preface_dest = doc.destination(0).?;
-    _ = try doc.addOutlineItem("Preface", preface_dest, null);
+    _ = try outline.add("Preface", preface_dest);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Preface", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This is the preface of the document.", body_12);
 
@@ -1964,28 +1967,28 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(.{});
     try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
     const ch1_dest = doc.destination(0).?;
-    const ch1 = try doc.addOutlineItem("Chapter 1: Introduction", ch1_dest, null);
+    const ch1 = try outline.add("Chapter 1: Introduction", ch1_dest);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 1: Introduction", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Welcome to the introduction chapter.", body_12);
 
     // Page 4: Section 1.1 (body - decimal 2)
     try doc.addPage(.{});
     const sec11_dest = doc.destination(0).?;
-    _ = try doc.addOutlineItem("Section 1.1: Background", sec11_dest, ch1);
+    _ = try outline.addChild(ch1, "Section 1.1: Background", sec11_dest);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.1: Background", title_14);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Some background information.", body_12);
 
     // Page 5: Section 1.2 (body - decimal 3)
     try doc.addPage(.{});
     const sec12_dest = doc.destination(0).?;
-    _ = try doc.addOutlineItem("Section 1.2: Overview", sec12_dest, ch1);
+    _ = try outline.addChild(ch1, "Section 1.2: Overview", sec12_dest);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.2: Overview", title_14);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "An overview of the topic.", body_12);
 
     // Page 6: Chapter 2 (body - decimal 4)
     try doc.addPage(.{});
     const ch2_dest = doc.destination(0).?;
-    _ = try doc.addOutlineItem("Chapter 2: Details", ch2_dest, null);
+    _ = try outline.add("Chapter 2: Details", ch2_dest);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 2: Details", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This chapter contains detailed information.", body_12);
 
@@ -1993,9 +1996,12 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(.{});
     try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
     const app_dest = doc.destination(0).?;
-    _ = try doc.addOutlineItem("Appendix A: References", app_dest, null);
+    _ = try outline.add("Appendix A: References", app_dest);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Appendix A: References", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "List of references.", body_12);
+
+    // Set the outline on the document
+    doc.setOutline(&outline);
 
     return doc.output();
 }
