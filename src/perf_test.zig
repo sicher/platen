@@ -160,8 +160,7 @@ fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
-    const emb = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    emb.encoding = .identity;
+    const emb = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
 
     // Test strings of varying complexity
     const test_cases = [_]struct {
@@ -186,15 +185,15 @@ fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
 
     for (test_cases) |tc| {
         // Set feature flags
-        emb.feature_flags.calt = tc.calt;
-        emb.feature_flags.liga = tc.liga;
-        emb.feature_flags.dlig = tc.dlig;
-        emb.feature_flags.frac = tc.frac;
+        emb.embedded.feature_flags.calt = tc.calt;
+        emb.embedded.feature_flags.liga = tc.liga;
+        emb.embedded.feature_flags.dlig = tc.dlig;
+        emb.embedded.feature_flags.frac = tc.frac;
 
         const t = Timer.begin(tc.name);
         for (0..iterations) |_| {
-            const glyphs = try emb.markUnicodeCharsUsed(tc.text, null);
-            emb.allocator.free(glyphs);
+            const glyphs = try emb.embedded.markUnicodeCharsUsed(tc.text, null);
+            emb.embedded.allocator.free(glyphs);
         }
         const elapsed = t.end();
         const per_call = @as(f64, @floatFromInt(elapsed)) / @as(f64, @floatFromInt(iterations));
@@ -232,55 +231,43 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         defer timing_doc.deinit();
 
         // Load multiple fonts to measure parsing time
-        const inter = try timing_doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-        inter.encoding = .identity;
-        const inter_bold = try timing_doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
-        inter_bold.encoding = .identity;
-        const inter_italic = try timing_doc.loadFont("test/fonts/Inter/Inter-Italic.ttf", null);
-        inter_italic.encoding = .identity;
-        const charter = try timing_doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-        charter.encoding = .identity;
-        const gentium = try timing_doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-        gentium.encoding = .identity;
-        const courier = try timing_doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
-        courier.encoding = .identity;
+        const inter = try timing_doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+        const inter_bold = try timing_doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", .identity);
+        const inter_italic = try timing_doc.loadFont("test/fonts/Inter/Inter-Italic.ttf", .identity);
+        const charter = try timing_doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+        const gentium = try timing_doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+        const courier = try timing_doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
         result.font_load_ms = t.endPrint(config.quiet);
         _ = .{ inter, inter_bold, inter_italic, charter, gentium, courier };
     }
 
     // Load fonts for actual use in main document
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    inter.encoding = .identity;
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
-    inter_bold.encoding = .identity;
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-    charter.encoding = .identity;
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-    gentium.encoding = .identity;
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", .identity);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
 
     // Font with all OpenType features enabled
-    const inter_ot = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    inter_ot.encoding = .identity;
-    inter_ot.setFeature(.liga, true);
-    inter_ot.setFeature(.dlig, true);
-    inter_ot.setFeature(.calt, true);
-    inter_ot.setFeature(.frac, true);
+    const inter_ot = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    inter_ot.embedded.setFeature(.liga, true);
+    inter_ot.embedded.setFeature(.dlig, true);
+    inter_ot.embedded.setFeature(.calt, true);
+    inter_ot.embedded.setFeature(.frac, true);
 
     const pages_per_section = config.pages / 4;
 
     // 2. Simple text test (minimal OpenType)
     {
         const t = Timer.begin("Simple text");
-        const simple_font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-        simple_font.encoding = .identity;
-        simple_font.setFeature(.kern, false);
-        simple_font.setFeature(.liga, false);
-        simple_font.setFeature(.calt, false);
+        const simple_font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+        simple_font.embedded.setFeature(.kern, false);
+        simple_font.embedded.setFeature(.liga, false);
+        simple_font.embedded.setFeature(.calt, false);
 
-        const simple_style = zpdf.TextStyle{ .font = .{ .embedded = simple_font }, .size = 10 };
+        const simple_style = zpdf.TextStyle{ .font = simple_font, .size = 10 };
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(.{});
             var y: f64 = 30;
             // 50 lines of text per page
             for (0..50) |_| {
@@ -294,10 +281,10 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 3. OpenType heavy test (ligatures, kerning, contextual alternates)
     {
         const t = Timer.begin("OpenType heavy");
-        const inter_ot_style = zpdf.TextStyle{ .font = .{ .embedded = inter_ot }, .size = 11 };
-        const inter_bold_style = zpdf.TextStyle{ .font = .{ .embedded = inter_bold }, .size = 12 };
+        const inter_ot_style = zpdf.TextStyle{ .font = inter_ot, .size = 11 };
+        const inter_bold_style = zpdf.TextStyle{ .font = inter_bold, .size = 12 };
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(.{});
             var y: f64 = 30;
 
             // Ligature-heavy text
@@ -330,10 +317,10 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 4. Unicode and diacritics test
     {
         const t = Timer.begin("Unicode/marks");
-        const gentium_style = zpdf.TextStyle{ .font = .{ .embedded = gentium }, .size = 11 };
-        const inter_style = zpdf.TextStyle{ .font = .{ .embedded = inter }, .size = 11 };
+        const gentium_style = zpdf.TextStyle{ .font = gentium, .size = 11 };
+        const inter_style = zpdf.TextStyle{ .font = inter, .size = 11 };
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(.{});
             var y: f64 = 30;
 
             // Latin extended with diacritics
@@ -375,10 +362,10 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
         const lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ";
         const full_text = lorem ++ lorem ++ lorem;
-        const charter_10 = zpdf.TextStyle{ .font = .{ .embedded = charter }, .size = 10 };
+        const charter_10 = zpdf.TextStyle{ .font = charter, .size = 10 };
 
         for (0..pages_per_section) |_| {
-            try doc.addPage();
+            try doc.addPage(.{});
 
             // Left column - justified with optimal line breaking
             var region = zpdf.Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
