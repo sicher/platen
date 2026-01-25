@@ -7,6 +7,7 @@
 const std = @import("std");
 const layout = @import("layout.zig");
 const color = @import("color.zig");
+const format = @import("format.zig");
 
 pub const LineCap = layout.LineCap;
 pub const LineJoin = layout.LineJoin;
@@ -49,24 +50,41 @@ pub fn writeShapeGraphicsState(style: ShapeStyle, buf: []u8) usize {
     // Write stroke settings if stroking
     if (stroke) |s| {
         // Line width
-        len += (std.fmt.bufPrint(buf[len..], "{d:.3} w\n", .{s.width}) catch unreachable).len;
+        const width_str = format.writeF64_3(buf[len..], s.width);
+        len += width_str.len;
+        @memcpy(buf[len..][0..3], " w\n");
+        len += 3;
 
         // Dash pattern
         if (s.dash.dash > 0) {
-            len += (std.fmt.bufPrint(buf[len..], "[{d:.3} {d:.3}] {d:.3} d\n", .{
-                s.dash.dash,
-                s.dash.gap,
-                s.dash.phase,
-            }) catch unreachable).len;
+            buf[len] = '[';
+            len += 1;
+            const dash_str = format.writeF64_3(buf[len..], s.dash.dash);
+            len += dash_str.len;
+            buf[len] = ' ';
+            len += 1;
+            const gap_str = format.writeF64_3(buf[len..], s.dash.gap);
+            len += gap_str.len;
+            @memcpy(buf[len..][0..2], "] ");
+            len += 2;
+            const phase_str = format.writeF64_3(buf[len..], s.dash.phase);
+            len += phase_str.len;
+            @memcpy(buf[len..][0..3], " d\n");
+            len += 3;
         } else {
-            len += (std.fmt.bufPrint(buf[len..], "[] 0 d\n", .{}) catch unreachable).len;
+            @memcpy(buf[len..][0..7], "[] 0 d\n");
+            len += 7;
         }
 
         // Line cap and join
-        len += (std.fmt.bufPrint(buf[len..], "{d} J {d} j\n", .{
-            @intFromEnum(s.cap),
-            @intFromEnum(s.join),
-        }) catch unreachable).len;
+        buf[len] = @intCast(@intFromEnum(s.cap) + '0');
+        len += 1;
+        @memcpy(buf[len..][0..3], " J ");
+        len += 3;
+        buf[len] = @intCast(@intFromEnum(s.join) + '0');
+        len += 1;
+        @memcpy(buf[len..][0..3], " j\n");
+        len += 3;
 
         // Stroke color
         var color_buf: [64]u8 = undefined;
@@ -104,38 +122,23 @@ pub fn writeEllipsePath(buf: []u8, cx: f64, cy: f64, rx: f64, ry: f64) usize {
     var len: usize = 0;
 
     // Start at right-most point (cx + rx, cy)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ cx + rx, cy }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], cx + rx, cy, " m\n");
 
     // Top-right quadrant: from (cx+rx, cy) to (cx, cy+ry)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx + rx, cy + ky,
-        cx + kx, cy + ry,
-        cx,      cy + ry,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], cx + rx, cy + ky, cx + kx, cy + ry, cx, cy + ry);
 
     // Top-left quadrant: from (cx, cy+ry) to (cx-rx, cy)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx - kx, cy + ry,
-        cx - rx, cy + ky,
-        cx - rx, cy,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], cx - kx, cy + ry, cx - rx, cy + ky, cx - rx, cy);
 
     // Bottom-left quadrant: from (cx-rx, cy) to (cx, cy-ry)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx - rx, cy - ky,
-        cx - kx, cy - ry,
-        cx,      cy - ry,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], cx - rx, cy - ky, cx - kx, cy - ry, cx, cy - ry);
 
     // Bottom-right quadrant: from (cx, cy-ry) to (cx+rx, cy)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx + kx, cy - ry,
-        cx + rx, cy - ky,
-        cx + rx, cy,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], cx + kx, cy - ry, cx + rx, cy - ky, cx + rx, cy);
 
     // Close path
-    len += (std.fmt.bufPrint(buf[len..], "h\n", .{}) catch unreachable).len;
+    @memcpy(buf[len..][0..2], "h\n");
+    len += 2;
 
     return len;
 }
@@ -150,50 +153,35 @@ pub fn writeRoundedRectPath(buf: []u8, x: f64, y: f64, w: f64, h: f64, r: f64) u
     var len: usize = 0;
 
     // Start at top-left corner, after the rounded part
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ x + r, y + h }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], x + r, y + h, " m\n");
 
     // Top edge (left to right)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + w - r, y + h }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], x + w - r, y + h, " l\n");
 
     // Top-right corner (curve)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        x + w - r + k, y + h,
-        x + w,         y + h - r + k,
-        x + w,         y + h - r,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], x + w - r + k, y + h, x + w, y + h - r + k, x + w, y + h - r);
 
     // Right edge (top to bottom)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + w, y + r }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], x + w, y + r, " l\n");
 
     // Bottom-right corner (curve)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        x + w,         y + r - k,
-        x + w - r + k, y,
-        x + w - r,     y,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], x + w, y + r - k, x + w - r + k, y, x + w - r, y);
 
     // Bottom edge (right to left)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x + r, y }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], x + r, y, " l\n");
 
     // Bottom-left corner (curve)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        x + r - k, y,
-        x,         y + r - k,
-        x,         y + r,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], x + r - k, y, x, y + r - k, x, y + r);
 
     // Left edge (bottom to top)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ x, y + h - r }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], x, y + h - r, " l\n");
 
     // Top-left corner (curve)
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        x,         y + h - r + k,
-        x + r - k, y + h,
-        x + r,     y + h,
-    }) catch unreachable).len;
+    len += format.writeCubic(buf[len..], x, y + h - r + k, x + r - k, y + h, x + r, y + h);
 
     // Close path
-    len += (std.fmt.bufPrint(buf[len..], "h ", .{}) catch unreachable).len;
+    @memcpy(buf[len..][0..2], "h ");
+    len += 2;
 
     return len;
 }
@@ -207,11 +195,11 @@ pub fn writePolygonPath(buf: []u8, points: []const Point) usize {
     var len: usize = 0;
 
     // Move to first point
-    len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ points[0].x, points[0].y }) catch unreachable).len;
+    len += format.writeCoord2Suffix(buf[len..], points[0].x, points[0].y, " m\n");
 
     // Line to remaining points
     for (points[1..]) |pt| {
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ pt.x, pt.y }) catch unreachable).len;
+        len += format.writeCoord2Suffix(buf[len..], pt.x, pt.y, " l\n");
     }
 
     // Close path

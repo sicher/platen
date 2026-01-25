@@ -25,6 +25,7 @@ pub const outlinemod = @import("outline.zig");
 pub const pdf_output = @import("pdf_output.zig");
 pub const pagemod = @import("page.zig");
 pub const text_render = @import("text_render.zig");
+pub const format = @import("format.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -1335,7 +1336,8 @@ pub const Document = struct {
         var len: usize = 0;
 
         // Save graphics state
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+        @memcpy(buf[len..][0..2], "q\n");
+        len += 2;
 
         // Fill if specified
         if (region.fill) |fill_color| {
@@ -1347,34 +1349,41 @@ pub const Document = struct {
             @memcpy(buf[len .. len + color_str.len], color_str);
             len += color_str.len;
 
-            len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ region.x, pdf_y, region.width, region.height }) catch unreachable).len;
+            len += format.writeCoord4Suffix(buf[len..], region.x, pdf_y, region.width, region.height, " re f\n");
         }
 
         // Draw border if specified
         if (region.border.top or region.border.bottom or region.border.left or region.border.right) {
             // Set line width to 0.567pt (fpdf2 default: 0.2mm)
-            len += (std.fmt.bufPrint(buf[len..], "0.567 w\n", .{}) catch unreachable).len;
+            @memcpy(buf[len..][0..8], "0.567 w\n");
+            len += 8;
             // Set stroke color to black
-            len += (std.fmt.bufPrint(buf[len..], "0 0 0 RG\n", .{}) catch unreachable).len;
+            @memcpy(buf[len..][0..9], "0 0 0 RG\n");
+            len += 9;
 
             if (region.border.top) {
                 const y_top = pdf_y + region.height;
-                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, y_top, region.x + region.width, y_top }) catch unreachable).len;
+                len += format.writeCoord2Suffix(buf[len..], region.x, y_top, " m ");
+                len += format.writeCoord2Suffix(buf[len..], region.x + region.width, y_top, " l S\n");
             }
             if (region.border.bottom) {
-                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, pdf_y, region.x + region.width, pdf_y }) catch unreachable).len;
+                len += format.writeCoord2Suffix(buf[len..], region.x, pdf_y, " m ");
+                len += format.writeCoord2Suffix(buf[len..], region.x + region.width, pdf_y, " l S\n");
             }
             if (region.border.left) {
-                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ region.x, pdf_y, region.x, pdf_y + region.height }) catch unreachable).len;
+                len += format.writeCoord2Suffix(buf[len..], region.x, pdf_y, " m ");
+                len += format.writeCoord2Suffix(buf[len..], region.x, pdf_y + region.height, " l S\n");
             }
             if (region.border.right) {
                 const x_right = region.x + region.width;
-                len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ x_right, pdf_y, x_right, pdf_y + region.height }) catch unreachable).len;
+                len += format.writeCoord2Suffix(buf[len..], x_right, pdf_y, " m ");
+                len += format.writeCoord2Suffix(buf[len..], x_right, pdf_y + region.height, " l S\n");
             }
         }
 
         // Restore graphics state
-        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+        @memcpy(buf[len..][0..2], "Q\n");
+        len += 2;
 
         if (len > 0) {
             // Allocated on page arena - freed when page is destroyed
@@ -1407,16 +1416,19 @@ pub const Document = struct {
         var len: usize = 0;
 
         // Save graphics state
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
+        @memcpy(buf[len..][0..2], "q\n");
+        len += 2;
 
         // Write stroke style
         len += graphics.writeShapeGraphicsState(.{ .stroke = style }, buf[len..]);
 
         // Move to start, line to end, stroke
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ p1.x, pdf_y1, p2.x, pdf_y2 }) catch unreachable).len;
+        len += format.writeCoord2Suffix(buf[len..], p1.x, pdf_y1, " m ");
+        len += format.writeCoord2Suffix(buf[len..], p2.x, pdf_y2, " l S\n");
 
         // Restore graphics state
-        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+        @memcpy(buf[len..][0..2], "Q\n");
+        len += 2;
 
         const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
@@ -1434,7 +1446,7 @@ pub const Document = struct {
 
         var buf: [512]u8 = undefined;
         var len = beginShapeCommand(&buf, style);
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re ", .{ rect.x, pdf_y, rect.width, rect.height }) catch unreachable).len;
+        len += format.writeCoord4Suffix(buf[len..], rect.x, pdf_y, rect.width, rect.height, " re ");
         len += finishShapeCommand(buf[len..], style);
 
         const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
@@ -1524,12 +1536,12 @@ pub const Document = struct {
 
         // Move to first point
         const pdf_y0 = page_height - points[0].y;
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m\n", .{ points[0].x, pdf_y0 }) catch unreachable).len;
+        len += format.writeCoord2Suffix(buf[len..], points[0].x, pdf_y0, " m\n");
 
         // Line to remaining points
         for (points[1..]) |pt| {
             const pdf_y = page_height - pt.y;
-            len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} l\n", .{ pt.x, pdf_y }) catch unreachable).len;
+            len += format.writeCoord2Suffix(buf[len..], pt.x, pdf_y, " l\n");
         }
 
         // Close path
