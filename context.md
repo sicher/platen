@@ -1,11 +1,19 @@
 # zpdf Context
 
 ## Current Focus
-API cleanup **COMPLETED**. All API is now explicit with per-page options.
+API cleanup and write() optimization **COMPLETED**.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
-- **Optimize write()** - currently 1.5-2x slower than writeStyled() for rendering (see bench_write.zig)
+
+## What We Did (Session 2026-01-25 #5)
+- **Optimized write() with line-batching** - 2x speedup for rendering:
+  - Buffer words per line, render as single string (1 allocation per line vs N)
+  - Fixed double `findHyphenBreakStyled` call
+  - Fixed duplicate `getTextWidthStyled(prefix)` measurement
+  - Root cause: `stripSoftHyphens` was allocating per word
+  - write() is now faster than writeStyled() for typical paragraphs
+  - measure_only path unchanged (still 4.8x faster than writeStyled)
 
 ## What We Did (Session 2026-01-25 #4)
 - **Renamed pageNo() to getPageIndex()** - returns 0-based index for consistency
@@ -24,9 +32,8 @@ API cleanup **COMPLETED**. All API is now explicit with per-page options.
   - Updated Python reference generator to use `cell()` with alignment
 
 - **Performance benchmark (bench_write.zig)**:
-  - writeStyled() is 1.2-1.8x faster than write() for rendering
-  - write() is 4.8x faster for measure_only
-  - TODO: Investigate write() slowness
+  - Created benchmark to compare write() vs writeStyled()
+  - Identified per-word allocation as bottleneck (fixed in session #5)
 
 - **Added writeLine() for block-based text with alignment**:
   - Clear separation: `write()` = incremental (cursor_x advances), `writeLine()` = block-based (cursor to next line)

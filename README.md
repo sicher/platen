@@ -18,6 +18,22 @@ A fast PDF rendering library for Zig.
 - **Links**: internal (TOC navigation) and external (URLs)
 - **Compression**: FlateDecode for smaller file sizes
 
+## Performance
+
+100-page benchmark on Apple Silicon (release build):
+
+| Operation | Time |
+|-----------|------|
+| Font loading | 2ms |
+| Simple text | 2ms |
+| OpenType shaping | 14ms |
+| Unicode/marks | 6ms |
+| Text flow | 2ms |
+| PDF output | 24ms |
+| **Total** | **52ms** (~1900 pages/sec) |
+
+Debug build: 704ms. See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
+
 ## Quick Start
 
 ```zig
