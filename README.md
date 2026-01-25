@@ -126,7 +126,7 @@ var region = zpdf.Region{
 const text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit...";
 const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
 
-// Simple text with word wrapping
+// Incremental text with word wrapping (cursor advances on same line)
 const result = try doc.write(&region, text, style, .{});
 
 if (result.overflow) |_| {
@@ -135,7 +135,11 @@ if (result.overflow) |_| {
     // ... continue with remaining text
 }
 
-// Or use styled text for mixed formatting
+// Block-based text with alignment (cursor moves to next line)
+_ = try doc.writeLine(&region, "Centered heading", style, .{ .alignment = .center });
+_ = try doc.writeLine(&region, "Right-aligned text", style, .{ .alignment = .right });
+
+// Styled text for mixed formatting within a paragraph
 var st = doc.createStyledText();
 defer st.deinit();
 try st.append("Normal text ", .{});
@@ -438,16 +442,17 @@ try doc.addLink(toc_rect, chapter1_dest);
 | Method | Description |
 |--------|-------------|
 | `writeAt(Point, str, TextStyle) -> Rect` | Write text at absolute position |
-| `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Write with word wrapping into region |
-| `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping |
+| `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Incremental write with word wrapping (cursor advances) |
+| `writeLine(*Region, str, TextStyle, LineOptions) -> WriteResult` | Block-based write with alignment (cursor to next line) |
+| `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping and alignment |
 | `createStyledText() -> StyledText` | Create builder for mixed formatting (bold, colors, etc.) |
 
 ### Text Measurement
 
 | Method | Description |
 |--------|-------------|
-| `getTextWidthStyled(str, TextStyle) -> f64` | Measure text width in points |
 | `write(*Region, str, style, .{ .measure_only = true })` | Measure layout without rendering (cursor unchanged) |
+| `writeLine(*Region, str, style, .{ .measure_only = true })` | Measure aligned layout without rendering |
 | `writeStyled(*Region, *StyledText, style, .{ .measure_only = true })` | Measure styled layout without rendering |
 
 ### Text Styling
@@ -576,7 +581,7 @@ zpdf.pt_per_cm    // 28.34...
 - `VAlign` - Vertical: `.top`, `.middle`, `.bottom`
 - `TextDecoration` - `.none`, `.underline`, `.strikethrough`, `.underline_strikethrough`
 - `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
-- `WriteOptions` / `ParagraphOptions` - Text layout options
+- `WriteOptions` / `LineOptions` / `ParagraphOptions` - Text layout options
 - `WriteResult` - Result with lines_written, overflow text, and bounding rect
 - `TextMetrics` / `FontMetrics` - Measurement results
 
