@@ -813,66 +813,7 @@ test "drawRegion with fill" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "%%EOF") != null);
 }
 
-test "findHyphenBreak finds break at regular hyphen" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-
-    // "state-of-the-art" - should find breaks after each hyphen
-    const word = "state-of-the-art";
-
-    // Width that fits "state-" but not more
-    const state_width = doc.getTextWidthStyled("state-", style);
-    const result = doc.findHyphenBreakStyled(word, state_width + 1, style);
-    try std.testing.expectEqual(@as(?usize, 6), result); // "state-" is 6 bytes
-
-    // Width that fits "state-of-" but not "state-of-the-"
-    const state_of_width = doc.getTextWidthStyled("state-of-", style);
-    const result2 = doc.findHyphenBreakStyled(word, state_of_width + 1, style);
-    try std.testing.expectEqual(@as(?usize, 9), result2); // "state-of-" is 9 bytes
-}
-
-test "findHyphenBreak returns null for word without hyphens" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-
-    const word = "supercalifragilistic";
-    const result = doc.findHyphenBreakStyled(word, 1000, style);
-    try std.testing.expectEqual(@as(?usize, null), result);
-}
-
-test "findSoftHyphenBreak finds break at soft hyphen" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-
-    // "ex\xc2\xadplicit" - soft-hyphen between "ex" and "plicit"
-    const word = "ex\xc2\xadplicit";
-
-    // Width that fits "ex-" (prefix + visible hyphen)
-    const ex_width = doc.getTextWidthStyled("ex-", style);
-    const result = doc.findSoftHyphenBreakStyled(word, ex_width + 1, style);
-    try std.testing.expectEqual(@as(?usize, 2), result); // Position of soft-hyphen
-}
-
-test "findSoftHyphenBreak returns null for word without soft hyphens" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-
-    const word = "explicit";
-    const result = doc.findSoftHyphenBreakStyled(word, 1000, style);
-    try std.testing.expectEqual(@as(?usize, null), result);
-}
+// Break helper tests moved to document.zig (internal tests)
 
 test "soft hyphens stripped from text output" {
     var doc = Document.init(std.testing.allocator);
@@ -911,18 +852,7 @@ test "writeStyled in narrow column" {
     try std.testing.expect(result.lines_written >= 2);
 }
 
-test "soft hyphens excluded from text width" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage(.{});
-    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-
-    // Width with soft-hyphens should equal width without
-    const with_soft = doc.getTextWidthStyled("ex\xc2\xadplic\xc2\xadit", style);
-    const without_soft = doc.getTextWidthStyled("explicit", style);
-    try std.testing.expectEqual(without_soft, with_soft);
-}
+// Soft hyphen width test moved to document.zig (internal test)
 
 test "writeStyled overflow returns remaining text" {
     var doc = Document.init(std.testing.allocator);
@@ -1184,10 +1114,7 @@ test "writeStyled greedy and optimal both render successfully" {
     try doc.addPage(.{});
     const style = TextStyle{ .font = Font.courier, .size = 12 };
 
-    // Verify char width: Courier is monospace at 600 units/1000 * 12pt = 7.2pt/char
-    const char_width = doc.getTextWidthStyled("X", style);
-    try std.testing.expectApproxEqAbs(@as(f64, 7.2), char_width, 0.01);
-
+    // Courier is monospace at 600 units/1000 * 12pt = 7.2pt/char
     const region_width = 101.0; // Just over 14 chars
     const text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
 

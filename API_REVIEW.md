@@ -8,11 +8,15 @@ The library provides several methods for measuring text and fonts. Here's a comp
 
 ### Text Width Measurement
 
-| Method | Returns | Use Case |
-|--------|---------|----------|
-| `getTextWidthStyled(str, style)` | `f64` | Measures text width in points for given TextStyle. Handles soft-hyphens (excludes them from width). Works with both standard and embedded fonts. |
+Use `write()` or `writeStyled()` with `.measure_only = true` to measure text:
 
-All measurement requires explicit `TextStyle` - no stateful font state.
+```zig
+var region = doc.getPageRegion().?;
+const result = try doc.write(&region, text, style, .{ .measure_only = true });
+// result.rect gives bounding box, result.lines_written gives line count
+```
+
+Internal text width measurement (`getTextWidthStyled`) is not exposed - use the layout APIs instead.
 
 ### Wrapped Text Measurement
 
@@ -191,7 +195,7 @@ The following changes have been implemented:
    ```
 3. ✅ **Added `line_height` to `WriteOptions`** - line height multiplier (default 1.2)
 4. ✅ **Added `getFontMetricsStyled()`** - get font metrics for a specific TextStyle
-5. ✅ **Added `getTextWidthStyled()`** - measure text width with explicit style
+5. ✅ **Text measurement via `write/writeStyled` with `.measure_only = true`**
 6. ✅ **Updated `writeStyled()`** - takes `TextStyle` parameter for explicit styling
    ```zig
    // Old
@@ -216,7 +220,7 @@ The following stateful methods have been removed in favor of explicit `TextStyle
 6. ✅ **Removed `setLineHeight()`** - use `WriteOptions{ .line_height = 1.5 }` instead
 7. ✅ **Removed `getLineHeightPts()`** - calculate as `style.size * line_height_multiplier`
 8. ✅ **Removed `getFontMetrics()`** - use `getFontMetricsStyled(style)` instead
-9. ✅ **Removed `getTextWidth()`** - use `getTextWidthStyled(str, style)` instead
+9. ✅ **Removed `getTextWidth()`** - use `write/writeStyled` with `.measure_only = true`
 10. ✅ **Removed `measureText()`** - use `write(..., .{ .measure_only = true })` instead
 11. ✅ **Removed `setPosition()`/`getPosition()`** - use explicit coordinates with `writeAt()`
 12. ✅ **Removed `currentDestination()`** - use `destination(y)` with explicit y position
@@ -263,7 +267,7 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 ## 2. Naming Inconsistencies
 
 ### Resolved Issues
-- ✅ `measureTextWidth` removed - now only `getTextWidthStyled(str, style)`
+- ✅ `measureTextWidth` removed - use `write/writeStyled` with `.measure_only = true`
 - ✅ `getLineHeightPts()` removed - use `style.size * line_height_multiplier`
 - ✅ `pageNo()` renamed to `getPageIndex()` for consistency
 
@@ -274,7 +278,7 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 
 ### Naming Conventions
 Method naming is now consistent:
-- `get*` for queries: `getPageIndex()`, `getPageRegion()`, `getTextWidthStyled()`
+- `get*` for queries: `getPageIndex()`, `getPageRegion()`, `getFontMetricsStyled()`
 - `destination(y)` returns a `Destination` struct (not a getter pattern)
 
 ## 3. Missing Convenience Methods
@@ -408,12 +412,12 @@ try doc.scale(sx, sy);
 ## Priority Recommendations
 
 ### Completed ✅
-- ~~Remove duplicate `measureTextWidth()`~~ - now only `getTextWidthStyled(str, style)`
+- ~~Remove duplicate `measureTextWidth()`~~ - use `write/writeStyled` with `.measure_only = true`
 - ~~Remove `measureWrappedText()`~~ - use `write/writeStyled(.measure_only=true)`
 - ~~Refactor graphics API~~ - explicit `ShapeStyle` replaces stateful `setDrawStyle()`
 - ~~Remove stateful text API~~ - all methods now take explicit `TextStyle`
 - ~~Add page navigation~~ - `pageCount()`, `getPageIndex()`, `selectPage()`, `insertPage()`
-- ~~Standardize getter naming~~ - `getPageIndex()`, `getPageRegion()`, `getTextWidthStyled()`
+- ~~Standardize getter naming~~ - `getPageIndex()`, `getPageRegion()`, `getFontMetricsStyled()`
 
 ### High Priority (API completeness)
 1. Add `loadFontFromBytes()`, `loadImageFromBytes()`, `loadSvgFromString()`

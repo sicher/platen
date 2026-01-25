@@ -814,24 +814,40 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     // Title - matches fpdf2 text() positioning
     _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "Text Flow API Test", title_style);
 
-    // Single lines with different alignments - use writeAt for exact positioning
+    // Single lines with different alignments
     var y: f64 = 112;
     const region_width = 595.28 - 72 - 72;
+    const line_height: f64 = 14.4;
 
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Left aligned line (default)", body_12);
-    y += 14.4;
+    // Left aligned (default) - use writeStyled with region for consistency
+    {
+        var st = zpdf.StyledText.init(allocator);
+        defer st.deinit();
+        try st.append("Left aligned line (default)", .{});
+        var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
+        _ = try doc.writeStyled(&line_region, &st, body_12, .{ .alignment = .left });
+    }
+    y += line_height;
 
-    // Center aligned
-    const center_text = "Center aligned line";
-    const center_width = doc.getTextWidthStyled(center_text, body_12);
-    _ = try doc.writeAt(.{ .x = 72 + (region_width - center_width) / 2, .y = y }, center_text, body_12);
-    y += 14.4;
+    // Center aligned - use writeStyled with alignment
+    {
+        var st = zpdf.StyledText.init(allocator);
+        defer st.deinit();
+        try st.append("Center aligned line", .{});
+        var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
+        _ = try doc.writeStyled(&line_region, &st, body_12, .{ .alignment = .center });
+    }
+    y += line_height;
 
-    // Right aligned
-    const right_text = "Right aligned line";
-    const right_width = doc.getTextWidthStyled(right_text, body_12);
-    _ = try doc.writeAt(.{ .x = 72 + region_width - right_width, .y = y }, right_text, body_12);
-    y += 14.4;
+    // Right aligned - use writeStyled with alignment
+    {
+        var st = zpdf.StyledText.init(allocator);
+        defer st.deinit();
+        try st.append("Right aligned line", .{});
+        var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
+        _ = try doc.writeStyled(&line_region, &st, body_12, .{ .alignment = .right });
+    }
+    y += line_height;
 
     y += 12;
 

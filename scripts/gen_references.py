@@ -693,22 +693,19 @@ def gen_text_flow():
     # Test lines with different alignments
     pdf.set_font("Helvetica", "", size=12)
 
-    # Left aligned (default)
-    pdf.text(region_x, y, "Left aligned line (default)")
+    # Left aligned (default) - use cell for consistency with other alignments
+    pdf.set_xy(region_x, y)
+    pdf.cell(region_width, 14.4, "Left aligned line (default)", align="L")
     y += 14.4  # line height = font_size * 1.2
 
-    # Center aligned
-    text = "Center aligned line"
-    text_width = pdf.get_string_width(text)
-    x_center = region_x + (region_width - text_width) / 2
-    pdf.text(x_center, y, text)
+    # Center aligned - use cell with alignment
+    pdf.set_xy(region_x, y)
+    pdf.cell(region_width, 14.4, "Center aligned line", align="C")
     y += 14.4
 
-    # Right aligned
-    text = "Right aligned line"
-    text_width = pdf.get_string_width(text)
-    x_right = region_x + region_width - text_width
-    pdf.text(x_right, y, text)
+    # Right aligned - use cell with alignment
+    pdf.set_xy(region_x, y)
+    pdf.cell(region_width, 14.4, "Right aligned line", align="R")
     y += 14.4
 
     # Spacing

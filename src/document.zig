@@ -1178,7 +1178,7 @@ pub const Document = struct {
 
     /// Measures text width with explicit style.
     /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
-    pub fn getTextWidthStyled(self: *Document, str: []const u8, style: TextStyle) f64 {
+    fn getTextWidthStyled(self: *Document, str: []const u8, style: TextStyle) f64 {
         _ = self; // Document not needed for measurement with explicit style
 
         // Fast path: no soft-hyphens
@@ -1429,7 +1429,7 @@ pub const Document = struct {
     /// Find a soft-hyphen break point in a word that fits within max_width.
     /// Soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) marks optional break points.
     /// Returns the byte position where to break (soft-hyphen will be replaced with visible hyphen).
-    pub fn findSoftHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
+    fn findSoftHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         var i: usize = 0;
         while (i + 1 < word.len) {
@@ -1452,7 +1452,7 @@ pub const Document = struct {
     /// Find a regular hyphen break point in a word that fits within max_width.
     /// Regular hyphens stay visible; we break AFTER the hyphen (e.g., "state-" / "of-the-art").
     /// Returns the byte position after the hyphen where to split.
-    pub fn findHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
+    fn findHyphenBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         for (word, 0..) |c, i| {
             if (c == '-' and i > 0 and i + 1 < word.len) {
@@ -3996,4 +3996,82 @@ fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
             return metrics.measureTextWidth(str, font_style);
         },
     }
+}
+
+// ============================================================================
+// Internal tests for break helpers and text width measurement
+// ============================================================================
+
+test "findHyphenBreak finds break at regular hyphen" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
+    // "state-of-the-art" - should find breaks after each hyphen
+    const word = "state-of-the-art";
+
+    // Width that fits "state-" but not more
+    const state_width = doc.getTextWidthStyled("state-", style);
+    const result = doc.findHyphenBreakStyled(word, state_width + 1, style);
+    try std.testing.expectEqual(@as(?usize, 6), result); // "state-" is 6 bytes
+
+    // Width that fits "state-of-" but not "state-of-the-"
+    const state_of_width = doc.getTextWidthStyled("state-of-", style);
+    const result2 = doc.findHyphenBreakStyled(word, state_of_width + 1, style);
+    try std.testing.expectEqual(@as(?usize, 9), result2); // "state-of-" is 9 bytes
+}
+
+test "findHyphenBreak returns null for word without hyphens" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
+    const word = "supercalifragilistic";
+    const result = doc.findHyphenBreakStyled(word, 1000, style);
+    try std.testing.expectEqual(@as(?usize, null), result);
+}
+
+test "findSoftHyphenBreak finds break at soft hyphen" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
+    // "ex\xc2\xadplicit" - soft-hyphen between "ex" and "plicit"
+    const word = "ex\xc2\xadplicit";
+
+    // Width that fits "ex-" (prefix + visible hyphen)
+    const ex_width = doc.getTextWidthStyled("ex-", style);
+    const result = doc.findSoftHyphenBreakStyled(word, ex_width + 1, style);
+    try std.testing.expectEqual(@as(?usize, 2), result); // Position of soft-hyphen
+}
+
+test "findSoftHyphenBreak returns null for word without soft hyphens" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
+    const word = "explicit";
+    const result = doc.findSoftHyphenBreakStyled(word, 1000, style);
+    try std.testing.expectEqual(@as(?usize, null), result);
+}
+
+test "soft hyphens excluded from text width" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+
+    // Width with soft-hyphens should equal width without
+    const with_soft = doc.getTextWidthStyled("ex\xc2\xadplic\xc2\xadit", style);
+    const without_soft = doc.getTextWidthStyled("explicit", style);
+    try std.testing.expectEqual(without_soft, with_soft);
 }
