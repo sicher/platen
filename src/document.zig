@@ -822,12 +822,6 @@ pub const Document = struct {
             },
         });
     }
-
-    // CID text rendering is in text_render.zig
-    fn renderCIDTextWithKerning(_: *Document, cw: *ContentWriter, emb: *EmbeddedFont, str: []const u8, cached_glyphs: ?[]const u16, font_size: f64, start_x: f64, start_y: f64) !bool {
-        return text_render.renderCIDTextWithKerning(cw, emb, str, cached_glyphs, font_size, start_x, start_y);
-    }
-
     /// Writes text at the specified position with explicit style.
     /// Returns the bounding rectangle of the rendered text.
     pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle) !Rect {
@@ -2430,7 +2424,7 @@ pub const Document = struct {
                                 // CID mode: output with ligatures, kerning, and mark positioning
                                 // Pass absolute position for Tm-based mark positioning
                                 // Use cached glyphs if available (avoids duplicate OpenType shaping)
-                                _ = try self.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y);
+                                _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y);
                             } else {
                                 try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                 // WinAnsi mode
