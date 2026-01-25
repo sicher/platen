@@ -1835,14 +1835,31 @@ pub const Document = struct {
     // Graphics Primitives
     // ========================================================================
 
-    /// Write graphics state operators for the ShapeStyle API.
-    fn writeShapeStyle(_: *const Document, buf: []u8, style: ShapeStyle) usize {
-        return graphics.writeShapeGraphicsState(style, buf);
-    }
-
     /// Write graphics state operators for stroke-only operations (e.g., lines).
     fn writeStrokeStyle(_: *const Document, buf: []u8, style: StrokeStyle) usize {
         return graphics.writeShapeGraphicsState(.{ .stroke = style }, buf);
+    }
+
+    /// Begin a shape command: save graphics state and apply style.
+    /// Returns the number of bytes written.
+    fn beginShapeCommand(buf: []u8, style: ShapeStyle) usize {
+        var len: usize = 0;
+        @memcpy(buf[len..][0..2], "q\n");
+        len += 2;
+        len += graphics.writeShapeGraphicsState(style, buf[len..]);
+        return len;
+    }
+
+    /// Finish a shape command: add path operator and restore graphics state.
+    /// Returns the number of bytes written.
+    fn finishShapeCommand(buf: []u8, style: ShapeStyle) usize {
+        var len: usize = 0;
+        const op = graphics.getShapePathOperator(style);
+        @memcpy(buf[len..][0..op.len], op);
+        len += op.len;
+        @memcpy(buf[len..][0..2], "Q\n");
+        len += 2;
+        return len;
     }
 
     /// Draw a line between two points.
@@ -1884,27 +1901,12 @@ pub const Document = struct {
 
         var page = &self.pages.items[self.current_page];
         const page_height = self.currentPageSize().height;
-
-        // Convert from top-left to PDF coordinates (bottom-left origin)
         const pdf_y = page_height - rect.y - rect.height;
 
         var buf: [512]u8 = undefined;
-        var len: usize = 0;
-
-        // Save graphics state
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
-
-        // Graphics state from explicit style
-        len += self.writeShapeStyle(buf[len..], style);
-
-        // Rectangle path and operator
+        var len = beginShapeCommand(&buf, style);
         len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re ", .{ rect.x, pdf_y, rect.width, rect.height }) catch unreachable).len;
-        const op = graphics.getShapePathOperator(style);
-        @memcpy(buf[len .. len + op.len], op);
-        len += op.len;
-
-        // Restore graphics state
-        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+        len += finishShapeCommand(buf[len..], style);
 
         const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
@@ -1927,27 +1929,12 @@ pub const Document = struct {
 
         var page = &self.pages.items[self.current_page];
         const page_height = self.currentPageSize().height;
-        const pdf_y = page_height - rect.y - rect.height; // Convert to PDF coords
+        const pdf_y = page_height - rect.y - rect.height;
 
         var buf: [1024]u8 = undefined;
-        var len: usize = 0;
-
-        // Save graphics state
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
-
-        // Graphics state from explicit style
-        len += self.writeShapeStyle(buf[len..], style);
-
-        // Rounded rectangle path (includes close path "h ")
+        var len = beginShapeCommand(&buf, style);
         len += graphics.writeRoundedRectPath(buf[len..], rect.x, pdf_y, rect.width, rect.height, r);
-
-        // Apply style
-        const op = graphics.getShapePathOperator(style);
-        @memcpy(buf[len .. len + op.len], op);
-        len += op.len;
-
-        // Restore graphics state
-        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+        len += finishShapeCommand(buf[len..], style);
 
         const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
@@ -1966,27 +1953,12 @@ pub const Document = struct {
         const rx = rect.width / 2.0;
         const ry = rect.height / 2.0;
         const cx = rect.x + rx;
-        const pdf_cy = page_height - (rect.y + ry); // Convert to PDF coords
+        const pdf_cy = page_height - (rect.y + ry);
 
         var buf: [1024]u8 = undefined;
-        var len: usize = 0;
-
-        // Save graphics state
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
-
-        // Graphics state from explicit style
-        len += self.writeShapeStyle(buf[len..], style);
-
-        // Ellipse path
+        var len = beginShapeCommand(&buf, style);
         len += graphics.writeEllipsePath(buf[len..], cx, pdf_cy, rx, ry);
-
-        // Apply style
-        const op = graphics.getShapePathOperator(style);
-        @memcpy(buf[len .. len + op.len], op);
-        len += op.len;
-
-        // Restore graphics state
-        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
+        len += finishShapeCommand(buf[len..], style);
 
         const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
@@ -2018,13 +1990,8 @@ pub const Document = struct {
         // Calculate required buffer size: ~50 bytes per point + overhead
         const buf_size = 256 + points.len * 64;
         const buf = try page.pageAllocator().alloc(u8, buf_size);
-        var len: usize = 0;
 
-        // Save graphics state
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
-
-        // Graphics state from explicit style
-        len += self.writeShapeStyle(buf[len..], style);
+        var len = beginShapeCommand(buf, style);
 
         // Move to first point
         const pdf_y0 = page_height - points[0].y;
@@ -2037,19 +2004,11 @@ pub const Document = struct {
         }
 
         // Close path
-        len += (std.fmt.bufPrint(buf[len..], "h ", .{}) catch unreachable).len;
+        @memcpy(buf[len..][0..2], "h ");
+        len += 2;
 
-        // Apply style
-        const op = graphics.getShapePathOperator(style);
-        @memcpy(buf[len .. len + op.len], op);
-        len += op.len;
-
-        // Restore graphics state
-        len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
-
-        // Shrink buffer to actual size (arena allocator)
-        const raw_copy = buf[0..len];
-        try page.commands.append(self.allocator, .{ .raw = raw_copy });
+        len += finishShapeCommand(buf[len..], style);
+        try page.commands.append(self.allocator, .{ .raw = buf[0..len] });
     }
 
     /// Create a new path builder.
@@ -2928,28 +2887,15 @@ pub const Document = struct {
         // Estimate buffer size: ~60 bytes per command + overhead
         const buf_size = 256 + p.commands.items.len * 64;
         const buf = try page.pageAllocator().alloc(u8, buf_size);
-        var fbs = std.io.fixedBufferStream(buf);
-        const writer = fbs.writer();
 
-        // Save graphics state
-        try writer.writeAll("q\n");
+        var len = beginShapeCommand(buf, style);
 
-        // Graphics state from explicit style
-        var gs_buf: [256]u8 = undefined;
-        const gs_len = self.writeShapeStyle(&gs_buf, style);
-        try writer.writeAll(gs_buf[0..gs_len]);
+        // Path commands (use fixedBufferStream for writer interface)
+        var fbs = std.io.fixedBufferStream(buf[len..]);
+        try p.toPdfContent(page_height, fbs.writer());
+        len += fbs.pos;
 
-        // Path commands
-        try p.toPdfContent(page_height, writer);
-
-        // Apply style
-        const op = graphics.getShapePathOperator(style);
-        try writer.writeAll(op);
-
-        // Restore graphics state
-        try writer.writeAll("Q\n");
-
-        const len = fbs.pos;
+        len += finishShapeCommand(buf[len..], style);
         try page.commands.append(self.allocator, .{ .raw = buf[0..len] });
     }
 
@@ -3375,62 +3321,13 @@ pub const Document = struct {
                 try w.endObject();
 
                 // 3. FontDescriptor
-                try w.beginObject(descriptor_id);
-                {
-                    var desc_dict = Dict.init(self.allocator);
-                    defer desc_dict.deinit();
-                    try desc_dict.put("Type", Value.name("FontDescriptor"));
-                    try desc_dict.put("FontName", Value.name(emb_font.name));
-                    try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
-                    try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
-                    try desc_dict.put("Ascent", Value.int(emb_font.ascent));
-                    try desc_dict.put("Descent", Value.int(emb_font.descent));
-                    try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
-                    try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
-
-                    // CFF fonts use FontFile3, TrueType uses FontFile2
-                    if (is_cff) {
-                        try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
-                    } else {
-                        try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
-                    }
-
-                    var bbox_array = Array.init(self.allocator);
-                    defer bbox_array.deinit();
-                    for (emb_font.bbox) |val| {
-                        try bbox_array.append(Value.int(val));
-                    }
-                    try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
-
-                    try w.writeDict(desc_dict);
-                }
-                try w.endObject();
+                try self.writeFontDescriptor(&w, emb_font, descriptor_id, fontfile_id, is_cff);
 
                 // 4. FontFile stream (FontFile2 for TTF, FontFile3 for CFF)
-                try w.beginObject(fontfile_id);
-                {
-                    const font_data = emb_font.getFontData();
-                    var stream_dict = Dict.init(self.allocator);
-                    defer stream_dict.deinit();
-
-                    if (is_cff) {
-                        // CFF requires Subtype
-                        try stream_dict.put("Subtype", Value.name("CIDFontType0C"));
-                    } else {
-                        try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
-                    }
-                    try w.writeStreamCompressed(&stream_dict, font_data);
-                }
-                try w.endObject();
+                try self.writeFontFileStream(&w, emb_font, fontfile_id, is_cff, true);
 
                 // 5. ToUnicode CMap stream
-                try w.beginObject(tounicode_id);
-                {
-                    var tounicode_dict = Dict.init(self.allocator);
-                    defer tounicode_dict.deinit();
-                    try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
-                }
-                try w.endObject();
+                try self.writeToUnicodeStream(&w, tounicode_id, tounicode_cmap);
             } else {
                 // WinAnsi font: Font, FontDescriptor, FontFile2, ToUnicode (4 objects)
                 const font_dict_id = base_id;
@@ -3470,60 +3367,13 @@ pub const Document = struct {
 
                 // 2. FontDescriptor
                 const is_cff_wa = emb_font.font.isCFF();
-                try w.beginObject(descriptor_id);
-                {
-                    var desc_dict = Dict.init(self.allocator);
-                    defer desc_dict.deinit();
-                    try desc_dict.put("Type", Value.name("FontDescriptor"));
-                    try desc_dict.put("FontName", Value.name(emb_font.name));
-                    try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
-                    try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
-                    try desc_dict.put("Ascent", Value.int(emb_font.ascent));
-                    try desc_dict.put("Descent", Value.int(emb_font.descent));
-                    try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
-                    try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
-
-                    if (is_cff_wa) {
-                        try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
-                    } else {
-                        try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
-                    }
-
-                    var bbox_array = Array.init(self.allocator);
-                    defer bbox_array.deinit();
-                    for (emb_font.bbox) |val| {
-                        try bbox_array.append(Value.int(val));
-                    }
-                    try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
-
-                    try w.writeDict(desc_dict);
-                }
-                try w.endObject();
+                try self.writeFontDescriptor(&w, emb_font, descriptor_id, fontfile_id, is_cff_wa);
 
                 // 3. FontFile stream
-                try w.beginObject(fontfile_id);
-                {
-                    const font_data = emb_font.getFontData();
-                    var stream_dict = Dict.init(self.allocator);
-                    defer stream_dict.deinit();
-
-                    if (is_cff_wa) {
-                        try stream_dict.put("Subtype", Value.name("Type1C"));
-                    } else {
-                        try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
-                    }
-                    try w.writeStreamCompressed(&stream_dict, font_data);
-                }
-                try w.endObject();
+                try self.writeFontFileStream(&w, emb_font, fontfile_id, is_cff_wa, false);
 
                 // 4. ToUnicode CMap stream
-                try w.beginObject(tounicode_id);
-                {
-                    var tounicode_dict = Dict.init(self.allocator);
-                    defer tounicode_dict.deinit();
-                    try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
-                }
-                try w.endObject();
+                try self.writeToUnicodeStream(&w, tounicode_id, tounicode_cmap);
             }
         }
         last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
@@ -4150,6 +4000,85 @@ pub const Document = struct {
         });
         last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
         return result;
+    }
+
+    // ========================================================================
+    // Font Output Helpers
+    // ========================================================================
+
+    /// Write a FontDescriptor PDF object.
+    fn writeFontDescriptor(
+        self: *Document,
+        w: *Writer,
+        emb_font: *EmbeddedFont,
+        descriptor_id: ObjectId,
+        fontfile_id: ObjectId,
+        is_cff: bool,
+    ) !void {
+        try w.beginObject(descriptor_id);
+        var desc_dict = Dict.init(self.allocator);
+        defer desc_dict.deinit();
+
+        try desc_dict.put("Type", Value.name("FontDescriptor"));
+        try desc_dict.put("FontName", Value.name(emb_font.name));
+        try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
+        try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
+        try desc_dict.put("Ascent", Value.int(emb_font.ascent));
+        try desc_dict.put("Descent", Value.int(emb_font.descent));
+        try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
+        try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
+
+        // CFF fonts use FontFile3, TrueType uses FontFile2
+        if (is_cff) {
+            try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
+        } else {
+            try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
+        }
+
+        var bbox_array = Array.init(self.allocator);
+        defer bbox_array.deinit();
+        for (emb_font.bbox) |val| {
+            try bbox_array.append(Value.int(val));
+        }
+        try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
+
+        try w.writeDict(desc_dict);
+        try w.endObject();
+    }
+
+    /// Write a FontFile stream PDF object.
+    /// is_cid determines the CFF Subtype: true = CIDFontType0C, false = Type1C.
+    fn writeFontFileStream(
+        self: *Document,
+        w: *Writer,
+        emb_font: *EmbeddedFont,
+        fontfile_id: ObjectId,
+        is_cff: bool,
+        is_cid: bool,
+    ) !void {
+        try w.beginObject(fontfile_id);
+        const font_data = emb_font.getFontData();
+        var stream_dict = Dict.init(self.allocator);
+        defer stream_dict.deinit();
+
+        if (is_cff) {
+            // CFF requires Subtype
+            const subtype = if (is_cid) "CIDFontType0C" else "Type1C";
+            try stream_dict.put("Subtype", Value.name(subtype));
+        } else {
+            try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
+        }
+        try w.writeStreamCompressed(&stream_dict, font_data);
+        try w.endObject();
+    }
+
+    /// Write a ToUnicode CMap stream PDF object.
+    fn writeToUnicodeStream(self: *Document, w: *Writer, tounicode_id: ObjectId, tounicode_cmap: []const u8) !void {
+        try w.beginObject(tounicode_id);
+        var tounicode_dict = Dict.init(self.allocator);
+        defer tounicode_dict.deinit();
+        try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
+        try w.endObject();
     }
 };
 

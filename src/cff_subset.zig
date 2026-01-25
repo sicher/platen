@@ -302,91 +302,96 @@ pub fn parseCFFTopDictForCharStrings(data: []const u8, topdict_index_start: usiz
     return parseCFFDictForOperator(dict_data, 17); // 17 = CharStrings
 }
 
-pub fn parseCFFTopDictForPrivate(data: []const u8, topdict_index_start: usize) PrivateInfo {
-    const index = parseCFFIndex(data, topdict_index_start) orelse return .{ .size = 0, .offset = 0 };
-    const dict_data = index.getEntry(0) orelse return .{ .size = 0, .offset = 0 };
+/// Result of parsing a CFF dict for a specific operator.
+const CFFDictParseResult = struct {
+    operands: [2]i32 = .{ 0, 0 },
+    count: usize = 0,
+    found: bool = false,
+};
 
-    // Parse for operator 18 (Private) which has two operands: size, offset
-    var operands: [2]i32 = .{ 0, 0 };
-    var op_count: usize = 0;
-    var i: usize = 0;
-
-    while (i < dict_data.len) {
-        const b0 = dict_data[i];
-        if (b0 == 18) {
-            return .{ .size = @intCast(operands[0]), .offset = @intCast(operands[1]) };
-        } else if (b0 == 12) {
-            i += 2;
-            op_count = 0;
-        } else if (b0 <= 21) {
-            i += 1;
-            op_count = 0;
-        } else if (b0 == 28) {
-            if (op_count < 2) operands[op_count] = @as(i32, @as(i16, @bitCast(readU16(dict_data, i + 1))));
-            op_count += 1;
-            i += 3;
-        } else if (b0 == 29) {
-            if (op_count < 2) operands[op_count] = @as(i32, @bitCast(readU32(dict_data, i + 1)));
-            op_count += 1;
-            i += 5;
-        } else if (b0 == 30) {
-            i += 1;
-            while (i < dict_data.len and (dict_data[i] & 0xf) != 0xf and (dict_data[i] >> 4) != 0xf) : (i += 1) {}
-            i += 1;
-            op_count += 1;
-        } else if (b0 >= 32 and b0 <= 246) {
-            if (op_count < 2) operands[op_count] = @as(i32, b0) - 139;
-            op_count += 1;
-            i += 1;
-        } else if (b0 >= 247 and b0 <= 250) {
-            if (op_count < 2) operands[op_count] = (@as(i32, b0) - 247) * 256 + dict_data[i + 1] + 108;
-            op_count += 1;
-            i += 2;
-        } else if (b0 >= 251 and b0 <= 254) {
-            if (op_count < 2) operands[op_count] = -(@as(i32, b0) - 251) * 256 - dict_data[i + 1] - 108;
-            op_count += 1;
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
-    return .{ .size = 0, .offset = 0 };
-}
-
-pub fn parseCFFDictForOperator(dict_data: []const u8, target_op: u8) ?usize {
-    var operand: i32 = 0;
+/// Parse a CFF DICT for a target operator, collecting up to max_operands operands.
+/// This is the unified parser for CFF dictionary data, handling all operand encodings.
+fn parseCFFDictOperator(dict_data: []const u8, target_op: u8, comptime max_operands: usize) CFFDictParseResult {
+    var result = CFFDictParseResult{};
     var i: usize = 0;
 
     while (i < dict_data.len) {
         const b0 = dict_data[i];
         if (b0 == target_op) {
-            return @intCast(operand);
+            result.found = true;
+            return result;
         } else if (b0 == 12) {
+            // Two-byte operator (escaped)
             i += 2;
+            result.count = 0;
         } else if (b0 <= 21) {
+            // One-byte operator
             i += 1;
+            result.count = 0;
         } else if (b0 == 28) {
-            operand = @as(i32, @as(i16, @bitCast(readU16(dict_data, i + 1))));
+            // 2-byte signed integer
+            if (result.count < max_operands) {
+                result.operands[result.count] = @as(i32, @as(i16, @bitCast(readU16(dict_data, i + 1))));
+            }
+            result.count += 1;
             i += 3;
         } else if (b0 == 29) {
-            operand = @as(i32, @bitCast(readU32(dict_data, i + 1)));
+            // 4-byte signed integer
+            if (result.count < max_operands) {
+                result.operands[result.count] = @as(i32, @bitCast(readU32(dict_data, i + 1)));
+            }
+            result.count += 1;
             i += 5;
         } else if (b0 == 30) {
+            // Floating point (variable length, skip)
             i += 1;
             while (i < dict_data.len and (dict_data[i] & 0xf) != 0xf and (dict_data[i] >> 4) != 0xf) : (i += 1) {}
             i += 1;
+            result.count += 1;
         } else if (b0 >= 32 and b0 <= 246) {
-            operand = @as(i32, b0) - 139;
+            // Small integer: value = b0 - 139
+            if (result.count < max_operands) {
+                result.operands[result.count] = @as(i32, b0) - 139;
+            }
+            result.count += 1;
             i += 1;
         } else if (b0 >= 247 and b0 <= 250) {
-            operand = (@as(i32, b0) - 247) * 256 + dict_data[i + 1] + 108;
+            // Positive 2-byte integer
+            if (result.count < max_operands) {
+                result.operands[result.count] = (@as(i32, b0) - 247) * 256 + dict_data[i + 1] + 108;
+            }
+            result.count += 1;
             i += 2;
         } else if (b0 >= 251 and b0 <= 254) {
-            operand = -(@as(i32, b0) - 251) * 256 - dict_data[i + 1] - 108;
+            // Negative 2-byte integer
+            if (result.count < max_operands) {
+                result.operands[result.count] = -(@as(i32, b0) - 251) * 256 - dict_data[i + 1] - 108;
+            }
+            result.count += 1;
             i += 2;
         } else {
             i += 1;
         }
+    }
+    return result;
+}
+
+pub fn parseCFFTopDictForPrivate(data: []const u8, topdict_index_start: usize) PrivateInfo {
+    const index = parseCFFIndex(data, topdict_index_start) orelse return .{ .size = 0, .offset = 0 };
+    const dict_data = index.getEntry(0) orelse return .{ .size = 0, .offset = 0 };
+
+    // Parse for operator 18 (Private) which has two operands: size, offset
+    const result = parseCFFDictOperator(dict_data, 18, 2);
+    if (result.found) {
+        return .{ .size = @intCast(result.operands[0]), .offset = @intCast(result.operands[1]) };
+    }
+    return .{ .size = 0, .offset = 0 };
+}
+
+pub fn parseCFFDictForOperator(dict_data: []const u8, target_op: u8) ?usize {
+    const result = parseCFFDictOperator(dict_data, target_op, 1);
+    if (result.found) {
+        return @intCast(result.operands[0]);
     }
     return null;
 }
