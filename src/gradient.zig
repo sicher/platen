@@ -107,16 +107,14 @@ pub const RadialGradient = struct {
     }
 };
 
-/// Write a PDF function for gradient color interpolation.
-/// For 2 stops: Type 2 exponential interpolation function.
-/// For 3+ stops: Type 3 stitching function.
-pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
-    if (stops.len < 2) return error.InvalidGradient;
-
-    if (stops.len == 2) {
-        // Simple 2-color: Type 2 exponential interpolation
-        const c0 = stops[0].color.toRgbf();
-        const c1 = stops[1].color.toRgbf();
+/// Write a PDF Type 2 exponential interpolation function for two colors.
+fn writeType2Function(writer: anytype, c0: Color.Rgbf, c1: Color.Rgbf, comptime compact: bool) !void {
+    if (compact) {
+        try writer.print(
+            "<< /FunctionType 2 /Domain [0 1] /C0 [{d:.3} {d:.3} {d:.3}] /C1 [{d:.3} {d:.3} {d:.3}] /N 1 >>\n",
+            .{ c0.r, c0.g, c0.b, c1.r, c1.g, c1.b },
+        );
+    } else {
         try writer.print(
             \\<<
             \\/FunctionType 2
@@ -126,6 +124,18 @@ pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
             \\/N 1
             \\>>
         , .{ c0.r, c0.g, c0.b, c1.r, c1.g, c1.b });
+    }
+}
+
+/// Write a PDF function for gradient color interpolation.
+/// For 2 stops: Type 2 exponential interpolation function.
+/// For 3+ stops: Type 3 stitching function.
+pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
+    if (stops.len < 2) return error.InvalidGradient;
+
+    if (stops.len == 2) {
+        // Simple 2-color: Type 2 exponential interpolation
+        try writeType2Function(writer, stops[0].color.toRgbf(), stops[1].color.toRgbf(), false);
     } else {
         // Multi-color: Type 3 stitching function
         // Each pair of adjacent stops needs a Type 2 function
@@ -134,12 +144,7 @@ pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
         // Functions array (inline Type 2 functions)
         try writer.writeAll("/Functions [\n");
         for (0..stops.len - 1) |i| {
-            const c0 = stops[i].color.toRgbf();
-            const c1 = stops[i + 1].color.toRgbf();
-            try writer.print(
-                \\<< /FunctionType 2 /Domain [0 1] /C0 [{d:.3} {d:.3} {d:.3}] /C1 [{d:.3} {d:.3} {d:.3}] /N 1 >>
-                \\
-            , .{ c0.r, c0.g, c0.b, c1.r, c1.g, c1.b });
+            try writeType2Function(writer, stops[i].color.toRgbf(), stops[i + 1].color.toRgbf(), true);
         }
         try writer.writeAll("]\n");
 

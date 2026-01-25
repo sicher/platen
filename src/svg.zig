@@ -27,6 +27,18 @@ pub const Color = struct {
     pub fn isNone(self: Color) bool {
         return self.a == 0;
     }
+
+    /// RGB color components as PDF floats (0.0-1.0 range).
+    pub const PdfRgb = struct { r: f64, g: f64, b: f64 };
+
+    /// Convert to PDF RGB float values (0.0-1.0 range).
+    pub fn toPdfRgb(self: Color) PdfRgb {
+        return .{
+            .r = @as(f64, @floatFromInt(self.r)) / 255.0,
+            .g = @as(f64, @floatFromInt(self.g)) / 255.0,
+            .b = @as(f64, @floatFromInt(self.b)) / 255.0,
+        };
+    }
 };
 
 /// Line cap style
@@ -178,6 +190,12 @@ pub const Transform = struct {
     f: f64 = 0,
 
     pub const identity = Transform{};
+
+    /// Check if this is the identity transform (no-op).
+    pub fn isIdentity(self: Transform) bool {
+        return self.a == 1 and self.b == 0 and self.c == 0 and
+            self.d == 1 and self.e == 0 and self.f == 0;
+    }
 
     /// Multiply two transforms: self * other
     pub fn multiply(self: Transform, other: Transform) Transform {
@@ -1427,11 +1445,8 @@ fn renderText(svg: *Svg, writer: *ContentWriter, text: anytype) !void {
     const fill = text.style.getFill();
     if (fill) |c| {
         if (!c.isNone()) {
-            try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{
-                @as(f64, @floatFromInt(c.r)) / 255.0,
-                @as(f64, @floatFromInt(c.g)) / 255.0,
-                @as(f64, @floatFromInt(c.b)) / 255.0,
-            });
+            const rgb = c.toPdfRgb();
+            try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{ rgb.r, rgb.g, rgb.b });
         }
     }
 
@@ -1463,11 +1478,7 @@ fn renderText(svg: *Svg, writer: *ContentWriter, text: anytype) !void {
 }
 
 fn applyTransform(writer: *ContentWriter, transform: Transform) !void {
-    if (transform.a == 1 and transform.b == 0 and transform.c == 0 and
-        transform.d == 1 and transform.e == 0 and transform.f == 0)
-    {
-        return; // Identity, no-op
-    }
+    if (transform.isIdentity()) return;
     try writer.append("q\n");
     try writer.print("{d:.4} {d:.4} {d:.4} {d:.4} {d:.2} {d:.2} cm\n", .{
         transform.a, transform.b, transform.c, transform.d, transform.e, transform.f,
@@ -1475,11 +1486,7 @@ fn applyTransform(writer: *ContentWriter, transform: Transform) !void {
 }
 
 fn restoreTransform(writer: *ContentWriter, transform: Transform) !void {
-    if (transform.a == 1 and transform.b == 0 and transform.c == 0 and
-        transform.d == 1 and transform.e == 0 and transform.f == 0)
-    {
-        return; // Identity, no-op
-    }
+    if (transform.isIdentity()) return;
     try writer.append("Q\n");
 }
 
@@ -1495,22 +1502,16 @@ fn applyStyle(svg: *Svg, writer: *ContentWriter, style: Style) !void {
     // Set fill color (default to black if unspecified)
     if (style.getFill()) |fill| {
         if (!fill.isNone()) {
-            try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{
-                @as(f64, @floatFromInt(fill.r)) / 255.0,
-                @as(f64, @floatFromInt(fill.g)) / 255.0,
-                @as(f64, @floatFromInt(fill.b)) / 255.0,
-            });
+            const rgb = fill.toPdfRgb();
+            try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{ rgb.r, rgb.g, rgb.b });
         }
     }
 
     // Set stroke color
     if (style.getStroke()) |stroke| {
         if (!stroke.isNone()) {
-            try writer.print("{d:.3} {d:.3} {d:.3} RG\n", .{
-                @as(f64, @floatFromInt(stroke.r)) / 255.0,
-                @as(f64, @floatFromInt(stroke.g)) / 255.0,
-                @as(f64, @floatFromInt(stroke.b)) / 255.0,
-            });
+            const rgb = stroke.toPdfRgb();
+            try writer.print("{d:.3} {d:.3} {d:.3} RG\n", .{ rgb.r, rgb.g, rgb.b });
             try writer.print("{d:.2} w\n", .{style.getStrokeWidth()});
             try writer.print("{d} J\n", .{style.getStrokeLinecap().toPdfValue()});
             try writer.print("{d} j\n", .{style.getStrokeLinejoin().toPdfValue()});
