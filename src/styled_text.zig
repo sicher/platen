@@ -388,6 +388,81 @@ pub const StyledText = struct {
         }
         self.break_point_storage.clearRetainingCapacity();
     }
+
+    /// Get the remaining text starting from a word index.
+    /// Returns null if word_idx is out of bounds.
+    pub fn getTextFromWord(self: *const StyledText, word_idx: usize) ?[]const u8 {
+        if (word_idx >= self.words.items.len) return null;
+        const word = self.words.items[word_idx];
+        const span = self.spans.items[word.start_span];
+        return span.text[word.start_offset..];
+    }
+
+    /// Compute optimal line breaks using Knuth-Plass algorithm.
+    /// Returns array of word indices where lines end (caller owns the slice).
+    pub fn computeOptimalBreaks(self: *const StyledText, line_width: f64, space_width: f64) ![]usize {
+        const n = self.words.items.len;
+        if (n == 0) return self.allocator.alloc(usize, 0);
+
+        const INFINITY: f64 = 1e18;
+
+        var dp = try self.allocator.alloc(f64, n + 1);
+        defer self.allocator.free(dp);
+        var prev = try self.allocator.alloc(usize, n + 1);
+        defer self.allocator.free(prev);
+
+        dp[0] = 0;
+        prev[0] = 0;
+
+        // For each ending position
+        for (1..n + 1) |j| {
+            dp[j] = INFINITY;
+            prev[j] = 0;
+
+            // Try each starting position
+            var line_w: f64 = 0;
+            var start_i = j;
+            while (start_i > 0) {
+                start_i -= 1;
+                const word = self.words.items[start_i];
+
+                // Check force break constraint
+                if (word.force_break and start_i + 1 < j) break;
+
+                // Add word width
+                if (start_i + 1 < j) line_w += space_width;
+                line_w += word.width;
+
+                // Line too wide
+                if (line_w > line_width + 0.01) break;
+
+                // Compute badness
+                const slack = line_width - line_w;
+                const is_last_line = (j == n);
+                const is_forced = self.words.items[j - 1].force_break;
+                const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
+
+                const total = dp[start_i] + badness;
+                if (total < dp[j]) {
+                    dp[j] = total;
+                    prev[j] = start_i;
+                }
+            }
+        }
+
+        // Backtrack
+        var breaks = std.ArrayListUnmanaged(usize){};
+        errdefer breaks.deinit(self.allocator);
+
+        var pos = n;
+        while (pos > 0) {
+            try breaks.append(self.allocator, pos);
+            pos = prev[pos];
+        }
+
+        std.mem.reverse(usize, breaks.items);
+        return breaks.toOwnedSlice(self.allocator);
+    }
 };
 
 // ============================================================================

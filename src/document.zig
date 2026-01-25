@@ -22,6 +22,7 @@ pub const gradient = @import("gradient.zig");
 pub const styled_text = @import("styled_text.zig");
 pub const graphics = @import("graphics.zig");
 pub const outlinemod = @import("outline.zig");
+pub const pdf_output = @import("pdf_output.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -338,67 +339,13 @@ const ContentWriter = struct {
     }
 };
 
-/// Get a short resource name for a font (F1, F2, etc.)
-fn fontResourceName(font: StandardFont) []const u8 {
-    return switch (font) {
-        .helvetica => "F1",
-        .helvetica_bold => "F2",
-        .helvetica_oblique => "F3",
-        .helvetica_bold_oblique => "F4",
-        .times_roman => "F5",
-        .times_bold => "F6",
-        .times_italic => "F7",
-        .times_bold_italic => "F8",
-        .courier => "F9",
-        .courier_bold => "F10",
-        .courier_oblique => "F11",
-        .courier_bold_oblique => "F12",
-        .symbol => "F13",
-        .zapf_dingbats => "F14",
-    };
-}
-
-/// Generate resource names at comptime (e.g., "E1", "E2", ... "E32").
-fn makeResourceNames(comptime prefix: []const u8, comptime count: usize) [count][]const u8 {
-    @setEvalBranchQuota(10000);
-    var names: [count][]const u8 = undefined;
-    for (0..count) |i| {
-        names[i] = std.fmt.comptimePrint("{s}{d}", .{ prefix, i + 1 });
-    }
-    return names;
-}
-
-/// Get resource name by index, with fallback for out-of-range indices.
-fn getResourceName(comptime names: []const []const u8, idx: usize, comptime fallback: []const u8) []const u8 {
-    return if (idx < names.len) names[idx] else fallback;
-}
-
-// Resource name arrays generated at comptime
-const embedded_font_names = makeResourceNames("E", 32);
-const image_names = makeResourceNames("Im", 32);
-const svg_names = makeResourceNames("Sv", 32);
-const extgstate_names = makeResourceNames("GS", 32);
-const shading_names = makeResourceNames("Sh", 16);
-
-fn embeddedFontResourceName(idx: usize) []const u8 {
-    return getResourceName(&embedded_font_names, idx, "E99");
-}
-
-fn imageResourceName(idx: usize) []const u8 {
-    return getResourceName(&image_names, idx, "Im99");
-}
-
-fn svgResourceName(idx: usize) []const u8 {
-    return getResourceName(&svg_names, idx, "Sv99");
-}
-
-fn extgstateResourceName(idx: usize) []const u8 {
-    return getResourceName(&extgstate_names, idx, "GS99");
-}
-
-fn shadingResourceName(idx: usize) []const u8 {
-    return getResourceName(&shading_names, idx, "Sh99");
-}
+// Resource naming functions are in pdf_output.zig
+const fontResourceName = pdf_output.fontResourceName;
+const embeddedFontResourceName = pdf_output.embeddedFontResourceName;
+const imageResourceName = pdf_output.imageResourceName;
+const svgResourceName = pdf_output.svgResourceName;
+const extgstateResourceName = pdf_output.extgstateResourceName;
+const shadingResourceName = pdf_output.shadingResourceName;
 
 /// Stored gradient definition
 pub const GradientDef = union(enum) {
@@ -2104,7 +2051,7 @@ pub const Document = struct {
                 }
                 return .{
                     .lines_written = lines_written,
-                    .overflow = self.getStyledTextFromWord(text, word_idx),
+                    .overflow = text.getTextFromWord(word_idx),
                     .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
                 };
             }
@@ -2471,15 +2418,6 @@ pub const Document = struct {
         return line_count;
     }
 
-    fn getStyledTextFromWord(self: *Document, text: *const StyledText, word_idx: usize) ?[]const u8 {
-        _ = self;
-        if (word_idx >= text.words.items.len) return null;
-
-        const word = text.words.items[word_idx];
-        const span = text.spans.items[word.start_span];
-        return span.text[word.start_offset..];
-    }
-
     /// Render a single line of styled text.
     fn renderStyledLine(
         self: *Document,
@@ -2736,7 +2674,7 @@ pub const Document = struct {
         const rect_width = region.contentWidth();
 
         // Compute optimal break points using preprocessed word data
-        const breaks = try self.computeStyledOptimalBreaks(text, line_width, space_width);
+        const breaks = try text.computeOptimalBreaks(line_width, space_width);
         defer self.allocator.free(breaks);
 
         if (breaks.len == 0) {
@@ -2751,7 +2689,7 @@ pub const Document = struct {
             if (region.remainingHeight() < line_height) {
                 return .{
                     .lines_written = lines_written,
-                    .overflow = self.getStyledTextFromWord(text, line_start),
+                    .overflow = text.getTextFromWord(line_start),
                     .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
                 };
             }
@@ -2786,71 +2724,6 @@ pub const Document = struct {
             .overflow = null,
             .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
         };
-    }
-
-    /// Compute optimal breaks for styled text using Knuth-Plass.
-    fn computeStyledOptimalBreaks(self: *Document, text: *const StyledText, line_width: f64, space_width: f64) ![]usize {
-        const n = text.words.items.len;
-        if (n == 0) return self.allocator.alloc(usize, 0);
-
-        const INFINITY: f64 = 1e18;
-
-        var dp = try self.allocator.alloc(f64, n + 1);
-        defer self.allocator.free(dp);
-        var prev = try self.allocator.alloc(usize, n + 1);
-        defer self.allocator.free(prev);
-
-        dp[0] = 0;
-        prev[0] = 0;
-
-        // For each ending position
-        for (1..n + 1) |j| {
-            dp[j] = INFINITY;
-            prev[j] = 0;
-
-            // Try each starting position
-            var line_w: f64 = 0;
-            var start_i = j;
-            while (start_i > 0) {
-                start_i -= 1;
-                const word = text.words.items[start_i];
-
-                // Check force break constraint
-                if (word.force_break and start_i + 1 < j) break;
-
-                // Add word width
-                if (start_i + 1 < j) line_w += space_width;
-                line_w += word.width;
-
-                // Line too wide
-                if (line_w > line_width + 0.01) break;
-
-                // Compute badness
-                const slack = line_width - line_w;
-                const is_last_line = (j == n);
-                const is_forced = text.words.items[j - 1].force_break;
-                const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
-
-                const total = dp[start_i] + badness;
-                if (total < dp[j]) {
-                    dp[j] = total;
-                    prev[j] = start_i;
-                }
-            }
-        }
-
-        // Backtrack
-        var breaks = std.ArrayListUnmanaged(usize){};
-        errdefer breaks.deinit(self.allocator);
-
-        var pos = n;
-        while (pos > 0) {
-            try breaks.append(self.allocator, pos);
-            pos = prev[pos];
-        }
-
-        std.mem.reverse(usize, breaks.items);
-        return breaks.toOwnedSlice(self.allocator);
     }
 
     /// Draw a path with the specified style.
@@ -3044,20 +2917,17 @@ pub const Document = struct {
     }
 
     /// Output timing information for performance analysis.
-    pub const OutputTiming = struct {
-        subset_ms: i64 = 0,
-        render_ms: i64 = 0,
-        font_write_ms: i64 = 0,
-        page_write_ms: i64 = 0,
-        finish_ms: i64 = 0,
-    };
+    pub const OutputTiming = pdf_output.OutputTiming;
 
     /// Last output timing (for performance debugging).
-    pub var last_output_timing: OutputTiming = .{};
+    /// Use pdf_output.last_output_timing for access.
+    fn getLastOutputTiming() *OutputTiming {
+        return &pdf_output.last_output_timing;
+    }
 
     /// Generate PDF output
     pub fn output(self: *Document) ![]u8 {
-        last_output_timing = .{};
+        pdf_output.last_output_timing = .{};
 
         var w = Writer.init(self.allocator);
         defer w.deinit();
@@ -3212,14 +3082,14 @@ pub const Document = struct {
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font.generateSubset();
         }
-        last_output_timing.subset_ms = std.time.milliTimestamp() - subset_start;
+        pdf_output.last_output_timing.subset_ms = std.time.milliTimestamp() - subset_start;
 
         // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
         const render_start = std.time.milliTimestamp();
         for (self.pages.items) |*page| {
             try self.renderPageCommands(page);
         }
-        last_output_timing.render_ms = std.time.milliTimestamp() - render_start;
+        pdf_output.last_output_timing.render_ms = std.time.milliTimestamp() - render_start;
 
         // Write embedded font objects
         const font_write_start = std.time.milliTimestamp();
@@ -3355,7 +3225,7 @@ pub const Document = struct {
                 try self.writeToUnicodeStream(&w, tounicode_id, tounicode_cmap);
             }
         }
-        last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
+        pdf_output.last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
 
         // Write image XObjects
         for (self.loaded_images.items, 0..) |image, i| {
@@ -3782,7 +3652,7 @@ pub const Document = struct {
                 try w.endObject();
             }
         }
-        last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
+        pdf_output.last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
 
         // Write Info dictionary if metadata is set
         var info_id: ?ObjectId = null;
@@ -3977,87 +3847,24 @@ pub const Document = struct {
             .catalog_ref = .{ .id = catalog_id },
             .info_ref = if (info_id) |id| .{ .id = id } else null,
         });
-        last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
+        pdf_output.last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
         return result;
     }
 
     // ========================================================================
-    // Font Output Helpers
+    // Font Output Helpers (delegated to pdf_output.zig)
     // ========================================================================
 
-    /// Write a FontDescriptor PDF object.
-    fn writeFontDescriptor(
-        self: *Document,
-        w: *Writer,
-        emb_font: *EmbeddedFont,
-        descriptor_id: ObjectId,
-        fontfile_id: ObjectId,
-        is_cff: bool,
-    ) !void {
-        try w.beginObject(descriptor_id);
-        var desc_dict = Dict.init(self.allocator);
-        defer desc_dict.deinit();
-
-        try desc_dict.put("Type", Value.name("FontDescriptor"));
-        try desc_dict.put("FontName", Value.name(emb_font.name));
-        try desc_dict.put("Flags", Value.int(@intCast(emb_font.flags.toInt())));
-        try desc_dict.put("ItalicAngle", Value.int(emb_font.italic_angle));
-        try desc_dict.put("Ascent", Value.int(emb_font.ascent));
-        try desc_dict.put("Descent", Value.int(emb_font.descent));
-        try desc_dict.put("CapHeight", Value.int(emb_font.cap_height));
-        try desc_dict.put("StemV", Value.int(@intCast(emb_font.stem_v)));
-
-        // CFF fonts use FontFile3, TrueType uses FontFile2
-        if (is_cff) {
-            try desc_dict.put("FontFile3", Value.ref(.{ .id = fontfile_id }));
-        } else {
-            try desc_dict.put("FontFile2", Value.ref(.{ .id = fontfile_id }));
-        }
-
-        var bbox_array = Array.init(self.allocator);
-        defer bbox_array.deinit();
-        for (emb_font.bbox) |val| {
-            try bbox_array.append(Value.int(val));
-        }
-        try desc_dict.put("FontBBox", .{ .array_val = &bbox_array });
-
-        try w.writeDict(desc_dict);
-        try w.endObject();
+    fn writeFontDescriptor(self: *Document, w: *Writer, emb_font: *EmbeddedFont, descriptor_id: ObjectId, fontfile_id: ObjectId, is_cff: bool) !void {
+        return pdf_output.writeFontDescriptor(self.allocator, w, emb_font, descriptor_id, fontfile_id, is_cff);
     }
 
-    /// Write a FontFile stream PDF object.
-    /// is_cid determines the CFF Subtype: true = CIDFontType0C, false = Type1C.
-    fn writeFontFileStream(
-        self: *Document,
-        w: *Writer,
-        emb_font: *EmbeddedFont,
-        fontfile_id: ObjectId,
-        is_cff: bool,
-        is_cid: bool,
-    ) !void {
-        try w.beginObject(fontfile_id);
-        const font_data = emb_font.getFontData();
-        var stream_dict = Dict.init(self.allocator);
-        defer stream_dict.deinit();
-
-        if (is_cff) {
-            // CFF requires Subtype
-            const subtype = if (is_cid) "CIDFontType0C" else "Type1C";
-            try stream_dict.put("Subtype", Value.name(subtype));
-        } else {
-            try stream_dict.put("Length1", Value.int(@intCast(font_data.len)));
-        }
-        try w.writeStreamCompressed(&stream_dict, font_data);
-        try w.endObject();
+    fn writeFontFileStream(self: *Document, w: *Writer, emb_font: *EmbeddedFont, fontfile_id: ObjectId, is_cff: bool, is_cid: bool) !void {
+        return pdf_output.writeFontFileStream(self.allocator, w, emb_font, fontfile_id, is_cff, is_cid);
     }
 
-    /// Write a ToUnicode CMap stream PDF object.
     fn writeToUnicodeStream(self: *Document, w: *Writer, tounicode_id: ObjectId, tounicode_cmap: []const u8) !void {
-        try w.beginObject(tounicode_id);
-        var tounicode_dict = Dict.init(self.allocator);
-        defer tounicode_dict.deinit();
-        try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
-        try w.endObject();
+        return pdf_output.writeToUnicodeStream(self.allocator, w, tounicode_id, tounicode_cmap);
     }
 };
 
@@ -4065,28 +3872,8 @@ pub const Document = struct {
 // Helper Functions
 // ============================================================================
 
-/// Format current UTC time as PDF date string: D:YYYYMMDDHHmmSSZ
-/// Returns a slice into the provided buffer.
-fn formatPdfDate(buf: *[24]u8) []const u8 {
-    const timestamp = std.time.timestamp();
-    const epoch_secs: u64 = @intCast(timestamp);
-    const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
-    const day = epoch.getEpochDay();
-    const year_day = day.calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_secs = epoch.getDaySeconds();
-
-    _ = std.fmt.bufPrint(buf, "D:{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}Z", .{
-        year_day.year,
-        month_day.month.numeric(),
-        month_day.day_index + 1,
-        day_secs.getHoursIntoDay(),
-        day_secs.getMinutesIntoHour(),
-        day_secs.getSecondsIntoMinute(),
-    }) catch unreachable;
-
-    return buf[0..17]; // "D:YYYYMMDDHHmmSSZ"
-}
+// formatPdfDate is now in pdf_output.zig
+const formatPdfDate = pdf_output.formatPdfDate;
 
 /// Check if a soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) starts at position i.
 inline fn isSoftHyphenAt(str: []const u8, i: usize) bool {
