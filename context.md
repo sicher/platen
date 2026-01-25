@@ -40,6 +40,10 @@ API cleanup **COMPLETED**. All API is now explicit with per-page options.
   - New API: `doc.createOutline()` → build → `doc.setOutline(&outline)`
   - Cleaner than old `addOutlineItem(title, dest, parent)` pattern
 
+- **Added integration test for insertPage()**:
+  - Tests building pages in reverse order with `insertPage(0)`
+  - Verifies output matches normal `addPage()` order
+
 ## What We Did (Session 2026-01-25 #3)
 - **Added per-page size/margins and page navigation API**:
   - New `PageOptions` struct with `size` and `margins` fields
