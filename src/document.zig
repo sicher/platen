@@ -358,67 +358,46 @@ fn fontResourceName(font: StandardFont) []const u8 {
     };
 }
 
-/// Generic resource name lookup helper
-fn resourceName(names: []const []const u8, idx: usize, fallback: []const u8) []const u8 {
+/// Generate resource names at comptime (e.g., "E1", "E2", ... "E32").
+fn makeResourceNames(comptime prefix: []const u8, comptime count: usize) [count][]const u8 {
+    @setEvalBranchQuota(10000);
+    var names: [count][]const u8 = undefined;
+    for (0..count) |i| {
+        names[i] = std.fmt.comptimePrint("{s}{d}", .{ prefix, i + 1 });
+    }
+    return names;
+}
+
+/// Get resource name by index, with fallback for out-of-range indices.
+fn getResourceName(comptime names: []const []const u8, idx: usize, comptime fallback: []const u8) []const u8 {
     return if (idx < names.len) names[idx] else fallback;
 }
 
-/// Static resource names for embedded fonts (E1, E2, etc.)
-const embedded_font_names = [_][]const u8{
-    "E1",  "E2",  "E3",  "E4",  "E5",  "E6",  "E7",  "E8",
-    "E9",  "E10", "E11", "E12", "E13", "E14", "E15", "E16",
-    "E17", "E18", "E19", "E20", "E21", "E22", "E23", "E24",
-    "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32",
-};
+// Resource name arrays generated at comptime
+const embedded_font_names = makeResourceNames("E", 32);
+const image_names = makeResourceNames("Im", 32);
+const svg_names = makeResourceNames("Sv", 32);
+const extgstate_names = makeResourceNames("GS", 32);
+const shading_names = makeResourceNames("Sh", 16);
 
 fn embeddedFontResourceName(idx: usize) []const u8 {
-    return resourceName(&embedded_font_names, idx, "E99");
+    return getResourceName(&embedded_font_names, idx, "E99");
 }
-
-// Static image resource names to avoid dangling pointer issues
-const image_names = [_][]const u8{
-    "Im1",  "Im2",  "Im3",  "Im4",  "Im5",  "Im6",  "Im7",  "Im8",
-    "Im9",  "Im10", "Im11", "Im12", "Im13", "Im14", "Im15", "Im16",
-    "Im17", "Im18", "Im19", "Im20", "Im21", "Im22", "Im23", "Im24",
-    "Im25", "Im26", "Im27", "Im28", "Im29", "Im30", "Im31", "Im32",
-};
 
 fn imageResourceName(idx: usize) []const u8 {
-    return resourceName(&image_names, idx, "Im99");
+    return getResourceName(&image_names, idx, "Im99");
 }
-
-// Static SVG resource names (Form XObjects)
-const svg_names = [_][]const u8{
-    "Sv1",  "Sv2",  "Sv3",  "Sv4",  "Sv5",  "Sv6",  "Sv7",  "Sv8",
-    "Sv9",  "Sv10", "Sv11", "Sv12", "Sv13", "Sv14", "Sv15", "Sv16",
-    "Sv17", "Sv18", "Sv19", "Sv20", "Sv21", "Sv22", "Sv23", "Sv24",
-    "Sv25", "Sv26", "Sv27", "Sv28", "Sv29", "Sv30", "Sv31", "Sv32",
-};
 
 fn svgResourceName(idx: usize) []const u8 {
-    return resourceName(&svg_names, idx, "Sv99");
+    return getResourceName(&svg_names, idx, "Sv99");
 }
-
-// Static ExtGState names for SVG transparency
-const extgstate_names = [_][]const u8{
-    "GS1",  "GS2",  "GS3",  "GS4",  "GS5",  "GS6",  "GS7",  "GS8",
-    "GS9",  "GS10", "GS11", "GS12", "GS13", "GS14", "GS15", "GS16",
-    "GS17", "GS18", "GS19", "GS20", "GS21", "GS22", "GS23", "GS24",
-    "GS25", "GS26", "GS27", "GS28", "GS29", "GS30", "GS31", "GS32",
-};
 
 fn extgstateResourceName(idx: usize) []const u8 {
-    return resourceName(&extgstate_names, idx, "GS99");
+    return getResourceName(&extgstate_names, idx, "GS99");
 }
 
-// Static shading names for gradients
-const shading_names = [_][]const u8{
-    "Sh1",  "Sh2",  "Sh3",  "Sh4",  "Sh5",  "Sh6",  "Sh7",  "Sh8",
-    "Sh9",  "Sh10", "Sh11", "Sh12", "Sh13", "Sh14", "Sh15", "Sh16",
-};
-
 fn shadingResourceName(idx: usize) []const u8 {
-    return resourceName(&shading_names, idx, "Sh99");
+    return getResourceName(&shading_names, idx, "Sh99");
 }
 
 /// Stored gradient definition

@@ -7,6 +7,7 @@ const std = @import("std");
 const xml = @import("xml.zig");
 const color_module = @import("color.zig");
 const layout = @import("layout.zig");
+const graphics = @import("graphics.zig");
 
 // ============================================================================
 // Types
@@ -1113,9 +1114,8 @@ fn renderRoundedRect(writer: *ContentWriter, x: f64, y: f64, w: f64, h: f64, rx:
     const ry_clamped = @min(ry, h / 2);
 
     // Bezier control point factor for approximating 90-degree arc
-    const k: f64 = 0.5522847498;
-    const kx = rx_clamped * k;
-    const ky = ry_clamped * k;
+    const kx = rx_clamped * graphics.KAPPA;
+    const ky = ry_clamped * graphics.KAPPA;
 
     // Start at top-left, after the corner
     try writer.print("{d:.2} {d:.2} m\n", .{ x + rx_clamped, y });
@@ -1180,13 +1180,12 @@ fn renderEllipse(svg: *Svg, writer: *ContentWriter, ellipse: anytype) !void {
     try applyStyle(svg, writer, ellipse.style);
 
     // Approximate ellipse with 4 bezier curves
-    const k: f64 = 0.5522847498;
     const cx = ellipse.cx;
     const cy = ellipse.cy;
     const rx = ellipse.rx;
     const ry = ellipse.ry;
-    const kx = rx * k;
-    const ky = ry * k;
+    const kx = rx * graphics.KAPPA;
+    const ky = ry * graphics.KAPPA;
 
     // Start at right
     try writer.print("{d:.2} {d:.2} m\n", .{ cx + rx, cy });

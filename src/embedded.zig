@@ -55,6 +55,31 @@ pub const FontEncoding = enum {
     identity,
 };
 
+/// Common font table references for TTF subsetting operations.
+/// Consolidates repeated table extraction code.
+const SubsetTables = struct {
+    head: ttf.HeadTable,
+    hhea: ttf.HheaTable,
+    maxp: ttf.MaxpTable,
+    glyf: []const u8,
+    loca: []const u8,
+    hmtx: []const u8,
+    loca_format: i16,
+
+    fn init(font: *const ttf.Font) !SubsetTables {
+        const head = font.head orelse return error.MissingTable;
+        return .{
+            .head = head,
+            .hhea = font.hhea orelse return error.MissingTable,
+            .maxp = font.maxp orelse return error.MissingTable,
+            .glyf = font.getTable("glyf".*) orelse return error.MissingTable,
+            .loca = font.getTable("loca".*) orelse return error.MissingTable,
+            .hmtx = font.getTable("hmtx".*) orelse return error.MissingTable,
+            .loca_format = head.index_to_loc_format,
+        };
+    }
+};
+
 /// WinAnsiEncoding (Windows-1252) to Unicode mapping.
 /// Maps byte values 0-255 to Unicode codepoints.
 /// Values 0x00-0x7F are identical to ASCII.
@@ -1366,14 +1391,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 /// This creates a sparse font with entries for all glyphs 0..max_gid
 fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]const u8 {
     const font = &emb.font;
-    const head = font.head orelse return error.MissingTable;
-    const hhea = font.hhea orelse return error.MissingTable;
-    const orig_maxp = font.maxp orelse return error.MissingTable;
-
-    const orig_glyf = font.getTable("glyf".*) orelse return error.MissingTable;
-    const orig_loca = font.getTable("loca".*) orelse return error.MissingTable;
-    const orig_hmtx = font.getTable("hmtx".*) orelse return error.MissingTable;
-    const loca_format = head.index_to_loc_format;
+    const tables = try SubsetTables.init(font);
 
     // Collect used glyph IDs from CID mode
     var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
@@ -1389,7 +1407,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     }
 
     // Recursively add component glyphs referenced by composite glyphs
-    try expandCompositeGlyphs(allocator, &glyph_set, orig_glyf, orig_loca, loca_format, orig_maxp.num_glyphs);
+    try expandCompositeGlyphs(allocator, &glyph_set, tables.glyf, tables.loca, tables.loca_format, tables.maxp.num_glyphs);
 
     // Find max glyph ID
     var max_gid: u16 = 0;
@@ -1399,8 +1417,8 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     }
 
     // Limit to original font's glyph count
-    if (max_gid >= orig_maxp.num_glyphs) {
-        max_gid = orig_maxp.num_glyphs - 1;
+    if (max_gid >= tables.maxp.num_glyphs) {
+        max_gid = tables.maxp.num_glyphs - 1;
     }
 
     const num_glyphs: u16 = max_gid + 1;
@@ -1418,15 +1436,15 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     while (gid <= max_gid) : (gid += 1) {
         // Record offset in new loca
         const offset: u32 = @intCast(new_glyf.items.len);
-        try appendLocaEntry(&new_loca, allocator, offset, loca_format);
+        try appendLocaEntry(&new_loca, allocator, offset, tables.loca_format);
 
         // Only include glyph data if this glyph is used
         if (glyph_set.contains(gid)) {
-            const glyph_start = getLocaOffset(orig_loca, gid, loca_format);
-            const glyph_end = getLocaOffset(orig_loca, gid + 1, loca_format);
+            const glyph_start = getLocaOffset(tables.loca, gid, tables.loca_format);
+            const glyph_end = getLocaOffset(tables.loca, gid + 1, tables.loca_format);
 
-            if (glyph_end > glyph_start and glyph_end <= orig_glyf.len) {
-                const glyph_data = orig_glyf[glyph_start..glyph_end];
+            if (glyph_end > glyph_start and glyph_end <= tables.glyf.len) {
+                const glyph_data = tables.glyf[glyph_start..glyph_end];
                 try new_glyf.appendSlice(allocator, glyph_data);
             }
         }
@@ -1435,7 +1453,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
 
     // Final loca entry (end of last glyph)
     const final_offset: u32 = @intCast(new_glyf.items.len);
-    try appendLocaEntry(&new_loca, allocator, final_offset, loca_format);
+    try appendLocaEntry(&new_loca, allocator, final_offset, tables.loca_format);
 
     // Build new hmtx (horizontal metrics) for all glyphs 0..max_gid
     var new_hmtx = std.ArrayListUnmanaged(u8){};
@@ -1446,25 +1464,25 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
         var advance: u16 = 0;
         var lsb: i16 = 0;
 
-        if (gid < hhea.num_of_long_hor_metrics) {
+        if (gid < tables.hhea.num_of_long_hor_metrics) {
             const off = @as(usize, gid) * 4;
-            if (off + 4 <= orig_hmtx.len) {
-                advance = readU16(orig_hmtx, off);
-                lsb = readI16(orig_hmtx, off + 2);
+            if (off + 4 <= tables.hmtx.len) {
+                advance = readU16(tables.hmtx, off);
+                lsb = readI16(tables.hmtx, off + 2);
             }
         } else {
             // Use last advance width
-            if (hhea.num_of_long_hor_metrics > 0) {
-                const off = (@as(usize, hhea.num_of_long_hor_metrics) - 1) * 4;
-                if (off + 2 <= orig_hmtx.len) {
-                    advance = readU16(orig_hmtx, off);
+            if (tables.hhea.num_of_long_hor_metrics > 0) {
+                const off = (@as(usize, tables.hhea.num_of_long_hor_metrics) - 1) * 4;
+                if (off + 2 <= tables.hmtx.len) {
+                    advance = readU16(tables.hmtx, off);
                 }
             }
             // lsb from separate array
-            const lsb_idx = gid - hhea.num_of_long_hor_metrics;
-            const lsb_off = @as(usize, hhea.num_of_long_hor_metrics) * 4 + @as(usize, lsb_idx) * 2;
-            if (lsb_off + 2 <= orig_hmtx.len) {
-                lsb = readI16(orig_hmtx, lsb_off);
+            const lsb_idx = gid - tables.hhea.num_of_long_hor_metrics;
+            const lsb_off = @as(usize, tables.hhea.num_of_long_hor_metrics) * 4 + @as(usize, lsb_idx) * 2;
+            if (lsb_off + 2 <= tables.hmtx.len) {
+                lsb = readI16(tables.hmtx, lsb_off);
             }
         }
 
@@ -1485,14 +1503,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
 /// and remaps glyph IDs for maximum size reduction
 fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]const u8 {
     const font = &emb.font;
-    const head = font.head orelse return error.MissingTable;
-    const hhea = font.hhea orelse return error.MissingTable;
-    const orig_maxp = font.maxp orelse return error.MissingTable;
-
-    const orig_glyf = font.getTable("glyf".*) orelse return error.MissingTable;
-    const orig_loca = font.getTable("loca".*) orelse return error.MissingTable;
-    const orig_hmtx = font.getTable("hmtx".*) orelse return error.MissingTable;
-    const loca_format = head.index_to_loc_format;
+    const tables = try SubsetTables.init(font);
 
     // Collect used glyph IDs
     // Use cid_glyph_widths instead of cid_used_glyphs because calt substitutions
@@ -1515,7 +1526,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Recursively add composite glyph components
-    try expandCompositeGlyphs(allocator, &glyph_set, orig_glyf, orig_loca, loca_format, orig_maxp.num_glyphs);
+    try expandCompositeGlyphs(allocator, &glyph_set, tables.glyf, tables.loca, tables.loca_format, tables.maxp.num_glyphs);
 
     // Build sorted glyph list (0 first, then ascending order)
     var glyph_list = std.ArrayListUnmanaged(u16){};
@@ -1552,17 +1563,17 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     for (glyph_list.items) |orig_gid| {
         // Record offset
         const offset: u32 = @intCast(new_glyf.items.len);
-        try appendLocaEntry(&new_loca, allocator, offset, loca_format);
+        try appendLocaEntry(&new_loca, allocator, offset, tables.loca_format);
 
         // Get original glyph data
-        if (orig_gid < orig_maxp.num_glyphs) {
-            const glyph_start = getLocaOffset(orig_loca, orig_gid, loca_format);
-            const glyph_end = getLocaOffset(orig_loca, orig_gid + 1, loca_format);
+        if (orig_gid < tables.maxp.num_glyphs) {
+            const glyph_start = getLocaOffset(tables.loca, orig_gid, tables.loca_format);
+            const glyph_end = getLocaOffset(tables.loca, orig_gid + 1, tables.loca_format);
 
-            if (glyph_end > glyph_start and glyph_end <= orig_glyf.len) {
+            if (glyph_end > glyph_start and glyph_end <= tables.glyf.len) {
                 var glyph_data = try allocator.alloc(u8, glyph_end - glyph_start);
                 defer allocator.free(glyph_data);
-                @memcpy(glyph_data, orig_glyf[glyph_start..glyph_end]);
+                @memcpy(glyph_data, tables.glyf[glyph_start..glyph_end]);
 
                 // Check if composite and rewrite component references
                 if (glyph_data.len >= 2) {
@@ -1580,10 +1591,10 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Final loca entry
     const final_offset: u32 = @intCast(new_glyf.items.len);
-    try appendLocaEntry(&new_loca, allocator, final_offset, loca_format);
+    try appendLocaEntry(&new_loca, allocator, final_offset, tables.loca_format);
 
     // Build compact hmtx
-    const new_hmtx = try buildHmtxForGlyphs(allocator, orig_hmtx, hhea.num_of_long_hor_metrics, glyph_list.items);
+    const new_hmtx = try buildHmtxForGlyphs(allocator, tables.hmtx, tables.hhea.num_of_long_hor_metrics, glyph_list.items);
     defer allocator.free(new_hmtx);
 
     // Build minimal cmap (same as CID version)
