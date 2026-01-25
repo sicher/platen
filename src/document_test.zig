@@ -2413,3 +2413,211 @@ test "writeStyled measure_only is side-effect free" {
     defer doc.allocator.free(pdf);
     try std.testing.expect(pdf.len > 0);
 }
+
+// ============================================================================
+// Font loading and family tests (moved from document.zig)
+// ============================================================================
+
+test "font family loads and resolves variants" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Load Gentium family with all variants
+    const font = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+        .bold = "test/fonts/Gentium/Gentium-Bold.ttf",
+        .italic = "test/fonts/Gentium/Gentium-Italic.ttf",
+        .bold_italic = "test/fonts/Gentium/Gentium-BoldItalic.ttf",
+    });
+
+    // Extract the family
+    const fam = font.embedded_family;
+
+    // Regular resolves to regular
+    const regular = try fam.resolve(false, false);
+    try std.testing.expect(std.mem.startsWith(u8, regular.name, "Gentium"));
+
+    // Bold resolves to bold
+    const bold = try fam.resolve(true, false);
+    try std.testing.expect(bold != regular);
+
+    // Italic resolves to italic
+    const italic = try fam.resolve(false, true);
+    try std.testing.expect(italic != regular);
+
+    // Bold+italic resolves to bold-italic
+    const bold_italic = try fam.resolve(true, true);
+    try std.testing.expect(bold_italic != bold);
+    try std.testing.expect(bold_italic != italic);
+}
+
+test "font family with missing variant returns error" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Load family with only regular
+    const font = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+    });
+
+    const fam = font.embedded_family;
+
+    // Regular works
+    _ = try fam.resolve(false, false);
+
+    // Bold should fail
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(true, false));
+
+    // Italic should fail
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(false, true));
+
+    // Bold+italic should fail
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(true, true));
+}
+
+test "font family text rendering uses correct variant" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Load Gentium family
+    const font = try doc.loadFontFamily(.{
+        .regular = "test/fonts/Gentium/Gentium-Regular.ttf",
+        .bold = "test/fonts/Gentium/Gentium-Bold.ttf",
+        .italic = "test/fonts/Gentium/Gentium-Italic.ttf",
+        .bold_italic = "test/fonts/Gentium/Gentium-BoldItalic.ttf",
+    });
+
+    try doc.addPage(.{});
+
+    // Write text with different styles - should use correct font variant
+    const base_style = TextStyle{ .font = font, .size = 12 };
+    const bold_style = TextStyle{ .font = font, .size = 12, .bold = true };
+    const italic_style = TextStyle{ .font = font, .size = 12, .italic = true };
+    const bold_italic_style = TextStyle{ .font = font, .size = 12, .bold = true, .italic = true };
+
+    // All should succeed without error
+    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Regular text", base_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 120 }, "Bold text", bold_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 140 }, "Italic text", italic_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 160 }, "Bold italic text", bold_italic_style);
+
+    // Generate PDF output
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // PDF should contain font references for all variants
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E3 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E4 ") != null);
+}
+
+test "loadFontFromMemory loads font from buffer" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Read font file into memory
+    const file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Regular.ttf", .{});
+    defer file.close();
+    const font_data = try file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    defer std.testing.allocator.free(font_data);
+
+    // Load from memory
+    const font = try doc.loadFontFromMemory(font_data, null);
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = font, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Text from memory-loaded font", style);
+
+    // Generate PDF and verify it contains embedded font
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+}
+
+test "loadFontFamilyFromMemory loads family from buffers" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Read font files into memory
+    const regular_file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Regular.ttf", .{});
+    defer regular_file.close();
+    const regular_data = try regular_file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    defer std.testing.allocator.free(regular_data);
+
+    const bold_file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Bold.ttf", .{});
+    defer bold_file.close();
+    const bold_data = try bold_file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    defer std.testing.allocator.free(bold_data);
+
+    // Load family from memory
+    const font = try doc.loadFontFamilyFromMemory(.{
+        .regular = regular_data,
+        .bold = bold_data,
+    });
+
+    // Verify resolution works
+    const fam = font.embedded_family;
+    const regular = try fam.resolve(false, false);
+    const bold = try fam.resolve(true, false);
+    try std.testing.expect(bold != regular);
+
+    // Verify missing variant returns error
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(false, true));
+
+    // Verify rendering works
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", .{ .font = font, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", .{ .font = font, .size = 12, .bold = true });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 ") != null);
+}
+
+test "loadImageFromMemory loads image from buffer" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Read image file into memory
+    const file = try std.fs.cwd().openFile("test/images/robot.png", .{});
+    defer file.close();
+    const image_data = try file.readToEndAlloc(std.testing.allocator, 5 * 1024 * 1024);
+    defer std.testing.allocator.free(image_data);
+
+    // Load from memory
+    const image = try doc.loadImageFromMemory(image_data);
+
+    try doc.addPage(.{});
+    try doc.drawImage(image, .{ .x = 50, .y = 50, .width = 100, .height = 0 });
+
+    // Generate PDF and verify it contains image
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Image") != null);
+}
+
+test "loadSvgFromMemory loads SVG from buffer" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // SVG content in memory
+    const svg_data =
+        \\<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        \\  <rect x="10" y="10" width="80" height="80" fill="red"/>
+        \\</svg>
+    ;
+
+    // Load from memory
+    const loaded_svg = try doc.loadSvgFromMemory(svg_data);
+
+    try doc.addPage(.{});
+    try doc.drawSvg(loaded_svg, .{ .x = 50, .y = 50, .width = 100, .height = 100 });
+
+    // Generate PDF and verify it contains the SVG content
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    // SVG is rendered as Form XObject
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Form") != null);
+}
