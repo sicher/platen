@@ -720,17 +720,17 @@ pub const Document = struct {
     }
 
     /// Draw an image at the specified position.
-    /// If w or h is 0, the original dimension is used (maintaining aspect ratio if one is specified).
+    /// If width or height is 0, the original dimension is used (maintaining aspect ratio if one is specified).
     /// Coordinates are from top-left origin.
-    pub fn drawImage(self: *Document, image: *Image, x: f64, y: f64, w: f64, h: f64) !void {
+    pub fn drawImage(self: *Document, image: *Image, rect: Rect) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
         const page_height = self.currentPageSize().height;
 
         // Calculate display dimensions
-        var display_w = w;
-        var display_h = h;
+        var display_w = rect.width;
+        var display_h = rect.height;
 
         if (display_w == 0 and display_h == 0) {
             // Use original dimensions (1 pixel = 1 point)
@@ -748,13 +748,13 @@ pub const Document = struct {
 
         // Convert from top-left to PDF coordinates (bottom-left origin)
         // y is the top of the image, PDF needs the bottom
-        const pdf_y = page_height - y - display_h;
+        const pdf_y = page_height - rect.y - display_h;
 
         // Get image resource name
         const img_idx = self.getImageIndex(image) orelse {
             // Image not in document, add it
             try self.loaded_images.append(self.allocator, image);
-            return self.drawImage(image, x, y, w, h);
+            return self.drawImage(image, rect);
         };
 
         // Mark image as used on this page
@@ -766,7 +766,7 @@ pub const Document = struct {
         const content = std.fmt.bufPrint(&buf, "q\n{d:.2} 0 0 {d:.2} {d:.2} {d:.2} cm\n/Im{d} Do\nQ\n", .{
             display_w,
             display_h,
-            x,
+            rect.x,
             pdf_y,
             img_idx + 1, // 1-indexed resource names
         }) catch unreachable;
@@ -800,17 +800,17 @@ pub const Document = struct {
     }
 
     /// Draw an SVG at the specified position.
-    /// If w or h is 0, the original dimension is used (maintaining aspect ratio if one is specified).
+    /// If width or height is 0, the original dimension is used (maintaining aspect ratio if one is specified).
     /// Coordinates are from top-left origin.
-    pub fn drawSvg(self: *Document, s: *Svg, x: f64, y: f64, w: f64, h: f64) !void {
+    pub fn drawSvg(self: *Document, s: *Svg, rect: Rect) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
         const page_height = self.currentPageSize().height;
 
         // Calculate display dimensions
-        var display_w = w;
-        var display_h = h;
+        var display_w = rect.width;
+        var display_h = rect.height;
 
         if (display_w == 0 and display_h == 0) {
             // Use original dimensions
@@ -827,13 +827,13 @@ pub const Document = struct {
         }
 
         // Convert from top-left to PDF coordinates (bottom-left origin)
-        const pdf_y = page_height - y - display_h;
+        const pdf_y = page_height - rect.y - display_h;
 
         // Get SVG resource name
         const svg_idx = self.getSvgIndex(s) orelse {
             // SVG not in document, add it
             try self.loaded_svgs.append(self.allocator, s);
-            return self.drawSvg(s, x, y, w, h);
+            return self.drawSvg(s, rect);
         };
 
         // Mark SVG as used on this page
@@ -848,7 +848,7 @@ pub const Document = struct {
         const content = std.fmt.bufPrint(&buf, "q\n{d:.4} 0 0 {d:.4} {d:.2} {d:.2} cm\n/{s} Do\nQ\n", .{
             scale_x,
             scale_y,
-            x,
+            rect.x,
             pdf_y,
             svgResourceName(svg_idx),
         }) catch unreachable;
@@ -4527,7 +4527,7 @@ test "loadImageFromMemory loads image from buffer" {
     const image = try doc.loadImageFromMemory(image_data);
 
     try doc.addPage(.{});
-    try doc.drawImage(image, 50, 50, 100, 0);
+    try doc.drawImage(image, .{ .x = 50, .y = 50, .width = 100, .height = 0 });
 
     // Generate PDF and verify it contains image
     const pdf = try doc.output();
@@ -4550,7 +4550,7 @@ test "loadSvgFromMemory loads SVG from buffer" {
     const loaded_svg = try doc.loadSvgFromMemory(svg_data);
 
     try doc.addPage(.{});
-    try doc.drawSvg(loaded_svg, 50, 50, 100, 100);
+    try doc.drawSvg(loaded_svg, .{ .x = 50, .y = 50, .width = 100, .height = 100 });
 
     // Generate PDF and verify it contains the SVG content
     const pdf = try doc.output();

@@ -1311,17 +1311,17 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Left column: JPEG
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "JPEG (100x140):", header_10);
-    try doc.drawImage(jpeg_img, 50, 55, 100, 140);
+    try doc.drawImage(jpeg_img, .{ .x = 50, .y = 55, .width = 100, .height = 140 });
 
     _ = try doc.writeAt(.{ .x = 50, .y = 210 }, "JPEG w=80 (h auto):", header_10);
-    try doc.drawImage(jpeg_img, 50, 215, 80, 0);
+    try doc.drawImage(jpeg_img, .{ .x = 50, .y = 215, .width = 80, .height = 0 });
 
     // Right column: PNG with alpha
     _ = try doc.writeAt(.{ .x = 200, .y = 50 }, "PNG with alpha (80x120):", header_10);
-    try doc.drawImage(png_img, 200, 55, 80, 120);
+    try doc.drawImage(png_img, .{ .x = 200, .y = 55, .width = 80, .height = 120 });
 
     _ = try doc.writeAt(.{ .x = 200, .y = 190 }, "PNG h=100 (w auto):", header_10);
-    try doc.drawImage(png_img, 200, 195, 0, 100);
+    try doc.drawImage(png_img, .{ .x = 200, .y = 195, .width = 0, .height = 100 });
 
     return doc.output();
 }
@@ -1343,19 +1343,19 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Row 1: Test SVG samples
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Original (200x200):", header_10);
-    try doc.drawSvg(test_svg, 50, 55, 0, 0);
+    try doc.drawSvg(test_svg, .{ .x = 50, .y = 55, .width = 0, .height = 0 });
 
     _ = try doc.writeAt(.{ .x = 280, .y = 50 }, "Scaled (100x100):", header_10);
-    try doc.drawSvg(test_svg, 280, 55, 100, 100);
+    try doc.drawSvg(test_svg, .{ .x = 280, .y = 55, .width = 100, .height = 100 });
 
     _ = try doc.writeAt(.{ .x = 420, .y = 50 }, "Width=80:", header_10);
-    try doc.drawSvg(test_svg, 420, 55, 80, 0);
+    try doc.drawSvg(test_svg, .{ .x = 420, .y = 55, .width = 80, .height = 0 });
 
     // Row 2: Tiger SVG
     if (doc.loadSvg("test/images/tiger.svg")) |tiger_svg| {
         _ = try doc.writeAt(.{ .x = 50, .y = 280 }, "Tiger SVG (400x400):", header_10);
         // Center on page
-        try doc.drawSvg(tiger_svg, 97, 295, 400, 400);
+        try doc.drawSvg(tiger_svg, .{ .x = 97, .y = 295, .width = 400, .height = 400 });
     } else |_| {
         // Tiger SVG not available, skip
     }
@@ -1821,11 +1821,11 @@ fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Full-size text SVG
     _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Text SVG (400x300):", header_10);
-    try doc.drawSvg(text_svg, 50, 75, 400, 300);
+    try doc.drawSvg(text_svg, .{ .x = 50, .y = 75, .width = 400, .height = 300 });
 
     // Scaled version
     _ = try doc.writeAt(.{ .x = 50, .y = 400 }, "Scaled (200x150):", header_10);
-    try doc.drawSvg(text_svg, 50, 415, 200, 150);
+    try doc.drawSvg(text_svg, .{ .x = 50, .y = 415, .width = 200, .height = 150 });
 
     return doc.output();
 }
@@ -1847,7 +1847,7 @@ fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Draw the SVG
     _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Reusable symbols via <use> and <defs>:", header_10);
-    try doc.drawSvg(use_defs_svg, 50, 75, 300, 200);
+    try doc.drawSvg(use_defs_svg, .{ .x = 50, .y = 75, .width = 300, .height = 200 });
 
     return doc.output();
 }
@@ -1869,12 +1869,12 @@ fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Draw the equation
     _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Quadratic formula (uses <defs> and <use xlink:href>):", header_10);
-    try doc.drawSvg(eq_svg, 50, 80, 400, 100);
+    try doc.drawSvg(eq_svg, .{ .x = 50, .y = 80, .width = 400, .height = 100 });
 
     // Draw it again at different sizes
     _ = try doc.writeAt(.{ .x = 50, .y = 200 }, "Scaled versions:", header_10);
-    try doc.drawSvg(eq_svg, 50, 220, 200, 50);
-    try doc.drawSvg(eq_svg, 50, 290, 300, 75);
+    try doc.drawSvg(eq_svg, .{ .x = 50, .y = 220, .width = 200, .height = 50 });
+    try doc.drawSvg(eq_svg, .{ .x = 50, .y = 290, .width = 300, .height = 75 });
 
     return doc.output();
 }

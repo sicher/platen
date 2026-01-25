@@ -326,10 +326,10 @@ const img = try doc.loadImage("photo.jpg");
 try doc.addPage(.{});
 
 // Draw at position with explicit size
-try doc.drawImage(img, 50, 50, 200, 150);
+try doc.drawImage(img, .{ .x = 50, .y = 50, .width = 200, .height = 150 });
 
-// Auto aspect ratio (specify 0 for width or height)
-try doc.drawImage(img, 50, 250, 200, 0);  // width=200, height auto
+// Auto aspect ratio (omit width or height for auto-scale)
+try doc.drawImage(img, .{ .x = 50, .y = 250, .width = 200 });  // height auto
 ```
 
 ### SVG Embedding
@@ -340,11 +340,11 @@ const svg = try doc.loadSvg("diagram.svg");
 
 try doc.addPage(.{});
 
-// Draw at position (original size if w=0, h=0)
-try doc.drawSvg(svg, 50, 50, 0, 0);
+// Draw at original size (omit width/height)
+try doc.drawSvg(svg, .{ .x = 50, .y = 50 });
 
 // Scaled
-try doc.drawSvg(svg, 300, 50, 150, 150);
+try doc.drawSvg(svg, .{ .x = 300, .y = 50, .width = 150, .height = 150 });
 ```
 
 ### Gradients
@@ -558,10 +558,10 @@ try st.append("red", .{ .color = zpdf.Color.red });
 |--------|-------------|
 | `loadImage(path) -> *Image` | Load JPEG or PNG image from file |
 | `loadImageFromMemory(data) -> *Image` | Load JPEG or PNG image from memory buffer |
-| `drawImage(*Image, x, y, w, h)` | Draw image (use 0 for w or h to auto-scale) |
+| `drawImage(*Image, Rect)` | Draw image (omit width/height for auto-scale) |
 | `loadSvg(path) -> *Svg` | Load SVG from file |
 | `loadSvgFromMemory(data) -> *Svg` | Load SVG from memory buffer |
-| `drawSvg(*Svg, x, y, w, h)` | Draw SVG (use 0, 0 for original size) |
+| `drawSvg(*Svg, Rect)` | Draw SVG (omit width/height for original size) |
 
 ### Drawing Shapes
 

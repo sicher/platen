@@ -193,8 +193,8 @@ pub const Point = struct {
 pub const Rect = struct {
     x: f64,
     y: f64,
-    width: f64,
-    height: f64,
+    width: f64 = 0,
+    height: f64 = 0,
 };
 
 /// Internal link destination (page position).
