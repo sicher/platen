@@ -347,7 +347,7 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     try file.writeAll(pdf);
 
     // Show stats
-    const cff_data = font.embedded.font.getTable("CFF ".*) orelse font.embedded.font.getTable("CFF2".*);
+    const cff_data = font.embedded.font.getCFFTable();
     const orig_size = if (cff_data) |d| d.len else 0;
     const subset_size = if (font.embedded.subset_data) |s| s.len else orig_size;
     const used_glyphs = font.embedded.cid_used_glyphs.count();

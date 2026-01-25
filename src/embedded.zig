@@ -1701,9 +1701,7 @@ fn appendCffSingleItemIndex(list: *std.ArrayListUnmanaged(u8), allocator: std.me
 
 /// Create a subset CFF for CID mode (preserves glyph IDs)
 fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]const u8 {
-    const cff_data = emb.font.getTable("CFF ".*) orelse
-        emb.font.getTable("CFF2".*) orelse
-        return error.MissingTable;
+    const cff_data = emb.font.getCFFTable() orelse return error.MissingTable;
 
     // Collect used glyph IDs
     var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
@@ -1956,9 +1954,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 /// This achieves better compression than createSubsetCFF by only including used glyphs
 /// and remapping glyph IDs to 0, 1, 2, ...
 fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]const u8 {
-    const cff_data = emb.font.getTable("CFF ".*) orelse
-        emb.font.getTable("CFF2".*) orelse
-        return error.MissingTable;
+    const cff_data = emb.font.getCFFTable() orelse return error.MissingTable;
 
     // Collect used glyph IDs into sorted list
     var glyph_list = std.ArrayListUnmanaged(u16){};

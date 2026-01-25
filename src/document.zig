@@ -1347,7 +1347,7 @@ pub const Document = struct {
         var j: usize = 0;
         var i: usize = 0;
         while (i < str.len and j < buf.len) {
-            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+            if (isSoftHyphenAt(str, i)) {
                 i += 2; // Skip soft-hyphen
             } else {
                 buf[j] = str[i];
@@ -1682,7 +1682,7 @@ pub const Document = struct {
         var best_break: ?usize = null;
         var i: usize = 0;
         while (i + 1 < word.len) {
-            if (word[i] == 0xC2 and word[i + 1] == 0xAD) {
+            if (isSoftHyphenAt(word, i)) {
                 const prefix = word[0..i];
                 const prefix_width = self.getTextWidthStyled(prefix, style) + self.getTextWidthStyled("-", style);
                 if (prefix_width <= max_width) {
@@ -4088,6 +4088,11 @@ fn formatPdfDate(buf: *[24]u8) []const u8 {
     return buf[0..17]; // "D:YYYYMMDDHHmmSSZ"
 }
 
+/// Check if a soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) starts at position i.
+inline fn isSoftHyphenAt(str: []const u8, i: usize) bool {
+    return i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD;
+}
+
 /// Strip soft-hyphens (U+00AD) from text.
 /// Soft-hyphens are invisible formatting characters that only appear as visible
 /// hyphens when text breaks at that point. Returns allocated copy without soft-hyphens.
@@ -4102,7 +4107,7 @@ fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
     var count: usize = 0;
     var i: usize = 0;
     while (i < str.len) {
-        if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+        if (isSoftHyphenAt(str, i)) {
             i += 2; // Skip soft-hyphen
         } else {
             count += 1;
@@ -4115,7 +4120,7 @@ fn stripSoftHyphens(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
     var j: usize = 0;
     i = 0;
     while (i < str.len) {
-        if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+        if (isSoftHyphenAt(str, i)) {
             i += 2; // Skip soft-hyphen
         } else {
             result[j] = str[i];
@@ -4139,7 +4144,7 @@ fn stripSoftHyphensTo(str: []const u8, buf: []u8) []const u8 {
     var j: usize = 0;
     var i: usize = 0;
     while (i < str.len and j < buf.len) {
-        if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
+        if (isSoftHyphenAt(str, i)) {
             i += 2; // Skip soft-hyphen
         } else {
             buf[j] = str[i];
@@ -4152,11 +4157,8 @@ fn stripSoftHyphensTo(str: []const u8, buf: []u8) []const u8 {
 
 /// Check if text contains any soft-hyphens.
 fn containsSoftHyphens(str: []const u8) bool {
-    var i: usize = 0;
-    while (i + 1 < str.len) : (i += 1) {
-        if (str[i] == 0xC2 and str[i + 1] == 0xAD) {
-            return true;
-        }
+    for (0..str.len) |i| {
+        if (isSoftHyphenAt(str, i)) return true;
     }
     return false;
 }

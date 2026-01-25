@@ -10,6 +10,11 @@ pub const Color = layout.Color;
 pub const TextDecoration = layout.TextDecoration;
 pub const TextStyleOptions = layout.TextStyleOptions;
 
+/// Check if a soft-hyphen (U+00AD, 0xC2 0xAD in UTF-8) starts at position i.
+inline fn isSoftHyphenAt(str: []const u8, i: usize) bool {
+    return i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD;
+}
+
 /// A span of text with uniform styling.
 pub const Span = struct {
     text: []const u8,
@@ -291,8 +296,8 @@ pub const StyledText = struct {
         // Count soft-hyphens (UTF-8: 0xC2 0xAD)
         var count: usize = 0;
         var i: usize = 0;
-        while (i + 1 < word_text.len) {
-            if (word_text[i] == 0xC2 and word_text[i + 1] == 0xAD) {
+        while (i < word_text.len) {
+            if (isSoftHyphenAt(word_text, i)) {
                 count += 1;
                 i += 2;
             } else {
@@ -309,8 +314,8 @@ pub const StyledText = struct {
         // Fill in break points with positions and widths
         var bp_idx: usize = 0;
         i = 0;
-        while (i + 1 < word_text.len) {
-            if (word_text[i] == 0xC2 and word_text[i + 1] == 0xAD) {
+        while (i < word_text.len) {
+            if (isSoftHyphenAt(word_text, i)) {
                 // Measure width up to this point (excluding soft-hyphen bytes)
                 // We need to measure the text with soft-hyphens removed
                 const prefix = word_text[0..i];
@@ -344,8 +349,8 @@ pub const StyledText = struct {
         _ = self;
         // Check if text contains soft-hyphens
         var has_soft_hyphen = false;
-        for (0..text.len -| 1) |i| {
-            if (text[i] == 0xC2 and text[i + 1] == 0xAD) {
+        for (0..text.len) |i| {
+            if (isSoftHyphenAt(text, i)) {
                 has_soft_hyphen = true;
                 break;
             }
@@ -360,7 +365,7 @@ pub const StyledText = struct {
         var buf_len: usize = 0;
         var i: usize = 0;
         while (i < text.len) {
-            if (i + 1 < text.len and text[i] == 0xC2 and text[i + 1] == 0xAD) {
+            if (isSoftHyphenAt(text, i)) {
                 i += 2; // Skip soft-hyphen
             } else {
                 if (buf_len < buf.len) {

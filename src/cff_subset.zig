@@ -41,6 +41,27 @@ pub fn parseCFFIndex(data: []const u8, offset: usize) ?CFFIndex {
     return CFFIndex{ .count = count, .off_size = off_size, .offsets_start = offsets_start, .data_start = data_start, .data = data };
 }
 
+/// Calculate the byte size of a CFF dict operand starting at the given position.
+/// Handles integer operands (1-5 bytes) and real number operands (variable length).
+/// Returns the total number of bytes to advance.
+fn cffOperandSize(data: []const u8, pos: usize) usize {
+    const b0 = data[pos];
+    if (b0 == 28) {
+        return 3; // 2-byte integer
+    } else if (b0 == 29) {
+        return 5; // 4-byte integer
+    } else if (b0 == 30) {
+        // Real number - scan for end nibble (0xf)
+        var i: usize = pos + 1;
+        while (i < data.len and (data[i] & 0xf) != 0xf and (data[i] >> 4) != 0xf) : (i += 1) {}
+        return i + 1 - pos;
+    } else if (b0 >= 247 and b0 <= 254) {
+        return 2; // 2-byte integer
+    } else {
+        return 1; // 1-byte integer (32-246) or unknown
+    }
+}
+
 pub fn skipCFFIndex(data: []const u8, offset: usize) usize {
     if (offset + 2 > data.len) return offset;
     const count = readU16(data, offset);
@@ -490,20 +511,9 @@ pub fn buildUpdatedTopDict(
             try output.appendSlice(allocator, dict_data[operand_start .. i + 1]);
             i += 1;
             operand_start = i;
-        } else if (b0 == 28) {
-            i += 3;
-        } else if (b0 == 29) {
-            i += 5;
-        } else if (b0 == 30) {
-            i += 1;
-            while (i < dict_data.len and (dict_data[i] & 0xf) != 0xf and (dict_data[i] >> 4) != 0xf) : (i += 1) {}
-            i += 1;
-        } else if (b0 >= 32 and b0 <= 246) {
-            i += 1;
-        } else if (b0 >= 247 and b0 <= 254) {
-            i += 2;
         } else {
-            i += 1;
+            // Operand - skip using helper
+            i += cffOperandSize(dict_data, i);
         }
     }
 }
@@ -694,20 +704,9 @@ pub fn buildPrivateDictWithoutSubrs(
             try output.appendSlice(allocator, private_dict_data[operand_start .. i + 1]);
             i += 1;
             operand_start = i;
-        } else if (b0 == 28) {
-            i += 3;
-        } else if (b0 == 29) {
-            i += 5;
-        } else if (b0 == 30) {
-            i += 1;
-            while (i < private_dict_data.len and (private_dict_data[i] & 0xf) != 0xf and (private_dict_data[i] >> 4) != 0xf) : (i += 1) {}
-            i += 1;
-        } else if (b0 >= 32 and b0 <= 246) {
-            i += 1;
-        } else if (b0 >= 247 and b0 <= 254) {
-            i += 2;
         } else {
-            i += 1;
+            // Operand - skip using helper
+            i += cffOperandSize(private_dict_data, i);
         }
     }
 }
