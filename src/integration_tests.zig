@@ -9,11 +9,11 @@ const testing = @import("testing.zig");
 const embedded = @import("embedded.zig");
 
 /// Helper to write plain text using writeStyled
-fn writeText(doc: *zpdf.Document, region: *zpdf.Region, text: []const u8, opts: zpdf.ParagraphOptions) !zpdf.WriteResult {
+fn writeText(doc: *zpdf.Document, region: *zpdf.Region, text: []const u8, style: zpdf.TextStyle, opts: zpdf.ParagraphOptions) !zpdf.WriteResult {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append(text, .{});
-    return doc.writeStyled(region, &st, opts);
+    return doc.writeStyled(region, &st, style, opts);
 }
 
 /// Reference test case
@@ -41,7 +41,7 @@ const test_cases = [_]TestCase{
     .{ .name = "colored_text", .generate = generateColoredTextPdf },
     .{ .name = "shapes", .generate = generateShapesPdf },
     .{ .name = "images", .generate = generateImagesPdf },
-    .{ .name = "svg", .generate = generateSvgPdf },
+    .{ .name = "svg_embedding", .generate = generateSvgPdf },
     .{ .name = "svg_text", .generate = generateSvgTextPdf, .skip_fonts = true }, // Form XObject fonts
     .{ .name = "svg_use_defs", .generate = generateSvgUseDefsPdf },
     .{ .name = "svg_equation", .generate = generateSvgEquationPdf }, // MathJax equation with xlink:href
@@ -73,7 +73,6 @@ fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
     try doc.addPage();
-    try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", .{ .font = zpdf.Font.helvetica, .size = 24 });
     return doc.output();
 }
@@ -83,16 +82,9 @@ fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
     try doc.addPage();
 
-    try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica Normal", .{ .font = zpdf.Font.helvetica, .size = 12 });
-
-    try doc.setFont(.helvetica_bold, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Helvetica Bold", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true });
-
-    try doc.setFont(.times_roman, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times Roman", .{ .font = zpdf.Font.times, .size = 12 });
-
-    try doc.setFont(.courier, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Courier", .{ .font = zpdf.Font.courier, .size = 12 });
 
     return doc.output();
@@ -122,7 +114,6 @@ fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     var y: f64 = 30;
     for (fonts) |font| {
-        try doc.setFont(font, 10);
         // Convert StandardFont to TextStyle
         const style: zpdf.TextStyle = switch (font) {
             .helvetica => .{ .font = zpdf.Font.helvetica, .size = 10 },
@@ -154,15 +145,12 @@ fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
     const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 };
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style);
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 3", style);
 
     return doc.output();
@@ -187,73 +175,55 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     var y: f64 = 50;
 
     // Large title
-    try doc.setEmbeddedFont(charter_bold, 36);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Embedded Fonts", .{ .font = charter_bold, .size = 36 });
     y += 50;
 
     // Courier Prime - all styles
-    try doc.setEmbeddedFont(courier_regular, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier Prime Regular: The quick brown fox jumps over the lazy dog.", .{ .font = courier_regular, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(courier_bold, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier Prime Bold: The quick brown fox jumps over the lazy dog.", .{ .font = courier_bold, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(courier_italic, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier Prime Italic: The quick brown fox jumps over the lazy dog.", .{ .font = courier_italic, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(courier_bold_italic, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier Prime Bold Italic: ABCabc 0123456789", .{ .font = courier_bold_italic, .size = 12 });
     y += 24;
 
     // Charter - all styles
-    try doc.setEmbeddedFont(charter_regular, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Charter Regular: The quick brown fox jumps over the lazy dog.", .{ .font = charter_regular, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(charter_bold, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Charter Bold: The quick brown fox jumps over the lazy dog.", .{ .font = charter_bold, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(charter_italic, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Charter Italic: The quick brown fox jumps over the lazy dog.", .{ .font = charter_italic, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(charter_bold_italic, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Charter Bold Italic: ABCabc 0123456789", .{ .font = charter_bold_italic, .size = 12 });
     y += 24;
 
     // Unicode - Latin Extended (WinAnsi compatible)
-    try doc.setEmbeddedFont(charter_regular, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Extended Latin: \xc0\xc1\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xcb \xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb", .{ .font = charter_regular, .size = 12 });
+    const charter_12 = zpdf.TextStyle{ .font = charter_regular, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Extended Latin: \xc0\xc1\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xcb \xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb", charter_12);
     y += 16;
-    try doc.setEmbeddedFont(charter_regular, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "More Latin: \xd1\xf1 \xd8\xf8 \xdf \xc6\xe6 \xd0\xf0 \xde\xfe \xbf\xa1", .{ .font = charter_regular, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "More Latin: \xd1\xf1 \xd8\xf8 \xdf \xc6\xe6 \xd0\xf0 \xde\xfe \xbf\xa1", charter_12);
     y += 16;
-    try doc.setEmbeddedFont(charter_regular, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Currency: \xa3 \xa5 \xa2 \x83 | Math: \xb1 \xd7 \xf7 \xb0 \xb2 \xb3 \xb9 \xbc \xbd \xbe \xb5", .{ .font = charter_regular, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Currency: \xa3 \xa5 \xa2 \x83 | Math: \xb1 \xd7 \xf7 \xb0 \xb2 \xb3 \xb9 \xbc \xbd \xbe \xb5", charter_12);
     y += 16;
-    try doc.setEmbeddedFont(charter_regular, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation: \x91single\x92 \x93double\x94 \x96 \x97 \x85 \xab\xbb \xa9 \xae \x99", .{ .font = charter_regular, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation: \x91single\x92 \x93double\x94 \x96 \x97 \x85 \xab\xbb \xa9 \xae \x99", charter_12);
     y += 16;
-    try doc.setEmbeddedFont(charter_regular, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Symbols: \xa7 \xb6 \x86 \x87 \x95 \xa6 \xac \xb7 \xaa \xba", .{ .font = charter_regular, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Symbols: \xa7 \xb6 \x86 \x87 \x95 \xa6 \xac \xb7 \xaa \xba", charter_12);
     y += 24;
 
     // Mixed standard and embedded
-    try doc.setFont(.helvetica, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica (standard): ABCDEFGHIJKLMNOPQRSTUVWXYZ", .{ .font = zpdf.Font.helvetica, .size = 12 });
     y += 16;
-    try doc.setEmbeddedFont(courier_regular, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier Prime (embedded): ABCDEFGHIJKLMNOPQRSTUVWXYZ", .{ .font = courier_regular, .size = 12 });
     y += 24;
 
     // Large sizes
-    try doc.setEmbeddedFont(charter_bold, 24);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "24pt Charter Bold", .{ .font = charter_bold, .size = 24 });
     y += 32;
-    try doc.setEmbeddedFont(courier_regular, 18);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "18pt Courier Prime Regular", .{ .font = courier_regular, .size = 18 });
     y += 28;
 
     // Character set
-    try doc.setEmbeddedFont(courier_regular, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@[\\]^_`{|}~", .{ .font = courier_regular, .size = 10 });
 
     return doc.output();
@@ -274,47 +244,47 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage();
     var y: f64 = 50;
 
+    const charter_24 = zpdf.TextStyle{ .font = charter, .size = 24 };
+    const charter_12 = zpdf.TextStyle{ .font = charter, .size = 12 };
+    const courier_12 = zpdf.TextStyle{ .font = courier, .size = 12 };
+
     // Title (using CID font)
-    try doc.setEmbeddedFont(charter, 24);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "CID Font Test (Identity-H Encoding)", .{ .font = charter, .size = 24 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "CID Font Test (Identity-H Encoding)", charter_24);
     y += 40;
 
     // Basic ASCII text
-    try doc.setEmbeddedFont(charter, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ASCII: The quick brown fox jumps over the lazy dog.", .{ .font = charter, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ASCII: The quick brown fox jumps over the lazy dog.", charter_12);
     y += 20;
 
     // UTF-8 encoded Unicode characters (Latin Extended)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin Extended: ÀÁÂÃÄÅÆÇÈÉÊË àáâãäåæçèéêë", .{ .font = charter, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin Extended: ÀÁÂÃÄÅÆÇÈÉÊË àáâãäåæçèéêë", charter_12);
     y += 20;
 
     // More Latin characters via UTF-8
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "More Latin: Ññ Øø ß Ææ Ðð Þþ ¿¡ Œœ", .{ .font = charter, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "More Latin: Ññ Øø ß Ææ Ðð Þþ ¿¡ Œœ", charter_12);
     y += 20;
 
     // Currency and math symbols (only those in Charter font)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Symbols: £ ¥ ¢ ± × ÷ ° ² ³ ¹ ¼ ½ ¾", .{ .font = charter, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Symbols: £ ¥ ¢ ± × ÷ ° ² ³ ¹ ¼ ½ ¾", charter_12);
     y += 20;
 
     // Punctuation (using escape sequences for curly quotes, only those in Charter)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation: \xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d \xe2\x80\x93 \xe2\x80\x94 \xe2\x80\xa6 \xc2\xab \xc2\xbb \xc2\xa9 \xc2\xae", .{ .font = charter, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation: \xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d \xe2\x80\x93 \xe2\x80\x94 \xe2\x80\xa6 \xc2\xab \xc2\xbb \xc2\xa9 \xc2\xae", charter_12);
     y += 20;
 
     // Mixed with Courier Prime
-    try doc.setEmbeddedFont(courier, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier (CID): ABCDabcd 0123456789 £¥", .{ .font = courier, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier (CID): ABCDabcd 0123456789 £¥", courier_12);
     y += 24;
 
     // Compare with WinAnsi mode (should look the same for basic chars)
     const charter_winansi = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", .win_ansi);
     charter_winansi.embedded.setFeature(.kern, false);
+    const charter_winansi_12 = zpdf.TextStyle{ .font = charter_winansi, .size = 12 };
 
-    try doc.setEmbeddedFont(charter_winansi, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "WinAnsi comparison: The quick brown fox", .{ .font = charter_winansi, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "WinAnsi comparison: The quick brown fox", charter_winansi_12);
     y += 20;
 
-    try doc.setEmbeddedFont(charter, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "CID comparison: The quick brown fox", .{ .font = charter, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "CID comparison: The quick brown fox", charter_12);
 
     return doc.output();
 }
@@ -370,213 +340,176 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_ss01.embedded.setFeature(.ss01, true);
 
     try doc.addPage();
+
+    // Define all text styles
+    const inter_bold_22 = zpdf.TextStyle{ .font = inter_bold, .size = 22 };
+    const inter_bold_13 = zpdf.TextStyle{ .font = inter_bold, .size = 13 };
+    const inter_bold_10 = zpdf.TextStyle{ .font = inter_bold, .size = 10 };
+    const inter_bold_9 = zpdf.TextStyle{ .font = inter_bold, .size = 9 };
+    const inter_bold_11 = zpdf.TextStyle{ .font = inter_bold, .size = 11 };
+    const inter_11 = zpdf.TextStyle{ .font = inter, .size = 11 };
+    const inter_10 = zpdf.TextStyle{ .font = inter, .size = 10 };
+    const inter_8 = zpdf.TextStyle{ .font = inter, .size = 8 };
+    const inter_12 = zpdf.TextStyle{ .font = inter, .size = 12 };
+    const inter_italic_11 = zpdf.TextStyle{ .font = inter_italic, .size = 11 };
+    const inter_bolditalic_11 = zpdf.TextStyle{ .font = inter_bolditalic, .size = 11 };
+    const inter_no_kern_12 = zpdf.TextStyle{ .font = inter_no_kern, .size = 12 };
+    const inter_no_mark_12 = zpdf.TextStyle{ .font = inter_no_mark, .size = 12 };
+    const inter_no_calt_11 = zpdf.TextStyle{ .font = inter_no_calt, .size = 11 };
+    const inter_dlig_12 = zpdf.TextStyle{ .font = inter_dlig, .size = 12 };
+    const inter_tnum_10 = zpdf.TextStyle{ .font = inter_tnum, .size = 10 };
+    const inter_frac_12 = zpdf.TextStyle{ .font = inter_frac, .size = 12 };
+    const inter_zero_12 = zpdf.TextStyle{ .font = inter_zero, .size = 12 };
+    const inter_nocalt_12 = zpdf.TextStyle{ .font = inter_nocalt, .size = 12 };
+    const inter_case_12 = zpdf.TextStyle{ .font = inter_case, .size = 12 };
+    const inter_ss01_12 = zpdf.TextStyle{ .font = inter_ss01, .size = 12 };
+
     var y: f64 = 32;
 
     // ===== Title =====
-    try doc.setEmbeddedFont(inter_bold, 22);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter Font Family", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter Font Family", inter_bold_22);
     y += 32;
 
     // ===== Font Styles =====
-    try doc.setEmbeddedFont(inter, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular: The quick brown fox jumps over the lazy dog.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular: The quick brown fox jumps over the lazy dog.", inter_11);
     y += 15;
-    try doc.setEmbeddedFont(inter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: The quick brown fox jumps over the lazy dog.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: The quick brown fox jumps over the lazy dog.", inter_bold_11);
     y += 15;
-    try doc.setEmbeddedFont(inter_italic, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic: The quick brown fox jumps over the lazy dog.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic: The quick brown fox jumps over the lazy dog.", inter_italic_11);
     y += 15;
-    try doc.setEmbeddedFont(inter_bolditalic, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold Italic: The quick brown fox jumps over the lazy dog.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold Italic: The quick brown fox jumps over the lazy dog.", inter_bolditalic_11);
     y += 24;
 
     // ===== OpenType Features =====
     // Two-column layout: OFF examples on left (x=80), ON examples on right (x=330)
-    try doc.setEmbeddedFont(inter_bold, 13);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "OpenType Features", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "OpenType Features", inter_bold_13);
     y += 18;
 
     // Column headers
-    try doc.setEmbeddedFont(inter, 8);
-    _ = try doc.writeAt(.{ .x = 80, .y = y }, "OFF", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 330, .y = y }, "ON", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 80, .y = y }, "OFF", inter_8);
+    _ = try doc.writeAt(.{ .x = 330, .y = y }, "ON", inter_8);
     y += 14;
 
     // --- Kerning ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Kerning (kern)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_no_kern, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "AV AWAY To Wave", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "AV AWAY To Wave", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Kerning (kern)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "AV AWAY To Wave", inter_no_kern_12);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "AV AWAY To Wave", inter_12);
     y += 28;
 
     // --- Mark Positioning ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mark Positioning (mark/mkmk)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_no_mark, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91", doc.getCurrentTextStyle()); // À É Õ Ñ
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mark Positioning (mark/mkmk)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91", inter_no_mark_12); // À É Õ Ñ
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "\xc3\x80 \xc3\x89 \xc3\x95 \xc3\x91", inter_12);
     y += 28;
     // Stacked marks (mark-to-mark): ẳ ế ộ ỗ (Vietnamese with double diacritics)
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stacked:", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y }, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97", doc.getCurrentTextStyle()); // ẳ ế ộ ỗ
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stacked:", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 330, .y = y }, "\xe1\xba\xb3 \xe1\xba\xbf \xe1\xbb\x99 \xe1\xbb\x97", inter_12); // ẳ ế ộ ỗ
     y += 16;
 
     // --- Contextual Alternates (calt) ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Contextual Alternates (calt)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_no_calt, 11);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "-> => <- <=>", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 11);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "-> => <- <=>", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Contextual Alternates (calt)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "-> => <- <=>", inter_no_calt_11);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "-> => <- <=>", inter_11);
     y += 28;
 
     // --- Discretionary Ligatures (dlig) ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Discretionary Ligatures (dlig)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "!? ff fi ft tt", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_dlig, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "!? ff fi ft tt", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Discretionary Ligatures (dlig)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "!? ff fi ft tt", inter_12);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "!? ff fi ft tt", inter_dlig_12);
     y += 28;
 
     // --- Tabular/Proportional Figures (tnum/pnum) ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Figure Styles (tnum/pnum)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 8);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "Proportional:", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "Tabular:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Figure Styles (tnum/pnum)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "Proportional:", inter_8);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "Tabular:", inter_8);
     y += 24;
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 80, .y = y }, "1111.00", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_tnum, 10);
-    _ = try doc.writeAt(.{ .x = 330, .y = y }, "1111.00", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 80, .y = y }, "1111.00", inter_10);
+    _ = try doc.writeAt(.{ .x = 330, .y = y }, "1111.00", inter_tnum_10);
     y += 12;
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 80, .y = y }, "2480.50", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_tnum, 10);
-    _ = try doc.writeAt(.{ .x = 330, .y = y }, "2480.50", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 80, .y = y }, "2480.50", inter_10);
+    _ = try doc.writeAt(.{ .x = 330, .y = y }, "2480.50", inter_tnum_10);
     y += 12;
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 80, .y = y }, "9999.99", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_tnum, 10);
-    _ = try doc.writeAt(.{ .x = 330, .y = y }, "9999.99", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 80, .y = y }, "9999.99", inter_10);
+    _ = try doc.writeAt(.{ .x = 330, .y = y }, "9999.99", inter_tnum_10);
     y += 18;
 
     // --- Fractions (frac) ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fractions (frac)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "1/2 3/4 5/8", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_frac, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "1\xe2\x81\x842 3\xe2\x81\x844 5\xe2\x81\x848", doc.getCurrentTextStyle()); // fraction slash U+2044
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fractions (frac)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "1/2 3/4 5/8", inter_12);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "1\xe2\x81\x842 3\xe2\x81\x844 5\xe2\x81\x848", inter_frac_12); // fraction slash U+2044
     y += 28;
 
     // --- Slashed Zero (zero) ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Slashed Zero (zero)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "0 10 200", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_zero, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "0 10 200", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Slashed Zero (zero)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "0 10 200", inter_12);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "0 10 200", inter_zero_12);
     y += 28;
 
     // --- Case-Sensitive Forms (case) ---
     // Note: calt OFF needed because calt contextually applies case-like substitutions
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Case-Sensitive (case)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_nocalt, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "A@B (C) 3 + 9 = 12 * 1", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_case, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "A@B (C) 3 + 9 = 12 * 1", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Case-Sensitive (case)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "A@B (C) 3 + 9 = 12 * 1", inter_nocalt_12);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "A@B (C) 3 + 9 = 12 * 1", inter_case_12);
     y += 28;
 
     // --- Stylistic Set 1 (ss01) - alternate digits ---
-    try doc.setEmbeddedFont(inter_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stylistic Set 1 (ss01)", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 12);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "3 4 6 9", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_ss01, 12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "3 4 6 9", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stylistic Set 1 (ss01)", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "3 4 6 9", inter_12);
+    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "3 4 6 9", inter_ss01_12);
     y += 28;
 
     // ===== Unicode Coverage =====
-    try doc.setEmbeddedFont(inter_bold, 13);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Unicode Coverage", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Unicode Coverage", inter_bold_13);
     y += 18;
 
     // Latin Extended
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 88, .y = y }, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏ ÐÑÒÓÔÕÖØÙÚÛÜÝÞ\xc3\x9f àáâãäåæçèéêëìíîï ðñòóôõöøùúûüýþÿ", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 88, .y = y }, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏ ÐÑÒÓÔÕÖØÙÚÛÜÝÞ\xc3\x9f àáâãäåæçèéêëìíîï ðñòóôõöøùúûüýþÿ", inter_10);
     y += 14;
-    _ = try doc.writeAt(.{ .x = 88, .y = y }, "\xc4\x80\xc4\x81\xc4\x82\xc4\x83\xc4\x84\xc4\x85\xc4\x86\xc4\x87\xc4\x88\xc4\x89\xc4\x8a\xc4\x8b\xc4\x8c\xc4\x8d\xc4\x8e\xc4\x8f\xc4\x90\xc4\x91\xc4\x92\xc4\x93\xc4\x94\xc4\x95 Œœ\xc5\xa0\xc5\xa1\xc5\xb8\xc5\xbd\xc5\xbe\xc6\x92", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 88, .y = y }, "\xc4\x80\xc4\x81\xc4\x82\xc4\x83\xc4\x84\xc4\x85\xc4\x86\xc4\x87\xc4\x88\xc4\x89\xc4\x8a\xc4\x8b\xc4\x8c\xc4\x8d\xc4\x8e\xc4\x8f\xc4\x90\xc4\x91\xc4\x92\xc4\x93\xc4\x94\xc4\x95 Œœ\xc5\xa0\xc5\xa1\xc5\xb8\xc5\xbd\xc5\xbe\xc6\x92", inter_10);
     y += 16;
 
     // Greek & Cyrillic
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Greek", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 88, .y = y }, "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠ αβγδεζηθικλμνξοπ", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Greek", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 88, .y = y }, "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠ αβγδεζηθικλμνξοπ", inter_10);
     y += 14;
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cyrillic", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 98, .y = y }, "АБВГДЕЖЗИЙКЛМНОП абвгдежзийклмноп", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cyrillic", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 98, .y = y }, "АБВГДЕЖЗИЙКЛМНОП абвгдежзийклмноп", inter_10);
     y += 16;
 
     // Punctuation
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 118, .y = y }, "\xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d \xc2\xabguillemets\xc2\xbb  hyphen- en\xe2\x80\x93dash em\xe2\x80\x94dash \xe2\x80\xa6", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 118, .y = y }, "\xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d \xc2\xabguillemets\xc2\xbb  hyphen- en\xe2\x80\x93dash em\xe2\x80\x94dash \xe2\x80\xa6", inter_10);
     y += 16;
 
     // Currency & Math
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Currency", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 11);
-    _ = try doc.writeAt(.{ .x = 105, .y = y }, "$ \xc2\xa2 \xc2\xa3 \xc2\xa5 \xe2\x82\xac \xe2\x82\xa3 \xe2\x82\xb9 \xe2\x82\xbd", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 260, .y = y }, "Math", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 11);
-    _ = try doc.writeAt(.{ .x = 295, .y = y }, "+ \xe2\x88\x92 \xc3\x97 \xc3\xb7 = \xe2\x89\xa0 \xe2\x89\xa4 \xe2\x89\xa5 \xc2\xb1 \xe2\x88\x9e \xe2\x88\x9a \xe2\x88\x91", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Currency", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 105, .y = y }, "$ \xc2\xa2 \xc2\xa3 \xc2\xa5 \xe2\x82\xac \xe2\x82\xa3 \xe2\x82\xb9 \xe2\x82\xbd", inter_11);
+    _ = try doc.writeAt(.{ .x = 260, .y = y }, "Math", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 295, .y = y }, "+ \xe2\x88\x92 \xc3\x97 \xc3\xb7 = \xe2\x89\xa0 \xe2\x89\xa4 \xe2\x89\xa5 \xc2\xb1 \xe2\x88\x9e \xe2\x88\x9a \xe2\x88\x91", inter_11);
     y += 16;
 
     // Arrows & Symbols
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Arrows", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 11);
-    _ = try doc.writeAt(.{ .x = 95, .y = y }, "\xe2\x86\x90 \xe2\x86\x91 \xe2\x86\x92 \xe2\x86\x93 \xe2\x86\x94 \xe2\x86\x95 \xe2\x87\x90 \xe2\x87\x92 \xe2\x87\x94", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 260, .y = y }, "Symbols", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 11);
-    _ = try doc.writeAt(.{ .x = 305, .y = y }, "\xc2\xa9 \xc2\xae \xe2\x84\xa2 \xc2\xb0 \xc2\xa7 \xc2\xb6 \xe2\x80\xa0 \xe2\x80\xa1 \xe2\x80\xa2", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Arrows", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 95, .y = y }, "\xe2\x86\x90 \xe2\x86\x91 \xe2\x86\x92 \xe2\x86\x93 \xe2\x86\x94 \xe2\x86\x95 \xe2\x87\x90 \xe2\x87\x92 \xe2\x87\x94", inter_11);
+    _ = try doc.writeAt(.{ .x = 260, .y = y }, "Symbols", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 305, .y = y }, "\xc2\xa9 \xc2\xae \xe2\x84\xa2 \xc2\xb0 \xc2\xa7 \xc2\xb6 \xe2\x80\xa0 \xe2\x80\xa1 \xe2\x80\xa2", inter_11);
     y += 16;
 
     // Figures
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Figures", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 10);
-    _ = try doc.writeAt(.{ .x = 98, .y = y }, "0123456789  \xc2\xbc \xc2\xbd \xc2\xbe \xe2\x85\x93 \xe2\x85\x94  Super: \xc2\xb9\xc2\xb2\xc2\xb3\xe2\x81\xb4\xe2\x81\xb5  Sub: \xe2\x82\x80\xe2\x82\x81\xe2\x82\x82\xe2\x82\x83\xe2\x82\x84  H\xe2\x82\x82O CO\xe2\x82\x82 E=mc\xc2\xb2", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Figures", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 98, .y = y }, "0123456789  \xc2\xbc \xc2\xbd \xc2\xbe \xe2\x85\x93 \xe2\x85\x94  Super: \xc2\xb9\xc2\xb2\xc2\xb3\xe2\x81\xb4\xe2\x81\xb5  Sub: \xe2\x82\x80\xe2\x82\x81\xe2\x82\x82\xe2\x82\x83\xe2\x82\x84  H\xe2\x82\x82O CO\xe2\x82\x82 E=mc\xc2\xb2", inter_10);
     y += 16;
 
     // ASCII
-    try doc.setEmbeddedFont(inter_bold, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ASCII", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(inter, 9);
-    _ = try doc.writeAt(.{ .x = 85, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@ ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_` abcdefghijklmnopqrstuvwxyz{|}~", doc.getCurrentTextStyle());
+    const inter_9 = zpdf.TextStyle{ .font = inter, .size = 9 };
+    const inter_7 = zpdf.TextStyle{ .font = inter, .size = 7 };
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ASCII", inter_bold_9);
+    _ = try doc.writeAt(.{ .x = 85, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@ ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_` abcdefghijklmnopqrstuvwxyz{|}~", inter_9);
     y += 18;
 
     // Footer: Available Features
-    try doc.setEmbeddedFont(inter, 7);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "GSUB: aalt calt case ccmp cv01-14 dlig dnom frac locl numr ordn pnum salt sinf ss01-08 subs sups tnum zero | GPOS: cpsp kern mark mkmk", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "GSUB: aalt calt case ccmp cv01-14 dlig dnom frac locl numr ordn pnum salt sinf ss01-08 subs sups tnum zero | GPOS: cpsp kern mark mkmk", inter_7);
 
     return doc.output();
 }
@@ -591,6 +524,16 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     const gentium_bold = try doc.loadFont("test/fonts/Gentium/Gentium-Bold.ttf", null);
     const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf", null);
 
+    // Define styles
+    const title_style = zpdf.TextStyle{ .font = gentium_bold, .size = 18 };
+    const header_style = zpdf.TextStyle{ .font = gentium_bold, .size = 11 };
+    const main_style = zpdf.TextStyle{ .font = gentium, .size = 13 };
+    const desc_style = zpdf.TextStyle{ .font = gentium, .size = 9 };
+    const sample_style = zpdf.TextStyle{ .font = gentium, .size = 11 };
+    const sample_italic_style = zpdf.TextStyle{ .font = gentium_italic, .size = 11 };
+    const bold_11_style = zpdf.TextStyle{ .font = gentium_bold, .size = 11 };
+    const italic_11_style = zpdf.TextStyle{ .font = gentium_italic, .size = 11 };
+
     try doc.addPage();
     var y: f64 = 32;
     const desc_x: f64 = 280; // Right column for descriptions
@@ -598,184 +541,135 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     const desc_offset: f64 = 12; // Alignment offset for description baseline
 
     // Title
-    try doc.setEmbeddedFont(gentium_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gentium Diacritics Reference", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gentium Diacritics Reference", title_style);
     y += 28;
 
     // --- Basic Combining Marks (Above) ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combining Marks (Above)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combining Marks (Above)", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // grave, acute, circumflex, tilde, macron - Aa Ee Oo pairs
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x80a\xcc\x80 A\xcc\x81a\xcc\x81 A\xcc\x82a\xcc\x82 A\xcc\x83a\xcc\x83 A\xcc\x84a\xcc\x84", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x80a\xcc\x80 A\xcc\x81a\xcc\x81 A\xcc\x82a\xcc\x82 A\xcc\x83a\xcc\x83 A\xcc\x84a\xcc\x84", main_style);
     var region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "grave, acute, circumflex, tilde, macron", .{});
+    _ = try writeText(&doc, &region, "grave, acute, circumflex, tilde, macron", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // breve, dot above, diaeresis, hook above, ring above
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x86a\xcc\x86 A\xcc\x87a\xcc\x87 A\xcc\x88a\xcc\x88 A\xcc\x89a\xcc\x89 A\xcc\x8aa\xcc\x8a", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x86a\xcc\x86 A\xcc\x87a\xcc\x87 A\xcc\x88a\xcc\x88 A\xcc\x89a\xcc\x89 A\xcc\x8aa\xcc\x8a", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "breve, dot above, diaeresis, hook above, ring above", .{});
+    _ = try writeText(&doc, &region, "breve, dot above, diaeresis, hook above, ring above", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // double acute, caron, double grave
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x8ba\xcc\x8b A\xcc\x8ca\xcc\x8c A\xcc\x8fa\xcc\x8f O\xcc\x8bo\xcc\x8b O\xcc\x8co\xcc\x8c", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x8ba\xcc\x8b A\xcc\x8ca\xcc\x8c A\xcc\x8fa\xcc\x8f O\xcc\x8bo\xcc\x8b O\xcc\x8co\xcc\x8c", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "double acute, caron, double grave (Hungarian, Czech)", .{});
+    _ = try writeText(&doc, &region, "double acute, caron, double grave (Hungarian, Czech)", desc_style, .{});
     y += 20;
 
     // --- Combining Marks (Below) ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combining Marks (Below)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combining Marks (Below)", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // cedilla, ogonek, dot below
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "C\xcc\xa7c\xcc\xa7 S\xcc\xa7s\xcc\xa7 A\xcc\xa8a\xcc\xa8 E\xcc\xa8e\xcc\xa8 A\xcc\xa3a\xcc\xa3", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "C\xcc\xa7c\xcc\xa7 S\xcc\xa7s\xcc\xa7 A\xcc\xa8a\xcc\xa8 E\xcc\xa8e\xcc\xa8 A\xcc\xa3a\xcc\xa3", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "cedilla (French, Turkish), ogonek (Polish), dot below (Vietnamese)", .{});
+    _ = try writeText(&doc, &region, "cedilla (French, Turkish), ogonek (Polish), dot below (Vietnamese)", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // macron below, line below, ring below
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xb1a\xcc\xb1 A\xcc\xb2a\xcc\xb2 A\xcc\xa5a\xcc\xa5 O\xcc\xa3o\xcc\xa3 U\xcc\xa3u\xcc\xa3", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xb1a\xcc\xb1 A\xcc\xb2a\xcc\xb2 A\xcc\xa5a\xcc\xa5 O\xcc\xa3o\xcc\xa3 U\xcc\xa3u\xcc\xa3", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "macron below, line below, ring below, more dot below", .{});
+    _ = try writeText(&doc, &region, "macron below, line below, ring below, more dot below", desc_style, .{});
     y += 20;
 
     // --- Stacked Diacritics (Vietnamese style) ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stacked Diacritics (Vietnamese)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stacked Diacritics (Vietnamese)", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // circumflex + tone marks
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x82\xcc\x81a\xcc\x82\xcc\x81 E\xcc\x82\xcc\x80e\xcc\x82\xcc\x80 O\xcc\x82\xcc\x89o\xcc\x82\xcc\x89 A\xcc\x82\xcc\x83a\xcc\x82\xcc\x83", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x82\xcc\x81a\xcc\x82\xcc\x81 E\xcc\x82\xcc\x80e\xcc\x82\xcc\x80 O\xcc\x82\xcc\x89o\xcc\x82\xcc\x89 A\xcc\x82\xcc\x83a\xcc\x82\xcc\x83", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "circumflex + acute, grave, hook above, tilde (Vietnamese vowels)", .{});
+    _ = try writeText(&doc, &region, "circumflex + acute, grave, hook above, tilde (Vietnamese vowels)", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // breve + tone, horn + tone (precomposed)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x86\xcc\x81a\xcc\x86\xcc\x81 A\xcc\x86\xcc\x80a\xcc\x86\xcc\x80 \xe1\xbb\x9a\xe1\xbb\x9b \xe1\xbb\x9c\xe1\xbb\x9d \xe1\xbb\xa8\xe1\xbb\xa9 \xe1\xbb\xaa\xe1\xbb\xab", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x86\xcc\x81a\xcc\x86\xcc\x81 A\xcc\x86\xcc\x80a\xcc\x86\xcc\x80 \xe1\xbb\x9a\xe1\xbb\x9b \xe1\xbb\x9c\xe1\xbb\x9d \xe1\xbb\xa8\xe1\xbb\xa9 \xe1\xbb\xaa\xe1\xbb\xab", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "breve+tone (combining), horn+tone (precomposed: Ớờ Ứừ)", .{});
+    _ = try writeText(&doc, &region, "breve+tone (combining), horn+tone (precomposed: Ớờ Ứừ)", desc_style, .{});
     y += 20;
 
     // --- Above + Below Combinations ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Above + Below Combinations", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Above + Below Combinations", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // cedilla + above marks
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "S\xcc\xa7\xcc\x81s\xcc\xa7\xcc\x81 C\xcc\xa7\xcc\x82c\xcc\xa7\xcc\x82 T\xcc\xa7\xcc\x83t\xcc\xa7\xcc\x83", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "S\xcc\xa7\xcc\x81s\xcc\xa7\xcc\x81 C\xcc\xa7\xcc\x82c\xcc\xa7\xcc\x82 T\xcc\xa7\xcc\x83t\xcc\xa7\xcc\x83", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "cedilla combined with acute, circumflex, tilde above", .{});
+    _ = try writeText(&doc, &region, "cedilla combined with acute, circumflex, tilde above", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // ogonek + above marks
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xa8\xcc\x84a\xcc\xa8\xcc\x84 E\xcc\xa8\xcc\x81e\xcc\xa8\xcc\x81 O\xcc\xa3\xcc\x82o\xcc\xa3\xcc\x82", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xa8\xcc\x84a\xcc\xa8\xcc\x84 E\xcc\xa8\xcc\x81e\xcc\xa8\xcc\x81 O\xcc\xa3\xcc\x82o\xcc\xa3\xcc\x82", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "ogonek + macron, ogonek + acute, dot below + circumflex", .{});
+    _ = try writeText(&doc, &region, "ogonek + macron, ogonek + acute, dot below + circumflex", desc_style, .{});
     y += 20;
 
     // --- Precomposed Characters ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Precomposed Characters", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Precomposed Characters", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // Precomposed grave, acute, circumflex, tilde
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x83\xc3\xa3 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x83\xc3\xa3 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Precomposed Latin letters with grave, acute, circumflex, tilde", .{});
+    _ = try writeText(&doc, &region, "Precomposed Latin letters with grave, acute, circumflex, tilde", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // Vietnamese precomposed
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xe1\xba\xa0\xe1\xba\xa1 \xe1\xba\xa2\xe1\xba\xa3 \xe1\xba\xa4\xe1\xba\xa5 \xc6\xa0\xc6\xa1 \xc6\xaf\xc6\xb0", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xe1\xba\xa0\xe1\xba\xa1 \xe1\xba\xa2\xe1\xba\xa3 \xe1\xba\xa4\xe1\xba\xa5 \xc6\xa0\xc6\xa1 \xc6\xaf\xc6\xb0", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Vietnamese precomposed: A with dot, hook, circumflex+acute, horn", .{});
+    _ = try writeText(&doc, &region, "Vietnamese precomposed: A with dot, hook, circumflex+acute, horn", desc_style, .{});
     y += 20;
 
     // --- Latin Extended (Ogonek, Cedilla, Caron) ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin Extended", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin Extended", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // Polish ogonek
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc4\x84\xc4\x85 \xc4\x98\xc4\x99 \xc4\xae\xc4\xaf \xc5\xb2\xc5\xb3", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc4\x84\xc4\x85 \xc4\x98\xc4\x99 \xc4\xae\xc4\xaf \xc5\xb2\xc5\xb3", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Polish: A, E, I, U with ogonek", .{});
+    _ = try writeText(&doc, &region, "Polish: A, E, I, U with ogonek", desc_style, .{});
     y += 17;
-    try doc.setEmbeddedFont(gentium, 13);
     // Turkish/Romanian cedilla, Czech caron
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc5\x9e\xc5\x9f \xc5\xa2\xc5\xa3 \xc4\x8e\xc4\x8f \xc4\xbd\xc4\xbe \xc5\xa4\xc5\xa5 \xc5\x87\xc5\x88", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc5\x9e\xc5\x9f \xc5\xa2\xc5\xa3 \xc4\x8e\xc4\x8f \xc4\xbd\xc4\xbe \xc5\xa4\xc5\xa5 \xc5\x87\xc5\x88", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Turkish/Romanian cedilla; Czech/Slovak caron", .{});
+    _ = try writeText(&doc, &region, "Turkish/Romanian cedilla; Czech/Slovak caron", desc_style, .{});
     y += 20;
 
     // --- Multiple Diacritics Stress Test ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Multiple Diacritics (3 marks)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Multiple Diacritics (3 marks)", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 13);
     // Triple stacked marks
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xa3\xcc\x82\xcc\x81a\xcc\xa3\xcc\x82\xcc\x81 E\xcc\xa8\xcc\x84\xcc\x87e\xcc\xa8\xcc\x84\xcc\x87 O\xcc\xa7\xcc\x83\xcc\x8ao\xcc\xa7\xcc\x83\xcc\x8a", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xa3\xcc\x82\xcc\x81a\xcc\xa3\xcc\x82\xcc\x81 E\xcc\xa8\xcc\x84\xcc\x87e\xcc\xa8\xcc\x84\xcc\x87 O\xcc\xa7\xcc\x83\xcc\x8ao\xcc\xa7\xcc\x83\xcc\x8a", main_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 40 };
-    _ = try writeText(&doc, &region, "dot below + circumflex + acute; ogonek + macron + dot above; cedilla + tilde + ring", .{});
+    _ = try writeText(&doc, &region, "dot below + circumflex + acute; ogonek + macron + dot above; cedilla + tilde + ring", desc_style, .{});
     y += 22;
 
     // --- Sample Text in Various Languages ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Sample Text", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Sample Text", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ti\xe1\xba\xbfng Vi\xe1\xbb\x87t: X\xc3\xa3 h\xe1\xbb\x99i ch\xe1\xbb\xa7 ngh\xc4\xa9a Vi\xe1\xbb\x87t Nam", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ti\xe1\xba\xbfng Vi\xe1\xbb\x87t: X\xc3\xa3 h\xe1\xbb\x99i ch\xe1\xbb\xa7 ngh\xc4\xa9a Vi\xe1\xbb\x87t Nam", sample_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Vietnamese with stacked diacritics and horn", .{});
+    _ = try writeText(&doc, &region, "Vietnamese with stacked diacritics and horn", desc_style, .{});
     y += 15;
-    try doc.setEmbeddedFont(gentium, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Polski: Zwy\xc5\xbc\xc4\x87 \xc5\x82\xc3\xb3dki\xc4\x99 sta\xc5\x84cie\xc4\x87 \xc5\xbcmij\xc4\x85", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Polski: Zwy\xc5\xbc\xc4\x87 \xc5\x82\xc3\xb3dki\xc4\x99 sta\xc5\x84cie\xc4\x87 \xc5\xbcmij\xc4\x85", sample_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Polish with ogonek, kreska, overdot", .{});
+    _ = try writeText(&doc, &region, "Polish with ogonek, kreska, overdot", desc_style, .{});
     y += 15;
-    try doc.setEmbeddedFont(gentium, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "T\xc3\xbcrk\xc3\xa7e: \xc3\x87al\xc4\xb1\xc5\x9fkan \xc3\xb6\xc4\x9frenciler", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "T\xc3\xbcrk\xc3\xa7e: \xc3\x87al\xc4\xb1\xc5\x9fkan \xc3\xb6\xc4\x9frenciler", sample_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "Turkish with cedilla, dotless i, breve", .{});
+    _ = try writeText(&doc, &region, "Turkish with cedilla, dotless i, breve", desc_style, .{});
     y += 15;
-    try doc.setEmbeddedFont(gentium_italic, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fran\xc3\xa7ais: L'\xc3\xa9l\xc3\xa8ve na\xc3\xaff re\xc3\xa7oit", doc.getCurrentTextStyle());
-    try doc.setEmbeddedFont(gentium, 9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fran\xc3\xa7ais: L'\xc3\xa9l\xc3\xa8ve na\xc3\xaff re\xc3\xa7oit", sample_italic_style);
     region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
-    _ = try writeText(&doc, &region, "French with cedilla, accents, diaeresis", .{});
+    _ = try writeText(&doc, &region, "French with cedilla, accents, diaeresis", desc_style, .{});
     y += 18;
 
     // --- Font Styles ---
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Font Styles", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Font Styles", header_style);
     y += 15;
-    try doc.setEmbeddedFont(gentium, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", sample_style);
     y += 14;
-    try doc.setEmbeddedFont(gentium_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", bold_11_style);
     y += 14;
-    try doc.setEmbeddedFont(gentium_italic, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", italic_11_style);
 
     return doc.output();
 }
@@ -908,133 +802,124 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    // Define styles used in this test
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+    const body_11 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     // Set margins (1 inch = 72pt)
     doc.setMargins(.{ .left = 72, .right = 72, .top = 72, .bottom = 72 });
 
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 16);
 
     // Title - matches fpdf2 text() positioning
-    _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "Text Flow API Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "Text Flow API Test", title_style);
 
     // Single lines with different alignments - use writeAt for exact positioning
-    try doc.setFont(.helvetica, 12);
     var y: f64 = 112;
     const region_width = 595.28 - 72 - 72;
 
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Left aligned line (default)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Left aligned line (default)", body_12);
     y += 14.4;
 
     // Center aligned
     const center_text = "Center aligned line";
-    const center_width = doc.getTextWidth(center_text);
-    _ = try doc.writeAt(.{ .x = 72 + (region_width - center_width) / 2, .y = y }, center_text, doc.getCurrentTextStyle());
+    const center_width = doc.getTextWidthStyled(center_text, body_12);
+    _ = try doc.writeAt(.{ .x = 72 + (region_width - center_width) / 2, .y = y }, center_text, body_12);
     y += 14.4;
 
     // Right aligned
     const right_text = "Right aligned line";
-    const right_width = doc.getTextWidth(right_text);
-    _ = try doc.writeAt(.{ .x = 72 + region_width - right_width, .y = y }, right_text, doc.getCurrentTextStyle());
+    const right_width = doc.getTextWidthStyled(right_text, body_12);
+    _ = try doc.writeAt(.{ .x = 72 + region_width - right_width, .y = y }, right_text, body_12);
     y += 14.4;
 
     y += 12;
 
     // Word wrapping section
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Word Wrapping Test:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Word Wrapping Test:", header_12);
     y += 14.4;
 
-    // Use writeStyled with valign: .middle for fpdf2-compatible positioning
-    try doc.setFont(.helvetica, 11);
+    // Use writeStyled with valign: .top for top-aligned text positioning
     var region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = 200 };
     const paragraph1 = "This is a test paragraph that demonstrates word wrapping. " ++
         "The text should automatically wrap to fit within the region width. " ++
         "Long words like supercalifragilisticexpialidocious should also be handled.";
-    _ = try writeText(&doc, &region, paragraph1, .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph1, body_11, .{ .valign = .top, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Demo 1: Regular hyphens - compound words stay together (100pt column)
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Regular Hyphens (100pt column):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Regular Hyphens (100pt column):", header_12);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     // At 11pt: "Look:" ~22pt, "state-of-the-art" ~86pt
     // "Look: state-of-the-art" ~111pt > 100pt, so word wraps to next line
     // With break_on_hyphens=false, the compound word stays intact
     region = zpdf.Region{ .x = 72, .y = y, .width = 100, .height = 60 };
     const paragraph2a = "Look: state-of-the-art works.";
-    _ = try writeText(&doc, &region, paragraph2a, .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph2a, body_11, .{ .valign = .top, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Demo 2: Soft-hyphens - word breaks at soft-hyphen point (26pt column)
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Soft-Hyphens (26pt column):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Soft-Hyphens (26pt column):", header_12);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     // At 11pt: "in-" ~12.8pt, "com-" ~24.4pt, both fit in 26pt
     // Word breaks recursively at soft-hyphen points
     region = zpdf.Region{ .x = 72, .y = y, .width = 26, .height = 80 };
     // Word has soft-hyphens: in­com­pre­hen­si­ble
     const paragraph2b = "in\xc2\xadcom\xc2\xadpre\xc2\xadhen\xc2\xadsi\xc2\xadble";
-    _ = try writeText(&doc, &region, paragraph2b, .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph2b, body_11, .{ .valign = .top, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Demo 3: Character wrap - long word without soft-hyphens in narrow column
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Character Wrap (50pt column):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Character Wrap (50pt column):", header_12);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     // "supercalifragilisticexpialidocious" is ~155pt at 11pt, won't fit in 50pt
     // Without soft-hyphens, it overflows the line (character-level handling)
     region = zpdf.Region{ .x = 72, .y = y, .width = 50, .height = 80 };
-    _ = try writeText(&doc, &region, "supercalifragilisticexpialidocious", .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, "supercalifragilisticexpialidocious", body_11, .{ .valign = .top, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Centered paragraph section
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Centered Paragraph:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Centered Paragraph:", header_12);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = 100 };
     const paragraph3 = "This paragraph is center aligned. Each line of text " ++
         "will be centered within the region width.";
-    _ = try writeText(&doc, &region, paragraph3, .{ .alignment = .center, .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &region, paragraph3, body_11, .{ .alignment = .center, .valign = .top, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Overflow test - small region that forces overflow
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Overflow Test (150pt wide, 30pt tall):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Overflow Test (150pt wide, 30pt tall):", header_12);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     // 150pt width forces more line wraps; 30pt height fits ~2 lines at 13.2pt each
     region = zpdf.Region{ .x = 72, .y = y, .width = 150, .height = 30 };
     const overflow_text = "Line one fits here. Line two fits here. " ++
         "Line three overflows. Line four overflows.";
-    const result = try writeText(&doc, &region, overflow_text, .{ .valign = .middle, .break_on_hyphens = false });
+    const result = try writeText(&doc, &region, overflow_text, body_11, .{ .valign = .top, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     // Show what overflowed
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Overflow content:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Overflow content:", header_10);
     y += 12;
-    try doc.setFont(.helvetica, 10);
     if (result.overflow) |overflow| {
         // Truncate if too long for display
         const display_len = @min(overflow.len, 60);
-        _ = try doc.writeAt(.{ .x = 72, .y = y }, overflow[0..display_len], doc.getCurrentTextStyle());
+        _ = try doc.writeAt(.{ .x = 72, .y = y }, overflow[0..display_len], body_10);
     } else {
-        _ = try doc.writeAt(.{ .x = 72, .y = y }, "(no overflow)", doc.getCurrentTextStyle());
+        _ = try doc.writeAt(.{ .x = 72, .y = y }, "(no overflow)", body_10);
     }
     y += 16;
 
     // Bordered region section
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Region with Border:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 72, .y = y }, "Region with Border:", header_12);
     y += 14.4;
 
     var boxed_region = zpdf.Region{
@@ -1047,10 +932,9 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     };
     try doc.drawRegion(boxed_region);
 
-    try doc.setFont(.helvetica, 11);
     // fpdf2 uses set_xy(x, y+5), so we set cursor_y = 5 to match
     boxed_region.cursor_y = 5;
-    _ = try writeText(&doc, &boxed_region, "This text is inside a bordered region with a light gray background fill.", .{ .valign = .middle, .break_on_hyphens = false });
+    _ = try writeText(&doc, &boxed_region, "This text is inside a bordered region with a light gray background fill.", body_11, .{ .valign = .top, .break_on_hyphens = false });
 
     return doc.output();
 }
@@ -1059,23 +943,24 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+    const header_11 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .bold = true };
+    const body_11 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+
     try doc.addPage();
     var y: f64 = 50;
 
     // Title
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Justified Text Alignment", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Justified Text Alignment", title_style);
     y += 24;
 
     // Standard paragraph width (451 pts = page width - 72pt margins each side)
     const region_width = 451;
 
     // Test 1: Long justified paragraph (multiple lines)
-    try doc.setFont(.helvetica_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Long Justified Paragraph:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Long Justified Paragraph:", header_11);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     var region = zpdf.Region{ .x = 50, .y = y, .width = region_width, .height = 200 };
     const text1 = "Typography is the art and technique of arranging type to make written " ++
         "language legible, readable, and appealing when displayed. The arrangement " ++
@@ -1088,16 +973,14 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append(text1, .{});
-        _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify, .break_on_hyphens = false });
+        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
     }
     y = region.y + region.cursor_y + 16;
 
     // Test 2: Narrow column justified (more lines)
-    try doc.setFont(.helvetica_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Narrow Column (200pt):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Narrow Column (200pt):", header_11);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     region = zpdf.Region{ .x = 50, .y = y, .width = 200, .height = 150 };
     const text2 = "In narrow columns, justified text requires more word spacing adjustment. " ++
         "Each line must stretch to fill the available width, which can create " ++
@@ -1107,7 +990,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append(text2, .{});
-        _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify, .break_on_hyphens = false });
+        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
     }
     y = region.y + region.cursor_y + 16;
 
@@ -1116,31 +999,27 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         "dozen liquor jugs. How vexingly quick daft zebras jump. The five boxing " ++
         "wizards jump quickly. Sphinx of black quartz, judge my vow.";
 
-    try doc.setFont(.helvetica_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Left Aligned:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Left Aligned:", header_11);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
     {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append(compare_text, .{});
-        _ = try doc.writeStyled(&region, &st, .{ .alignment = .left, .break_on_hyphens = false });
+        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .left, .break_on_hyphens = false });
     }
     y = region.y + region.cursor_y + 12;
 
-    try doc.setFont(.helvetica_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Justified:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Justified:", header_11);
     y += 14.4;
 
-    try doc.setFont(.helvetica, 11);
     region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
     {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append(compare_text, .{});
-        _ = try doc.writeStyled(&region, &st, .{ .alignment = .justify, .break_on_hyphens = false });
+        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
     }
 
     return doc.output();
@@ -1150,16 +1029,22 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const body_9 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 9 };
+    const body_8 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 8 };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const header_9 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 9, .bold = true };
+    const courier_12 = zpdf.TextStyle{ .font = zpdf.Font.courier, .size = 12 };
+    const times_10 = zpdf.TextStyle{ .font = zpdf.Font.times, .size = 10 };
+
     try doc.addPage();
     var y: f64 = 40;
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Knuth-Plass Optimal Line Breaking", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Knuth-Plass Optimal Line Breaking", title_style);
     y += 22;
 
     // Explanation
-    try doc.setFont(.helvetica, 9);
     const explanation =
         \\The greedy algorithm fills each line as much as possible. Knuth-Plass minimizes total
         \\"badness" (slack squared) across all lines, often leaving space on one line to improve others.
@@ -1169,13 +1054,12 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append(explanation, .{});
-        _ = try doc.writeStyled(&exp_region, &st, .{});
+        _ = try doc.writeStyled(&exp_region, &st, body_9, .{});
     }
     y += 38;
 
     // Monospace example with the classic test case
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Monospace Example (14 chars wide):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Monospace Example (14 chars wide):", header_10);
     y += 14;
 
     const mono_text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
@@ -1183,23 +1067,20 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     const mono_width = 14 * char_width;
 
     // Two small boxes side by side for monospace
-    try doc.setFont(.courier, 12);
     var mono_greedy = zpdf.Region{ .x = 50, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
     var mono_optimal = zpdf.Region{ .x = 180, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
-    _ = try writeText(&doc, &mono_greedy, mono_text, .{ .line_breaking = .greedy });
-    _ = try writeText(&doc, &mono_optimal, mono_text, .{ .line_breaking = .optimal });
+    _ = try writeText(&doc, &mono_greedy, mono_text, courier_12, .{ .line_breaking = .greedy });
+    _ = try writeText(&doc, &mono_optimal, mono_text, courier_12, .{ .line_breaking = .optimal });
     try doc.drawRegion(mono_greedy);
     try doc.drawRegion(mono_optimal);
 
     // Labels
-    try doc.setFont(.helvetica, 8);
-    _ = try doc.writeAt(.{ .x = 50, .y = y + 118 }, "Greedy: line 2 = \"yellow dog was\"", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 180, .y = y + 118 }, "Optimal: line 2 = \"yellow dog\"", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y + 118 }, "Greedy: line 2 = \"yellow dog was\"", body_8);
+    _ = try doc.writeAt(.{ .x = 180, .y = y + 118 }, "Optimal: line 2 = \"yellow dog\"", body_8);
     y += 136;
 
     // Lorem Ipsum columns
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Dense Text Comparison:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Dense Text Comparison:", header_10);
     y += 14;
 
     const lorem =
@@ -1214,20 +1095,18 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     const right_x: f64 = 310;
 
     // Column headers
-    try doc.setFont(.helvetica_bold, 9);
-    _ = try doc.writeAt(.{ .x = left_x, .y = y }, "GREEDY", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = right_x, .y = y }, "OPTIMAL (Knuth-Plass)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = left_x, .y = y }, "GREEDY", header_9);
+    _ = try doc.writeAt(.{ .x = right_x, .y = y }, "OPTIMAL (Knuth-Plass)", header_9);
     y += 12;
 
     // Left column - Greedy
-    try doc.setFont(.times_roman, 10);
     var left_col = zpdf.Region{ .x = left_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
-    _ = try writeText(&doc, &left_col, lorem, .{ .line_breaking = .greedy, .alignment = .justify });
+    _ = try writeText(&doc, &left_col, lorem, times_10, .{ .line_breaking = .greedy, .alignment = .justify });
     try doc.drawRegion(left_col);
 
     // Right column - Optimal
     var right_col = zpdf.Region{ .x = right_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
-    _ = try writeText(&doc, &right_col, lorem, .{ .line_breaking = .optimal, .alignment = .justify });
+    _ = try writeText(&doc, &right_col, lorem, times_10, .{ .line_breaking = .optimal, .alignment = .justify });
     try doc.drawRegion(right_col);
 
     return doc.output();
@@ -1237,60 +1116,50 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+    const body_bold = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+
     try doc.addPage();
     var y: f64 = 50;
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Colored Text Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Colored Text Test", title_style);
     y += 30;
 
     // Black text (default)
-    try doc.setFont(.helvetica, 12);
-    doc.setTextColor(zpdf.Color.black);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Black text (default)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Black text (default)", body_12);
     y += 20;
 
     // Red text
-    doc.setTextColor(zpdf.Color.red);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text (RGB: 255, 0, 0)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text (RGB: 255, 0, 0)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.red });
     y += 20;
 
     // Lime green text (CSS "green" is 0,128,0 - this is "lime")
-    doc.setTextColor(zpdf.Color.lime);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Lime text (RGB: 0, 255, 0)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Lime text (RGB: 0, 255, 0)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.lime });
     y += 20;
 
     // Blue text
-    doc.setTextColor(zpdf.Color.blue);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text (RGB: 0, 0, 255)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text (RGB: 0, 0, 255)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.blue });
     y += 20;
 
     // Gray text (using grayscale) - 128/255 = 0.502
-    doc.setTextColor(zpdf.Color.greyscale(128.0 / 255.0));
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gray text (50% gray)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gray text (50% gray)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.greyscale(128.0 / 255.0) });
     y += 20;
 
     // Custom color (orange) - RGB 255, 165, 0
-    doc.setTextColor(zpdf.Color.rgb(255, 165, 0));
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Orange text (RGB: 255, 165, 0)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Orange text (RGB: 255, 165, 0)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.rgb(255, 165, 0) });
     y += 20;
 
     // Back to black
-    doc.setTextColor(zpdf.Color.black);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Back to black text", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Back to black text", body_12);
     y += 30;
 
     // Multiple colors on same line (using multiple writeAt calls)
-    try doc.setFont(.helvetica_bold, 12);
-    doc.setTextColor(zpdf.Color.black);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mixed colors: ", doc.getCurrentTextStyle());
-    doc.setTextColor(zpdf.Color.red);
-    _ = try doc.writeAt(.{ .x = 145, .y = y }, "Red ", doc.getCurrentTextStyle());
-    doc.setTextColor(zpdf.Color.lime);
-    _ = try doc.writeAt(.{ .x = 175, .y = y }, "Lime ", doc.getCurrentTextStyle());
-    doc.setTextColor(zpdf.Color.blue);
-    _ = try doc.writeAt(.{ .x = 220, .y = y }, "Blue", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mixed colors: ", body_bold);
+    _ = try doc.writeAt(.{ .x = 145, .y = y }, "Red ", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true, .color = zpdf.Color.red });
+    _ = try doc.writeAt(.{ .x = 175, .y = y }, "Lime ", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true, .color = zpdf.Color.lime });
+    _ = try doc.writeAt(.{ .x = 220, .y = y }, "Blue", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true, .color = zpdf.Color.blue });
 
     return doc.output();
 }
@@ -1299,17 +1168,18 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Graphics Primitives Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Graphics Primitives Test", title_style);
 
     var y: f64 = 60;
 
     // === Lines ===
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Lines:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Lines:", header_12);
     y += 15;
 
     // Simple line
@@ -1329,8 +1199,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 20;
 
     // === Rectangles ===
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Rectangles:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Rectangles:", header_12);
     y += 15;
 
     // Stroke only
@@ -1347,8 +1216,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 45;
 
     // === Rounded Rectangles ===
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Rounded Rectangles:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Rounded Rectangles:", header_12);
     y += 15;
 
     // Small radius
@@ -1365,8 +1233,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 45;
 
     // === Circles ===
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Circles:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Circles:", header_12);
     y += 15;
 
     // Stroke circle
@@ -1383,8 +1250,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 65;
 
     // === Ellipses ===
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ellipses:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ellipses:", header_12);
     y += 15;
 
     // Horizontal ellipse - bounding box: (x, y+20) with width=40, height=20
@@ -1401,8 +1267,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 55;
 
     // === Polygons ===
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Polygons:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Polygons:", header_12);
     y += 15;
 
     // Triangle
@@ -1447,29 +1312,30 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Image Embedding Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Image Embedding Test", title_16);
 
     // Load images
     const jpeg_img = try doc.loadImage("test/images/madonna_and_child_1939.1.256.jpg");
     const png_img = try doc.loadImage("test/images/robot.png");
 
     // Left column: JPEG
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "JPEG (100x140):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "JPEG (100x140):", header_10);
     try doc.drawImage(jpeg_img, 50, 55, 100, 140);
 
-    _ = try doc.writeAt(.{ .x = 50, .y = 210 }, "JPEG w=80 (h auto):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 210 }, "JPEG w=80 (h auto):", header_10);
     try doc.drawImage(jpeg_img, 50, 215, 80, 0);
 
     // Right column: PNG with alpha
-    _ = try doc.writeAt(.{ .x = 200, .y = 50 }, "PNG with alpha (80x120):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 200, .y = 50 }, "PNG with alpha (80x120):", header_10);
     try doc.drawImage(png_img, 200, 55, 80, 120);
 
-    _ = try doc.writeAt(.{ .x = 200, .y = 190 }, "PNG h=100 (w auto):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 200, .y = 190 }, "PNG h=100 (w auto):", header_10);
     try doc.drawImage(png_img, 200, 195, 0, 100);
 
     return doc.output();
@@ -1479,29 +1345,30 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Embedding Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Embedding Test", title_16);
 
     // Load test SVG
     const test_svg = try doc.loadSvg("test/images/test.svg");
 
     // Row 1: Test SVG samples
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Original (200x200):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Original (200x200):", header_10);
     try doc.drawSvg(test_svg, 50, 55, 0, 0);
 
-    _ = try doc.writeAt(.{ .x = 280, .y = 50 }, "Scaled (100x100):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 280, .y = 50 }, "Scaled (100x100):", header_10);
     try doc.drawSvg(test_svg, 280, 55, 100, 100);
 
-    _ = try doc.writeAt(.{ .x = 420, .y = 50 }, "Width=80:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 420, .y = 50 }, "Width=80:", header_10);
     try doc.drawSvg(test_svg, 420, 55, 80, 0);
 
     // Row 2: Tiger SVG
     if (doc.loadSvg("test/images/tiger.svg")) |tiger_svg| {
-        _ = try doc.writeAt(.{ .x = 50, .y = 280 }, "Tiger SVG (400x400):", doc.getCurrentTextStyle());
+        _ = try doc.writeAt(.{ .x = 50, .y = 280 }, "Tiger SVG (400x400):", header_10);
         // Center on page
         try doc.drawSvg(tiger_svg, 97, 295, 400, 400);
     } else |_| {
@@ -1517,17 +1384,18 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Path API Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Path API Test", title_16);
 
     var y: f64 = 70;
 
     // Triangle using moveTo, lineTo, closePath
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Triangle (moveTo, lineTo, closePath):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Triangle (moveTo, lineTo, closePath):", body_10);
     y += 15;
 
     var path = doc.createPath();
@@ -1543,8 +1411,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 80;
 
     // Cubic Bezier curve
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cubic Bezier curve (curveTo):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cubic Bezier curve (curveTo):", body_10);
     y += 15;
 
     var bezier = doc.createPath();
@@ -1557,8 +1424,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 70;
 
     // Heart shape using bezier curves
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Heart shape (bezier curves):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Heart shape (bezier curves):", body_10);
     y += 15;
 
     const hx: f64 = 140;
@@ -1580,8 +1446,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 95; // Extra spacing to avoid overlap with zigzag label
 
     // Zigzag stroke
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke only (zigzag):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke only (zigzag):", body_10);
     y += 15;
 
     var zigzag = doc.createPath();
@@ -1602,17 +1467,18 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Gradient Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Gradient Test", title_16);
 
     var y: f64 = 70;
 
     // Linear gradient horizontal
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (horizontal):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (horizontal):", body_10);
     y += 15;
 
     const grad1 = try doc.addLinearGradient(.{
@@ -1629,8 +1495,7 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 70;
 
     // Linear gradient vertical
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (vertical):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (vertical):", body_10);
     y += 15;
 
     const grad2 = try doc.addLinearGradient(.{
@@ -1647,8 +1512,7 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 70;
 
     // Linear gradient 3 colors
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (3 colors):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (3 colors):", body_10);
     y += 15;
 
     const grad3 = try doc.addLinearGradient(.{
@@ -1666,8 +1530,7 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 70;
 
     // Radial gradient
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Radial gradient:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Radial gradient:", body_10);
     y += 15;
 
     const grad4 = try doc.addRadialGradient(.{
@@ -1692,60 +1555,53 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+
     // Page 1: A4 portrait (default)
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1: A4 Portrait (595 x 842)", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1: A4 Portrait (595 x 842)", title_style);
     var buf: [64]u8 = undefined;
     var len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{doc.page_size.width}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], body_12);
     len = (std.fmt.bufPrint(&buf, "Height: {d:.2} pt", .{doc.page_size.height}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 2: A4 landscape
     doc.setPageSize(zpdf.PageSize.A4.landscape());
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: A4 Landscape (842 x 595)", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: A4 Landscape (842 x 595)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{doc.page_size.width}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], body_12);
     len = (std.fmt.bufPrint(&buf, "Height: {d:.2} pt", .{doc.page_size.height}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 3: Letter portrait
     doc.setPageSize(zpdf.PageSize.Letter);
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 3: Letter Portrait (612 x 792)", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 3: Letter Portrait (612 x 792)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{doc.page_size.width}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], body_12);
     len = (std.fmt.bufPrint(&buf, "Height: {d:.2} pt", .{doc.page_size.height}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 4: Letter landscape
     doc.setPageSize(zpdf.PageSize.Letter.landscape());
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 4: Letter Landscape (792 x 612)", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 4: Letter Landscape (792 x 612)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{doc.page_size.width}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], body_12);
     len = (std.fmt.bufPrint(&buf, "Height: {d:.2} pt", .{doc.page_size.height}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 5: Custom size
     doc.setPageSize(.{ .width = 400, .height = 300 });
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 5: Custom (400 x 300)", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 5: Custom (400 x 300)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{doc.page_size.width}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, buf[0..len], body_12);
     len = (std.fmt.bufPrint(&buf, "Height: {d:.2} pt", .{doc.page_size.height}) catch unreachable).len;
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     return doc.output();
 }
@@ -1754,11 +1610,12 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = 25 }, "CSS Named Colors", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 25 }, "CSS Named Colors", title_style);
 
     // All 148 CSS named colors (excluding aliases: grey variants, aqua, fuchsia)
     const ColorDef = struct { name: []const u8, color: zpdf.Color };
@@ -1925,7 +1782,7 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
     const gap_x: f64 = 6;
     const gap_y: f64 = 14;
 
-    try doc.setFont(.helvetica, 5);
+    const label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 5 };
 
     for (colors, 0..) |cdef, i| {
         const col = i % cols;
@@ -1940,7 +1797,7 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
         });
 
         // Draw label below swatch (offset by font size since PDF text uses baseline)
-        _ = try doc.writeAt(.{ .x = x + 1, .y = y + swatch_h + 6 }, cdef.name, doc.getCurrentTextStyle());
+        _ = try doc.writeAt(.{ .x = x + 1, .y = y + swatch_h + 6 }, cdef.name, label_style);
     }
 
     return doc.output();
@@ -1962,22 +1819,23 @@ fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Text Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Text Test", title_16);
 
     // Load text SVG
     const text_svg = try doc.loadSvg("test/images/text-sample.svg");
 
     // Full-size text SVG
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Text SVG (400x300):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Text SVG (400x300):", header_10);
     try doc.drawSvg(text_svg, 50, 75, 400, 300);
 
     // Scaled version
-    _ = try doc.writeAt(.{ .x = 50, .y = 400 }, "Scaled (200x150):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 400 }, "Scaled (200x150):", header_10);
     try doc.drawSvg(text_svg, 50, 415, 200, 150);
 
     return doc.output();
@@ -1987,18 +1845,19 @@ fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Use/Defs Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Use/Defs Test", title_style);
 
     // Load use/defs SVG
     const use_defs_svg = try doc.loadSvg("test/images/use-defs.svg");
 
     // Draw the SVG
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Reusable symbols via <use> and <defs>:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Reusable symbols via <use> and <defs>:", header_10);
     try doc.drawSvg(use_defs_svg, 50, 75, 300, 200);
 
     return doc.output();
@@ -2008,22 +1867,23 @@ fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Equation Test (MathJax)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "SVG Equation Test (MathJax)", title_style);
 
     // Load equation SVG (quadratic formula with xlink:href)
     const eq_svg = try doc.loadSvg("test/images/equation.svg");
 
     // Draw the equation
-    try doc.setFont(.helvetica_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Quadratic formula (uses <defs> and <use xlink:href>):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 60 }, "Quadratic formula (uses <defs> and <use xlink:href>):", header_10);
     try doc.drawSvg(eq_svg, 50, 80, 400, 100);
 
     // Draw it again at different sizes
-    _ = try doc.writeAt(.{ .x = 50, .y = 200 }, "Scaled versions:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 200 }, "Scaled versions:", header_10);
     try doc.drawSvg(eq_svg, 50, 220, 200, 50);
     try doc.drawSvg(eq_svg, 50, 290, 300, 75);
 
@@ -2034,58 +1894,56 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_24 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
+    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
+    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+
     // Page 1: Table of Contents with internal links
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 24);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Table of Contents", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Table of Contents", title_24);
 
-    try doc.setFont(.helvetica, 12);
     var y: f64 = 100;
 
     // TOC entry 1 - link to page 2
-    const toc1 = try doc.writeAt(.{ .x = 50, .y = y }, "Chapter 1: Introduction", doc.getCurrentTextStyle());
+    const toc1 = try doc.writeAt(.{ .x = 50, .y = y }, "Chapter 1: Introduction", body_12);
     const dest1 = zpdf.Destination{ .page_index = 1, .y = 50 };
     try doc.addLink(toc1, dest1);
     y += 20;
 
     // TOC entry 2 - link to page 3
-    const toc2 = try doc.writeAt(.{ .x = 50, .y = y }, "Chapter 2: Getting Started", doc.getCurrentTextStyle());
+    const toc2 = try doc.writeAt(.{ .x = 50, .y = y }, "Chapter 2: Getting Started", body_12);
     const dest2 = zpdf.Destination{ .page_index = 2, .y = 50 };
     try doc.addLink(toc2, dest2);
     y += 20;
 
     // External link
-    const ext_link = try doc.writeAt(.{ .x = 50, .y = y }, "Visit our website", doc.getCurrentTextStyle());
+    const ext_link = try doc.writeAt(.{ .x = 50, .y = y }, "Visit our website", body_12);
     try doc.addExternalLink(ext_link, "https://example.com");
     y += 40;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Click on the entries above to navigate.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Click on the entries above to navigate.", body_12);
 
     // Page 2: Chapter 1
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 1: Introduction", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 1: Introduction", title_18);
 
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This is the introduction chapter.", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Content goes here...", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This is the introduction chapter.", body_12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Content goes here...", body_12);
 
     // Link back to TOC
-    const back1 = try doc.writeAt(.{ .x = 50, .y = 700 }, "Back to Table of Contents", doc.getCurrentTextStyle());
+    const back1 = try doc.writeAt(.{ .x = 50, .y = 700 }, "Back to Table of Contents", body_12);
     const dest_toc = zpdf.Destination{ .page_index = 0, .y = 50 };
     try doc.addLink(back1, dest_toc);
 
     // Page 3: Chapter 2
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 2: Getting Started", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 2: Getting Started", title_18);
 
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This chapter explains how to get started.", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "More content goes here...", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This chapter explains how to get started.", body_12);
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "More content goes here...", body_12);
 
     // Link back to TOC
-    const back2 = try doc.writeAt(.{ .x = 50, .y = 700 }, "Back to Table of Contents", doc.getCurrentTextStyle());
+    const back2 = try doc.writeAt(.{ .x = 50, .y = 700 }, "Back to Table of Contents", body_12);
     try doc.addLink(back2, dest_toc);
 
     return doc.output();
@@ -2095,71 +1953,62 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_24 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
+    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
+    const title_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+
     // Page 1: Title (front matter - roman numeral i)
     try doc.addPage();
     try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
     const title_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Title Page", title_dest, null);
-    try doc.setFont(.helvetica_bold, 24);
-    _ = try doc.writeAt(.{ .x = 200, .y = 300 }, "My Document", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 220, .y = 350 }, "A Sample Book", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 200, .y = 300 }, "My Document", title_24);
+    _ = try doc.writeAt(.{ .x = 220, .y = 350 }, "A Sample Book", body_12);
 
     // Page 2: Preface (front matter - roman numeral ii)
     try doc.addPage();
     const preface_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Preface", preface_dest, null);
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Preface", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This is the preface of the document.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Preface", title_18);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This is the preface of the document.", body_12);
 
     // Page 3: Chapter 1 (body - decimal 1)
     try doc.addPage();
     try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
     const ch1_dest = doc.currentDestination().?;
     const ch1 = try doc.addOutlineItem("Chapter 1: Introduction", ch1_dest, null);
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 1: Introduction", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Welcome to the introduction chapter.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 1: Introduction", title_18);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Welcome to the introduction chapter.", body_12);
 
     // Page 4: Section 1.1 (body - decimal 2)
     try doc.addPage();
     const sec11_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Section 1.1: Background", sec11_dest, ch1);
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.1: Background", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Some background information.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.1: Background", title_14);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Some background information.", body_12);
 
     // Page 5: Section 1.2 (body - decimal 3)
     try doc.addPage();
     const sec12_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Section 1.2: Overview", sec12_dest, ch1);
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.2: Overview", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "An overview of the topic.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.2: Overview", title_14);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "An overview of the topic.", body_12);
 
     // Page 6: Chapter 2 (body - decimal 4)
     try doc.addPage();
     const ch2_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Chapter 2: Details", ch2_dest, null);
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 2: Details", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This chapter contains detailed information.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 2: Details", title_18);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This chapter contains detailed information.", body_12);
 
     // Page 7: Appendix A (appendix - A-1)
     try doc.addPage();
     try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
     const app_dest = doc.currentDestination().?;
     _ = try doc.addOutlineItem("Appendix A: References", app_dest, null);
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Appendix A: References", doc.getCurrentTextStyle());
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "List of references.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Appendix A: References", title_18);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "List of references.", body_12);
 
     return doc.output();
 }
@@ -2168,75 +2017,62 @@ fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
+    const header_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+    const body_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14 };
+    const underline_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } };
+    const strike_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .strikethrough = true } };
+    const both_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true, .strikethrough = true } };
+
     try doc.addPage();
 
     var y: f64 = 50;
     const line_height: f64 = 30;
 
     // Title
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text Decorations Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text Decorations Test", title_18);
     y += 40;
 
     // Normal text (no decoration)
-    try doc.setFont(.helvetica, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Normal text (no decoration)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Normal text (no decoration)", body_14);
     y += line_height;
 
     // Underlined text
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Underlined text", doc.getCurrentTextStyle());
-    doc.setTextStyle(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Underlined text", underline_14);
     y += line_height;
 
     // Strikethrough text
-    doc.setTextStyle(.{ .decoration = .{ .strikethrough = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Strikethrough text", doc.getCurrentTextStyle());
-    doc.setTextStyle(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Strikethrough text", strike_14);
     y += line_height;
 
     // Both underline and strikethrough
-    doc.setTextStyle(.{ .decoration = .{ .underline = true, .strikethrough = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Both underline and strikethrough", doc.getCurrentTextStyle());
-    doc.setTextStyle(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Both underline and strikethrough", both_14);
     y += 50;
 
     // Different font sizes
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Different font sizes:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Different font sizes:", header_14);
     y += 25;
 
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    try doc.setFont(.helvetica, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "10pt underlined", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "10pt underlined", .{ .font = zpdf.Font.helvetica, .size = 10, .decoration = .{ .underline = true } });
     y += 20;
 
-    try doc.setFont(.helvetica, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "14pt underlined", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "14pt underlined", .{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } });
     y += 25;
 
-    try doc.setFont(.helvetica, 20);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "20pt underlined", doc.getCurrentTextStyle());
-    doc.setTextStyle(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "20pt underlined", .{ .font = zpdf.Font.helvetica, .size = 20, .decoration = .{ .underline = true } });
     y += 40;
 
     // Different fonts
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Different fonts:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Different fonts:", header_14);
     y += 25;
 
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    try doc.setFont(.helvetica, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica underlined", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica underlined", .{ .font = zpdf.Font.helvetica, .size = 12, .decoration = .{ .underline = true } });
     y += 20;
 
-    try doc.setFont(.times_roman, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Times Roman underlined", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Times Roman underlined", .{ .font = zpdf.Font.times, .size = 12, .decoration = .{ .underline = true } });
     y += 20;
 
-    try doc.setFont(.courier, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier underlined", doc.getCurrentTextStyle());
-    doc.setTextStyle(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier underlined", .{ .font = zpdf.Font.courier, .size = 12, .decoration = .{ .underline = true } });
 
     return doc.output();
 }
@@ -2245,75 +2081,63 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
+    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+    const body_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14 };
+
     try doc.addPage();
 
     var y: f64 = 50;
     const line_height: f64 = 25;
 
     // Title
-    try doc.setFont(.helvetica_bold, 18);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text Style Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text Style Test", title_18);
     y += 40;
 
-    try doc.setFont(.helvetica, 14);
-
     // Default style (black, no decoration)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Default style (black, no decoration)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Default style (black, no decoration)", body_14);
     y += line_height;
 
     // Color only
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(1, 0, 0) });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(1, 0, 0) });
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0.5, 0) });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Green text", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Green text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0, 0.5, 0) });
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 1) });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0, 0, 1) });
     y += line_height + 10;
 
     // Decoration only
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Underlined (black)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Underlined (black)", .{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } });
     y += line_height;
 
-    doc.setTextStyle(.{ .decoration = .{ .strikethrough = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Strikethrough (black)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Strikethrough (black)", .{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .strikethrough = true } });
     y += line_height + 10;
 
     // Color + decoration combined
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(1, 0, 0), .decoration = .{ .underline = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red underlined", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red underlined", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(1, 0, 0), .decoration = .{ .underline = true } });
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 1), .decoration = .{ .strikethrough = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue strikethrough", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue strikethrough", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0, 0, 1), .decoration = .{ .strikethrough = true } });
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Purple with both decorations", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Purple with both decorations", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
     y += line_height + 10;
 
     // Reset and verify
-    doc.setTextStyle(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Reset to defaults", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Reset to defaults", body_14);
     y += line_height;
 
     // Grayscale colors
-    doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.5) });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "50% gray text", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "50% gray text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.greyscale(0.5) });
     y += line_height;
 
-    doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.3), .decoration = .{ .underline = true } });
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "30% gray underlined", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "30% gray underlined", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.greyscale(0.3), .decoration = .{ .underline = true } });
     y += line_height + 20;
 
     // Styled text box using write() for flowing text with inline styles
-    try doc.setFont(.helvetica_bold, 12);
-    doc.setTextStyle(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styled Text in Box (using write()):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styled Text in Box (using write()):", header_12);
     y += 20;
 
     // Draw a bordered box with light gray fill
@@ -2342,44 +2166,19 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     };
 
     // Write styled text using write() - text flows and wraps automatically
-    try doc.setFont(.helvetica, 11);
-
     const base_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
 
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "The ", base_style, .{});
-
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.6, 0.3, 0) }); // brown
     _ = try doc.write(&region, "quick brown fox ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0.6, 0.3, 0) }, .{});
-
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
     _ = try doc.write(&region, "jumps ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .decoration = .{ .underline = true } }, .{});
-
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "over the ", base_style, .{});
-
-    doc.setTextStyle(.{ .color = zpdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } });
     _ = try doc.write(&region, "lazy ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } }, .{});
-
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "dog, demonstrating how ", base_style, .{});
-
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0, 0.8) });
     _ = try doc.write(&region, "different ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0, 0, 0.8) }, .{});
-
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "words can have ", base_style, .{});
-
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } });
     _ = try doc.write(&region, "unique colors ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } }, .{});
-
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "and ", base_style, .{});
-
-    doc.setTextStyle(.{ .color = zpdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } });
     _ = try doc.write(&region, "decorations ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } }, .{});
-
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "within the same wrapped paragraph.", base_style, .{});
 
     return doc.output();
@@ -2389,14 +2188,14 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Auto-height Box Demo", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Auto-height Box Demo", title_14);
 
     // Demonstrates creating a box whose height is determined by text content
-    try doc.setFont(.helvetica, 11);
     const box_width: f64 = 250;
     const box_padding: f64 = 8;
 
@@ -2413,8 +2212,8 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
     };
     const text_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
     const measure_result = try doc.write(&measure_region, sample_text, text_style, .{ .measure_only = true });
-    // Use lines_written to calculate height (cursor_y may be off by one line)
-    const line_height = doc.getLineHeightPts();
+    // Use lines_written to calculate height with the style's font size (not stateful doc.getLineHeightPts())
+    const line_height = text_style.size * 1.2; // default line_height multiplier
     const content_height = @as(f64, @floatFromInt(measure_result.lines_written)) * line_height;
     const box_height = content_height + 2 * box_padding;
 
@@ -2446,24 +2245,21 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var y: f64 = 50;
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "StyledText Builder Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "StyledText Builder Test", title_16);
     y += 35;
 
-    try doc.setFont(.helvetica, 12);
-
     // Section 1: Basic styled text
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "1. Basic Inline Styles", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "1. Basic Inline Styles", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2477,16 +2273,14 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(" inline.", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
-        _ = try doc.writeStyled(&region, &text, .{});
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{});
         y += 35;
     }
 
     // Section 2: Decorations
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "2. Text Decorations", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "2. Text Decorations", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2498,16 +2292,14 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(" text.", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
-        _ = try doc.writeStyled(&region, &text, .{});
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{});
         y += 35;
     }
 
     // Section 3: Combined color and decoration
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "3. Combined Styles", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "3. Combined Styles", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2519,16 +2311,14 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(" easily.", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
-        _ = try doc.writeStyled(&region, &text, .{});
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{});
         y += 35;
     }
 
     // Section 4: Word wrapping with styles
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "4. Word Wrapping with Styles", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "4. Word Wrapping with Styles", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2544,16 +2334,14 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(".", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-        _ = try doc.writeStyled(&region, &text, .{});
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{});
         y += 80;
     }
 
     // Section 5: Justified styled text
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "5. Justified Alignment", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "5. Justified Alignment", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2571,16 +2359,14 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(" attributes of each styled span.", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-        _ = try doc.writeStyled(&region, &text, .{ .alignment = .justify });
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .alignment = .justify });
         y += 110;
     }
 
     // Section 6: Centered styled text
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "6. Centered Alignment", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "6. Centered Alignment", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2590,16 +2376,14 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(" text", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 30 };
-        _ = try doc.writeStyled(&region, &text, .{ .alignment = .center });
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .alignment = .center });
         y += 40;
     }
 
     // Section 7: Optimal line breaking
-    try doc.setFont(.helvetica_bold, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "7. Optimal Line Breaking (Knuth-Plass)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "7. Optimal Line Breaking (Knuth-Plass)", header_12);
     y += 20;
 
-    try doc.setFont(.helvetica, 12);
     {
         var text = doc.createStyledText();
         defer text.deinit();
@@ -2617,7 +2401,7 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append(" results. The difference is most noticeable in narrow columns where word lengths vary significantly.", .{});
 
         var region = zpdf.Region{ .x = 50, .y = y, .width = 280, .height = 120 };
-        _ = try doc.writeStyled(&region, &text, .{
+        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{
             .alignment = .justify,
             .line_breaking = .optimal,
         });
@@ -2630,6 +2414,10 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = zpdf.Document.init(allocator);
     defer doc.deinit();
 
+    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+    const label_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+
     // Load embedded fonts (identity encoding is now default)
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
@@ -2637,8 +2425,7 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage();
 
     // Title
-    try doc.setFont(.helvetica_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Vertical Alignment Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Vertical Alignment Test", title_16);
 
     // Common settings
     const box_width: f64 = 150;
@@ -2666,15 +2453,13 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
         const y = 60 + @as(f64, @floatFromInt(row)) * 150;
 
         // Row label
-        try doc.setFont(.helvetica_bold, 12);
-        _ = try doc.writeAt(.{ .x = 50, .y = y - 15 }, f.label, doc.getCurrentTextStyle());
+        _ = try doc.writeAt(.{ .x = 50, .y = y - 15 }, f.label, header_12);
 
         for (valigns, 0..) |v, i| {
             const x = 50 + @as(f64, @floatFromInt(i)) * (box_width + 20);
 
             // Draw label above box
-            try doc.setFont(.helvetica_bold, 10);
-            _ = try doc.writeAt(.{ .x = x, .y = y - 5 }, v.label, doc.getCurrentTextStyle());
+            _ = try doc.writeAt(.{ .x = x, .y = y - 5 }, v.label, label_10);
 
             // Draw box border
             try doc.drawRect(.{ .x = x, .y = y, .width = box_width, .height = box_height }, .{
@@ -2686,12 +2471,11 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
             try doc.drawLine(.{ .x = x, .y = y + box_height / 2 }, .{ .x = x + box_width, .y = y + box_height / 2 }, .{ .color = zpdf.Color.blue, .width = 0.3 });
             try doc.drawLine(.{ .x = x, .y = y + box_height - padding }, .{ .x = x + box_width, .y = y + box_height - padding }, .{ .color = zpdf.Color.rgb(0, 180, 0), .width = 0.3 });
 
-            // Set font (built-in or embedded)
-            if (f.font) |fnt| {
-                try doc.setEmbeddedFont(fnt, 11);
-            } else {
-                try doc.setFont(.helvetica, 11);
-            }
+            // Set text style (built-in or embedded font)
+            const text_style: zpdf.TextStyle = if (f.font) |fnt|
+                .{ .font = fnt, .size = 11 }
+            else
+                .{ .font = zpdf.Font.helvetica, .size = 11 };
 
             // Write text inside with valign
             var st = doc.createStyledText();
@@ -2705,7 +2489,7 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
                 .height = box_height,
                 .padding = .{ .left = padding, .right = padding, .top = padding, .bottom = padding },
             };
-            _ = try doc.writeStyled(&region, &st, .{ .valign = v.valign });
+            _ = try doc.writeStyled(&region, &st, text_style, .{ .valign = v.valign });
         }
     }
 
@@ -2904,9 +2688,9 @@ test "integration: images PDF" {
     try runIntegrationTest("images", generateImagesPdf);
 }
 
-test "integration: svg PDF" {
+test "integration: svg_embedding PDF" {
     // Tests SVG embedding as Form XObjects
-    try runIntegrationTest("svg", generateSvgPdf);
+    try runIntegrationTest("svg_embedding", generateSvgPdf);
 }
 
 test "integration: paths PDF" {

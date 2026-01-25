@@ -909,6 +909,18 @@ pub const Document = struct {
         return metrics.measureText(text_str, self.getFontStyle());
     }
 
+    /// Measure text dimensions with explicit style (without rendering).
+    pub fn measureStyled(self: *Document, text_str: []const u8, style: TextStyle) TextMetrics {
+        _ = self;
+        const font_style = FontStyle{
+            .font = style.standardFont() orelse .helvetica,
+            .size = style.size,
+            .char_spacing = style.char_spacing,
+            .line_height = 1.2,
+        };
+        return metrics.measureText(text_str, font_style);
+    }
+
     /// Set cursor position (in points from top-left).
     pub fn setPosition(self: *Document, pos: Point) void {
         self.x = pos.x;
@@ -1006,64 +1018,8 @@ pub const Document = struct {
         });
     }
 
-    /// Internal: Writes text at the current cursor position.
-    fn writeAtCursor(self: *Document, str: []const u8) !void {
-        if (self.pages.items.len == 0) return error.NoPage;
-
-        var page = &self.pages.items[self.pages.items.len - 1];
-        const page_alloc = page.pageAllocator();
-
-        // Create owned copy of text, stripping soft-hyphens (U+00AD)
-        // Soft-hyphens are invisible unless used as break points
-        // Allocated on page arena - freed when page is destroyed
-        const text_copy = try stripSoftHyphens(page_alloc, str);
-
-        // Determine font reference, mark as used, and cache glyphs
-        var cached_glyphs: ?[]const u16 = null;
-
-        const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
-            try page.markEmbeddedUsed(self.allocator, emb);
-            // Mark chars/glyphs as used for subsetting and cache glyphs
-            if (emb.encoding == .identity) {
-                cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
-            } else {
-                emb.markCharsUsed(text_copy);
-            }
-            break :blk .{ .embedded = emb };
-        } else if (self.current_font) |font| blk: {
-            try page.markFontUsed(self.allocator, font);
-            break :blk .{ .standard = font };
-        } else {
-            return error.NoFont;
-        };
-
-        // Calculate text width for decorations (only if decoration enabled)
-        const text_width = if (self.text_decoration.underline or self.text_decoration.strikethrough)
-            self.getTextWidth(text_copy)
-        else
-            0;
-
-        // Store deferred command with cached glyphs
-        try page.commands.append(self.allocator, .{
-            .text = .{
-                .x = self.x,
-                .y = self.y,
-                .font_size = self.font_size,
-                .char_spacing = self.char_spacing,
-                .word_spacing = 0,
-                .text_data = text_copy,
-                .font = font_ref,
-                .text_color = self.text_color,
-                .cached_glyphs = cached_glyphs,
-                .text_width = text_width,
-                .underline = self.text_decoration.underline,
-                .strikethrough = self.text_decoration.strikethrough,
-            },
-        });
-    }
-
-    /// Internal: Write text at position with specified word spacing (for justification).
-    fn writeWithWordSpacing(self: *Document, x: f64, y: f64, str: []const u8, word_spacing: f64) !void {
+    /// Write text at position with word spacing (styled version).
+    fn writeWithWordSpacingStyled(self: *Document, x: f64, y: f64, str: []const u8, word_spacing: f64, style: TextStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.pages.items.len - 1];
@@ -1076,24 +1032,27 @@ pub const Document = struct {
         // Determine font reference, mark as used, and cache glyphs
         var cached_glyphs: ?[]const u16 = null;
 
-        const font_ref: FontRef = if (self.current_embedded) |emb| blk: {
-            try page.markEmbeddedUsed(self.allocator, emb);
-            if (emb.encoding == .identity) {
-                cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
-            } else {
-                emb.markCharsUsed(text_copy);
-            }
-            break :blk .{ .embedded = emb };
-        } else if (self.current_font) |font| blk: {
-            try page.markFontUsed(self.allocator, font);
-            break :blk .{ .standard = font };
-        } else {
-            return error.NoFont;
+        const font_ref: FontRef = switch (style.font) {
+            .embedded => |emb| blk: {
+                try page.markEmbeddedUsed(self.allocator, emb);
+                if (emb.encoding == .identity) {
+                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                } else {
+                    emb.markCharsUsed(text_copy);
+                }
+                break :blk .{ .embedded = emb };
+            },
+            else => blk: {
+                const std_font = style.standardFont() orelse return error.NoFont;
+                try page.markFontUsed(self.allocator, std_font);
+                try self.used_fonts.put(self.allocator, std_font, {}); // Track at document level
+                break :blk .{ .standard = std_font };
+            },
         };
 
         // Calculate text width for decorations (only if decoration enabled)
-        const text_width = if (self.text_decoration.underline or self.text_decoration.strikethrough)
-            self.getTextWidth(text_copy)
+        const text_width = if (style.decoration.underline or style.decoration.strikethrough)
+            self.getTextWidthStyled(text_copy, style)
         else
             0;
 
@@ -1103,16 +1062,16 @@ pub const Document = struct {
             .text = .{
                 .x = x,
                 .y = self.page_size.height - y,
-                .font_size = self.font_size,
-                .char_spacing = self.char_spacing,
+                .font_size = style.size,
+                .char_spacing = style.char_spacing,
                 .word_spacing = word_spacing,
                 .text_data = text_copy,
                 .font = font_ref,
-                .text_color = self.text_color,
+                .text_color = style.color,
                 .cached_glyphs = cached_glyphs,
                 .text_width = text_width,
-                .underline = self.text_decoration.underline,
-                .strikethrough = self.text_decoration.strikethrough,
+                .underline = style.decoration.underline,
+                .strikethrough = style.decoration.strikethrough,
             },
         });
     }
@@ -1352,6 +1311,7 @@ pub const Document = struct {
             .family, .symbol, .zapf_dingbats => blk: {
                 const std_font = style.standardFont() orelse return error.InvalidFont;
                 try page.markFontUsed(self.allocator, std_font);
+                try self.used_fonts.put(self.allocator, std_font, {}); // Track at document level
                 break :blk .{ .standard = std_font };
             },
         };
@@ -1440,97 +1400,6 @@ pub const Document = struct {
             return emb.measureTextWidth(filtered, self.font_size);
         }
         return metrics.measureTextWidth(filtered, self.getFontStyle());
-    }
-
-    /// Internal: Write text at position using document state (for write/writeStyled flow).
-    /// Will be removed when write methods are updated to use explicit TextStyle.
-    fn writeAtStateful(self: *Document, x: f64, y: f64, str: []const u8) !void {
-        self.setPosition(.{ .x = x, .y = y });
-        try self.writeAtCursor(str);
-    }
-
-    /// Internal line writer with indent and valign support.
-    fn writeLineInternal(self: *Document, area: *Region, str: []const u8, alignment: Align, valign: VAlign, indent: f64) !WriteResult {
-        const line_height = self.getLineHeightPts();
-
-        // Rect calculation values
-        const rect_x = area.x + area.padding.left;
-        const rect_y = area.y + area.padding.top + area.cursor_y;
-        const rect_width = area.contentWidth();
-
-        // Check if we have room for a line
-        if (area.remainingHeight() < line_height) {
-            return .{
-                .lines_written = 0,
-                .overflow = str,
-                .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = 0 },
-            };
-        }
-
-        const text_width = self.getTextWidth(str);
-        const content_width = area.contentWidth();
-        const available_width = content_width - indent;
-
-        // Count spaces for justification calculation
-        var space_count: usize = 0;
-        for (str) |c| {
-            if (c == ' ') space_count += 1;
-        }
-
-        // Calculate word spacing for justified text
-        // Only justify if there are spaces and text doesn't fill line
-        const extra_space = available_width - text_width;
-        const word_spacing: f64 = if (alignment == .justify and space_count > 0 and extra_space > 0)
-            extra_space / @as(f64, @floatFromInt(space_count))
-        else
-            0;
-
-        // Calculate x position based on alignment (content starts at x + padding.left)
-        const content_x = area.x + area.padding.left;
-        const x = switch (alignment) {
-            .left => content_x + indent,
-            .center => content_x + indent + (available_width - text_width) / 2,
-            .right => content_x + content_width - text_width,
-            .justify => content_x + indent,
-        };
-
-        // Calculate y position based on vertical alignment
-        const content_y = area.y + area.padding.top;
-        const font_metrics = self.getFontMetrics();
-        const cap_height = font_metrics.cap_height;
-        const ascender = font_metrics.ascender;
-        const descender = @abs(font_metrics.descender);
-
-        // CSS-style vertical alignment:
-        // content_area = ascender + descender (the font's natural height)
-        // half_leading = (line_height - content_area) / 2
-        // For .top: baseline = cursor_y + half_leading + ascender
-        //         = cursor_y + (line_height - ascender - descender) / 2 + ascender
-        //         = cursor_y + (line_height + ascender - descender) / 2
-        const y = switch (valign) {
-            // .top: CSS-style alignment where virtual-area top aligns to cursor
-            .top => content_y + area.cursor_y + (line_height + ascender - descender) / 2,
-            // .middle uses cap_height for centering visual text mass
-            .middle => content_y + area.cursor_y + line_height / 2 + cap_height / 2,
-            // Baseline at bottom of line height
-            .bottom => content_y + area.cursor_y + line_height,
-        };
-
-        // Render text (with word spacing if justified)
-        if (word_spacing > 0) {
-            try self.writeWithWordSpacing(x, y, str, word_spacing);
-        } else {
-            try self.writeAtStateful(x, y, str);
-        }
-
-        // Advance cursor
-        area.cursor_y += line_height;
-
-        return .{
-            .lines_written = 1,
-            .overflow = null,
-            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = line_height },
-        };
     }
 
     /// Writes flowing text into a region with word wrapping.
@@ -2196,20 +2065,26 @@ pub const Document = struct {
         return StyledText.init(self.allocator);
     }
 
+    /// Context for styledTextMeasure callback (contains document and base style).
+    pub const MeasureContext = struct {
+        doc: *Document,
+        style: TextStyle,
+    };
+
     /// Measure function adapter for StyledText.prepare()
-    pub fn styledTextMeasure(text: []const u8, style: TextStyleOptions, ctx: *anyopaque) f64 {
-        const doc: *Document = @ptrCast(@alignCast(ctx));
+    pub fn styledTextMeasure(text: []const u8, span_style: TextStyleOptions, ctx: *anyopaque) f64 {
+        const measure_ctx: *MeasureContext = @ptrCast(@alignCast(ctx));
         // Text width doesn't depend on color/decoration, just the font
-        _ = style;
-        return doc.getTextWidth(text);
+        _ = span_style;
+        return measure_ctx.doc.getTextWidthStyled(text, measure_ctx.style);
     }
 
     /// Write styled text into a region with alignment support.
     /// Uses Knuth-Plass optimal line breaking when requested.
-    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, opts: ParagraphOptions) !WriteResult {
+    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style: TextStyle, opts: ParagraphOptions) !WriteResult {
         if (self.pages.items.len == 0) return error.NoPage;
 
-        const line_height = self.getLineHeightPts();
+        const line_height = style.size * opts.line_height;
         const line_width = region.contentWidth();
 
         // Save original cursor for measure_only restore
@@ -2218,9 +2093,10 @@ pub const Document = struct {
 
         // Prepare text (preprocesses words with width measurement)
         // Note: We always prepare for middle/bottom valign to count lines accurately
-        try text.prepare(styledTextMeasure, @ptrCast(self));
+        var measure_ctx = MeasureContext{ .doc = self, .style = style };
+        try text.prepare(styledTextMeasure, @ptrCast(&measure_ctx));
 
-        const space_width = self.getTextWidth(" ");
+        const space_width = self.getTextWidthStyled(" ", style);
 
         if (text.words.items.len == 0) {
             const rect_x = region.x + region.padding.left;
@@ -2230,9 +2106,10 @@ pub const Document = struct {
 
         // For middle/bottom valign, calculate block offset first
         if (opts.valign != .top) {
-            const line_count = self.countStyledLines(text, line_width, space_width);
-            const ascender = self.getFontMetrics().ascender;
-            const descender = @abs(self.getFontMetrics().descender);
+            const line_count = self.countStyledLinesStyled(text, style, line_width, space_width);
+            const fm = self.getFontMetricsStyled(style);
+            const ascender = fm.ascender;
+            const descender = @abs(fm.descender);
             const text_height = @as(f64, @floatFromInt(line_count)) * line_height;
             const available_height = region.remainingHeight();
 
@@ -2259,6 +2136,7 @@ pub const Document = struct {
             .valign = if (opts.valign == .middle) .top else opts.valign,
             .break_on_hyphens = opts.break_on_hyphens,
             .line_breaking = opts.line_breaking,
+            .line_height = opts.line_height,
         };
 
         const start_cursor_y = region.cursor_y;
@@ -2269,7 +2147,7 @@ pub const Document = struct {
 
         // Use optimal or greedy line breaking based on options
         if (render_opts.line_breaking == .optimal) {
-            const result = try self.writeStyledOptimal(region, text, render_opts, line_height, space_width, line_width, start_cursor_y);
+            const result = try self.writeStyledOptimal(region, text, style, render_opts, line_height, space_width, line_width, start_cursor_y);
             if (opts.measure_only) {
                 region.cursor_x = saved_cursor_x;
                 region.cursor_y = saved_cursor_y;
@@ -2319,7 +2197,7 @@ pub const Document = struct {
 
                 // Try to break at soft-hyphen if available
                 if (big_word.break_points) |break_points| {
-                    const hyphen_width = self.getTextWidth("-");
+                    const hyphen_width = self.getTextWidthStyled("-", style);
 
                     // Find best break point that fits
                     var best_bp: ?styled_text.BreakPoint = null;
@@ -2331,40 +2209,77 @@ pub const Document = struct {
                         }
                     }
 
-                    if (best_bp) |bp| {
-                        // Render prefix + hyphen on this line
+                    if (best_bp) |_| {
                         const span = text.spans.items[big_word.start_span];
-                        const prefix_end = bp.offset;
-                        const prefix = span.text[big_word.start_offset..prefix_end];
+                        const fm = self.getFontMetricsStyled(style);
 
-                        // Strip soft-hyphens from prefix for rendering
-                        var prefix_buf: [512]u8 = undefined;
-                        const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
+                        // Apply span color to style for rendering
+                        var render_style = style;
+                        render_style.color = span.style.color;
+                        render_style.decoration = span.style.decoration;
 
-                        // CSS-style .top valign: baseline = cursor_y + (line_height + ascender - descender) / 2
-                        const fm = self.getFontMetrics();
-                        const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                        // Recursively break at soft-hyphens until the remaining fits
+                        var remaining_start: u16 = big_word.start_offset;
 
-                        const x_pos = region.x + region.padding.left;
-                        try self.writeAtStateful(x_pos, y_pos, clean_prefix);
-                        try self.writeAtStateful(x_pos + bp.width, y_pos, "-");
+                        while (remaining_start < big_word.end_offset) {
+                            const remaining = span.text[remaining_start..big_word.end_offset];
+                            var remaining_buf: [512]u8 = undefined;
+                            const clean_remaining = stripSoftHyphensTo(remaining, &remaining_buf);
+                            const remaining_width = self.getTextWidthStyled(clean_remaining, style);
 
-                        region.newLine(line_height);
-                        lines_written += 1;
+                            // If remaining fits on one line, render it and we're done
+                            if (remaining_width <= line_width + 0.01) {
+                                if (region.remainingHeight() >= line_height) {
+                                    const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style);
+                                    region.newLine(line_height);
+                                    lines_written += 1;
+                                }
+                                break;
+                            }
 
-                        // Now render the suffix on the next line
-                        // Skip the soft-hyphen bytes (2 bytes for UTF-8 soft-hyphen)
-                        const suffix_start = prefix_end + 2;
-                        if (suffix_start < big_word.end_offset) {
-                            const suffix = span.text[suffix_start..big_word.end_offset];
-                            var suffix_buf: [512]u8 = undefined;
-                            const clean_suffix = stripSoftHyphensTo(suffix, &suffix_buf);
+                            // Find best break point that fits, searching from remaining_start
+                            var best_break_offset: ?u16 = null;
+                            for (break_points) |bp| {
+                                if (bp.offset <= remaining_start) continue; // Skip already-used break points
+                                // Measure text from remaining_start to this break point
+                                const segment = span.text[remaining_start..bp.offset];
+                                var seg_buf: [512]u8 = undefined;
+                                const clean_seg = stripSoftHyphensTo(segment, &seg_buf);
+                                const seg_width = self.getTextWidthStyled(clean_seg, style);
+                                if (seg_width + hyphen_width <= line_width + 0.01) {
+                                    best_break_offset = bp.offset;
+                                } else {
+                                    break; // Break points are ordered, no point checking further
+                                }
+                            }
 
-                            if (region.remainingHeight() >= line_height) {
-                                const y_pos2 = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
-                                try self.writeAtStateful(region.x + region.padding.left, y_pos2, clean_suffix);
+                            if (best_break_offset) |break_offset| {
+                                // Render prefix + hyphen on this line
+                                const prefix = span.text[remaining_start..break_offset];
+                                var prefix_buf: [512]u8 = undefined;
+                                const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
+                                const prefix_width = self.getTextWidthStyled(clean_prefix, style);
+
+                                const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                                const x_pos = region.x + region.padding.left;
+                                _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, clean_prefix, render_style);
+                                _ = try self.writeAt(.{ .x = x_pos + prefix_width, .y = y_pos }, "-", render_style);
+
                                 region.newLine(line_height);
                                 lines_written += 1;
+
+                                // Move to after the soft-hyphen (2 bytes for UTF-8)
+                                remaining_start = break_offset + 2;
+                            } else {
+                                // No break point fits, render remaining as-is (will overflow)
+                                if (region.remainingHeight() >= line_height) {
+                                    const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style);
+                                    region.newLine(line_height);
+                                    lines_written += 1;
+                                }
+                                break;
                             }
                         }
 
@@ -2378,17 +2293,22 @@ pub const Document = struct {
                     const span = text.spans.items[big_word.start_span];
                     const word_text = span.text[big_word.start_offset..big_word.end_offset];
 
-                    if (self.findHyphenBreak(word_text, line_width)) |break_pos| {
+                    if (self.findHyphenBreakStyled(word_text, line_width, style)) |break_pos| {
                         // break_pos is position after the hyphen
                         const prefix = word_text[0..break_pos];
                         const suffix = word_text[break_pos..];
 
                         // CSS-style .top valign
-                        const fm = self.getFontMetrics();
+                        const fm = self.getFontMetricsStyled(style);
                         const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
 
+                        // Apply span color to style for rendering
+                        var render_style = style;
+                        render_style.color = span.style.color;
+                        render_style.decoration = span.style.decoration;
+
                         const x_pos = region.x + region.padding.left;
-                        try self.writeAtStateful(x_pos, y_pos, prefix);
+                        _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style);
 
                         region.newLine(line_height);
                         lines_written += 1;
@@ -2396,7 +2316,7 @@ pub const Document = struct {
                         // Render suffix on next line
                         if (suffix.len > 0 and region.remainingHeight() >= line_height) {
                             const y_pos2 = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
-                            try self.writeAtStateful(region.x + region.padding.left, y_pos2, suffix);
+                            _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos2 }, suffix, render_style);
                             region.newLine(line_height);
                             lines_written += 1;
                         }
@@ -2412,18 +2332,23 @@ pub const Document = struct {
                     const span = text.spans.items[big_word.start_span];
                     var remaining_text = span.text[big_word.start_offset..big_word.end_offset];
                     // CSS-style .top valign
-                    const fm = self.getFontMetrics();
+                    const fm = self.getFontMetricsStyled(style);
                     var did_break = false;
+
+                    // Apply span color to style for rendering
+                    var render_style = style;
+                    render_style.color = span.style.color;
+                    render_style.decoration = span.style.decoration;
 
                     while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
                         const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
                         const x_pos = region.x + region.padding.left;
 
                         // Check if remaining text fits on line
-                        const remaining_width = self.getTextWidth(remaining_text);
+                        const remaining_width = self.getTextWidthStyled(remaining_text, style);
                         if (remaining_width <= line_width + 0.01) {
                             // Fits - render it and we're done
-                            try self.writeAtStateful(x_pos, y_pos, remaining_text);
+                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style);
                             region.newLine(line_height);
                             lines_written += 1;
                             did_break = true;
@@ -2431,16 +2356,16 @@ pub const Document = struct {
                         }
 
                         // Doesn't fit - find break point
-                        if (self.findCharacterBreak(remaining_text, line_width)) |break_pos| {
+                        if (self.findCharacterBreakStyled(remaining_text, line_width, style)) |break_pos| {
                             const prefix = remaining_text[0..break_pos];
-                            try self.writeAtStateful(x_pos, y_pos, prefix);
+                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style);
                             region.newLine(line_height);
                             lines_written += 1;
                             remaining_text = remaining_text[break_pos..];
                             did_break = true;
                         } else {
                             // Can't break (shouldn't happen) - render what we can
-                            try self.writeAtStateful(x_pos, y_pos, remaining_text);
+                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style);
                             region.newLine(line_height);
                             lines_written += 1;
                             did_break = true;
@@ -2471,7 +2396,7 @@ pub const Document = struct {
             if (render_opts.measure_only) {
                 region.cursor_y += line_height;
             } else {
-                try self.renderStyledLine(region, text, line_start, line_end, line_alignment, render_opts.valign, line_width, space_width, current_width);
+                try self.renderStyledLine(region, text, style, line_start, line_end, line_alignment, render_opts.valign, line_height, line_width, space_width, current_width);
             }
             lines_written += 1;
 
@@ -2491,9 +2416,8 @@ pub const Document = struct {
         };
     }
 
-    /// Get remaining text from a word index (for overflow).
-    /// Count how many lines styled text will occupy (for block valign calculation).
-    fn countStyledLines(self: *Document, text: *const StyledText, line_width: f64, space_width: f64) usize {
+    /// Count styled lines with explicit style (for styled valign calculation).
+    fn countStyledLinesStyled(self: *Document, text: *const StyledText, base_style: TextStyle, line_width: f64, space_width: f64) usize {
         const n = text.words.items.len;
         if (n == 0) return 0;
 
@@ -2522,23 +2446,85 @@ pub const Document = struct {
             if (line_end == line_start and line_start < n) {
                 const big_word = text.words.items[line_start];
                 if (big_word.break_points) |break_points| {
-                    const hyphen_width = self.getTextWidth("-");
-                    var can_break = false;
-                    for (break_points) |bp| {
-                        if (bp.width + hyphen_width <= line_width + 0.01) {
-                            can_break = true;
+                    const hyphen_width = self.getTextWidthStyled("-", base_style);
+
+                    // Count actual lines needed for recursive soft-hyphen breaking
+                    const span = text.spans.items[big_word.start_span];
+                    var remaining_start: u16 = big_word.start_offset;
+                    var soft_hyphen_lines: usize = 0;
+
+                    while (remaining_start < big_word.end_offset) {
+                        const remaining = span.text[remaining_start..big_word.end_offset];
+                        var remaining_buf: [512]u8 = undefined;
+                        const clean_remaining = stripSoftHyphensTo(remaining, &remaining_buf);
+                        const remaining_width = self.getTextWidthStyled(clean_remaining, base_style);
+
+                        // If remaining fits on one line, count it and we're done
+                        if (remaining_width <= line_width + 0.01) {
+                            soft_hyphen_lines += 1;
+                            break;
+                        }
+
+                        // Find best break point that fits
+                        var best_break_offset: ?u16 = null;
+                        for (break_points) |bp| {
+                            if (bp.offset <= remaining_start) continue;
+                            const segment = span.text[remaining_start..bp.offset];
+                            var seg_buf: [512]u8 = undefined;
+                            const clean_seg = stripSoftHyphensTo(segment, &seg_buf);
+                            const seg_width = self.getTextWidthStyled(clean_seg, base_style);
+                            if (seg_width + hyphen_width <= line_width + 0.01) {
+                                best_break_offset = bp.offset;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if (best_break_offset) |break_offset| {
+                            soft_hyphen_lines += 1;
+                            remaining_start = break_offset + 2;
                         } else {
+                            // No break fits, count remaining as one line
+                            soft_hyphen_lines += 1;
                             break;
                         }
                     }
-                    if (can_break) {
-                        // Word can be broken - counts as one line for the prefix
-                        line_count += 1;
-                        // Approximate: assume rest fits on next line(s)
+
+                    if (soft_hyphen_lines > 0) {
+                        line_count += soft_hyphen_lines;
                         word_idx = line_start + 1;
                         continue;
                     }
                 }
+
+                // Count character-level breaking lines (for words without soft-hyphens)
+                if (big_word.start_span == big_word.end_span) {
+                    const span = text.spans.items[big_word.start_span];
+                    var remaining_text = span.text[big_word.start_offset..big_word.end_offset];
+                    var char_break_lines: usize = 0;
+
+                    while (remaining_text.len > 0) {
+                        const remaining_width = self.getTextWidthStyled(remaining_text, base_style);
+                        if (remaining_width <= line_width + 0.01) {
+                            char_break_lines += 1;
+                            break;
+                        }
+                        if (self.findCharacterBreakStyled(remaining_text, line_width, base_style)) |break_pos| {
+                            char_break_lines += 1;
+                            remaining_text = remaining_text[break_pos..];
+                        } else {
+                            char_break_lines += 1;
+                            break;
+                        }
+                    }
+
+                    if (char_break_lines > 0) {
+                        line_count += char_break_lines;
+                        word_idx = line_start + 1;
+                        continue;
+                    }
+                }
+
                 // Word doesn't fit at all - still takes a line
                 line_end = line_start + 1;
             }
@@ -2564,20 +2550,21 @@ pub const Document = struct {
         self: *Document,
         region: *Region,
         text: *const StyledText,
+        base_style: TextStyle,
         line_start: usize,
         line_end: usize,
         alignment: Align,
         valign: VAlign,
+        line_height: f64,
         line_width: f64,
         space_width: f64,
         content_width: f64,
     ) !void {
-        const line_height = self.getLineHeightPts();
-        const font_metrics = self.getFontMetrics();
+        const font_metrics = self.getFontMetricsStyled(base_style);
         const cap_height = font_metrics.cap_height;
         const ascender = font_metrics.ascender;
         const descender = @abs(font_metrics.descender);
-        const font_size = self.font_size; // needed for decoration scaling
+        const font_size = base_style.size; // needed for decoration scaling
 
         // Calculate x offset based on alignment
         const slack = line_width - content_width;
@@ -2628,10 +2615,11 @@ pub const Document = struct {
             const last_word = text.words.items[line_end - 1];
             const line_text = first_span.text[first_word.start_offset..last_word.end_offset];
 
-            const saved_color = self.text_color;
-            self.text_color = first_span.style.color;
-            try self.writeWithWordSpacing(x_start, y_pos, line_text, extra_word_spacing);
-            self.text_color = saved_color;
+            // Apply span color to base style
+            var render_style = base_style;
+            render_style.color = first_span.style.color;
+            render_style.decoration = first_span.style.decoration;
+            try self.writeWithWordSpacingStyled(x_start, y_pos, line_text, extra_word_spacing, render_style);
 
             region.cursor_y += line_height;
             return;
@@ -2710,20 +2698,15 @@ pub const Document = struct {
                         in_strikethrough = seg_strike;
                     }
 
-                    // Save and apply color only (decoration handled separately)
-                    const saved_color = self.text_color;
-                    const saved_decoration = self.text_decoration;
-                    self.text_color = span.style.color;
-                    self.text_decoration = .none; // Don't draw per-segment
+                    // Apply span style to base style (no decoration - handled separately)
+                    var render_style = base_style;
+                    render_style.color = span.style.color;
+                    render_style.decoration = .none; // Don't draw per-segment
 
                     // Get segment width and render using writeAt
-                    const seg_width = self.getTextWidth(segment);
-                    try self.writeAtStateful(current_x, y_pos, segment);
+                    const seg_width = self.getTextWidthStyled(segment, base_style);
+                    _ = try self.writeAt(.{ .x = current_x, .y = y_pos }, segment, render_style);
                     current_x += seg_width;
-
-                    // Restore style
-                    self.text_color = saved_color;
-                    self.text_decoration = saved_decoration;
                 }
             }
         }
@@ -2745,7 +2728,7 @@ pub const Document = struct {
             var strikeout_pos: f64 = 250;
             var strikeout_thick: f64 = 50;
 
-            if (self.current_embedded) |emb| {
+            if (base_style.embeddedFont()) |emb| {
                 underline_pos = @floatFromInt(emb.underline_position);
                 underline_thick = @floatFromInt(emb.underline_thickness);
                 strikeout_pos = @floatFromInt(emb.strikeout_position);
@@ -2801,155 +2784,12 @@ pub const Document = struct {
         region.cursor_y += line_height;
     }
 
-    /// Fast path for single-span greedy left-aligned text.
-    /// Processes inline without preprocessing.
-    fn writeStyledGreedyFast(
-        self: *Document,
-        region: *Region,
-        text: []const u8,
-        style: TextStyleOptions,
-        opts: ParagraphOptions,
-        line_height: f64,
-        line_width: f64,
-        start_cursor_y: f64,
-    ) !WriteResult {
-        const space_width = self.getTextWidth(" ");
-        const font_metrics = self.getFontMetrics();
-        const cap_height = font_metrics.cap_height;
-        const ascender = font_metrics.ascender;
-        const descender = @abs(font_metrics.descender);
-
-        var lines_written: usize = 0;
-        const rect_x = region.x + region.padding.left;
-        const rect_y = region.y + region.padding.top + start_cursor_y;
-        const rect_width = region.contentWidth();
-
-        // Apply style
-        self.setTextColor(style.color);
-
-        var remaining = text;
-        while (remaining.len > 0) {
-            if (region.remainingHeight() < line_height) {
-                return .{
-                    .lines_written = lines_written,
-                    .overflow = remaining,
-                    .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
-                };
-            }
-
-            // Build line by collecting words
-            var line_end: usize = 0;
-            var current_width: f64 = 0;
-            var word_start: usize = 0;
-            var in_word = false;
-            var forced_break = false;
-
-            for (remaining, 0..) |c, i| {
-                const is_space = c == ' ' or c == '\t' or c == '\n';
-
-                if (is_space and in_word) {
-                    const word = remaining[word_start..i];
-                    const word_width = self.getTextWidth(word);
-
-                    if (current_width + word_width <= line_width + 0.01) {
-                        current_width += word_width + space_width;
-                        line_end = i;
-                    } else if (line_end == 0) {
-                        // First word doesn't fit - try hyphen break
-                        if (opts.break_on_hyphens) {
-                            if (self.findHyphenBreak(word, line_width)) |break_pos| {
-                                line_end = word_start + break_pos;
-                                break;
-                            }
-                        }
-                        // Character-level break as fallback
-                        if (self.findCharacterBreak(word, line_width - current_width)) |break_pos| {
-                            line_end = word_start + break_pos;
-                            break;
-                        }
-                        line_end = i;
-                    } else {
-                        break;
-                    }
-
-                    in_word = false;
-
-                    if (c == '\n') {
-                        forced_break = true;
-                        break;
-                    }
-                } else if (!is_space and !in_word) {
-                    word_start = i;
-                    in_word = true;
-                }
-            }
-
-            // Handle final word
-            if (in_word and !forced_break) {
-                const word = remaining[word_start..];
-                const word_width = self.getTextWidth(word);
-
-                if (current_width + word_width <= line_width + 0.01) {
-                    line_end = remaining.len;
-                } else if (line_end == 0) {
-                    if (opts.break_on_hyphens) {
-                        if (self.findHyphenBreak(word, line_width)) |break_pos| {
-                            line_end = word_start + break_pos;
-                        }
-                    }
-                    if (line_end == 0) {
-                        if (self.findCharacterBreak(word, line_width - current_width)) |break_pos| {
-                            line_end = word_start + break_pos;
-                        }
-                    }
-                    if (line_end == 0) {
-                        line_end = remaining.len;
-                    }
-                }
-            }
-
-            if (line_end == 0) break;
-
-            // Get line text
-            var line = remaining[0..line_end];
-            while (line.len > 0 and (line[0] == ' ' or line[0] == '\t')) line = line[1..];
-            while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t' or line[line.len - 1] == '\n'))
-                line = line[0 .. line.len - 1];
-
-            // Render line (or just advance cursor if measure_only)
-            if (line.len > 0) {
-                if (!opts.measure_only) {
-                    // CSS-style valign: baseline = cursor_y + (line_height + ascender - descender) / 2
-                    const y_pos = switch (opts.valign) {
-                        .top => region.y + region.padding.top + region.cursor_y + (line_height + ascender - descender) / 2,
-                        .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + cap_height / 2,
-                        .bottom => region.y + region.padding.top + region.cursor_y + line_height,
-                    };
-                    try self.writeAtStateful(region.x + region.padding.left, y_pos, line);
-                }
-                region.newLine(line_height);
-                lines_written += 1;
-            }
-
-            // Advance past rendered content + whitespace
-            remaining = remaining[line_end..];
-            while (remaining.len > 0 and (remaining[0] == ' ' or remaining[0] == '\t' or remaining[0] == '\n')) {
-                remaining = remaining[1..];
-            }
-        }
-
-        return .{
-            .lines_written = lines_written,
-            .overflow = null,
-            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
-        };
-    }
-
     /// Write styled text using optimal (Knuth-Plass) line breaking.
     fn writeStyledOptimal(
         self: *Document,
         region: *Region,
         text: *StyledText,
+        style: TextStyle,
         opts: ParagraphOptions,
         line_height: f64,
         space_width: f64,
@@ -3000,7 +2840,7 @@ pub const Document = struct {
             if (opts.measure_only) {
                 region.cursor_y += line_height;
             } else {
-                try self.renderStyledLine(region, text, line_start, line_end, line_alignment, opts.valign, line_width, space_width, content_width);
+                try self.renderStyledLine(region, text, style, line_start, line_end, line_alignment, opts.valign, line_height, line_width, space_width, content_width);
             }
             lines_written += 1;
             line_start = line_end;

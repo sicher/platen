@@ -205,16 +205,9 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 24);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 });
-
-    try doc.setFont(.helvetica_bold, 16);
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "This is zpdf - a PDF library for Zig", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true });
-
-    try doc.setFont(.times_roman, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats", zpdf.TextStyle{ .font = zpdf.Font.times, .size = 12 });
-
-    try doc.setFont(.courier, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = 200 }, "Fixed-width font for code", zpdf.TextStyle{ .font = zpdf.Font.courier, .size = 10 });
 
     const pdf = try doc.output();
@@ -238,43 +231,32 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     try doc.addPage();
 
     // Title with standard font
-    try doc.setFont(.helvetica_bold, 24);
     const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Embedded Font Test", title_style);
 
     // Show font info
-    try doc.setFont(.helvetica, 12);
     const info_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
     var info_buf: [256]u8 = undefined;
     const info = std.fmt.bufPrint(&info_buf, "Font: {s}", .{custom_font.embedded.name}) catch "Font: Unknown";
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, info, info_style);
 
     // Use embedded font at various sizes
-    try doc.setEmbeddedFont(custom_font, 24);
     const embed24_style = zpdf.TextStyle{ .font = custom_font, .size = 24 };
     _ = try doc.writeAt(.{ .x = 50, .y = 120 }, "The quick brown fox jumps over the lazy dog.", embed24_style);
 
-    try doc.setEmbeddedFont(custom_font, 18);
     const embed18_style = zpdf.TextStyle{ .font = custom_font, .size = 18 };
     _ = try doc.writeAt(.{ .x = 50, .y = 160 }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", embed18_style);
-
-    try doc.setEmbeddedFont(custom_font, 18);
     _ = try doc.writeAt(.{ .x = 50, .y = 190 }, "abcdefghijklmnopqrstuvwxyz", embed18_style);
-
-    try doc.setEmbeddedFont(custom_font, 18);
     _ = try doc.writeAt(.{ .x = 50, .y = 220 }, "0123456789 !@#$%^&*()", embed18_style);
 
     // Mix with standard fonts
-    try doc.setFont(.helvetica, 12);
     const helv12_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 270 }, "Standard font (Helvetica) for comparison", helv12_style);
 
-    try doc.setEmbeddedFont(custom_font, 12);
     const embed12_style = zpdf.TextStyle{ .font = custom_font, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 290 }, "Embedded font at same size (12pt)", embed12_style);
 
     // Multiple lines
-    try doc.setEmbeddedFont(custom_font, 14);
     const embed14_style = zpdf.TextStyle{ .font = custom_font, .size = 14 };
     _ = try doc.writeAt(.{ .x = 50, .y = 340 }, "Line 1: This is a test of the embedded font.", embed14_style);
     _ = try doc.writeAt(.{ .x = 50, .y = 360 }, "Line 2: Lorem ipsum dolor sit amet.", embed14_style);
@@ -282,11 +264,9 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
 
     // Page 2 - stress test
     try doc.addPage();
-    try doc.setFont(.helvetica_bold, 18);
     const page2_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: Extended Character Test", page2_title_style);
 
-    try doc.setEmbeddedFont(custom_font, 14);
     const page2_embed_style = zpdf.TextStyle{ .font = custom_font, .size = 14 };
     var y: f64 = 80;
 
@@ -312,7 +292,6 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     y += 30;
 
     // Show metrics
-    try doc.setFont(.helvetica, 10);
     const metrics_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
     var metrics_buf: [256]u8 = undefined;
 
@@ -353,11 +332,9 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     try doc.addPage();
 
     // Just a few characters to test subsetting
-    try doc.setEmbeddedFont(font, 24);
     const cff24_style = zpdf.TextStyle{ .font = font, .size = 24 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello CFF!", cff24_style);
 
-    try doc.setEmbeddedFont(font, 18);
     const cff18_style = zpdf.TextStyle{ .font = font, .size = 18 };
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDEFGHIJ", cff18_style);
     _ = try doc.writeAt(.{ .x = 50, .y = 130 }, "0123456789", cff18_style);
@@ -402,22 +379,20 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     font.embedded.setFeature(.mkmk, true);
 
     try doc.addPage();
-    var y: f64 = 30;
 
-    try doc.setEmbeddedFont(font, 24);
     const mark24_style = zpdf.TextStyle{ .font = font, .size = 24 };
+    const mark14_style = zpdf.TextStyle{ .font = font, .size = 14 };
+    const mark18_style = zpdf.TextStyle{ .font = font, .size = 18 };
+
+    var y: f64 = 30;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mark Positioning Test", mark24_style);
     y += 30;
 
-    try doc.setEmbeddedFont(font, 14);
-    const mark14_style = zpdf.TextStyle{ .font = font, .size = 14 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "GPOS Type 4 (mark-to-base) and Type 6 (mark-to-mark)", mark14_style);
     y += 24;
 
     // Test text with combining diacritical marks
     // These are separate Unicode combining characters (U+0300-U+036F)
-    try doc.setEmbeddedFont(font, 18);
-    const mark18_style = zpdf.TextStyle{ .font = font, .size = 18 };
 
     // Pre-composed vs combining (visual comparison)
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Pre-composed: À É Î Õ Ü ñ", mark18_style);
@@ -440,7 +415,6 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     y += 30;
 
     // Comparison row
-    try doc.setEmbeddedFont(font, 12);
     const mark12_style = zpdf.TextStyle{ .font = font, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "If mark positioning works, combining characters should align with pre-composed.", mark12_style);
     y += 16;
@@ -480,40 +454,37 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     font_no_calt.embedded.setFeature(.calt, false);
 
     try doc.addPage();
+
+    // Define all styles
+    const calt24_style = zpdf.TextStyle{ .font = font, .size = 24 };
+    const calt16_style = zpdf.TextStyle{ .font = font, .size = 16 };
+    const calt14_style = zpdf.TextStyle{ .font = font, .size = 14 };
+    const calt12_style = zpdf.TextStyle{ .font = font, .size = 12 };
+    const calt11_style = zpdf.TextStyle{ .font = font, .size = 11 };
+    const calt10_style = zpdf.TextStyle{ .font = font, .size = 10 };
+    const no_calt16_style = zpdf.TextStyle{ .font = font_no_calt, .size = 16 };
+    const no_calt11_style = zpdf.TextStyle{ .font = font_no_calt, .size = 11 };
+
     var y: f64 = 30;
 
-    try doc.setEmbeddedFont(font, 24);
-    const calt24_style = zpdf.TextStyle{ .font = font, .size = 24 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Contextual Alternates (calt) Test", calt24_style);
     y += 30;
 
-    try doc.setEmbeddedFont(font, 12);
-    const calt12_style = zpdf.TextStyle{ .font = font, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter font: GSUB calt feature for programming ligatures", calt12_style);
     y += 24;
 
     // Test arrow sequences
-    try doc.setEmbeddedFont(font, 10);
-    const calt10_style = zpdf.TextStyle{ .font = font, .size = 10 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "calt OFF:", calt10_style);
-    try doc.setEmbeddedFont(font_no_calt, 16);
-    const no_calt16_style = zpdf.TextStyle{ .font = font_no_calt, .size = 16 };
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "-> => <- <=> !== ===", no_calt16_style);
     y += 22;
 
-    try doc.setEmbeddedFont(font, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "calt ON:", calt10_style);
-    try doc.setEmbeddedFont(font, 16);
-    const calt16_style = zpdf.TextStyle{ .font = font, .size = 16 };
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "-> => <- <=> !== ===", calt16_style);
     y += 30;
 
     // Test in context
-    try doc.setEmbeddedFont(font, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "In context (calt ON):", calt10_style);
     y += 16;
-    try doc.setEmbeddedFont(font, 14);
-    const calt14_style = zpdf.TextStyle{ .font = font, .size = 14 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "function arrow() { return x => x + 1; }", calt14_style);
     y += 20;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "if (a !== b && c <= d) { return a <=> b; }", calt14_style);
@@ -522,11 +493,8 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     y += 30;
 
     // Test ASCII line (the problematic one from integration tests)
-    try doc.setEmbeddedFont(font, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Full ASCII (calt ON):", calt10_style);
     y += 16;
-    try doc.setEmbeddedFont(font, 11);
-    const calt11_style = zpdf.TextStyle{ .font = font, .size = 11 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@", calt11_style);
     y += 16;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`", calt11_style);
@@ -535,11 +503,8 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     y += 24;
 
     // Same without calt for comparison
-    try doc.setEmbeddedFont(font, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Full ASCII (calt OFF):", calt10_style);
     y += 16;
-    try doc.setEmbeddedFont(font_no_calt, 11);
-    const no_calt11_style = zpdf.TextStyle{ .font = font_no_calt, .size = 11 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@", no_calt11_style);
     y += 16;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`", no_calt11_style);
@@ -548,10 +513,8 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     y += 24;
 
     // Regular text should be unchanged
-    try doc.setEmbeddedFont(font, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular text (should be identical with/without calt):", calt10_style);
     y += 16;
-    try doc.setEmbeddedFont(font, 12);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "The quick brown fox jumps over the lazy dog.", calt12_style);
 
     const pdf = try doc.output();
@@ -575,16 +538,15 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 
     try doc.addPage();
 
-    // Title
-    try doc.setFont(.helvetica_bold, 16);
     const path_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const path_label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+
+    // Title
     _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Path API Test", path_title_style);
 
     var y: f64 = 70;
 
     // Triangle using moveTo/lineTo
-    try doc.setFont(.helvetica, 10);
-    const path_label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Triangle (moveTo, lineTo, closePath):", path_label_style);
     y += 15;
 
@@ -601,7 +563,6 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 80;
 
     // Bezier curve
-    try doc.setFont(.helvetica, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cubic Bezier curve (curveTo):", path_label_style);
     y += 15;
 
@@ -619,7 +580,6 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 100;
 
     // Heart shape using curves
-    try doc.setFont(.helvetica, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Heart shape (multiple curveTo):", path_label_style);
     y += 15;
 
@@ -637,7 +597,6 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 90;
 
     // Stroke only path
-    try doc.setFont(.helvetica, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke only (zigzag):", path_label_style);
     y += 15;
 
@@ -668,16 +627,15 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     try doc.addPage();
 
-    // Title
-    try doc.setFont(.helvetica_bold, 16);
     const grad_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const grad_label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+
+    // Title
     _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Gradient Test", grad_title_style);
 
     var y: f64 = 70;
 
     // Linear gradient horizontal
-    try doc.setFont(.helvetica, 10);
-    const grad_label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (horizontal):", grad_label_style);
     y += 15;
 
@@ -696,7 +654,6 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 70;
 
     // Linear gradient vertical
-    try doc.setFont(.helvetica, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (vertical):", grad_label_style);
     y += 15;
 
@@ -715,7 +672,6 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 70;
 
     // Linear gradient 3 colors
-    try doc.setFont(.helvetica, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (3 colors):", grad_label_style);
     y += 15;
 
@@ -735,7 +691,6 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 70;
 
     // Radial gradient
-    try doc.setFont(.helvetica, 10);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Radial gradient:", grad_label_style);
     y += 15;
 
@@ -777,58 +732,42 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
 
     try doc.addPage();
 
-    try doc.setFont(.helvetica_bold, 24);
     const meta_title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
+    const meta12_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+    const meta_bold11_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .bold = true };
+    const meta11_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const meta_italic10_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .italic = true };
+
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Document with Metadata", meta_title_style);
 
-    try doc.setFont(.helvetica, 12);
-    const meta12_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
     var y: f64 = 100;
-
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "This PDF has the following metadata set in the Info dictionary:", meta12_style);
     y += 30;
 
-    const meta_bold11_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .bold = true };
-    const meta11_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
-
-    try doc.setFont(.helvetica_bold, 11);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Title:", meta_bold11_style);
-    try doc.setFont(.helvetica, 11);
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "zpdf Metadata Demo", meta11_style);
     y += 18;
 
-    try doc.setFont(.helvetica_bold, 11);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Author:", meta_bold11_style);
-    try doc.setFont(.helvetica, 11);
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "zpdf Library", meta11_style);
     y += 18;
 
-    try doc.setFont(.helvetica_bold, 11);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Subject:", meta_bold11_style);
-    try doc.setFont(.helvetica, 11);
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "Demonstrating PDF metadata support", meta11_style);
     y += 18;
 
-    try doc.setFont(.helvetica_bold, 11);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Keywords:", meta_bold11_style);
-    try doc.setFont(.helvetica, 11);
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "pdf, zig, metadata, demo", meta11_style);
     y += 18;
 
-    try doc.setFont(.helvetica_bold, 11);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Creator:", meta_bold11_style);
-    try doc.setFont(.helvetica, 11);
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "zpdf CLI tool", meta11_style);
     y += 18;
 
-    try doc.setFont(.helvetica_bold, 11);
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Producer:", meta_bold11_style);
-    try doc.setFont(.helvetica, 11);
     _ = try doc.writeAt(.{ .x = 120, .y = y }, "zpdf (default)", meta11_style);
     y += 40;
 
-    try doc.setFont(.helvetica_oblique, 10);
-    const meta_italic10_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .italic = true };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Use 'pdfinfo' or your PDF viewer's document properties to verify.", meta_italic10_style);
 
     const pdf = try doc.output();

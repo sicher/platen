@@ -46,7 +46,6 @@ test "Document with text" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
@@ -141,7 +140,6 @@ test "text without page returns error" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 12);
     // Should fail because no page is added
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
     try std.testing.expectError(error.NoPage, doc.writeAt(.{ .x = 0, .y = 0 }, "test", style));
@@ -154,15 +152,12 @@ test "multiple fonts on single page" {
 
     try doc.addPage();
 
-    try doc.setFont(.helvetica, 12);
     const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica", helvetica_style);
 
-    try doc.setFont(.times_roman, 12);
     const times_style = TextStyle{ .font = Font.times, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Times", times_style);
 
-    try doc.setFont(.courier, 12);
     const courier_style = TextStyle{ .font = Font.courier, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Courier", courier_style);
 
@@ -182,19 +177,15 @@ test "font styles" {
 
     try doc.addPage();
 
-    try doc.setFont(.helvetica, 12);
     const normal_style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Normal", normal_style);
 
-    try doc.setFont(.helvetica_bold, 12);
     const bold_style = TextStyle{ .font = Font.helvetica, .size = 12, .bold = true };
     _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style);
 
-    try doc.setFont(.helvetica_oblique, 12);
     const italic_style = TextStyle{ .font = Font.helvetica, .size = 12, .italic = true };
     _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Italic", italic_style);
 
-    try doc.setFont(.helvetica_bold_oblique, 12);
     const bold_italic_style = TextStyle{ .font = Font.helvetica, .size = 12, .bold = true, .italic = true };
     _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "BoldItalic", bold_italic_style);
 
@@ -229,7 +220,6 @@ test "multiple pages" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
 
@@ -289,7 +279,6 @@ test "all 14 standard fonts" {
 
     var y: f64 = 50;
     for (all_fonts) |font| {
-        try doc.setFont(font, 10);
         const style = standardFontToStyle(font, 10);
         _ = try doc.writeAt(.{ .x = 50, .y = y }, font.pdfName(), style);
         y += 15;
@@ -319,8 +308,8 @@ test "Document measureText" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 12);
-    const m = doc.measureText("Hello");
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const m = doc.measureStyled("Hello", style);
 
     // "Hello" = H(722) + e(556) + l(222) + l(222) + o(556) = 2278
     // Width = 2278 * 12 / 1000 = 27.336
@@ -332,10 +321,8 @@ test "Document measureText with spacing" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 12);
-    doc.setCharSpacing(2.0);
-
-    const m = doc.measureText("Hello");
+    const style = TextStyle{ .font = Font.helvetica, .size = 12, .char_spacing = 2.0 };
+    const m = doc.measureStyled("Hello", style);
 
     // Base ~27.336 + 4 * 2.0 = 35.336
     try std.testing.expectApproxEqAbs(@as(f64, 35.336), m.width, 0.01);
@@ -419,7 +406,6 @@ test "render text with embedded font" {
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
-    try doc.setEmbeddedFont(font, 12);
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
@@ -456,17 +442,14 @@ test "mix standard and embedded fonts" {
     try doc.addPage();
 
     // Use standard font first
-    try doc.setFont(.helvetica, 12);
     const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica text", helvetica_style);
 
     // Switch to embedded font
-    try doc.setEmbeddedFont(courier_prime, 14);
-    const embedded_style = TextStyle{ .font = .{ .embedded = courier_prime.embedded }, .size = 14 };
+    const embedded_style = TextStyle{ .font = courier_prime, .size = 14 };
     _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Courier Prime text", embedded_style);
 
     // Switch back to standard
-    try doc.setFont(.times_roman, 12);
     const times_style = TextStyle{ .font = Font.times, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times text", times_style);
 
@@ -491,12 +474,10 @@ test "multiple embedded fonts" {
 
     try doc.addPage();
 
-    try doc.setEmbeddedFont(courier_regular, 12);
-    const regular_style = TextStyle{ .font = .{ .embedded = courier_regular.embedded }, .size = 12 };
+    const regular_style = TextStyle{ .font = courier_regular, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", regular_style);
 
-    try doc.setEmbeddedFont(courier_bold, 12);
-    const bold_style = TextStyle{ .font = .{ .embedded = courier_bold.embedded }, .size = 12 };
+    const bold_style = TextStyle{ .font = courier_bold, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style);
 
     const pdf = try doc.output();
@@ -526,7 +507,6 @@ test "embedded font on multiple pages" {
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
-    try doc.setEmbeddedFont(font, 12);
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
 
@@ -581,7 +561,6 @@ test "embedded font widths array in PDF" {
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
 
     try doc.addPage();
-    try doc.setEmbeddedFont(font, 12);
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Test", style);
 
@@ -619,7 +598,6 @@ test "PDF output is valid with embedded font" {
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
     try doc.addPage();
-    try doc.setEmbeddedFont(font, 24);
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 24 };
     _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Test embedded font!", style);
 
@@ -674,7 +652,6 @@ test "writeStyled advances cursor" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = doc.getPageRegion();
     const initial_cursor = region.cursor_y;
@@ -682,10 +659,12 @@ test "writeStyled advances cursor" {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append("Test line", .{});
-    _ = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{});
 
     try std.testing.expect(region.cursor_y > initial_cursor);
-    try std.testing.expectEqual(doc.getLineHeightPts(), region.cursor_y);
+    // Line height at 12pt with default 1.2 factor = 14.4pt
+    try std.testing.expectApproxEqAbs(@as(f64, 14.4), region.cursor_y, 0.01);
 }
 
 test "writeStyled alignment" {
@@ -693,30 +672,31 @@ test "writeStyled alignment" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 100, .y = 100, .width = 400, .height = 600 };
+
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // Test left alignment (default)
     {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append("Left", .{});
-        _ = try doc.writeStyled(&region, &st, .{});
+        _ = try doc.writeStyled(&region, &st, style, .{});
     }
     // Test center alignment
     {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append("Center", .{});
-        _ = try doc.writeStyled(&region, &st, .{ .alignment = .center });
+        _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .center });
     }
     // Test right alignment
     {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append("Right", .{});
-        _ = try doc.writeStyled(&region, &st, .{ .alignment = .right });
+        _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .right });
     }
 
     const pdf = try doc.output();
@@ -731,7 +711,6 @@ test "writeStyled wraps text to multiple lines" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 600 };
     const long_text = "This is a longer piece of text that should wrap across multiple lines within the region.";
@@ -739,7 +718,8 @@ test "writeStyled wraps text to multiple lines" {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append(long_text, .{});
-    const result = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const result = try doc.writeStyled(&region, &st, style, .{});
 
     try std.testing.expect(result.lines_written > 1);
     try std.testing.expect(result.overflow == null);
@@ -750,7 +730,6 @@ test "writeStyled overflow" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     // Small region - line height at 12pt with 1.2 factor = 14.4pt
     // Region of 15pt should fit one line, but not two (would need 28.8pt)
@@ -760,7 +739,8 @@ test "writeStyled overflow" {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append(long_text, .{});
-    const result = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const result = try doc.writeStyled(&region, &st, style, .{});
 
     // Should only fit one line due to height constraint
     try std.testing.expectEqual(@as(usize, 1), result.lines_written);
@@ -772,7 +752,6 @@ test "writeStyled multi-page via overflow handling" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
     doc.setMargins(.{ .left = 50, .right = 50, .top = 50, .bottom = 50 });
 
     // Generate long text that should span multiple pages
@@ -783,6 +762,7 @@ test "writeStyled multi-page via overflow handling" {
     try st.append(paragraph, .{});
 
     // Manual pagination loop using overflow
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
     var remaining: ?[]const u8 = paragraph;
     while (remaining) |text_to_write| {
         if (text_to_write.len == 0) break;
@@ -792,7 +772,7 @@ test "writeStyled multi-page via overflow handling" {
         defer page_st.deinit();
         try page_st.append(text_to_write, .{});
 
-        const result = try doc.writeStyled(&region, &page_st, .{});
+        const result = try doc.writeStyled(&region, &page_st, style, .{});
 
         if (result.overflow) |overflow| {
             try doc.addPage();
@@ -865,19 +845,19 @@ test "findHyphenBreak finds break at regular hyphen" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // "state-of-the-art" - should find breaks after each hyphen
     const word = "state-of-the-art";
 
     // Width that fits "state-" but not more
-    const state_width = doc.getTextWidth("state-");
-    const result = doc.findHyphenBreak(word, state_width + 1);
+    const state_width = doc.getTextWidthStyled("state-", style);
+    const result = doc.findHyphenBreakStyled(word, state_width + 1, style);
     try std.testing.expectEqual(@as(?usize, 6), result); // "state-" is 6 bytes
 
     // Width that fits "state-of-" but not "state-of-the-"
-    const state_of_width = doc.getTextWidth("state-of-");
-    const result2 = doc.findHyphenBreak(word, state_of_width + 1);
+    const state_of_width = doc.getTextWidthStyled("state-of-", style);
+    const result2 = doc.findHyphenBreakStyled(word, state_of_width + 1, style);
     try std.testing.expectEqual(@as(?usize, 9), result2); // "state-of-" is 9 bytes
 }
 
@@ -886,10 +866,10 @@ test "findHyphenBreak returns null for word without hyphens" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     const word = "supercalifragilistic";
-    const result = doc.findHyphenBreak(word, 1000);
+    const result = doc.findHyphenBreakStyled(word, 1000, style);
     try std.testing.expectEqual(@as(?usize, null), result);
 }
 
@@ -898,14 +878,14 @@ test "findSoftHyphenBreak finds break at soft hyphen" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // "ex\xc2\xadplicit" - soft-hyphen between "ex" and "plicit"
     const word = "ex\xc2\xadplicit";
 
     // Width that fits "ex-" (prefix + visible hyphen)
-    const ex_width = doc.getTextWidth("ex-");
-    const result = doc.findSoftHyphenBreak(word, ex_width + 1);
+    const ex_width = doc.getTextWidthStyled("ex-", style);
+    const result = doc.findSoftHyphenBreakStyled(word, ex_width + 1, style);
     try std.testing.expectEqual(@as(?usize, 2), result); // Position of soft-hyphen
 }
 
@@ -914,10 +894,10 @@ test "findSoftHyphenBreak returns null for word without soft hyphens" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     const word = "explicit";
-    const result = doc.findSoftHyphenBreak(word, 1000);
+    const result = doc.findSoftHyphenBreakStyled(word, 1000, style);
     try std.testing.expectEqual(@as(?usize, null), result);
 }
 
@@ -926,10 +906,9 @@ test "soft hyphens stripped from text output" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // Write text with soft-hyphens
-    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "ex\xc2\xadplic\xc2\xadit", style);
 
     // The stored text should have soft-hyphens stripped
@@ -944,7 +923,6 @@ test "writeStyled in narrow column" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 11);
 
     // Narrow column test - text should wrap
     var region = Region{ .x = 72, .y = 100, .width = 100, .height = 200 };
@@ -953,7 +931,8 @@ test "writeStyled in narrow column" {
     defer st.deinit();
     try st.append("This is a test of narrow column wrapping behavior.", .{});
 
-    const result = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 11 };
+    const result = try doc.writeStyled(&region, &st, style, .{});
 
     // Should produce multiple lines
     try std.testing.expect(result.lines_written >= 2);
@@ -964,11 +943,11 @@ test "soft hyphens excluded from text width" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // Width with soft-hyphens should equal width without
-    const with_soft = doc.getTextWidth("ex\xc2\xadplic\xc2\xadit");
-    const without_soft = doc.getTextWidth("explicit");
+    const with_soft = doc.getTextWidthStyled("ex\xc2\xadplic\xc2\xadit", style);
+    const without_soft = doc.getTextWidthStyled("explicit", style);
     try std.testing.expectEqual(without_soft, with_soft);
 }
 
@@ -977,7 +956,6 @@ test "writeStyled overflow returns remaining text" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     // Region that can only fit 2 lines (line height = 14.4pt at 12pt font)
     var region = Region{ .x = 50, .y = 50, .width = 100, .height = 30 };
@@ -986,7 +964,8 @@ test "writeStyled overflow returns remaining text" {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append(text, .{});
-    const result = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const result = try doc.writeStyled(&region, &st, style, .{});
 
     try std.testing.expectEqual(@as(usize, 2), result.lines_written);
     try std.testing.expect(result.overflow != null);
@@ -997,7 +976,6 @@ test "writeStyled newline forces line break" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
     const text = "Line one.\nLine two.\nLine three.";
@@ -1005,7 +983,8 @@ test "writeStyled newline forces line break" {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append(text, .{});
-    const result = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const result = try doc.writeStyled(&region, &st, style, .{});
 
     // Should have 3 lines due to explicit newlines
     try std.testing.expectEqual(@as(usize, 3), result.lines_written);
@@ -1016,16 +995,16 @@ test "writeStyled returns overflow when no room" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     // Small region that can only fit ~1 line
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 15 };
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append("First line", .{});
-        const result1 = try doc.writeStyled(&region, &st, .{});
+        const result1 = try doc.writeStyled(&region, &st, style, .{});
         try std.testing.expectEqual(@as(usize, 1), result1.lines_written);
         try std.testing.expect(result1.overflow == null);
     }
@@ -1035,7 +1014,7 @@ test "writeStyled returns overflow when no room" {
         var st = doc.createStyledText();
         defer st.deinit();
         try st.append("Second line", .{});
-        const result2 = try doc.writeStyled(&region, &st, .{});
+        const result2 = try doc.writeStyled(&region, &st, style, .{});
         try std.testing.expectEqual(@as(usize, 0), result2.lines_written);
         try std.testing.expect(result2.overflow != null);
     }
@@ -1046,7 +1025,6 @@ test "region padding affects content area" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     // Region with padding
     var region = Region{
@@ -1067,7 +1045,8 @@ test "region padding affects content area" {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append("Test", .{});
-    _ = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{});
     try std.testing.expect(region.remainingHeight() < 90);
 }
 
@@ -1076,7 +1055,6 @@ test "writeStyled handles empty text" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = doc.getPageRegion();
 
@@ -1084,7 +1062,8 @@ test "writeStyled handles empty text" {
     var st = doc.createStyledText();
     defer st.deinit();
     // Don't append anything - empty
-    _ = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{});
 
     // Should still have just one page
     try std.testing.expectEqual(@as(usize, 1), doc.pages.items.len);
@@ -1095,14 +1074,14 @@ test "writeStyled respects margins via region" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
     doc.setMargins(.{ .left = 100, .right = 100, .top = 100, .bottom = 100 });
 
     var region = doc.getPageRegion();
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append("Short text.", .{});
-    _ = try doc.writeStyled(&region, &st, .{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{});
 
     // Check text position respects left margin
     const page = &doc.pages.items[0];
@@ -1118,13 +1097,13 @@ test "valign top uses CSS-style half-leading calculation" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append("Test", .{});
-    _ = try doc.writeStyled(&region, &st, .{ .valign = .top });
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .top });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
@@ -1145,13 +1124,13 @@ test "valign middle centers text block in region" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append("Test", .{});
-    _ = try doc.writeStyled(&region, &st, .{ .valign = .middle });
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .middle });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
@@ -1168,13 +1147,13 @@ test "valign bottom puts text block at bottom of region" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
     var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append("Test", .{});
-    _ = try doc.writeStyled(&region, &st, .{ .valign = .bottom });
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .bottom });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
@@ -1194,20 +1173,20 @@ test "writeStyled greedy vs optimal line counts" {
 
     try doc.addPage();
     // Courier is monospace: 600 units per char, at 12pt = 7.2pt per char
-    try doc.setFont(.courier, 12);
-
     // 14 chars width = 14 * 7.2 = 100.8pt
     const char_width = 7.2;
     const region_width = 14 * char_width;
 
     const text = "The lazy yellow dog was caught by the slow red fox as he lay sleeping in the sun.";
 
+    const style = TextStyle{ .font = Font.courier, .size = 12 };
+
     // Test greedy mode
     var region_greedy = Region{ .x = 0, .y = 0, .width = region_width, .height = 500 };
     var st_greedy = doc.createStyledText();
     defer st_greedy.deinit();
     try st_greedy.append(text, .{});
-    const greedy_result = try doc.writeStyled(&region_greedy, &st_greedy, .{ .line_breaking = .greedy });
+    const greedy_result = try doc.writeStyled(&region_greedy, &st_greedy, style, .{ .line_breaking = .greedy });
 
     // Test optimal mode
     try doc.addPage();
@@ -1215,7 +1194,7 @@ test "writeStyled greedy vs optimal line counts" {
     var st_optimal = doc.createStyledText();
     defer st_optimal.deinit();
     try st_optimal.append(text, .{});
-    const optimal_result = try doc.writeStyled(&region_optimal, &st_optimal, .{ .line_breaking = .optimal });
+    const optimal_result = try doc.writeStyled(&region_optimal, &st_optimal, style, .{ .line_breaking = .optimal });
 
     // Both should produce 7 lines for this text
     try std.testing.expectEqual(@as(usize, 7), greedy_result.lines_written);
@@ -1231,10 +1210,10 @@ test "writeStyled greedy and optimal both render successfully" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.courier, 12);
+    const style = TextStyle{ .font = Font.courier, .size = 12 };
 
     // Verify char width: Courier is monospace at 600 units/1000 * 12pt = 7.2pt/char
-    const char_width = doc.getTextWidth("X");
+    const char_width = doc.getTextWidthStyled("X", style);
     try std.testing.expectApproxEqAbs(@as(f64, 7.2), char_width, 0.01);
 
     const region_width = 101.0; // Just over 14 chars
@@ -1245,7 +1224,7 @@ test "writeStyled greedy and optimal both render successfully" {
     var st_greedy = doc.createStyledText();
     defer st_greedy.deinit();
     try st_greedy.append(text, .{});
-    const greedy_result = try doc.writeStyled(&region, &st_greedy, .{ .line_breaking = .greedy });
+    const greedy_result = try doc.writeStyled(&region, &st_greedy, style, .{ .line_breaking = .greedy });
 
     // Test optimal mode
     try doc.addPage();
@@ -1253,7 +1232,7 @@ test "writeStyled greedy and optimal both render successfully" {
     var st_optimal = doc.createStyledText();
     defer st_optimal.deinit();
     try st_optimal.append(text, .{});
-    const optimal_result = try doc.writeStyled(&region2, &st_optimal, .{ .line_breaking = .optimal });
+    const optimal_result = try doc.writeStyled(&region2, &st_optimal, style, .{ .line_breaking = .optimal });
 
     // Both should complete without overflow
     try std.testing.expect(greedy_result.overflow == null);
@@ -1275,10 +1254,9 @@ test "mark positioning with Tm absolute coordinates" {
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
 
     try doc.addPage();
-    try doc.setEmbeddedFont(inter, 14);
 
     // Write "À" (A + combining grave)
-    const style = TextStyle{ .font = .{ .embedded = inter.embedded }, .size = 14 };
+    const style = TextStyle{ .font = inter, .size = 14 };
     _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style);
 
     // Get the content stream
@@ -1333,21 +1311,13 @@ test "mark positioning with Tm absolute coordinates" {
     }
 }
 
-test "setTextColor changes text color" {
+test "TextStyle color stored in command" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
-    // Default is black
-    try std.testing.expect(doc.text_color.eql(Color.black));
-
-    // Set to red
-    doc.setTextColor(Color.red);
-    try std.testing.expect(doc.text_color.eql(Color.red));
-
-    // Write some text
+    // Write text with explicit red color
     const red_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Red text", red_style);
 
@@ -1365,11 +1335,9 @@ test "Color grayscale stored in command" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
-    // Set greyscale color
+    // Write text with greyscale color via explicit style
     const gray = Color.greyscale(0.5);
-    doc.setTextColor(gray);
     const gray_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = gray };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Gray text", gray_style);
 
@@ -1383,11 +1351,9 @@ test "Color CMYK stored in command" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
-    // Set CMYK cyan
+    // Write text with CMYK color via explicit style
     const cyan = Color.cmyk(1, 0, 0, 0);
-    doc.setTextColor(cyan);
     const cyan_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = cyan };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Cyan text", cyan_style);
 
@@ -1407,8 +1373,8 @@ test "getFontMetrics standard font" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 12);
-    const m = doc.getFontMetrics();
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const m = doc.getFontMetricsStyled(style);
 
     // Helvetica at 12pt
     // Ascender: 718 * 12/1000 = 8.616
@@ -1428,11 +1394,11 @@ test "getFontMetrics different sizes" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 24);
-    const m24 = doc.getFontMetrics();
+    const style24 = TextStyle{ .font = Font.helvetica, .size = 24 };
+    const m24 = doc.getFontMetricsStyled(style24);
 
-    try doc.setFont(.helvetica, 12);
-    const m12 = doc.getFontMetrics();
+    const style12 = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const m12 = doc.getFontMetricsStyled(style12);
 
     // Metrics should scale linearly with font size
     try std.testing.expectApproxEqAbs(m24.ascender, m12.ascender * 2, 0.001);
@@ -1443,11 +1409,11 @@ test "getFontMetrics Times vs Helvetica" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 12);
-    const hm = doc.getFontMetrics();
+    const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const hm = doc.getFontMetricsStyled(helvetica_style);
 
-    try doc.setFont(.times_roman, 12);
-    const tm = doc.getFontMetrics();
+    const times_style = TextStyle{ .font = Font.times, .size = 12 };
+    const tm = doc.getFontMetricsStyled(times_style);
 
     // Times has different metrics than Helvetica
     // Times ascender: 683, Helvetica: 718
@@ -1460,8 +1426,8 @@ test "getFontMetrics lineHeight" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
-    try doc.setFont(.helvetica, 12);
-    const m = doc.getFontMetrics();
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
+    const m = doc.getFontMetricsStyled(style);
 
     // lineHeight = ascender - descender
     // 8.616 - (-2.484) = 11.1
@@ -2045,21 +2011,13 @@ test "no outlines or page labels when not set" {
 // Text Decoration Tests
 // ============================================================================
 
-test "setTextStyle enables underline decoration" {
+test "TextStyle underline decoration stored in command" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
-    // Default is no decoration
-    try std.testing.expect(!doc.text_decoration.underline);
-
-    // Enable underline via setTextStyle
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
-    try std.testing.expect(doc.text_decoration.underline);
-
-    // Write text
+    // Write text with underline via explicit style
     const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Underlined text", underline_style);
 
@@ -2069,21 +2027,13 @@ test "setTextStyle enables underline decoration" {
     try std.testing.expect(cmd.text.underline);
 }
 
-test "setTextStyle enables strikethrough decoration" {
+test "TextStyle strikethrough decoration stored in command" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
-    // Default is no decoration
-    try std.testing.expect(!doc.text_decoration.strikethrough);
-
-    // Enable strikethrough via setTextStyle
-    doc.setTextStyle(.{ .decoration = .{ .strikethrough = true } });
-    try std.testing.expect(doc.text_decoration.strikethrough);
-
-    // Write text
+    // Write text with strikethrough via explicit style
     const strikethrough_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .strikethrough = true } };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Strikethrough text", strikethrough_style);
 
@@ -2098,8 +2048,6 @@ test "text width stored in command for decorations" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
 
     const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Hello", underline_style);
@@ -2107,17 +2055,15 @@ test "text width stored in command for decorations" {
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
 
-    // Text width should be non-zero
+    // Text width should be non-zero when decorations enabled
     try std.testing.expect(cmd.text.text_width > 0);
 }
 
-test "setTextStyle with both decorations" {
+test "TextStyle with both decorations" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-    doc.setTextStyle(.{ .decoration = .{ .underline = true, .strikethrough = true } });
 
     const both_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true, .strikethrough = true } };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", both_style);
@@ -2135,17 +2081,21 @@ test "setTextStyle with both decorations" {
     try std.testing.expect(pdf.len > 0);
 }
 
-test "setTextStyle sets color and decoration" {
+test "TextStyle with color and decoration" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
 
-    // Set color and decoration together
-    doc.setTextStyle(.{ .color = Color.red, .decoration = .{ .underline = true } });
-    try std.testing.expect(doc.text_color.eql(Color.red));
-    try std.testing.expect(doc.text_decoration.underline);
+    // Color and decoration set together in style
+    const style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red, .decoration = .{ .underline = true } };
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style);
+
+    // Verify the command has both color and decoration
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[0];
+    try std.testing.expect(cmd.text.text_color.eql(Color.red));
+    try std.testing.expect(cmd.text.underline);
 }
 
 test "decoration not rendered when disabled" {
@@ -2153,8 +2103,6 @@ test "decoration not rendered when disabled" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
     _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style);
 
@@ -2187,8 +2135,6 @@ test "write() advances cursor_x" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     var region = Region{ .x = 50, .y = 50, .width = 300, .height = 100 };
 
     try std.testing.expectEqual(@as(f64, 0), region.cursor_x);
@@ -2208,8 +2154,6 @@ test "write() wraps to next line" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     // Narrow region to force wrapping
     var region = Region{ .x = 50, .y = 50, .width = 60, .height = 100 };
 
@@ -2226,20 +2170,15 @@ test "write() with multiple styled chunks" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     var region = Region{ .x = 50, .y = 50, .width = 300, .height = 100 };
 
     const normal_style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    doc.setTextStyle(.{});
     _ = try doc.write(&region, "Normal ", normal_style, .{});
 
     const red_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red };
-    doc.setTextStyle(.{ .color = Color.red });
     _ = try doc.write(&region, "red ", red_style, .{});
 
     const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
-    doc.setTextStyle(.{ .decoration = .{ .underline = true } });
     _ = try doc.write(&region, "underlined", underline_style, .{});
 
     // Should have 3 text commands
@@ -2256,8 +2195,6 @@ test "write() returns overflow when region is full" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     // Very small region - only fits one line
     var region = Region{ .x = 50, .y = 50, .width = 100, .height = 15 };
 
@@ -2284,10 +2221,7 @@ test "write() with measure_only is side-effect free" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
-
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // Measure pass - cursor should be unchanged (side-effect free)
@@ -2313,8 +2247,6 @@ test "write() with wrap=false stays on one line" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
-
     // Narrow region that would normally wrap
     var region = Region{ .x = 50, .y = 50, .width = 60, .height = 100 };
 
@@ -2337,7 +2269,7 @@ test "writeStyled basic" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2346,7 +2278,7 @@ test "writeStyled basic" {
     try text.append("World", .{ .color = Color.red });
 
     var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
-    const result = try doc.writeStyled(&region, &text, .{});
+    const result = try doc.writeStyled(&region, &text, style, .{});
 
     try std.testing.expectEqual(@as(usize, 1), result.lines_written);
     try std.testing.expect(result.overflow == null);
@@ -2357,7 +2289,7 @@ test "writeStyled word wrapping" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2367,7 +2299,7 @@ test "writeStyled word wrapping" {
 
     // Narrow region to force wrapping
     var region = Region{ .x = 50, .y = 50, .width = 120, .height = 200 };
-    const result = try doc.writeStyled(&region, &text, .{});
+    const result = try doc.writeStyled(&region, &text, style, .{});
 
     try std.testing.expect(result.lines_written > 1);
     try std.testing.expect(result.overflow == null);
@@ -2378,7 +2310,7 @@ test "writeStyled justified alignment" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2388,7 +2320,7 @@ test "writeStyled justified alignment" {
     try text.append(" of justified text.", .{});
 
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 200 };
-    const result = try doc.writeStyled(&region, &text, .{ .alignment = .justify });
+    const result = try doc.writeStyled(&region, &text, style, .{ .alignment = .justify });
 
     try std.testing.expect(result.lines_written >= 1);
     try std.testing.expect(result.overflow == null);
@@ -2399,7 +2331,7 @@ test "writeStyled optimal line breaking" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2409,7 +2341,7 @@ test "writeStyled optimal line breaking" {
     try text.append("the lazy dog.", .{});
 
     var region = Region{ .x = 50, .y = 50, .width = 150, .height = 200 };
-    const result = try doc.writeStyled(&region, &text, .{
+    const result = try doc.writeStyled(&region, &text, style, .{
         .line_breaking = .optimal,
     });
 
@@ -2422,7 +2354,7 @@ test "writeStyled generates valid PDF" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2432,7 +2364,7 @@ test "writeStyled generates valid PDF" {
     try text.append("underlined", .{ .decoration = .{ .underline = true } });
 
     var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
-    _ = try doc.writeStyled(&region, &text, .{});
+    _ = try doc.writeStyled(&region, &text, style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2447,7 +2379,7 @@ test "writeStyled breaks at soft-hyphen when word too wide" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2458,7 +2390,7 @@ test "writeStyled breaks at soft-hyphen when word too wide" {
 
     // Use a narrow region that forces breaking
     var region = Region{ .x = 50, .y = 50, .width = 40, .height = 100 };
-    const result = try doc.writeStyled(&region, &text, .{});
+    const result = try doc.writeStyled(&region, &text, style, .{});
 
     // Should have rendered multiple lines due to soft-hyphen breaking
     try std.testing.expect(result.lines_written >= 2);
@@ -2469,7 +2401,7 @@ test "writeStyled soft-hyphen break renders hyphen" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2480,7 +2412,7 @@ test "writeStyled soft-hyphen break renders hyphen" {
     // Width that fits "ab-" but not "abcd"
     // At 12pt Helvetica: "ab" is about 14pt, "-" is about 4pt, "abcd" is about 27pt
     var region = Region{ .x = 50, .y = 50, .width = 22, .height = 50 };
-    const result = try doc.writeStyled(&region, &text, .{});
+    const result = try doc.writeStyled(&region, &text, style, .{});
 
     // Should have broken into 2 lines: "ab-" and "cd"
     try std.testing.expectEqual(@as(usize, 2), result.lines_written);
@@ -2496,7 +2428,7 @@ test "writeStyled breaks at regular hyphen when break_on_hyphens is true" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2506,7 +2438,7 @@ test "writeStyled breaks at regular hyphen when break_on_hyphens is true" {
 
     // Width that fits "state-" (~35pt) but not full word (~87pt)
     var region = Region{ .x = 50, .y = 50, .width = 45, .height = 100 };
-    const result = try doc.writeStyled(&region, &text, .{ .break_on_hyphens = true });
+    const result = try doc.writeStyled(&region, &text, style, .{ .break_on_hyphens = true });
 
     // Should have broken at hyphen
     try std.testing.expect(result.lines_written >= 2);
@@ -2517,7 +2449,7 @@ test "writeStyled does not break at regular hyphen when break_on_hyphens is fals
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2528,7 +2460,7 @@ test "writeStyled does not break at regular hyphen when break_on_hyphens is fals
     // Narrow width - with break_on_hyphens=false, should NOT break at hyphen
     // But character-level breaking will still apply as last resort
     var region = Region{ .x = 50, .y = 50, .width = 45, .height = 100 };
-    const result = try doc.writeStyled(&region, &text, .{ .break_on_hyphens = false });
+    const result = try doc.writeStyled(&region, &text, style, .{ .break_on_hyphens = false });
 
     // With break_on_hyphens=false, won't break at hyphens but will do character breaks
     // So it will still break (just not at the hyphen boundaries)
@@ -2540,7 +2472,7 @@ test "writeStyled character-level breaking for long word without hyphens" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2551,7 +2483,7 @@ test "writeStyled character-level breaking for long word without hyphens" {
     // Very narrow width (50pt) forces multiple character breaks
     // At 12pt Helvetica, ~7-8 chars fit per line, so expect ~5 lines
     var region = Region{ .x = 50, .y = 50, .width = 50, .height = 200 };
-    const result = try doc.writeStyled(&region, &text, .{});
+    const result = try doc.writeStyled(&region, &text, style, .{});
 
     // Should break into multiple lines via repeated character breaking
     try std.testing.expect(result.lines_written >= 4);
@@ -2562,7 +2494,7 @@ test "writeStyled measure_only is side-effect free" {
     defer doc.deinit();
 
     try doc.addPage();
-    try doc.setFont(.helvetica, 12);
+    const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     var text = doc.createStyledText();
     defer text.deinit();
@@ -2570,7 +2502,7 @@ test "writeStyled measure_only is side-effect free" {
 
     // Measure the text
     var measure_region = Region{ .x = 50, .y = 50, .width = 150, .height = 1000 };
-    const measure_result = try doc.writeStyled(&measure_region, &text, .{ .measure_only = true });
+    const measure_result = try doc.writeStyled(&measure_region, &text, style, .{ .measure_only = true });
 
     // Should have counted lines
     try std.testing.expect(measure_result.lines_written > 1);
@@ -2586,7 +2518,7 @@ test "writeStyled measure_only is side-effect free" {
     try text2.append("This is a test paragraph that should wrap to multiple lines in a narrow region.", .{});
 
     var render_region = Region{ .x = 50, .y = 50, .width = 150, .height = 1000 };
-    const render_result = try doc.writeStyled(&render_region, &text2, .{});
+    const render_result = try doc.writeStyled(&render_region, &text2, style, .{});
 
     // Should get the same line count
     try std.testing.expectEqual(measure_result.lines_written, render_result.lines_written);

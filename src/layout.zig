@@ -265,6 +265,8 @@ pub const ParagraphOptions = struct {
     break_on_hyphens: bool = true,
     /// Line breaking algorithm. Greedy is fast, optimal (Knuth-Plass) produces better results.
     line_breaking: LineBreaking = .greedy,
+    /// Line height multiplier (1.2 = default, 1.0 = single spacing, 1.5 = 150%, etc.).
+    line_height: f64 = 1.2,
 };
 
 /// Page size in points (1 point = 1/72 inch)

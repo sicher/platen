@@ -281,7 +281,6 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         const simple_style = zpdf.TextStyle{ .font = .{ .embedded = simple_font }, .size = 10 };
         for (0..pages_per_section) |_| {
             try doc.addPage();
-            try doc.setEmbeddedFont(simple_font, 10);
             var y: f64 = 30;
             // 50 lines of text per page
             for (0..50) |_| {
@@ -302,7 +301,6 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             var y: f64 = 30;
 
             // Ligature-heavy text
-            try doc.setEmbeddedFont(inter_ot, 11);
             for (0..15) |_| {
                 _ = try doc.writeAt(.{ .x = 50, .y = y }, "ффи|fi fl ffi ffl|office efficientifficiently buffer difficult fjord", inter_ot_style);
                 y += 14;
@@ -321,7 +319,6 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             }
 
             // Kerning stress (AV, To, Ty, etc.)
-            try doc.setEmbeddedFont(inter_bold, 12);
             for (0..10) |_| {
                 _ = try doc.writeAt(.{ .x = 50, .y = y }, "AVATAR WAVE TYPEWRITER Today Tomorrow Typography WATTAGE", inter_bold_style);
                 y += 15;
@@ -340,7 +337,6 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             var y: f64 = 30;
 
             // Latin extended with diacritics
-            try doc.setEmbeddedFont(gentium, 11);
             for (0..10) |_| {
                 _ = try doc.writeAt(.{ .x = 50, .y = y }, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞß àáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ", gentium_style);
                 y += 14;
@@ -359,7 +355,6 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             }
 
             // Currency and symbols
-            try doc.setEmbeddedFont(inter, 11);
             for (0..10) |_| {
                 _ = try doc.writeAt(.{ .x = 50, .y = y }, "€£¥¢₹₽₿ §¶†‡ ©®™ °′″ ±×÷≠≈≤≥ ∞∑∏∫√ ←→↑↓↔ •◦○●■□▲△", inter_style);
                 y += 14;
@@ -380,10 +375,10 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
         const lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ";
         const full_text = lorem ++ lorem ++ lorem;
+        const charter_10 = zpdf.TextStyle{ .font = .{ .embedded = charter }, .size = 10 };
 
         for (0..pages_per_section) |_| {
             try doc.addPage();
-            try doc.setEmbeddedFont(charter, 10);
 
             // Left column - justified with optimal line breaking
             var region = zpdf.Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
@@ -391,7 +386,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 var st = doc.createStyledText();
                 defer st.deinit();
                 try st.append(full_text, .{});
-                _ = try doc.writeStyled(&region, &st, .{
+                _ = try doc.writeStyled(&region, &st, charter_10, .{
                     .alignment = .justify,
                     .valign = .top,
                     .line_breaking = .optimal,
@@ -404,7 +399,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 var st = doc.createStyledText();
                 defer st.deinit();
                 try st.append(full_text, .{});
-                _ = try doc.writeStyled(&region, &st, .{
+                _ = try doc.writeStyled(&region, &st, charter_10, .{
                     .alignment = .justify,
                     .valign = .top,
                     .line_breaking = .optimal,
