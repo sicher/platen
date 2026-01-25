@@ -1,11 +1,32 @@
 # zpdf Context
 
 ## Current Focus
-Stateful API removal **COMPLETED**. All API is now explicit with per-page options.
+API cleanup **COMPLETED**. All API is now explicit with per-page options.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
-- Update README.md and API_REVIEW.md for new page API
+- **Optimize write()** - currently 1.5-2x slower than writeStyled() for rendering (see bench_write.zig)
+
+## What We Did (Session 2026-01-25 #4)
+- **Renamed pageNo() to getPageIndex()** - returns 0-based index for consistency
+
+- **Cleaned up API_REVIEW.md** - removed outdated references, updated for current API
+
+- **Removed dead code** - non-styled break helpers that called non-existent getTextWidth()
+
+- **Made internal APIs private**:
+  - `getTextWidthStyled()` - use `write/writeStyled(.measure_only=true)` instead
+  - `findHyphenBreakStyled()`, `findSoftHyphenBreakStyled()` - internal line-breaking
+  - Moved related tests to document.zig as inline tests
+
+- **Refactored text_flow integration test**:
+  - Uses `writeStyled()` with alignment instead of manual width calculation
+  - Updated Python reference generator to use `cell()` with alignment
+
+- **Performance benchmark (bench_write.zig)**:
+  - writeStyled() is 1.2-1.8x faster than write() for rendering
+  - write() is 4.8x faster for measure_only
+  - TODO: Investigate write() slowness
 
 ## What We Did (Session 2026-01-25 #3)
 - **Added per-page size/margins and page navigation API**:
