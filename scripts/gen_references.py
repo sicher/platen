@@ -195,6 +195,24 @@ def gen_multi_page():
     print("  multi_page.pdf")
 
 
+def gen_insert_page():
+    """Reference for insertPage test - same output as multi_page, tests zpdf's insertPage."""
+    pdf = make_pdf()
+
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=24)
+    pdf.text(50, 50, "Page 1")
+
+    pdf.add_page()
+    pdf.text(50, 50, "Page 2")
+
+    pdf.add_page()
+    pdf.text(50, 50, "Page 3")
+
+    pdf.output(OUTPUT_DIR / "insert_page.pdf")
+    print("  insert_page.pdf")
+
+
 def gen_embedded_fonts():
     """PDF with embedded TTF fonts - dense one-pager."""
     pdf = make_pdf()
@@ -2210,6 +2228,7 @@ GENERATORS = {
     "multi_font": gen_multi_font,
     "all_fonts": gen_all_fonts,
     "multi_page": gen_multi_page,
+    "insert_page": gen_insert_page,
     "embedded_fonts": gen_embedded_fonts,
     "cid_fonts": gen_cid_fonts,
     "inter_fonts": gen_inter_fonts,

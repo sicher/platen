@@ -56,6 +56,7 @@ const test_cases = [_]TestCase{
     .{ .name = "auto_height", .generate = generateAutoHeightPdf },
     .{ .name = "styled_text", .generate = generateStyledTextPdf },
     .{ .name = "kerning", .generate = generateKerningPdf },
+    .{ .name = "insert_page", .generate = generateInsertPagePdf },
 };
 
 // ============================================================================
@@ -2608,6 +2609,26 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateInsertPagePdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 };
+
+    // Build pages in reverse order using insertPage(0)
+    // This tests that insertPage correctly shifts existing pages
+    try doc.insertPage(0, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 3", style);
+
+    try doc.insertPage(0, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style);
+
+    try doc.insertPage(0, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2752,6 +2773,12 @@ test "integration: valign PDF" {
 test "integration: kerning PDF" {
     // Tests kerning with Charter font - extensive kerning pair coverage
     try runIntegrationTest("kerning", generateKerningPdf);
+}
+
+test "integration: insert_page PDF" {
+    // Tests insertPage by building pages in reverse order
+    // Reference is generated the normal way with addPage()
+    try runIntegrationTest("insert_page", generateInsertPagePdf);
 }
 
 const TestOptions = struct {
