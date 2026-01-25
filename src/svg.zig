@@ -1197,46 +1197,11 @@ fn renderEllipse(svg: *Svg, writer: *ContentWriter, ellipse: anytype) !void {
     try applyTransform(writer, ellipse.transform);
     try applyStyle(svg, writer, ellipse.style);
 
-    // Approximate ellipse with 4 bezier curves
-    const cx = ellipse.cx;
-    const cy = ellipse.cy;
-    const rx = ellipse.rx;
-    const ry = ellipse.ry;
-    const kx = rx * graphics.KAPPA;
-    const ky = ry * graphics.KAPPA;
+    // Use shared ellipse path generator
+    var buf: [512]u8 = undefined;
+    const len = graphics.writeEllipsePath(&buf, ellipse.cx, ellipse.cy, ellipse.rx, ellipse.ry);
+    try writer.append(buf[0..len]);
 
-    // Start at right
-    try writer.print("{d:.2} {d:.2} m\n", .{ cx + rx, cy });
-
-    // Right to bottom
-    try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx + rx, cy + ky,
-        cx + kx, cy + ry,
-        cx,      cy + ry,
-    });
-
-    // Bottom to left
-    try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx - kx, cy + ry,
-        cx - rx, cy + ky,
-        cx - rx, cy,
-    });
-
-    // Left to top
-    try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx - rx, cy - ky,
-        cx - kx, cy - ry,
-        cx,      cy - ry,
-    });
-
-    // Top to right
-    try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-        cx + kx, cy - ry,
-        cx + rx, cy - ky,
-        cx + rx, cy,
-    });
-
-    try writer.append("h\n");
     try finishPath(writer, ellipse.style);
     try restoreTransform(writer, ellipse.transform);
 }

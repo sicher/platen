@@ -134,6 +134,9 @@ pub fn writeEllipsePath(buf: []u8, cx: f64, cy: f64, rx: f64, ry: f64) usize {
         cx + rx, cy,
     }) catch unreachable).len;
 
+    // Close path
+    len += (std.fmt.bufPrint(buf[len..], "h\n", .{}) catch unreachable).len;
+
     return len;
 }
 
@@ -261,6 +264,8 @@ test "writeEllipsePath" {
         }
     }
     try testing.expectEqual(@as(usize, 4), count);
+    // Should close path
+    try testing.expect(std.mem.indexOf(u8, output, "h\n") != null);
 }
 
 test "writeRoundedRectPath" {
