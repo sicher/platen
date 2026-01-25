@@ -819,33 +819,24 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     const region_width = 595.28 - 72 - 72;
     const line_height: f64 = 14.4;
 
-    // Left aligned (default) - use writeStyled with region for consistency
+    // Left aligned (default)
     {
-        var st = zpdf.StyledText.init(allocator);
-        defer st.deinit();
-        try st.append("Left aligned line (default)", .{});
         var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
-        _ = try doc.writeStyled(&line_region, &st, body_12, .{ .alignment = .left });
+        _ = try doc.writeLine(&line_region, "Left aligned line (default)", body_12, .{ .alignment = .left });
     }
     y += line_height;
 
-    // Center aligned - use writeStyled with alignment
+    // Center aligned
     {
-        var st = zpdf.StyledText.init(allocator);
-        defer st.deinit();
-        try st.append("Center aligned line", .{});
         var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
-        _ = try doc.writeStyled(&line_region, &st, body_12, .{ .alignment = .center });
+        _ = try doc.writeLine(&line_region, "Center aligned line", body_12, .{ .alignment = .center });
     }
     y += line_height;
 
-    // Right aligned - use writeStyled with alignment
+    // Right aligned
     {
-        var st = zpdf.StyledText.init(allocator);
-        defer st.deinit();
-        try st.append("Right aligned line", .{});
         var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
-        _ = try doc.writeStyled(&line_region, &st, body_12, .{ .alignment = .right });
+        _ = try doc.writeLine(&line_region, "Right aligned line", body_12, .{ .alignment = .right });
     }
     y += line_height;
 
@@ -981,12 +972,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         "Justified text creates clean edges on both sides of a text block, which many " ++
         "readers find visually appealing. However, it can create uneven spacing between " ++
         "words, especially in narrow columns. The last line is typically left-aligned.";
-    {
-        var st = doc.createStyledText();
-        defer st.deinit();
-        try st.append(text1, .{});
-        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
-    }
+    _ = try doc.writeLine(&region, text1, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 16;
 
     // Test 2: Narrow column justified (more lines)
@@ -998,12 +984,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
         "Each line must stretch to fill the available width, which can create " ++
         "noticeable gaps between words. Good typography balances readability with " ++
         "visual appeal. The spacing should be even across the paragraph.";
-    {
-        var st = doc.createStyledText();
-        defer st.deinit();
-        try st.append(text2, .{});
-        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
-    }
+    _ = try doc.writeLine(&region, text2, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 16;
 
     // Test 3: Compare left vs justify with same long text
@@ -1015,24 +996,14 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 14.4;
 
     region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-    {
-        var st = doc.createStyledText();
-        defer st.deinit();
-        try st.append(compare_text, .{});
-        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .left, .break_on_hyphens = false });
-    }
+    _ = try doc.writeLine(&region, compare_text, body_11, .{ .alignment = .left, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Justified:", header_11);
     y += 14.4;
 
     region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-    {
-        var st = doc.createStyledText();
-        defer st.deinit();
-        try st.append(compare_text, .{});
-        _ = try doc.writeStyled(&region, &st, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
-    }
+    _ = try doc.writeLine(&region, compare_text, body_11, .{ .alignment = .justify, .break_on_hyphens = false });
 
     return doc.output();
 }
