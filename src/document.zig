@@ -4448,3 +4448,113 @@ test "font family text rendering uses correct variant" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/E3 ") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/E4 ") != null);
 }
+
+test "loadFontFromMemory loads font from buffer" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Read font file into memory
+    const file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Regular.ttf", .{});
+    defer file.close();
+    const font_data = try file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    defer std.testing.allocator.free(font_data);
+
+    // Load from memory
+    const font = try doc.loadFontFromMemory(font_data, null);
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = font, .size = 12 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Text from memory-loaded font", style);
+
+    // Generate PDF and verify it contains embedded font
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+}
+
+test "loadFontFamilyFromMemory loads family from buffers" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Read font files into memory
+    const regular_file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Regular.ttf", .{});
+    defer regular_file.close();
+    const regular_data = try regular_file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    defer std.testing.allocator.free(regular_data);
+
+    const bold_file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Bold.ttf", .{});
+    defer bold_file.close();
+    const bold_data = try bold_file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    defer std.testing.allocator.free(bold_data);
+
+    // Load family from memory
+    const font = try doc.loadFontFamilyFromMemory(.{
+        .regular = regular_data,
+        .bold = bold_data,
+    });
+
+    // Verify resolution works
+    const fam = font.embedded_family;
+    const regular = try fam.resolve(false, false);
+    const bold = try fam.resolve(true, false);
+    try std.testing.expect(bold != regular);
+
+    // Verify missing variant returns error
+    try std.testing.expectError(error.FontVariantNotLoaded, fam.resolve(false, true));
+
+    // Verify rendering works
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", .{ .font = font, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", .{ .font = font, .size = 12, .bold = true });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E2 ") != null);
+}
+
+test "loadImageFromMemory loads image from buffer" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Read image file into memory
+    const file = try std.fs.cwd().openFile("test/images/robot.png", .{});
+    defer file.close();
+    const image_data = try file.readToEndAlloc(std.testing.allocator, 5 * 1024 * 1024);
+    defer std.testing.allocator.free(image_data);
+
+    // Load from memory
+    const image = try doc.loadImageFromMemory(image_data);
+
+    try doc.addPage(.{});
+    try doc.drawImage(image, 50, 50, 100, 0);
+
+    // Generate PDF and verify it contains image
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Image") != null);
+}
+
+test "loadSvgFromMemory loads SVG from buffer" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // SVG content in memory
+    const svg_data =
+        \\<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        \\  <rect x="10" y="10" width="80" height="80" fill="red"/>
+        \\</svg>
+    ;
+
+    // Load from memory
+    const loaded_svg = try doc.loadSvgFromMemory(svg_data);
+
+    try doc.addPage(.{});
+    try doc.drawSvg(loaded_svg, 50, 50, 100, 100);
+
+    // Generate PDF and verify it contains the SVG content
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    // SVG is rendered as Form XObject
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Form") != null);
+}
