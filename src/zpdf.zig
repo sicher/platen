@@ -22,6 +22,7 @@ pub const svg = @import("svg.zig");
 pub const xml = @import("xml.zig");
 pub const testing = @import("testing.zig");
 pub const integration_tests = @import("integration_tests.zig");
+pub const pdf_output = @import("pdf_output.zig");
 
 // Re-export Document as the primary type
 pub const Document = document.Document;

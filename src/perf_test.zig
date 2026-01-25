@@ -404,7 +404,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
         // Print output timing breakdown
         if (!config.quiet) {
-            const ot = zpdf.Document.last_output_timing;
+            const ot = zpdf.pdf_output.last_output_timing;
             std.debug.print("    - Subset generation: {d}ms\n", .{ot.subset_ms});
             std.debug.print("    - Page rendering:    {d}ms\n", .{ot.render_ms});
             std.debug.print("    - Font writing:      {d}ms\n", .{ot.font_write_ms});
