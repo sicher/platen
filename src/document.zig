@@ -1393,32 +1393,9 @@ pub const Document = struct {
     // Graphics Primitives
     // ========================================================================
 
-    /// Write graphics state operators for stroke-only operations (e.g., lines).
-    fn writeStrokeStyle(_: *const Document, buf: []u8, style: StrokeStyle) usize {
-        return graphics.writeShapeGraphicsState(.{ .stroke = style }, buf);
-    }
-
-    /// Begin a shape command: save graphics state and apply style.
-    /// Returns the number of bytes written.
-    fn beginShapeCommand(buf: []u8, style: ShapeStyle) usize {
-        var len: usize = 0;
-        @memcpy(buf[len..][0..2], "q\n");
-        len += 2;
-        len += graphics.writeShapeGraphicsState(style, buf[len..]);
-        return len;
-    }
-
-    /// Finish a shape command: add path operator and restore graphics state.
-    /// Returns the number of bytes written.
-    fn finishShapeCommand(buf: []u8, style: ShapeStyle) usize {
-        var len: usize = 0;
-        const op = graphics.getShapePathOperator(style);
-        @memcpy(buf[len..][0..op.len], op);
-        len += op.len;
-        @memcpy(buf[len..][0..2], "Q\n");
-        len += 2;
-        return len;
-    }
+    // Shape command helpers are in graphics.zig
+    const beginShapeCommand = graphics.beginShapeCommand;
+    const finishShapeCommand = graphics.finishShapeCommand;
 
     /// Draw a line between two points.
     /// Coordinates are from top-left origin.
@@ -1439,7 +1416,7 @@ pub const Document = struct {
         len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
 
         // Write stroke style
-        len += self.writeStrokeStyle(buf[len..], style);
+        len += graphics.writeShapeGraphicsState(.{ .stroke = style }, buf[len..]);
 
         // Move to start, line to end, stroke
         len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} m {d:.2} {d:.2} l S\n", .{ p1.x, pdf_y1, p2.x, pdf_y2 }) catch unreachable).len;

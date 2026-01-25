@@ -221,6 +221,32 @@ pub fn writePolygonPath(buf: []u8, points: []const Point) usize {
 }
 
 // ============================================================================
+// Shape Command Helpers
+// ============================================================================
+
+/// Begin a shape command: save graphics state and apply style.
+/// Returns the number of bytes written.
+pub fn beginShapeCommand(buf: []u8, style: ShapeStyle) usize {
+    var len: usize = 0;
+    @memcpy(buf[len..][0..2], "q\n");
+    len += 2;
+    len += writeShapeGraphicsState(style, buf[len..]);
+    return len;
+}
+
+/// Finish a shape command: add path operator and restore graphics state.
+/// Returns the number of bytes written.
+pub fn finishShapeCommand(buf: []u8, style: ShapeStyle) usize {
+    var len: usize = 0;
+    const op = getShapePathOperator(style);
+    @memcpy(buf[len..][0..op.len], op);
+    len += op.len;
+    @memcpy(buf[len..][0..2], "Q\n");
+    len += 2;
+    return len;
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
