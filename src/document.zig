@@ -67,6 +67,7 @@ pub const PageLabelStyle = layout.PageLabelStyle;
 pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WriteOptions = layout.WriteOptions;
+pub const LineOptions = layout.LineOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const PageSize = layout.PageSize;
 pub const PageOptions = layout.PageOptions;
@@ -1213,20 +1214,6 @@ pub const Document = struct {
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
     pub fn write(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: WriteOptions) !WriteResult {
-        // For non-left alignment, delegate to writeStyled which handles line-based alignment
-        if (opts.alignment != .left) {
-            var st = StyledText.init(self.allocator);
-            defer st.deinit();
-            try st.append(str, .{});
-            return self.writeStyled(region, &st, style, .{
-                .measure_only = opts.measure_only,
-                .alignment = opts.alignment,
-                .valign = opts.valign,
-                .break_on_hyphens = opts.break_on_hyphens,
-                .line_height = opts.line_height,
-            });
-        }
-
         const line_height = style.size * opts.line_height;
         const font_metrics = self.getFontMetricsStyled(style);
         const ascender = font_metrics.ascender;
@@ -1438,6 +1425,22 @@ pub const Document = struct {
                 .height = if (final_lines > 0) @as(f64, @floatFromInt(final_lines)) * line_height else 0,
             },
         };
+    }
+
+    /// Write a block of text with alignment support.
+    /// Unlike write(), this is block-based: cursor moves to start of next line after.
+    /// Use this for table cells, headers, or any text that needs alignment.
+    pub fn writeLine(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: LineOptions) !WriteResult {
+        var st = StyledText.init(self.allocator);
+        defer st.deinit();
+        try st.append(str, .{});
+        return self.writeStyled(region, &st, style, .{
+            .measure_only = opts.measure_only,
+            .alignment = opts.alignment,
+            .valign = opts.valign,
+            .break_on_hyphens = opts.break_on_hyphens,
+            .line_height = opts.line_height,
+        });
     }
 
     /// Find a soft-hyphen break point in a word that fits within max_width.

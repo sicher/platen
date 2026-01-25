@@ -244,13 +244,25 @@ pub const WriteOptions = struct {
     /// If true, wrap text to next line when it doesn't fit.
     /// If false, text stays on one line.
     wrap: bool = true,
-    /// Horizontal text alignment.
-    alignment: Align = .left,
     /// Vertical text alignment within line height.
     valign: VAlign = .top,
     /// Allow breaking after regular hyphens in compound words (e.g., "state-of-the-art").
     break_on_hyphens: bool = true,
     /// Line height multiplier (1.2 = default, 1.0 = single spacing, 1.5 = 150%, etc.).
+    line_height: f64 = 1.2,
+};
+
+/// Options for writeLine (block-based text with alignment).
+pub const LineOptions = struct {
+    /// If true, only measure text without rendering.
+    measure_only: bool = false,
+    /// Horizontal text alignment.
+    alignment: Align = .left,
+    /// Vertical text alignment within line height.
+    valign: VAlign = .top,
+    /// Allow breaking after regular hyphens in compound words.
+    break_on_hyphens: bool = true,
+    /// Line height multiplier.
     line_height: f64 = 1.2,
 };
 

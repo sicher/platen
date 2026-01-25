@@ -28,6 +28,12 @@ API cleanup **COMPLETED**. All API is now explicit with per-page options.
   - write() is 4.8x faster for measure_only
   - TODO: Investigate write() slowness
 
+- **Added writeLine() for block-based text with alignment**:
+  - Clear separation: `write()` = incremental (cursor_x advances), `writeLine()` = block-based (cursor to next line)
+  - `writeLine()` supports alignment (left, center, right, justify)
+  - Added `LineOptions` struct with alignment, valign, line_height, break_on_hyphens
+  - Use case: table cells, headers, any text that needs alignment
+
 ## What We Did (Session 2026-01-25 #3)
 - **Added per-page size/margins and page navigation API**:
   - New `PageOptions` struct with `size` and `margins` fields

@@ -69,6 +69,7 @@ pub const PageLabelStyle = document.PageLabelStyle;
 pub const PageLabel = document.PageLabel;
 pub const WriteResult = document.WriteResult;
 pub const WriteOptions = document.WriteOptions;
+pub const LineOptions = document.LineOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
 pub const PageSize = document.PageSize;
 pub const PageOptions = document.PageOptions;
