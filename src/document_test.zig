@@ -198,23 +198,6 @@ test "font styles" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/BaseFont /Helvetica-BoldOblique") != null);
 }
 
-test "positioning setPosition/getPosition" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.addPage();
-
-    doc.setPosition(.{ .x = 100, .y = 200 });
-    const pos = doc.getPosition();
-    try std.testing.expectApproxEqAbs(@as(f64, 100), pos.x, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f64, 200), pos.y, 0.01);
-
-    doc.setPosition(.{ .x = 150, .y = 300 });
-    const pos2 = doc.getPosition();
-    try std.testing.expectApproxEqAbs(@as(f64, 150), pos2.x, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f64, 300), pos2.y, 0.01);
-}
-
 test "multiple pages" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
@@ -326,19 +309,6 @@ test "Document measureText with spacing" {
 
     // Base ~27.336 + 4 * 2.0 = 35.336
     try std.testing.expectApproxEqAbs(@as(f64, 35.336), m.width, 0.01);
-}
-
-test "Document line height" {
-    var doc = Document.init(std.testing.allocator);
-    defer doc.deinit();
-
-    try doc.setFont(.helvetica, 12);
-
-    // Default line height is 1.2
-    try std.testing.expectApproxEqAbs(@as(f64, 14.4), doc.getLineHeightPts(), 0.01);
-
-    doc.setLineHeight(1.5);
-    try std.testing.expectApproxEqAbs(@as(f64, 18.0), doc.getLineHeightPts(), 0.01);
 }
 
 // ============================================================================

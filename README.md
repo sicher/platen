@@ -389,8 +389,8 @@ const rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Click here for Zig document
 try doc.addExternalLink(rect, "https://ziglang.org/documentation/");
 
 // Internal links for TOC navigation
-_ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduction", heading);
-const chapter1_dest = doc.currentDestination();  // save this location
+const ch1_result = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduction", heading);
+const chapter1_dest = doc.destination(ch1_result.y).?;  // save this location
 
 // Later, create a link to that chapter
 try doc.addPage(null);
@@ -472,7 +472,7 @@ try st.append("red", .{ .color = zpdf.Color.red });
 
 | Method | Description |
 |--------|-------------|
-| `currentDestination() -> ?Destination` | Get destination for current position |
+| `destination(y) -> ?Destination` | Get destination at y position on current page |
 | `addLink(Rect, Destination)` | Add internal link (jumps to page/position) |
 | `addExternalLink(Rect, url)` | Add external link (opens URL) |
 | `addOutlineItem(title, Destination, ?parent) -> *Outline` | Add to table of contents |

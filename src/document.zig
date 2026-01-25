@@ -431,20 +431,6 @@ pub const Document = struct {
     page_size: PageSize,
     /// Document margins.
     margins: Margins = .{},
-    // Text state
-    current_font: ?StandardFont = null,
-    current_embedded: ?*EmbeddedFont = null,
-    font_size: f64 = 12,
-    x: f64 = 0,
-    y: f64 = 0,
-    /// Extra space between characters (in points). Can be negative.
-    char_spacing: f64 = 0,
-    /// Line height as multiple of font size. Default 1.2 (20% leading).
-    line_height: f64 = 1.2,
-    /// Text color (default black).
-    text_color: Color = Color.black,
-    /// Text decoration (underline, strikethrough).
-    text_decoration: TextDecoration = .none,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
     // Track all embedded fonts
@@ -522,17 +508,6 @@ pub const Document = struct {
     /// Add a new page using the current page size (set via setPageSize, default A4).
     pub fn addPage(self: *Document) !void {
         try self.pages.append(self.allocator, Page.init(self.allocator, self.page_size));
-        // Reset position to top-left
-        self.x = 0;
-        self.y = self.page_size.height;
-    }
-
-    /// Set the current font and size (standard font)
-    pub fn setFont(self: *Document, font: StandardFont, size: f64) !void {
-        self.current_font = font;
-        self.current_embedded = null; // Clear embedded font
-        self.font_size = size;
-        try self.used_fonts.put(self.allocator, font, {});
     }
 
     /// Load a TrueType font from file.
@@ -543,22 +518,6 @@ pub const Document = struct {
         emb.encoding = encoding orelse .identity;
         try self.embedded_fonts.append(self.allocator, emb);
         return Font{ .embedded = emb };
-    }
-
-    /// Set an embedded font as current (deprecated - use TextStyle instead)
-    pub fn setEmbeddedFont(self: *Document, font: Font, size: f64) !void {
-        const emb = switch (font) {
-            .embedded => |e| e,
-            else => return error.NotEmbeddedFont,
-        };
-        self.current_embedded = emb;
-        self.current_font = null; // Clear standard font
-        self.font_size = size;
-        // Ensure font is in our list
-        for (self.embedded_fonts.items) |f| {
-            if (f == emb) return;
-        }
-        try self.embedded_fonts.append(self.allocator, emb);
     }
 
     /// Get index of embedded font (for resource naming)
@@ -715,27 +674,6 @@ pub const Document = struct {
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
     }
 
-    /// Set character spacing (extra space between characters, in points)
-    pub fn setCharSpacing(self: *Document, spacing: f64) void {
-        self.char_spacing = spacing;
-    }
-
-    /// Set line height (as multiple of font size, e.g. 1.2 = 120%)
-    pub fn setLineHeight(self: *Document, height: f64) void {
-        self.line_height = height;
-    }
-
-    /// Set text color.
-    pub fn setTextColor(self: *Document, c: Color) void {
-        self.text_color = c;
-    }
-
-    /// Set text style (color and decoration).
-    pub fn setTextStyle(self: *Document, opts: TextStyleOptions) void {
-        self.text_color = opts.color;
-        self.text_decoration = opts.decoration;
-    }
-
     /// Set document margins.
     pub fn setMargins(self: *Document, m: Margins) void {
         self.margins = m;
@@ -763,112 +701,6 @@ pub const Document = struct {
     pub fn setFontFeature(self: *Document, font: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
         _ = self;
         font.setFeature(feature, enabled);
-    }
-
-    /// Get current line height in points
-    pub fn getLineHeightPts(self: *Document) f64 {
-        return self.font_size * self.line_height;
-    }
-
-    /// Get current font style for measurement (standard fonts only).
-    pub fn getFontStyle(self: *Document) FontStyle {
-        return .{
-            .font = self.current_font orelse .helvetica,
-            .size = self.font_size,
-            .char_spacing = self.char_spacing,
-            .line_height = self.line_height,
-        };
-    }
-
-    /// Get the current text style as a TextStyle struct.
-    /// This can be passed to writeAt() to match the current document font settings.
-    pub fn getCurrentTextStyle(self: *Document) TextStyle {
-        const font: Font = if (self.current_embedded) |emb|
-            Font{ .embedded = emb }
-        else if (self.current_font) |std_font|
-            switch (std_font) {
-                .helvetica, .helvetica_bold, .helvetica_oblique, .helvetica_bold_oblique => Font.helvetica,
-                .times_roman, .times_bold, .times_italic, .times_bold_italic => Font.times,
-                .courier, .courier_bold, .courier_oblique, .courier_bold_oblique => Font.courier,
-                .symbol => Font.symbol,
-                .zapf_dingbats => Font.zapf_dingbats,
-            }
-        else
-            Font.helvetica;
-
-        const bold = if (self.current_font) |std_font|
-            switch (std_font) {
-                .helvetica_bold, .helvetica_bold_oblique, .times_bold, .times_bold_italic, .courier_bold, .courier_bold_oblique => true,
-                else => false,
-            }
-        else
-            false;
-
-        const italic = if (self.current_font) |std_font|
-            switch (std_font) {
-                .helvetica_oblique, .helvetica_bold_oblique, .times_italic, .times_bold_italic, .courier_oblique, .courier_bold_oblique => true,
-                else => false,
-            }
-        else
-            false;
-
-        return .{
-            .font = font,
-            .size = self.font_size,
-            .bold = bold,
-            .italic = italic,
-            .color = self.text_color,
-            .decoration = self.text_decoration,
-            .char_spacing = self.char_spacing,
-        };
-    }
-
-    /// Get font metrics for the current font, scaled to the current font size.
-    /// Returns metrics in points at the current font size.
-    pub fn getFontMetrics(self: *Document) FontMetrics {
-        const size = self.font_size;
-
-        if (self.current_embedded) |emb| {
-            // Embedded font: use actual metrics from the font
-            // Metrics are stored in 1000 units, scale to points
-            const scale = size / 1000.0;
-            return .{
-                .ascender = @as(f64, @floatFromInt(emb.ascent)) * scale,
-                .descender = @as(f64, @floatFromInt(emb.descent)) * scale,
-                .cap_height = @as(f64, @floatFromInt(emb.cap_height)) * scale,
-                // x_height estimated as 70% of cap_height if not available
-                .x_height = @as(f64, @floatFromInt(emb.cap_height)) * scale * 0.7,
-                .y_max = @as(f64, @floatFromInt(emb.bbox[3])) * scale,
-                .font_size = size,
-                .units_per_em = emb.font.head.?.units_per_em,
-            };
-        } else if (self.current_font) |font| {
-            // Standard font: use predefined metrics (ascender = y_max for these)
-            const m = metrics.getStandardFontMetrics(font);
-            const scale = size / 1000.0;
-            return .{
-                .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
-                .descender = @as(f64, @floatFromInt(m.descender)) * scale,
-                .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
-                .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
-                .y_max = @as(f64, @floatFromInt(m.ascender)) * scale,
-                .font_size = size,
-                .units_per_em = 1000, // Standard fonts use 1000 units per em
-            };
-        } else {
-            // No font set, return Helvetica defaults
-            const m = metrics.getStandardFontMetrics(.helvetica);
-            const scale = size / 1000.0;
-            return .{
-                .ascender = @as(f64, @floatFromInt(m.ascender)) * scale,
-                .descender = @as(f64, @floatFromInt(m.descender)) * scale,
-                .cap_height = @as(f64, @floatFromInt(m.cap_height)) * scale,
-                .x_height = @as(f64, @floatFromInt(m.x_height)) * scale,
-                .y_max = @as(f64, @floatFromInt(m.ascender)) * scale,
-                .font_size = size,
-                .units_per_em = 1000,
-            };
-        }
     }
 
     /// Get font metrics for a specific TextStyle.
@@ -904,11 +736,6 @@ pub const Document = struct {
         }
     }
 
-    /// Measure text dimensions without rendering
-    pub fn measureText(self: *Document, text_str: []const u8) TextMetrics {
-        return metrics.measureText(text_str, self.getFontStyle());
-    }
-
     /// Measure text dimensions with explicit style (without rendering).
     pub fn measureStyled(self: *Document, text_str: []const u8, style: TextStyle) TextMetrics {
         _ = self;
@@ -921,33 +748,18 @@ pub const Document = struct {
         return metrics.measureText(text_str, font_style);
     }
 
-    /// Set cursor position (in points from top-left).
-    pub fn setPosition(self: *Document, pos: Point) void {
-        self.x = pos.x;
-        self.y = self.page_size.height - pos.y;
-    }
-
-    /// Get cursor position (in points from top-left).
-    pub fn getPosition(self: *Document) Point {
-        return .{
-            .x = self.x,
-            .y = self.page_size.height - self.y,
-        };
-    }
-
     /// Get current page number (1-based).
     /// Returns 0 if no pages have been added.
     pub fn pageNo(self: *Document) usize {
         return self.pages.items.len;
     }
 
-    /// Get a destination for the current cursor position.
+    /// Get a destination for a y position on the current page.
     /// Used as target for internal links (e.g., TOC entries).
     /// Returns null if no pages have been added.
-    pub fn currentDestination(self: *const Document) ?Destination {
+    pub fn destination(self: *const Document, y: f64) ?Destination {
         if (self.pages.items.len == 0) return null;
-        // Convert from internal PDF coords (bottom-up) to user coords (top-down)
-        return .{ .page_index = self.pages.items.len - 1, .y = self.page_size.height - self.y };
+        return .{ .page_index = self.pages.items.len - 1, .y = y };
     }
 
     /// Add an internal link (clickable area that jumps to another page position).
@@ -1368,38 +1180,6 @@ pub const Document = struct {
             }
         }
         return measureTextStyled(buf[0..j], style);
-    }
-
-    /// Measures text width using current font (standard or embedded).
-    /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
-    pub fn getTextWidth(self: *Document, str: []const u8) f64 {
-        // Fast path: no soft-hyphens
-        if (!containsSoftHyphens(str)) {
-            if (self.current_embedded) |emb| {
-                return emb.measureTextWidth(str, self.font_size);
-            }
-            return metrics.measureTextWidth(str, self.getFontStyle());
-        }
-
-        // Slow path: filter out soft-hyphens using stack buffer
-        var buf: [4096]u8 = undefined;
-        var j: usize = 0;
-        var i: usize = 0;
-        while (i < str.len and j < buf.len) {
-            if (i + 1 < str.len and str[i] == 0xC2 and str[i + 1] == 0xAD) {
-                i += 2; // Skip soft-hyphen
-            } else {
-                buf[j] = str[i];
-                j += 1;
-                i += 1;
-            }
-        }
-        const filtered = buf[0..j];
-
-        if (self.current_embedded) |emb| {
-            return emb.measureTextWidth(filtered, self.font_size);
-        }
-        return metrics.measureTextWidth(filtered, self.getFontStyle());
     }
 
     /// Writes flowing text into a region with word wrapping.

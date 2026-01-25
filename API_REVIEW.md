@@ -73,9 +73,7 @@ _ = try doc.write(&region, text, style, .{});
 
 | Method | Returns | Use Case |
 |--------|---------|----------|
-| `getFontMetrics()` | `FontMetrics` | Get detailed font metrics (ascender, descender, cap height, x-height) scaled to current font size. |
-| `getFontStyle()` | `FontStyle` | Get current font info for external measurement (used internally by measureText). |
-| `getLineHeightPts()` | `f64` | Get computed line height in points (font_size × line_height_multiplier). |
+| `getFontMetricsStyled(style)` | `FontMetrics` | Get detailed font metrics (ascender, descender, cap height, x-height) scaled to the specified style's font size. |
 
 **FontMetrics:**
 ```zig
@@ -223,7 +221,8 @@ The following stateful methods have been removed in favor of explicit `TextStyle
 9. ✅ **Removed `getTextWidth()`** - use `getTextWidthStyled(str, style)` instead
 10. ✅ **Removed `measureText()`** - use `write(..., .{ .measure_only = true })` instead
 11. ✅ **Removed `setPosition()`/`getPosition()`** - use explicit coordinates with `writeAt()`
-12. ✅ **Removed `current_font`, `font_size`, `text_color`, etc.** - all state is now explicit
+12. ✅ **Removed `currentDestination()`** - use `destination(y)` with explicit y position
+13. ✅ **Removed `current_font`, `font_size`, `text_color`, etc.** - all state is now explicit
 
 **New usage pattern:**
 ```zig
@@ -272,10 +271,10 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 
 ### Inconsistent Prefixes
 Some methods use `get`/`set` prefix, others don't:
-- `pageNo()` vs `getPosition()`
-- `currentDestination()` vs `getPageRegion()`
+- `pageNo()` vs `getPageRegion()`
+- `destination(y)` vs explicit coordinate methods
 
-**Recommendation**: Standardize on `get`/`set` prefix for all state access.
+**Note**: With the removal of stateful methods (`getPosition()`, `currentDestination()`), this is less of an issue.
 
 ## 3. Missing Convenience Methods
 

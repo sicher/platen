@@ -694,106 +694,104 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
     const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
     inter_bold.embedded.setFeature(.kern, false);
 
+    // Define styles
+    const satoshi_bold_20 = zpdf.TextStyle{ .font = satoshi_bold, .size = 20 };
+    const satoshi_7 = zpdf.TextStyle{ .font = satoshi, .size = 7 };
+    const satoshi_bold_11 = zpdf.TextStyle{ .font = satoshi_bold, .size = 11 };
+    const satoshi_9 = zpdf.TextStyle{ .font = satoshi, .size = 9 };
+    const satoshi_10 = zpdf.TextStyle{ .font = satoshi, .size = 10 };
+    const satoshi_8 = zpdf.TextStyle{ .font = satoshi, .size = 8 };
+    const satoshi_bold_10 = zpdf.TextStyle{ .font = satoshi_bold, .size = 10 };
+    const satoshi_italic_10 = zpdf.TextStyle{ .font = satoshi_italic, .size = 10 };
+    const satoshi_6 = zpdf.TextStyle{ .font = satoshi, .size = 6 };
+    const charter_bold_11 = zpdf.TextStyle{ .font = charter_bold, .size = 11 };
+    const charter_10 = zpdf.TextStyle{ .font = charter, .size = 10 };
+    const inter_bold_11 = zpdf.TextStyle{ .font = inter_bold, .size = 11 };
+    const inter_9 = zpdf.TextStyle{ .font = inter, .size = 9 };
+
     try doc.addPage();
     var y: f64 = 25;
 
     // Title
-    try doc.setEmbeddedFont(satoshi_bold, 20);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "OpenType Features Showcase", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "OpenType Features Showcase", satoshi_bold_20);
     y += 16;
-    try doc.setEmbeddedFont(satoshi, 7);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ligatures (liga), Kerning (kern), Tabular Figures (tnum), and more", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ligatures (liga), Kerning (kern), Tabular Figures (tnum), and more", satoshi_7);
     y += 12;
 
     // === Ligatures Section ===
-    try doc.setEmbeddedFont(satoshi_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Standard Ligatures (liga)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Standard Ligatures (liga)", satoshi_bold_11);
     y += 11;
 
-    try doc.setEmbeddedFont(satoshi, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Satoshi: fi fl ff ffi ffl ligatures enabled", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Satoshi: fi fl ff ffi ffl ligatures enabled", satoshi_9);
     y += 10;
 
     // Words with ligatures - compact layout
-    try doc.setEmbeddedFont(satoshi, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "office efficient waffle difficult affidavit affluent", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "office efficient waffle difficult affidavit affluent", satoshi_10);
     y += 12;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "find five flow flag coffee effect staff differ suffix", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "find five flow flag coffee effect staff differ suffix", satoshi_10);
     y += 12;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "after soft gift lift draft shift swift left craft", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "after soft gift lift draft shift swift left craft", satoshi_10);
     y += 14;
 
     // === Kerning Section ===
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Kerning (kern)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Kerning (kern)", charter_bold_11);
     y += 11;
 
-    try doc.setEmbeddedFont(charter, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AWAY AVATAR To Today We Weather LT AT TA VA WA Yo", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AWAY AVATAR To Today We Weather LT AT TA VA WA Yo", charter_10);
     y += 12;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Typography: proper letter spacing for readability", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Typography: proper letter spacing for readability", charter_10);
     y += 14;
 
     // === Tabular Figures ===
-    try doc.setEmbeddedFont(satoshi_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Tabular vs Proportional Figures (tnum/pnum)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Tabular vs Proportional Figures (tnum/pnum)", satoshi_bold_11);
     y += 11;
 
-    try doc.setEmbeddedFont(satoshi, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Numbers align in columns when using tabular figures:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Numbers align in columns when using tabular figures:", satoshi_9);
     y += 10;
 
-    try doc.setEmbeddedFont(satoshi, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "tnum: 1111  0000  1234", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1,234.56", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "tnum: 1111  0000  1234", satoshi_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1,234.56", satoshi_10);
     y += 11;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "tnum: 9999  1010  5678", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 200, .y = y }, "9,876.54", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "tnum: 9999  1010  5678", satoshi_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "9,876.54", satoshi_10);
     y += 12;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "pnum: 1111  0000  1234", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1,234.56", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "pnum: 1111  0000  1234", satoshi_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1,234.56", satoshi_10);
     y += 11;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "pnum: 9999  1010  5678", doc.getCurrentTextStyle());
-    _ = try doc.writeAt(.{ .x = 200, .y = y }, "9,876.54", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "pnum: 9999  1010  5678", satoshi_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "9,876.54", satoshi_10);
     y += 14;
 
     // === Inter stylistic features ===
-    try doc.setEmbeddedFont(inter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter: Character Variants & Stylistic Sets", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter: Character Variants & Stylistic Sets", inter_bold_11);
     y += 11;
 
-    try doc.setEmbeddedFont(inter, 9);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Default: 0123456789 Il1| agy", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Default: 0123456789 Il1| agy", inter_9);
     y += 10;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "zero feature: 0123456789 (slashed zero)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "zero feature: 0123456789 (slashed zero)", inter_9);
     y += 10;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "tnum+zero: 0123456789 (tabular + slashed)", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "tnum+zero: 0123456789 (tabular + slashed)", inter_9);
     y += 12;
 
     // === Combined features paragraph ===
-    try doc.setEmbeddedFont(satoshi_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Paragraph with Multiple Features:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Paragraph with Multiple Features:", satoshi_bold_11);
     y += 11;
 
-    try doc.setEmbeddedFont(satoshi, 8);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "The efficient office staff finished 5,432 affidavits in 2024. Officials offered", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "The efficient office staff finished 5,432 affidavits in 2024. Officials offered", satoshi_8);
     y += 9;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "to fix afflicted files worth $1,234,567.89. The coffee effect was sufficient after fifty", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "to fix afflicted files worth $1,234,567.89. The coffee effect was sufficient after fifty", satoshi_8);
     y += 9;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "efforts. Different offices refined workflow: Task A=1111, B=2222, C=3333.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "efforts. Different offices refined workflow: Task A=1111, B=2222, C=3333.", satoshi_8);
     y += 12;
 
     // === Bold/Italic with ligatures ===
-    try doc.setEmbeddedFont(satoshi_bold, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styles: Bold: office efficient waffle", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styles: Bold: office efficient waffle", satoshi_bold_10);
     y += 11;
-    try doc.setEmbeddedFont(satoshi_italic, 10);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styles: Italic: office efficient waffle", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styles: Italic: office efficient waffle", satoshi_italic_10);
     y += 12;
 
     // Footer note
-    try doc.setEmbeddedFont(satoshi, 6);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Features: liga=ligatures, kern=kerning, tnum=tabular figures, pnum=proportional figures, zero=slashed zero", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Features: liga=ligatures, kern=kerning, tnum=tabular figures, pnum=proportional figures, zero=slashed zero", satoshi_6);
 
     return doc.output();
 }
@@ -1961,14 +1959,14 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 1: Title (front matter - roman numeral i)
     try doc.addPage();
     try doc.setPageLabel(0, .{ .style = .roman_lower }); // i, ii, ...
-    const title_dest = doc.currentDestination().?;
+    const title_dest = doc.destination(0).?;
     _ = try doc.addOutlineItem("Title Page", title_dest, null);
     _ = try doc.writeAt(.{ .x = 200, .y = 300 }, "My Document", title_24);
     _ = try doc.writeAt(.{ .x = 220, .y = 350 }, "A Sample Book", body_12);
 
     // Page 2: Preface (front matter - roman numeral ii)
     try doc.addPage();
-    const preface_dest = doc.currentDestination().?;
+    const preface_dest = doc.destination(0).?;
     _ = try doc.addOutlineItem("Preface", preface_dest, null);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Preface", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This is the preface of the document.", body_12);
@@ -1976,28 +1974,28 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 3: Chapter 1 (body - decimal 1)
     try doc.addPage();
     try doc.setPageLabel(2, .{ .style = .decimal, .start = 1 }); // 1, 2, 3, ...
-    const ch1_dest = doc.currentDestination().?;
+    const ch1_dest = doc.destination(0).?;
     const ch1 = try doc.addOutlineItem("Chapter 1: Introduction", ch1_dest, null);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 1: Introduction", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Welcome to the introduction chapter.", body_12);
 
     // Page 4: Section 1.1 (body - decimal 2)
     try doc.addPage();
-    const sec11_dest = doc.currentDestination().?;
+    const sec11_dest = doc.destination(0).?;
     _ = try doc.addOutlineItem("Section 1.1: Background", sec11_dest, ch1);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.1: Background", title_14);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Some background information.", body_12);
 
     // Page 5: Section 1.2 (body - decimal 3)
     try doc.addPage();
-    const sec12_dest = doc.currentDestination().?;
+    const sec12_dest = doc.destination(0).?;
     _ = try doc.addOutlineItem("Section 1.2: Overview", sec12_dest, ch1);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Section 1.2: Overview", title_14);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "An overview of the topic.", body_12);
 
     // Page 6: Chapter 2 (body - decimal 4)
     try doc.addPage();
-    const ch2_dest = doc.currentDestination().?;
+    const ch2_dest = doc.destination(0).?;
     _ = try doc.addOutlineItem("Chapter 2: Details", ch2_dest, null);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Chapter 2: Details", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "This chapter contains detailed information.", body_12);
@@ -2005,7 +2003,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
     // Page 7: Appendix A (appendix - A-1)
     try doc.addPage();
     try doc.setPageLabel(6, .{ .style = .alpha_upper, .prefix = "A-", .start = 1 }); // A-1, A-2, ...
-    const app_dest = doc.currentDestination().?;
+    const app_dest = doc.destination(0).?;
     _ = try doc.addOutlineItem("Appendix A: References", app_dest, null);
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Appendix A: References", title_18);
     _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "List of references.", body_12);
@@ -2505,119 +2503,112 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
     const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", null);
     const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf", null);
 
+    // Define styles
+    const charter_bold_16 = zpdf.TextStyle{ .font = charter_bold, .size = 16 };
+    const charter_bold_11 = zpdf.TextStyle{ .font = charter_bold, .size = 11 };
+    const charter_bold_14 = zpdf.TextStyle{ .font = charter_bold, .size = 14 };
+    const charter_14 = zpdf.TextStyle{ .font = charter, .size = 14 };
+    const charter_12 = zpdf.TextStyle{ .font = charter, .size = 12 };
+    const charter_11 = zpdf.TextStyle{ .font = charter, .size = 11 };
+    const charter_italic_14 = zpdf.TextStyle{ .font = charter_italic, .size = 14 };
+
     // Kerning is enabled by default
     try doc.addPage();
 
     var y: f64 = 30;
 
     // Title
-    try doc.setEmbeddedFont(charter_bold, 16);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Kerning Test", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Kerning Test", charter_bold_16);
     y += 24;
 
     // Section 1: Classic kerning pairs
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Classic Kerning Pairs:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Classic Kerning Pairs:", charter_bold_11);
     y += 14;
 
-    try doc.setEmbeddedFont(charter, 14);
     // AV, AW, AY, AT combinations
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AW AY AT Av Aw Ay At", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AW AY AT Av Aw Ay At", charter_14);
     y += 18;
     // To, Ta, Te, Ti, Tr, Ty, Tu, Tw
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "To Ta Te Ti Tr Ty Tu Tw", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "To Ta Te Ti Tr Ty Tu Tw", charter_14);
     y += 18;
     // VA, Vo, WA, Wa, We, Ya, Yo
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "VA Vo WA Wa We Ya Yo", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "VA Vo WA Wa We Ya Yo", charter_14);
     y += 18;
     // LT, LV, LY, LA, PA
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "LT LV LY LA PA", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "LT LV LY LA PA", charter_14);
     y += 18;
     // Punctuation kerning
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "T. V. W. Y. F. P. r. f.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "T. V. W. Y. F. P. r. f.", charter_14);
     y += 24;
 
     // Section 2: Words with kerning
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Words with Kerning:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Words with Kerning:", charter_bold_11);
     y += 14;
 
-    try doc.setEmbeddedFont(charter, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AVATAR WAVE TYPEWRITER", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AVATAR WAVE TYPEWRITER", charter_14);
     y += 18;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Today Tomorrow Typography", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Today Tomorrow Typography", charter_14);
     y += 18;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Water Weather Welcome", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Water Weather Welcome", charter_14);
     y += 18;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Yellow Yield Youth", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Yellow Yield Youth", charter_14);
     y += 24;
 
     // Section 3: Sentence with many kerning opportunities
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Sentence with Kerning:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Sentence with Kerning:", charter_bold_11);
     y += 14;
 
-    try doc.setEmbeddedFont(charter, 12);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "The AVATAR watched TypeWriter keys Today.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "The AVATAR watched TypeWriter keys Today.", charter_12);
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "We Welcome You To This Typography Test.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "We Welcome You To This Typography Test.", charter_12);
     y += 20;
 
     // Section 4: Comparison - same text at different sizes
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Size Comparison (kerning scales):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Size Comparison (kerning scales):", charter_bold_11);
     y += 14;
 
     const sizes = [_]f64{ 10, 14, 18, 24 };
     for (sizes) |size| {
-        try doc.setEmbeddedFont(charter, size);
-        _ = try doc.writeAt(.{ .x = 50, .y = y }, "AWAY Today", doc.getCurrentTextStyle());
+        const style = zpdf.TextStyle{ .font = charter, .size = size };
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, "AWAY Today", style);
         y += size + 4;
     }
 
     y += 8;
 
     // Section 5: Italic kerning
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic Kerning:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic Kerning:", charter_bold_11);
     y += 14;
 
-    try doc.setEmbeddedFont(charter_italic, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AW To Ta Typography WAVE", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AW To Ta Typography WAVE", charter_italic_14);
     y += 20;
 
     // Section 6: Bold kerning
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold Kerning:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold Kerning:", charter_bold_11);
     y += 14;
 
-    try doc.setEmbeddedFont(charter_bold, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AW To Ta Typography WAVE", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "AV AW To Ta Typography WAVE", charter_bold_14);
     y += 20;
 
     // Section 7: Numbers and punctuation
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Numbers and Punctuation:", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Numbers and Punctuation:", charter_bold_11);
     y += 14;
 
-    try doc.setEmbeddedFont(charter, 14);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "1. 2. 3. 4. 5. 6. 7. 8. 9. 0.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "1. 2. 3. 4. 5. 6. 7. 8. 9. 0.", charter_14);
     y += 18;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\"Quote\" (Paren) [Bracket]", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\"Quote\" (Paren) [Bracket]", charter_14);
     y += 20;
 
     // Section 8: Long paragraph to show cumulative effect
-    try doc.setEmbeddedFont(charter_bold, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Paragraph (cumulative kerning):", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Paragraph (cumulative kerning):", charter_bold_11);
     y += 14;
 
     // Use writeAt for paragraph lines to match fpdf2's multi_cell positioning
-    try doc.setEmbeddedFont(charter, 11);
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Typography is the art of arranging type to make written", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Typography is the art of arranging type to make written", charter_11);
     y += 11 * 1.2;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "language legible and appealing. WATER flows Today as", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "language legible and appealing. WATER flows Today as", charter_11);
     y += 11 * 1.2;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "WAVES crash Tomorrow. The Yellow sun Yields warmth.", doc.getCurrentTextStyle());
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "WAVES crash Tomorrow. The Yellow sun Yields warmth.", charter_11);
 
     return doc.output();
 }
@@ -2832,19 +2823,19 @@ test "debug: font metrics" {
     defer doc.deinit();
 
     // Built-in font
-    try doc.setFont(.helvetica, 11);
-    const hm = doc.getFontMetrics();
+    const helvetica_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const hm = doc.getFontMetricsStyled(helvetica_style);
     std.debug.print("\nHelvetica 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ hm.ascender, hm.y_max, hm.cap_height });
 
     // Embedded fonts
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    try doc.setEmbeddedFont(inter, 11);
-    const im = doc.getFontMetrics();
+    const inter_style = zpdf.TextStyle{ .font = inter, .size = 11 };
+    const im = doc.getFontMetricsStyled(inter_style);
     std.debug.print("Inter 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ im.ascender, im.y_max, im.cap_height });
 
     const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-    try doc.setEmbeddedFont(gentium, 11);
-    const gm = doc.getFontMetrics();
+    const gentium_style = zpdf.TextStyle{ .font = gentium, .size = 11 };
+    const gm = doc.getFontMetricsStyled(gentium_style);
     std.debug.print("Gentium 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ gm.ascender, gm.y_max, gm.cap_height });
 
     // What y position would .top valign give?

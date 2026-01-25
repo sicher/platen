@@ -1,12 +1,85 @@
 # zpdf Context
 
 ## Current Focus
-Graphics API redesign complete. Documentation updated.
+Stateful text API removal **COMPLETED**. All text API is now explicit.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
-- Consider adding saveState()/restoreState() for transforms and clipping
-- Add `loadFontFromBytes()`, `loadImageFromBytes()`, `loadSvgFromString()`
+- Consider additional cleanup if needed
+
+## What We Did (Session 2026-01-25 #2)
+- **COMPLETED stateful text API removal**:
+  - Removed all stateful fields from Document struct (`current_font`, `current_embedded`, `font_size`, `x`, `y`, `char_spacing`, `line_height`, `text_color`, `text_decoration`)
+  - Removed stateful setters: `setFont`, `setEmbeddedFont`, `setCharSpacing`, `setLineHeight`, `setTextColor`, `setTextStyle`
+  - Removed stateful getters: `getLineHeightPts`, `getFontStyle`, `getCurrentTextStyle`, `getFontMetrics` (stateful version)
+  - Removed: `measureText`, `setPosition`, `getPosition`, `getTextWidth` (stateful version)
+  - Updated `currentDestination()` → `destination(y)` taking explicit y position
+  - Updated `addPage()` to not reset x/y position (no longer tracked)
+
+- **Updated test files**:
+  - Removed stateful API tests from document_test.zig
+  - Updated integration_tests.zig: generateOpenTypeFeaturessPdf, generateKerningPdf, font metrics test
+  - All tests pass
+
+- **Updated documentation**:
+  - README.md: Updated `currentDestination()` example to `destination(y)`, updated API table
+  - API_REVIEW.md: Updated Font Metrics table, added `currentDestination` removal to list
+
+## What We Did (Session 2026-01-25)
+- **Completed cli.zig explicit style migration**:
+  - Removed all 33 `setFont` calls
+  - Removed all `setEmbeddedFont` calls
+  - All functions now use explicit TextStyle constants
+
+- **Completed perf_test.zig explicit style migration**:
+  - Removed 6 redundant `setEmbeddedFont` calls
+  - Added missing base style parameter to `writeStyled` calls
+
+- **Updated document_test.zig**:
+  - Removed 4 redundant `setEmbeddedFont` calls
+  - 1 remaining `setFont` is for testing stateful `getLineHeightPts()` method
+
+- **Partial progress on integration_tests.zig**:
+  - Removed all 17 `setFont` calls
+  - Fully converted: generateCIDFontsPdf, generateInterFontsPdf, generateStyledTextPdf, generateValignPdf
+  - 175 usages remain (mainly in generateGentiumDiacriticsPdf, generateOpenTypeFeaturessPdf)
+
+- **Pattern for conversion**:
+  ```zig
+  // Before:
+  try doc.setEmbeddedFont(font, 12);
+  _ = try doc.writeAt(..., doc.getCurrentTextStyle());
+
+  // After:
+  const style_12 = zpdf.TextStyle{ .font = font, .size = 12 };
+  _ = try doc.writeAt(..., style_12);
+  ```
+
+## What We Did (Session 2026-01-24 #7)
+- **Removed dead/internal stateful text methods**:
+  - `writeStyledGreedyFast` (dead code, never called)
+  - `writeAtCursor`, `writeWithWordSpacing`, `writeAtStateful`, `writeLineInternal`
+  - `countStyledLines` (stateful version, replaced by `countStyledLinesStyled`)
+
+- **Fixed font tracking for explicit style API**:
+  - `writeTextStyled` now properly registers fonts in `doc.used_fonts`
+  - `writeWithWordSpacingStyled` also updated for font tracking
+  - Tests using explicit styles now correctly include fonts in PDF output
+
+- **Added `measureStyled` method**:
+  - New styled version of `measureText` that takes explicit `TextStyle`
+  - Returns `TextMetrics` (width, height, char_count)
+
+- **Started test updates for explicit style API**:
+  - Updated hyphen break tests to use `findHyphenBreakStyled`/`findSoftHyphenBreakStyled`
+  - Updated font metrics tests to use `getFontMetricsStyled`
+  - Updated text width tests to use `getTextWidthStyled`
+  - Removed redundant `setFont` calls where explicit styles are used
+
+- **Remaining work**:
+  - ~50 more tests in document_test.zig still use `setFont`
+  - integration_tests.zig, cli.zig, perf_test.zig need updates
+  - Once tests updated, remove stateful API methods and fields
 
 ## What We Did (Session 2026-01-24 #6)
 - **Updated documentation**:
