@@ -23,6 +23,7 @@ pub const styled_text = @import("styled_text.zig");
 pub const graphics = @import("graphics.zig");
 pub const outlinemod = @import("outline.zig");
 pub const pdf_output = @import("pdf_output.zig");
+pub const pagemod = @import("page.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -153,191 +154,19 @@ pub const FontHandle = union(enum) {
     }
 };
 
-/// Font reference for deferred text commands
-const FontRef = union(enum) {
-    standard: StandardFont,
-    embedded: *EmbeddedFont,
-};
-
-/// Text command parameters for deferred rendering
-const TextCommand = struct {
-    x: f64,
-    y: f64,
-    font_size: f64,
-    char_spacing: f64,
-    word_spacing: f64, // Extra space added between words for justification
-    text_data: []const u8, // Owned copy of text
-    font: FontRef,
-    /// Text color
-    text_color: Color,
-    /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
-    cached_glyphs: ?[]const u16 = null,
-    /// Text width (for decoration drawing)
-    text_width: f64 = 0,
-    /// Draw underline
-    underline: bool = false,
-    /// Draw strikethrough
-    strikethrough: bool = false,
-};
-
-/// Content command for deferred rendering (enables glyph ID remapping)
-const ContentCommand = union(enum) {
-    /// Text command with all rendering parameters
-    text: TextCommand,
-    /// Raw content (for non-text operations that don't need deferred processing)
-    raw: []const u8, // Owned copy
-};
-
 /// Entry in the page labels number tree
 const PageLabelEntry = struct {
     page_index: usize,
     label: PageLabel,
 };
 
-/// Link annotation for internal or external links
-const LinkAnnotation = union(enum) {
-    /// Internal link to page position
-    internal: struct {
-        rect: Rect,
-        dest: Destination,
-    },
-    /// External link to URL
-    external: struct {
-        rect: Rect,
-        url: []const u8, // Owned by page arena
-    },
-};
-
-/// Internal page representation
-const Page = struct {
-    content: std.ArrayListUnmanaged(u8), // Legacy: direct content bytes
-    commands: std.ArrayListUnmanaged(ContentCommand), // Deferred commands
-    used_fonts: std.AutoHashMapUnmanaged(StandardFont, void),
-    used_embedded: std.ArrayListUnmanaged(*EmbeddedFont),
-    used_images: std.ArrayListUnmanaged(*Image),
-    used_svgs: std.ArrayListUnmanaged(*Svg),
-    used_gradients: std.AutoHashMapUnmanaged(usize, void),
-    annotations: std.ArrayListUnmanaged(LinkAnnotation), // Link annotations
-    size: PageSize, // Page dimensions
-    margins: Margins, // Page margins
-
-    // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
-    // All page allocations freed at once in deinit - no individual free() calls
-    arena: std.heap.ArenaAllocator,
-
-    fn init(backing_allocator: std.mem.Allocator, opts: PageOptions) Page {
-        return .{
-            .content = .{},
-            .commands = .{},
-            .used_fonts = .{},
-            .used_embedded = .{},
-            .used_images = .{},
-            .used_svgs = .{},
-            .used_gradients = .{},
-            .annotations = .{},
-            .size = opts.size,
-            .margins = opts.margins,
-            .arena = std.heap.ArenaAllocator.init(backing_allocator),
-        };
-    }
-
-    /// Get the arena allocator for page-local allocations
-    fn pageAllocator(self: *Page) std.mem.Allocator {
-        return self.arena.allocator();
-    }
-
-    fn deinit(self: *Page, backing_allocator: std.mem.Allocator) void {
-        // Arena frees all text_data, cached_glyphs, etc. in one operation
-        self.arena.deinit();
-
-        // These use the backing allocator, not the arena
-        self.commands.deinit(backing_allocator);
-        self.content.deinit(backing_allocator);
-        self.used_fonts.deinit(backing_allocator);
-        self.used_embedded.deinit(backing_allocator);
-        self.used_images.deinit(backing_allocator);
-        self.used_svgs.deinit(backing_allocator);
-        self.used_gradients.deinit(backing_allocator);
-        self.annotations.deinit(backing_allocator);
-    }
-
-    fn markFontUsed(self: *Page, allocator: std.mem.Allocator, font: StandardFont) !void {
-        try self.used_fonts.put(allocator, font, {});
-    }
-
-    fn markEmbeddedUsed(self: *Page, allocator: std.mem.Allocator, font: *EmbeddedFont) !void {
-        // Check if already in list
-        for (self.used_embedded.items) |f| {
-            if (f == font) return;
-        }
-        try self.used_embedded.append(allocator, font);
-    }
-
-    fn markImageUsed(self: *Page, allocator: std.mem.Allocator, image: *Image) !void {
-        // Check if already in list
-        for (self.used_images.items) |img| {
-            if (img == image) return;
-        }
-        try self.used_images.append(allocator, image);
-    }
-
-    fn markSvgUsed(self: *Page, allocator: std.mem.Allocator, s: *Svg) !void {
-        // Check if already in list
-        for (self.used_svgs.items) |existing| {
-            if (existing == s) return;
-        }
-        try self.used_svgs.append(allocator, s);
-    }
-
-    fn writer(self: *Page, allocator: std.mem.Allocator) ContentWriter {
-        return ContentWriter{ .page = self, .allocator = allocator };
-    }
-};
-
-/// Writer for page content stream
-const ContentWriter = struct {
-    page: *Page,
-    allocator: std.mem.Allocator,
-
-    fn append(self: *ContentWriter, data: []const u8) !void {
-        try self.page.content.appendSlice(self.allocator, data);
-    }
-
-    pub fn print(self: *ContentWriter, comptime fmt: []const u8, args: anytype) !void {
-        var buf: [256]u8 = undefined;
-        const slice = std.fmt.bufPrint(&buf, fmt, args) catch {
-            // Buffer too small, allocate
-            const str = try std.fmt.allocPrint(self.allocator, fmt, args);
-            defer self.allocator.free(str);
-            try self.append(str);
-            return;
-        };
-        try self.append(slice);
-    }
-
-    /// Append a string with PDF string escaping (for literal strings)
-    /// Escapes (, ), and \ characters
-    fn appendEscaped(self: *ContentWriter, str: []const u8) !void {
-        for (str) |c| {
-            switch (c) {
-                '\\' => try self.page.content.appendSlice(self.allocator, "\\\\"),
-                '(' => try self.page.content.appendSlice(self.allocator, "\\("),
-                ')' => try self.page.content.appendSlice(self.allocator, "\\)"),
-                else => try self.page.content.append(self.allocator, c),
-            }
-        }
-    }
-
-    /// Return std.io.Writer interface for this ContentWriter
-    fn writer(self: *ContentWriter) std.io.GenericWriter(*ContentWriter, error{OutOfMemory}, writeBytes) {
-        return .{ .context = self };
-    }
-
-    fn writeBytes(self: *ContentWriter, bytes: []const u8) error{OutOfMemory}!usize {
-        self.page.content.appendSlice(self.allocator, bytes) catch return error.OutOfMemory;
-        return bytes.len;
-    }
-};
+// Page types are in page.zig
+const Page = pagemod.Page;
+const ContentWriter = pagemod.ContentWriter;
+const FontRef = pagemod.FontRef;
+const TextCommand = pagemod.TextCommand;
+const ContentCommand = pagemod.ContentCommand;
+const LinkAnnotation = pagemod.LinkAnnotation;
 
 // Resource naming functions are in pdf_output.zig
 const fontResourceName = pdf_output.fontResourceName;
