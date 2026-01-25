@@ -338,25 +338,30 @@ try doc.fillRectGradient(100, 200, 100, 100, radial_idx);
 
 ```zig
 // Available sizes: A3, A4, A5, Letter, Legal, Tabloid
-// Default is A4
+// Default is A4 with 72pt margins
 
-// Set page size for subsequent pages
-doc.setPageSize(zpdf.PageSize.Letter);
+// Add page with defaults (A4, 72pt margins)
+try doc.addPage(.{});
 
-try doc.addPage();  // Letter
-try doc.addPage();  // Letter
+// Add page with specific size
+try doc.addPage(.{ .size = zpdf.PageSize.Letter });
 
-// Change to a different size
-doc.setPageSize(zpdf.PageSize.A4);
-try doc.addPage();  // A4
+// Add page with size and custom margins
+try doc.addPage(.{
+    .size = zpdf.PageSize.A4,
+    .margins = .{ .left = 50, .right = 50, .top = 72, .bottom = 72 },
+});
 
 // Landscape orientation
-doc.setPageSize(zpdf.PageSize.Letter.landscape());
-try doc.addPage();
+try doc.addPage(.{ .size = zpdf.PageSize.Letter.landscape() });
 
 // Custom size
-doc.setPageSize(.{ .width = 500, .height = 700 });
-try doc.addPage();
+try doc.addPage(.{ .size = .{ .width = 500, .height = 700 } });
+
+// Page navigation (for TOC, footers, etc.)
+const total = doc.pageCount();
+doc.selectPage(0);  // go back to first page
+try doc.insertPage(0, .{});  // insert page at beginning
 ```
 
 ### Document Metadata
@@ -412,10 +417,11 @@ try doc.addLink(toc_rect, chapter1_dest);
 
 | Method | Description |
 |--------|-------------|
-| `addPage()` | Add a new page (uses current page size, default A4) |
-| `setPageSize(PageSize)` | Set page size for subsequent pages |
-| `setMargins(Margins)` | Set document margins |
-| `getPageRegion() -> Region` | Get drawable region respecting margins |
+| `addPage(PageOptions)` | Add a new page with size and margins |
+| `insertPage(index, PageOptions)` | Insert page at index (shifts others) |
+| `selectPage(index)` | Select page for subsequent operations |
+| `pageCount() -> usize` | Get total number of pages |
+| `getPageRegion() -> ?Region` | Get drawable region for current page |
 | `pageNo() -> usize` | Get current page number (1-based) |
 | `setMetadata(DocumentMetadata)` | Set title, author, subject, keywords, etc. |
 

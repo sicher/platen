@@ -1,11 +1,32 @@
 # zpdf Context
 
 ## Current Focus
-Stateful text API removal **COMPLETED**. All text API is now explicit.
+Stateful API removal **COMPLETED**. All API is now explicit with per-page options.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
-- Consider additional cleanup if needed
+- Update README.md and API_REVIEW.md for new page API
+
+## What We Did (Session 2026-01-25 #3)
+- **Added per-page size/margins and page navigation API**:
+  - New `PageOptions` struct with `size` and `margins` fields
+  - `addPage(PageOptions)` - add page with explicit size/margins
+  - `insertPage(index, PageOptions)` - insert page at position (for TOC)
+  - `selectPage(index)` - switch current page for content operations
+  - `pageCount()` - get total number of pages
+  - `getPageRegion()` now returns `?Region` using current page's margins
+  - Added `current_page` tracking to Document struct
+
+- **Removed stateful page setters**:
+  - `setPageSize()` - pass size in PageOptions instead
+  - `setMargins()` - pass margins in PageOptions instead
+  - `doc.page_size` field - now per-page in Page struct
+  - `doc.margins` field - now per-page in Page struct
+
+- **Design rationale**: Enables workflows like:
+  - TOC insertion at beginning after content is laid out
+  - "Page X of Y" footers where total is unknown until end
+  - Different margins per page (title page vs content)
 
 ## What We Did (Session 2026-01-25 #2)
 - **COMPLETED stateful text API removal**:

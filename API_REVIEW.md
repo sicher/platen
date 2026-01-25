@@ -223,6 +223,11 @@ The following stateful methods have been removed in favor of explicit `TextStyle
 11. ✅ **Removed `setPosition()`/`getPosition()`** - use explicit coordinates with `writeAt()`
 12. ✅ **Removed `currentDestination()`** - use `destination(y)` with explicit y position
 13. ✅ **Removed `current_font`, `font_size`, `text_color`, etc.** - all state is now explicit
+14. ✅ **Removed `setPageSize()`** - use `addPage(.{ .size = ... })` instead
+15. ✅ **Removed `setMargins()`** - use `addPage(.{ .margins = ... })` instead
+16. ✅ **Added `selectPage(index)`** - switch current page for content operations
+17. ✅ **Added `insertPage(index, opts)`** - insert page at position (for TOC workflows)
+18. ✅ **Added `pageCount()`** - get total number of pages
 
 **New usage pattern:**
 ```zig
@@ -245,8 +250,6 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 
 | Setter | Missing Getter | Notes |
 |--------|----------------|-------|
-| `setMargins(Margins)` | `getMargins()` | Need to read document margins |
-| `setPageSize(PageSize)` | `getPageSize()` | Need to read current page size setting |
 | `setMetadata(DocumentMetadata)` | `getMetadata()` | Need to read document metadata |
 
 **Removed setters** (now use explicit parameters):
@@ -254,8 +257,10 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 - ~~`setTextColor()`~~ - use `TextStyle.color`
 - ~~`setLineHeight()`~~ - use `WriteOptions.line_height`
 - ~~`setDrawStyle()`~~ - use `ShapeStyle` parameter
+- ~~`setPageSize()`~~ - use `addPage(.{ .size = ... })`
+- ~~`setMargins()`~~ - use `addPage(.{ .margins = ... })`
 
-**Recommendation**: Add getters for remaining setters.
+**Recommendation**: Add getter for `setMetadata()`.
 
 ## 2. Naming Inconsistencies
 
