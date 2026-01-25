@@ -344,7 +344,7 @@ Stateful API removal **COMPLETED**. All API is now explicit with per-page option
 - **Simplified cursor API** (5 methods → 2):
   - Removed: `setXY`, `setX`, `setY`, `getX`, `getY`
   - Added: `setPosition(Point)`, `getPosition() -> Point`
-- **Removed redundant `currentPageIndex()`** - users can use `pageNo() - 1`
+- **Page index API**: `getPageIndex()` for 0-based index, `pageCount()` for total
 - **Updated DESIGN.md** with all Region → TextBox, setXY → setPosition changes
 - **Future consideration**: Replace `first_indent` option with general cursor advancement on TextBox
 
@@ -375,11 +375,11 @@ Stateful API removal **COMPLETED**. All API is now explicit with per-page option
 
 ## What We Did (Session 2026-01-21 #56) [COMPLETE]
 - **Implemented quick wins from API gap analysis**:
-  - **pageNo()**: Returns current page count (`pages.items.len`)
+  - **getPageIndex()**: Returns current page index (0-based)
   - **drawRoundedRect()**: Rounded rectangles using Bezier curves (KAPPA constant)
     - Parameters: x, y, width, height, corner_radius, style
     - Handles small radii (clamps to half min dimension)
-- **Added unit tests**: 1 for pageNo(), 3 for rounded rectangles
+- **Added unit tests**: 1 for getPageIndex/pageCount, 3 for rounded rectangles
 - **Updated integration test**: Added rounded rectangles to shapes test
 - **Regenerated fpdf2 reference**: Updated gen_references.py with round_corners=True
 - **Updated documentation**: README (example + API table), API_COMPARISON.md

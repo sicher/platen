@@ -422,7 +422,7 @@ try doc.addLink(toc_rect, chapter1_dest);
 | `selectPage(index)` | Select page for subsequent operations |
 | `pageCount() -> usize` | Get total number of pages |
 | `getPageRegion() -> ?Region` | Get drawable region for current page |
-| `pageNo() -> usize` | Get current page number (1-based) |
+| `getPageIndex() -> usize` | Get current page index (0-based) |
 | `setMetadata(DocumentMetadata)` | Set title, author, subject, keywords, etc. |
 
 ### Fonts

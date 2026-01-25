@@ -272,11 +272,11 @@ Most stateful setters have been removed in favor of explicit parameters. Remaini
 |---------|-------|-----------|
 | `getLineHeightPts()` | Returns computed pts, but `setLineHeight()` takes multiplier | Add `getLineHeight()` for multiplier, keep `getLineHeightPts()` for computed |
 | `fillRectGradient()` | Doesn't match `drawRect()` pattern | `drawRectGradient()` or integrate into `drawRect()` |
-| `pageNo()` | Inconsistent with other getters | `getPageNumber()` or `currentPageNumber()` |
+| ~~`pageNo()`~~ | ~~Inconsistent with other getters~~ | ✅ Renamed to `getPageIndex()` |
 
 ### Inconsistent Prefixes
 Some methods use `get`/`set` prefix, others don't:
-- `pageNo()` vs `getPageRegion()`
+- ~~`pageNo()` vs `getPageRegion()`~~ ✅ Fixed: now `getPageIndex()` vs `getPageRegion()`
 - `destination(y)` vs explicit coordinate methods
 
 **Note**: With the removal of stateful methods (`getPosition()`, `currentDestination()`), this is less of an issue.
@@ -431,8 +431,8 @@ try doc.scale(sx, sy);
 
 ### Medium Priority (Consistency)
 3. Rename `fillRectGradient()` to `drawRectGradient()`
-4. Add `getPageCount()`, `getCurrentPageIndex()`
-5. Standardize getter naming (`pageNo()` → `getPageNumber()`)
+4. ~~Add `getPageCount()`, `getCurrentPageIndex()`~~ ✅ Added `pageCount()`, `getPageIndex()`
+5. ~~Standardize getter naming (`pageNo()` → `getPageNumber()`)~~ ✅ Done: `getPageIndex()`
 
 ### Low Priority (Nice to have)
 6. Add `saveState()` / `restoreState()`

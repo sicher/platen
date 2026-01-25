@@ -768,10 +768,9 @@ pub const Document = struct {
         return metrics.measureText(text_str, font_style);
     }
 
-    /// Get current page number (1-based).
-    /// Returns 0 if no pages have been added.
-    pub fn pageNo(self: *Document) usize {
-        return self.pages.items.len;
+    /// Get current page index (0-based).
+    pub fn getPageIndex(self: *const Document) usize {
+        return self.current_page;
     }
 
     /// Get a destination for a y position on the current page.

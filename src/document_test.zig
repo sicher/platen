@@ -78,24 +78,28 @@ test "page format landscape" {
     try std.testing.expectApproxEqAbs(@as(f64, 595.28), landscape_a4.height, 0.01);
 }
 
-test "pageNo returns current page number" {
+test "getPageIndex and pageCount" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
     // No pages yet
-    try std.testing.expectEqual(@as(usize, 0), doc.pageNo());
+    try std.testing.expectEqual(@as(usize, 0), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 0), doc.getPageIndex());
 
-    // Add first page
+    // Add first page - current is 0
     try doc.addPage(.{});
-    try std.testing.expectEqual(@as(usize, 1), doc.pageNo());
+    try std.testing.expectEqual(@as(usize, 1), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 0), doc.getPageIndex());
 
-    // Add second page
+    // Add second page - current is now 1
     try doc.addPage(.{});
-    try std.testing.expectEqual(@as(usize, 2), doc.pageNo());
+    try std.testing.expectEqual(@as(usize, 2), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 1), doc.getPageIndex());
 
-    // Add third page
-    try doc.addPage(.{});
-    try std.testing.expectEqual(@as(usize, 3), doc.pageNo());
+    // Select first page
+    doc.selectPage(0);
+    try std.testing.expectEqual(@as(usize, 2), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 0), doc.getPageIndex());
 }
 
 test "addPage with PageOptions" {

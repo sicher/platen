@@ -42,7 +42,7 @@ Comprehensive comparison identifying functional gaps between zpdf (Zig) and fpdf
 | Auto page break | `set_auto_page_break()` | — | Not planned (use writeFlow) |
 | Page background | `set_page_background()` | — | Not planned (draw rect first) |
 | Alias for total pages | `alias_nb_pages()` | — | Not planned |
-| Page number | `page_no()` | ✅ `pageNo()` | |
+| Page number | `page_no()` | ✅ `getPageIndex()` | 0-based index |
 | Page labels | `set_page_label()`, `get_page_label()` | ✅ `setPageLabel()` | |
 
 ---

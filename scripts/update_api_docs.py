@@ -20,8 +20,8 @@ EXCLUDE_METHODS = {
 CATEGORY_RULES = [
     # Exact matches first
     (['init', 'deinit', 'output'], 'Core'),
-    (['pageNo', 'addPage', 'setPageSize',
-      'setMetadata', 'setMargins', 'getPageRegion'], 'Document'),
+    (['getPageIndex', 'pageCount', 'addPage', 'insertPage', 'selectPage',
+      'setMetadata', 'getPageRegion'], 'Document'),
     (['loadFont', 'setFont', 'setEmbeddedFont', 'setFeature',
       'setFontFeature', 'getFontMetrics', 'getTextStyle'], 'Fonts'),
     (['write', 'writeStyled', 'writeFlow', 'writeAt',

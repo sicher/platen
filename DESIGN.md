@@ -684,8 +684,8 @@ Exception: Drawing APIs like `writeAt(x, y, text)` keep separate params for conv
 
 ### 3. Eliminate redundant methods
 If two methods differ only by a constant offset, keep one:
-- `pageNo()` returns page count (1, 2, 3...)
-- Removed `currentPageIndex()` since it's just `pageNo() - 1`
+- `getPageIndex()` returns 0-based page index
+- `pageCount()` returns total page count
 
 ### 4. Composable primitives over special options
 Prefer general mechanisms that compose well:
