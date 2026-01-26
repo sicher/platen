@@ -61,6 +61,7 @@ const test_cases = [_]TestCase{
     .{ .name = "gentium_family", .generate = generateGentiumFamilyPdf },
     .{ .name = "pdfa", .generate = generatePdfaPdf, .skip_fonts = true }, // Has additional PDF/A structures
     .{ .name = "pdfa_2b", .generate = generatePdfa2bPdf, .skip_fonts = true }, // PDF/A-2b with transparency
+    .{ .name = "emoji", .generate = generateEmojiPdf },
 };
 
 // ============================================================================
@@ -2906,6 +2907,79 @@ fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Load Noto Emoji in different weights
+    const emoji_regular = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Regular.ttf", null);
+    const emoji_bold = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Bold.ttf", null);
+    const emoji_light = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Light.ttf", null);
+
+    // Load Inter for labels
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter.embedded.setFeature(.kern, false);
+
+    try doc.addPage(.{});
+
+    const title_style = zpdf.TextStyle{ .font = inter, .size = 16 };
+    const label_style = zpdf.TextStyle{ .font = inter, .size = 11 };
+    const emoji_24 = zpdf.TextStyle{ .font = emoji_regular, .size = 24 };
+    const emoji_bold_24 = zpdf.TextStyle{ .font = emoji_bold, .size = 24 };
+    const emoji_light_24 = zpdf.TextStyle{ .font = emoji_light, .size = 24 };
+    const emoji_48 = zpdf.TextStyle{ .font = emoji_regular, .size = 48 };
+
+    var y: f64 = 50;
+
+    // Title
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Emoji Test (Noto Emoji)", title_style);
+    y += 35;
+
+    // Emoticons (U+1F600-1F64F) - these are above BMP (> U+FFFF)
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Emoticons (U+1F600+):", label_style);
+    y += 28;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "😀😁😂😃😄😅😆😇😈😉😊😋😌😍😎😏", emoji_24);
+    y += 35;
+
+    // Misc Symbols and Pictographs (U+1F300-1F5FF)
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Misc Pictographs (U+1F300+):", label_style);
+    y += 28;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "🌀🌈🌍🌙🌟🍀🍎🍕🎁🎉🎨🏠🐱🐶", emoji_24);
+    y += 35;
+
+    // Transport and Map (U+1F680-1F6FF)
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Transport (U+1F680+):", label_style);
+    y += 28;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "🚀🚁🚂🚃🚄🚅🚆🚇🚈🚉🚊🚋🚌🚍", emoji_24);
+    y += 35;
+
+    // Misc Symbols (U+2600-26FF) - in BMP
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Misc Symbols (U+2600+):", label_style);
+    y += 28;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "☀☁☂☃☄☎☮☯☸☹☺♠♣♥♦♨", emoji_24);
+    y += 35;
+
+    // Font weight comparison
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Font Weights:", label_style);
+    y += 28;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Light: ", label_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = y }, "😀🎉🚀", emoji_light_24);
+    y += 30;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular: ", label_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = y }, "😀🎉🚀", emoji_24);
+    y += 30;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: ", label_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = y }, "😀🎉🚀", emoji_bold_24);
+    y += 45;
+
+    // Large emoji
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Large (48pt):", label_style);
+    y += 50;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "🎊🎈🎂🎁🎄", emoji_48);
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -3071,6 +3145,11 @@ test "integration: pdfa PDF" {
 test "integration: pdfa_2b PDF" {
     // Tests PDF/A-2b conformance output with transparency
     try runIntegrationTestWithOptions("pdfa_2b", generatePdfa2bPdf, .{ .skip_fonts = true });
+}
+
+test "integration: emoji PDF" {
+    // Tests emoji rendering with Noto Emoji font (high Unicode codepoints)
+    try runIntegrationTest("emoji", generateEmojiPdf);
 }
 
 const TestOptions = struct {

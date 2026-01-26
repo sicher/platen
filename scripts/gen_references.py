@@ -2516,6 +2516,92 @@ def gen_pdfa_2b():
     print("  pdfa_2b.pdf")
 
 
+def gen_emoji():
+    """PDF with emoji characters using Noto Emoji font."""
+    pdf = make_pdf()
+
+    fonts_dir = Path("test/fonts")
+
+    # Add Noto Emoji fonts
+    emoji_dir = fonts_dir / "Noto Emoji"
+    pdf.add_font("NotoEmoji", "", str(emoji_dir / "NotoEmoji-Regular.ttf"))
+    pdf.add_font("NotoEmoji", "B", str(emoji_dir / "NotoEmoji-Bold.ttf"))
+    pdf.add_font("NotoEmojiLight", "", str(emoji_dir / "NotoEmoji-Light.ttf"))
+
+    # Add Inter for labels
+    inter_dir = fonts_dir / "Inter"
+    pdf.add_font("Inter", "", str(inter_dir / "Inter-Regular.ttf"))
+
+    pdf.add_page()
+    y = 50
+
+    # Title
+    pdf.set_font("Inter", "", size=16)
+    pdf.text(50, y, "Emoji Test (Noto Emoji)")
+    y += 35
+
+    # Emoticons (U+1F600-1F64F) - these are above BMP (> U+FFFF)
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Emoticons (U+1F600+):")
+    y += 28
+    pdf.set_font("NotoEmoji", "", size=24)
+    pdf.text(50, y, "😀😁😂😃😄😅😆😇😈😉😊😋😌😍😎😏")
+    y += 35
+
+    # Misc Symbols and Pictographs (U+1F300-1F5FF)
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Misc Pictographs (U+1F300+):")
+    y += 28
+    pdf.set_font("NotoEmoji", "", size=24)
+    pdf.text(50, y, "🌀🌈🌍🌙🌟🍀🍎🍕🎁🎉🎨🏠🐱🐶")
+    y += 35
+
+    # Transport and Map (U+1F680-1F6FF)
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Transport (U+1F680+):")
+    y += 28
+    pdf.set_font("NotoEmoji", "", size=24)
+    pdf.text(50, y, "🚀🚁🚂🚃🚄🚅🚆🚇🚈🚉🚊🚋🚌🚍")
+    y += 35
+
+    # Misc Symbols (U+2600-26FF) - in BMP
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Misc Symbols (U+2600+):")
+    y += 28
+    pdf.set_font("NotoEmoji", "", size=24)
+    pdf.text(50, y, "☀☁☂☃☄☎☮☯☸☹☺♠♣♥♦♨")
+    y += 35
+
+    # Font weight comparison
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Font Weights:")
+    y += 28
+    pdf.text(50, y, "Light: ")
+    pdf.set_font("NotoEmojiLight", "", size=24)
+    pdf.text(100, y, "😀🎉🚀")
+    y += 30
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Regular: ")
+    pdf.set_font("NotoEmoji", "", size=24)
+    pdf.text(100, y, "😀🎉🚀")
+    y += 30
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Bold: ")
+    pdf.set_font("NotoEmoji", "B", size=24)
+    pdf.text(100, y, "😀🎉🚀")
+    y += 45
+
+    # Large emoji
+    pdf.set_font("Inter", "", size=11)
+    pdf.text(50, y, "Large (48pt):")
+    y += 50
+    pdf.set_font("NotoEmoji", "", size=48)
+    pdf.text(50, y, "🎊🎈🎂🎁🎄")
+
+    pdf.output(OUTPUT_DIR / "emoji.pdf")
+    print("  emoji.pdf")
+
+
 GENERATORS = {
     "gentium_family": gen_gentium_family,
     "kerning": gen_kerning,
@@ -2549,6 +2635,7 @@ GENERATORS = {
     "colors": gen_colors,
     "pdfa": gen_pdfa,
     "pdfa_2b": gen_pdfa_2b,
+    "emoji": gen_emoji,
 }
 
 
