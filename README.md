@@ -73,11 +73,13 @@ Add zpdf as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .zpdf = .{
-        .url = "https://codeberg.org/sicher/zpdf/archive/main.tar.gz",
+        .url = "https://codeberg.org/sicher/zpdf/archive/v1.0.0.tar.gz",
         .hash = "...",
     },
 },
 ```
+
+To use the latest development version, replace `v1.0.0` with `main`.
 
 Then in your `build.zig`:
 
