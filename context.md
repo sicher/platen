@@ -1,10 +1,58 @@
 # zpdf Context
 
 ## Current Focus
-Performance optimization **COMPLETED**.
+Opacity support **COMPLETED**.
 
 ## What's Next
-- Add opacity support to graphics API (via ExtGState)
+- Consider: Text opacity support (non-stroking alpha for text)
+- Consider: Blend modes (Normal, Multiply, Screen, etc.)
+
+## What We Did (Session 2026-01-26 #3)
+- **Added opacity support to graphics API** (`src/layout.zig`, `src/graphics.zig`, `src/document.zig`):
+  - Added `opacity` field to `StrokeStyle` and `FillStyle` (0.0-1.0, default 1.0)
+  - Added `OpacityState` type to `layout.zig` (shared between page and SVG)
+  - Added `getShapeOpacity()` and `writeExtGStateRef()` helpers to `graphics.zig`
+  - Updated `Page` struct with `opacity_states` tracking and deduplication
+  - Updated all draw methods: `drawLine`, `drawRect`, `drawRoundedRect`, `drawEllipse`, `drawCircle`, `drawPolygon`, `drawPath`
+  - Added ExtGState resource building in page output
+
+- **API usage**:
+  ```zig
+  // Fill with 50% opacity
+  try doc.drawRect(rect, .{ .fill = .{ .color = Color.red, .opacity = 0.5 }});
+
+  // Stroke with 70% opacity
+  try doc.drawLine(p1, p2, .{ .color = Color.blue, .opacity = 0.7 });
+
+  // Both fill and stroke opacity
+  try doc.drawRoundedRect(rect, 10, .{
+      .fill = .{ .opacity = 0.6 },
+      .stroke = .{ .opacity = 0.8, .width = 2 },
+  });
+  ```
+
+- **Added tests** (`src/document_test.zig`):
+  - `test "drawRect with fill opacity"` - verifies ExtGState/ca
+  - `test "drawRect with stroke opacity"` - verifies ExtGState/CA
+  - `test "drawRect with both fill and stroke opacity"`
+  - `test "drawRect fully opaque has no ExtGState"` - no overhead for opaque
+  - `test "drawLine with opacity"`
+  - `test "drawEllipse with opacity"`
+  - `test "opacity state deduplication"` - same opacity reuses GS
+
+- **Added CLI command** (`src/cli.zig`):
+  - `zpdf opacity-test [out]` - generates visual test PDF
+
+- **Added integration test** (`src/integration_tests.zig`, `scripts/gen_references.py`):
+  - `gen_opacity()` in Python - generates fpdf2 reference PDF with opacity
+  - `generateOpacityPdf()` in Zig - generates zpdf PDF matching the reference
+  - Tests overlapping transparent shapes, different opacity levels, stroke opacity
+
+- **Fixed off-by-one bug in ExtGState references** (`src/graphics.zig`):
+  - Bug: `writeExtGStateRef()` wrote `/GS0 gs` but resources defined `GS1, GS2, ...`
+  - Resource names are 1-indexed (index 0 → "GS1"), content stream was 0-indexed
+  - Fix: Added `+ 1` to index in `writeExtGStateRef()`
+  - Caught by comparing fpdf2 reference vs zpdf output in integration test
 
 ## What We Did (Session 2026-01-26 #2)
 - **Fixed gentium_family PDF size issue** (`src/ttf_subset.zig`, `src/embedded.zig`):

@@ -20,6 +20,7 @@ pub const Margins = layout.Margins;
 pub const PageOptions = layout.PageOptions;
 pub const Rect = layout.Rect;
 pub const Destination = layout.Destination;
+pub const OpacityState = layout.OpacityState;
 pub const Color = color.Color;
 
 /// Font reference for deferred text commands
@@ -80,6 +81,7 @@ pub const Page = struct {
     used_images: std.ArrayListUnmanaged(*Image),
     used_svgs: std.ArrayListUnmanaged(*Svg),
     used_gradients: std.AutoHashMapUnmanaged(usize, void),
+    opacity_states: std.ArrayListUnmanaged(OpacityState), // ExtGState opacity values
     annotations: std.ArrayListUnmanaged(LinkAnnotation), // Link annotations
     size: PageSize, // Page dimensions
     margins: Margins, // Page margins
@@ -97,6 +99,7 @@ pub const Page = struct {
             .used_images = .{},
             .used_svgs = .{},
             .used_gradients = .{},
+            .opacity_states = .{},
             .annotations = .{},
             .size = opts.size,
             .margins = opts.margins,
@@ -121,6 +124,7 @@ pub const Page = struct {
         self.used_images.deinit(backing_allocator);
         self.used_svgs.deinit(backing_allocator);
         self.used_gradients.deinit(backing_allocator);
+        self.opacity_states.deinit(backing_allocator);
         self.annotations.deinit(backing_allocator);
     }
 
@@ -150,6 +154,22 @@ pub const Page = struct {
             if (existing == s) return;
         }
         try self.used_svgs.append(allocator, s);
+    }
+
+    /// Get or add an opacity state, returning its index.
+    /// If the state already exists, returns the existing index.
+    /// Returns null if the state is fully opaque (no ExtGState needed).
+    pub fn getOrAddOpacityState(self: *Page, allocator: std.mem.Allocator, fill_op: f64, stroke_op: f64) !?usize {
+        const state = OpacityState{ .fill_opacity = fill_op, .stroke_opacity = stroke_op };
+        // No ExtGState needed for fully opaque
+        if (state.isOpaque()) return null;
+        // Check for existing state
+        for (self.opacity_states.items, 0..) |s, i| {
+            if (s.eql(state)) return i;
+        }
+        // Add new state
+        try self.opacity_states.append(allocator, state);
+        return self.opacity_states.items.len - 1;
     }
 
     pub fn writer(self: *Page, allocator: std.mem.Allocator) ContentWriter {

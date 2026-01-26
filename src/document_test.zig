@@ -2621,3 +2621,148 @@ test "loadSvgFromMemory loads SVG from buffer" {
     // SVG is rendered as Form XObject
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Form") != null);
 }
+
+// ============================================================================
+// Opacity Tests
+// ============================================================================
+
+test "drawRect with fill opacity" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // Draw a semi-transparent filled rectangle
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.rgb(255, 0, 0), .opacity = 0.5 },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify PDF has ExtGState resources
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/GS1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ca 0.5") != null);
+}
+
+test "drawRect with stroke opacity" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // Draw a rectangle with semi-transparent stroke
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .stroke = .{ .color = Color.rgb(0, 0, 255), .opacity = 0.7 },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify PDF has ExtGState with stroke opacity
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CA 0.7") != null);
+}
+
+test "drawRect with both fill and stroke opacity" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // Draw with different fill and stroke opacity
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.rgb(255, 0, 0), .opacity = 0.3 },
+        .stroke = .{ .color = Color.rgb(0, 0, 0), .opacity = 0.8 },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify PDF has ExtGState with both opacities
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ca 0.3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CA 0.8") != null);
+}
+
+test "drawRect fully opaque has no ExtGState" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // Draw fully opaque (default opacity = 1.0)
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.rgb(255, 0, 0) },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // No ExtGState needed for fully opaque
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") == null);
+}
+
+test "drawLine with opacity" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    try doc.drawLine(.{ .x = 10, .y = 10 }, .{ .x = 100, .y = 100 }, .{
+        .color = Color.rgb(0, 128, 0),
+        .width = 2.0,
+        .opacity = 0.6,
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Verify ExtGState for stroke opacity
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CA 0.6") != null);
+}
+
+test "drawEllipse with opacity" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    try doc.drawEllipse(.{ .x = 100, .y = 100, .width = 80, .height = 60 }, .{
+        .fill = .{ .color = Color.rgb(255, 255, 0), .opacity = 0.4 },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ca 0.4") != null);
+}
+
+test "opacity state deduplication" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // Draw multiple shapes with the same opacity - should reuse same ExtGState
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 50, .height = 50 }, .{
+        .fill = .{ .opacity = 0.5 },
+    });
+    try doc.drawRect(.{ .x = 110, .y = 50, .width = 50, .height = 50 }, .{
+        .fill = .{ .opacity = 0.5 },
+    });
+    try doc.drawRect(.{ .x = 170, .y = 50, .width = 50, .height = 50 }, .{
+        .fill = .{ .opacity = 0.5 },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Should only have one GS0 definition (deduplicated)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/GS1") != null);
+    // Count occurrences of "/ca 0.5" - should only be once in ExtGState dict
+    var count: usize = 0;
+    var idx: usize = 0;
+    while (std.mem.indexOf(u8, pdf[idx..], "/ca 0.5")) |pos| {
+        count += 1;
+        idx += pos + 6;
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
+}

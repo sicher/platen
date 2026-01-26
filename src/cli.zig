@@ -87,6 +87,11 @@ pub fn main() !void {
         const output_path = if (args.len > 2) args[2] else "gradient_test.pdf";
         try generateGradientTestPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "opacity-test")) {
+        // Test opacity API (fill/stroke alpha)
+        const output_path = if (args.len > 2) args[2] else "opacity_test.pdf";
+        try generateOpacityTestPdf(allocator, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else if (std.mem.eql(u8, cmd, "metadata-test")) {
         // Test document metadata
         const output_path = if (args.len > 2) args[2] else "metadata_test.pdf";
@@ -123,6 +128,7 @@ fn printUsage() !void {
         \\  calt-test [ttf] [out]   Test GSUB contextual alternates (arrows, ligatures)
         \\  path-test [out]         Test path API (moveTo, lineTo, curveTo)
         \\  gradient-test [out]     Test gradient API (linear, radial)
+        \\  opacity-test [out]      Test opacity API (fill/stroke alpha)
         \\
     ;
     try stdout.writeAll(usage);
@@ -708,6 +714,98 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
         .stops = &rad_stops,
     });
     try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 80 }, grad4);
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+}
+
+fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+
+    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
+    const label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+
+    // Title
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Opacity Test", title_style);
+
+    var y: f64 = 70;
+
+    // Overlapping rectangles with fill opacity
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fill opacity (overlapping rectangles):", label_style);
+    y += 20;
+
+    // Draw a solid background rectangle
+    try doc.drawRect(.{ .x = 50, .y = y, .width = 120, .height = 80 }, .{
+        .fill = .{ .color = zpdf.Color.red },
+    });
+    // Draw overlapping semi-transparent blue rectangle
+    try doc.drawRect(.{ .x = 90, .y = y + 20, .width = 120, .height = 80 }, .{
+        .fill = .{ .color = zpdf.Color.blue, .opacity = 0.5 },
+    });
+    // Draw another overlapping green rectangle
+    try doc.drawRect(.{ .x = 130, .y = y + 40, .width = 120, .height = 80 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(0, 200, 0), .opacity = 0.5 },
+    });
+    y += 150;
+
+    // Different opacity levels
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fill opacity levels (100%, 75%, 50%, 25%):", label_style);
+    y += 20;
+
+    const opacities = [_]f64{ 1.0, 0.75, 0.5, 0.25 };
+    for (opacities, 0..) |op, i| {
+        try doc.drawRect(.{ .x = 50 + @as(f64, @floatFromInt(i)) * 55, .y = y, .width = 50, .height = 50 }, .{
+            .fill = .{ .color = zpdf.Color.rgb(0, 100, 200), .opacity = op },
+        });
+    }
+    y += 80;
+
+    // Stroke opacity
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke opacity (overlapping lines):", label_style);
+    y += 20;
+
+    // Draw lines with different stroke opacities
+    try doc.drawLine(.{ .x = 50, .y = y }, .{ .x = 250, .y = y + 60 }, .{
+        .color = zpdf.Color.red,
+        .width = 8,
+    });
+    try doc.drawLine(.{ .x = 50, .y = y + 60 }, .{ .x = 250, .y = y }, .{
+        .color = zpdf.Color.blue,
+        .width = 8,
+        .opacity = 0.5,
+    });
+    y += 90;
+
+    // Combined fill and stroke opacity
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combined fill + stroke opacity:", label_style);
+    y += 20;
+
+    try doc.drawRoundedRect(.{ .x = 50, .y = y, .width = 100, .height = 60 }, 10, .{
+        .fill = .{ .color = zpdf.Color.rgb(255, 200, 0), .opacity = 0.6 },
+        .stroke = .{ .color = zpdf.Color.rgb(100, 0, 100), .width = 4, .opacity = 0.8 },
+    });
+
+    // Semi-transparent circle
+    try doc.drawCircle(.{ .x = 250, .y = y + 30 }, 35, .{
+        .fill = .{ .color = zpdf.Color.rgb(0, 180, 180), .opacity = 0.4 },
+        .stroke = .{ .color = zpdf.Color.black, .width = 2 },
+    });
+    y += 100;
+
+    // Ellipse with opacity
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ellipse with opacity:", label_style);
+    y += 20;
+
+    try doc.drawEllipse(.{ .x = 50, .y = y, .width = 120, .height = 60 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(200, 100, 50), .opacity = 0.7 },
+    });
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

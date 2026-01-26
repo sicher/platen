@@ -1439,6 +1439,14 @@ pub const Document = struct {
     const beginShapeCommand = graphics.beginShapeCommand;
     const finishShapeCommand = graphics.finishShapeCommand;
 
+    /// Write opacity ExtGState reference if needed.
+    /// Returns the number of bytes written (0 if fully opaque).
+    fn writeOpacityRef(self: *Document, page: *pagemod.Page, style: ShapeStyle, buf: []u8) !usize {
+        const opacity = graphics.getShapeOpacity(style) orelse return 0;
+        const idx = try page.getOrAddOpacityState(self.allocator, opacity.fill_opacity, opacity.stroke_opacity) orelse return 0;
+        return graphics.writeExtGStateRef(buf, idx);
+    }
+
     /// Draw a line between two points.
     /// Coordinates are from top-left origin.
     pub fn drawLine(self: *Document, p1: Point, p2: Point, style: StrokeStyle) !void {
@@ -1451,6 +1459,8 @@ pub const Document = struct {
         const pdf_y1 = page_height - p1.y;
         const pdf_y2 = page_height - p2.y;
 
+        const shape_style = ShapeStyle{ .stroke = style };
+
         var buf: [512]u8 = undefined;
         var len: usize = 0;
 
@@ -1458,8 +1468,11 @@ pub const Document = struct {
         @memcpy(buf[len..][0..2], "q\n");
         len += 2;
 
+        // Write opacity ExtGState reference if needed
+        len += try self.writeOpacityRef(page, shape_style, buf[len..]);
+
         // Write stroke style
-        len += graphics.writeShapeGraphicsState(.{ .stroke = style }, buf[len..]);
+        len += graphics.writeShapeGraphicsState(shape_style, buf[len..]);
 
         // Move to start, line to end, stroke
         len += format.writeCoord2Suffix(buf[len..], p1.x, pdf_y1, " m ");
@@ -1485,6 +1498,7 @@ pub const Document = struct {
 
         var buf: [512]u8 = undefined;
         var len = beginShapeCommand(&buf, style);
+        len += try self.writeOpacityRef(page, style, buf[len..]);
         len += format.writeCoord4Suffix(buf[len..], rect.x, pdf_y, rect.width, rect.height, " re ");
         len += finishShapeCommand(buf[len..], style);
 
@@ -1513,6 +1527,7 @@ pub const Document = struct {
 
         var buf: [1024]u8 = undefined;
         var len = beginShapeCommand(&buf, style);
+        len += try self.writeOpacityRef(page, style, buf[len..]);
         len += graphics.writeRoundedRectPath(buf[len..], rect.x, pdf_y, rect.width, rect.height, r);
         len += finishShapeCommand(buf[len..], style);
 
@@ -1537,6 +1552,7 @@ pub const Document = struct {
 
         var buf: [1024]u8 = undefined;
         var len = beginShapeCommand(&buf, style);
+        len += try self.writeOpacityRef(page, style, buf[len..]);
         len += graphics.writeEllipsePath(buf[len..], cx, pdf_cy, rx, ry);
         len += finishShapeCommand(buf[len..], style);
 
@@ -1572,6 +1588,7 @@ pub const Document = struct {
         const buf = try page.pageAllocator().alloc(u8, buf_size);
 
         var len = beginShapeCommand(buf, style);
+        len += try self.writeOpacityRef(page, style, buf[len..]);
 
         // Move to first point
         const pdf_y0 = page_height - points[0].y;
@@ -2406,6 +2423,7 @@ pub const Document = struct {
         const buf = try page.pageAllocator().alloc(u8, buf_size);
 
         var len = beginShapeCommand(buf, style);
+        len += try self.writeOpacityRef(page, style, buf[len..]);
 
         // Path commands (use fixedBufferStream for writer interface)
         var fbs = std.io.fixedBufferStream(buf[len..]);
@@ -3100,6 +3118,8 @@ pub const Document = struct {
             defer xobject_res.deinit();
             var shading_res = Dict.init(self.allocator);
             defer shading_res.deinit();
+            var extgstate_res = Dict.init(self.allocator);
+            defer extgstate_res.deinit();
             var shading_strs = std.ArrayListUnmanaged([]u8){};
             defer {
                 for (shading_strs.items) |s| self.allocator.free(s);
@@ -3161,15 +3181,37 @@ pub const Document = struct {
                 }
             }
 
-            // Check if page uses shadings
+            // Check if page uses shadings or ExtGState
             const has_shadings = page.used_gradients.count() > 0;
+            const has_extgstate = page.opacity_states.items.len > 0;
 
-            if (has_fonts or has_xobjects or has_shadings) {
+            if (has_fonts or has_xobjects or has_shadings or has_extgstate) {
                 if (has_fonts) {
                     try resources.put("Font", .{ .dict_val = &font_res });
                 }
                 if (has_xobjects) {
                     try resources.put("XObject", .{ .dict_val = &xobject_res });
+                }
+                if (has_extgstate) {
+                    // Build ExtGState resources for opacity
+                    for (page.opacity_states.items, 0..) |state, idx| {
+                        // Build inline dict: << /Type /ExtGState /ca N /CA N >>
+                        var gs_buf: [128]u8 = undefined;
+                        var gs_fbs = std.io.fixedBufferStream(&gs_buf);
+                        const gs_writer = gs_fbs.writer();
+                        try gs_writer.writeAll("<< /Type /ExtGState /ca ");
+                        var val_buf: [16]u8 = undefined;
+                        var len = format.writeF64_3(&val_buf, state.fill_opacity).len;
+                        try gs_writer.writeAll(val_buf[0..len]);
+                        try gs_writer.writeAll(" /CA ");
+                        len = format.writeF64_3(&val_buf, state.stroke_opacity).len;
+                        try gs_writer.writeAll(val_buf[0..len]);
+                        try gs_writer.writeAll(" >>");
+                        const gs_str = try self.allocator.dupe(u8, gs_fbs.getWritten());
+                        try shading_strs.append(self.allocator, gs_str); // Reuse cleanup list
+                        try extgstate_res.put(extgstateResourceName(idx), Value.literal(gs_str));
+                    }
+                    try resources.put("ExtGState", .{ .dict_val = &extgstate_res });
                 }
                 if (has_shadings) {
                     // Write inline shading dictionaries

@@ -464,12 +464,16 @@ pub const StrokeStyle = struct {
     join: LineJoin = .miter,
     /// Dash pattern (solid by default).
     dash: DashPattern = .solid,
+    /// Stroke opacity (0.0 = fully transparent, 1.0 = fully opaque).
+    opacity: f64 = 1.0,
 };
 
 /// Style for filling shapes.
 pub const FillStyle = struct {
     /// Fill color.
     color: Color = Color.black,
+    /// Fill opacity (0.0 = fully transparent, 1.0 = fully opaque).
+    opacity: f64 = 1.0,
 };
 
 /// Combined style for drawing shapes.
@@ -480,4 +484,20 @@ pub const ShapeStyle = struct {
     stroke: ?StrokeStyle = null,
     /// Fill style, or null for no fill.
     fill: ?FillStyle = null,
+};
+
+/// Opacity state for ExtGState resources.
+/// Used to track unique fill/stroke opacity combinations.
+pub const OpacityState = struct {
+    fill_opacity: f64,
+    stroke_opacity: f64,
+
+    pub fn eql(a: OpacityState, b: OpacityState) bool {
+        return a.fill_opacity == b.fill_opacity and a.stroke_opacity == b.stroke_opacity;
+    }
+
+    /// Returns true if this state represents fully opaque (no transparency).
+    pub fn isOpaque(self: OpacityState) bool {
+        return self.fill_opacity == 1.0 and self.stroke_opacity == 1.0;
+    }
 };

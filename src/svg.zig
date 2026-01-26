@@ -396,15 +396,8 @@ pub const SvgElement = union(enum) {
     }
 };
 
-/// Opacity state for PDF ExtGState
-pub const OpacityState = struct {
-    fill_opacity: f64,
-    stroke_opacity: f64,
-
-    pub fn eql(a: OpacityState, b: OpacityState) bool {
-        return a.fill_opacity == b.fill_opacity and a.stroke_opacity == b.stroke_opacity;
-    }
-};
+/// Opacity state for PDF ExtGState (imported from layout)
+pub const OpacityState = layout.OpacityState;
 
 /// Parsed SVG document
 /// Font used in SVG text elements

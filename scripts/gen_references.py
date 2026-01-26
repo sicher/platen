@@ -1447,6 +1447,95 @@ def gen_gradients():
     print("  gradients.pdf")
 
 
+def gen_opacity():
+    """Test opacity/transparency API: fill and stroke alpha."""
+    pdf = make_pdf()
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", size=16)
+    pdf.text(50, 30, "Opacity Test")
+
+    y = 70
+
+    # Fill opacity - overlapping rectangles
+    pdf.set_font("Helvetica", "", size=10)
+    pdf.text(50, y, "Fill opacity (overlapping rectangles):")
+    y += 20
+
+    # First rect - solid red
+    pdf.set_fill_color(255, 0, 0)
+    pdf.rect(50, y, 120, 80, style="F")
+
+    # Second rect - blue with 50% opacity
+    with pdf.local_context(fill_opacity=0.5):
+        pdf.set_fill_color(0, 0, 255)
+        pdf.rect(90, y + 20, 120, 80, style="F")
+
+    # Third rect - green with 50% opacity
+    with pdf.local_context(fill_opacity=0.5):
+        pdf.set_fill_color(0, 200, 0)
+        pdf.rect(130, y + 40, 120, 80, style="F")
+    y += 150
+
+    # Different opacity levels
+    pdf.text(50, y, "Fill opacity levels (100%, 75%, 50%, 25%):")
+    y += 20
+
+    opacities = [1.0, 0.75, 0.5, 0.25]
+    for i, op in enumerate(opacities):
+        with pdf.local_context(fill_opacity=op):
+            pdf.set_fill_color(0, 100, 200)
+            pdf.rect(50 + i * 55, y, 50, 50, style="F")
+    y += 80
+
+    # Stroke opacity
+    pdf.text(50, y, "Stroke opacity (overlapping lines):")
+    y += 20
+
+    # Solid red line
+    pdf.set_draw_color(255, 0, 0)
+    pdf.set_line_width(8)
+    pdf.line(50, y, 250, y + 60)
+
+    # Blue line with 50% stroke opacity
+    with pdf.local_context(stroke_opacity=0.5):
+        pdf.set_draw_color(0, 0, 255)
+        pdf.set_line_width(8)
+        pdf.line(50, y + 60, 250, y)
+    y += 90
+
+    # Combined fill and stroke opacity
+    pdf.text(50, y, "Combined fill + stroke opacity:")
+    y += 20
+
+    # Rounded rect with fill opacity 0.6, stroke opacity 0.8
+    with pdf.local_context(fill_opacity=0.6, stroke_opacity=0.8):
+        pdf.set_fill_color(255, 200, 0)
+        pdf.set_draw_color(100, 0, 100)
+        pdf.set_line_width(4)
+        pdf.rect(50, y, 100, 60, style="FD", round_corners=True, corner_radius=10)
+
+    # Semi-transparent circle
+    with pdf.local_context(fill_opacity=0.4):
+        pdf.set_fill_color(0, 180, 180)
+        pdf.set_draw_color(0, 0, 0)
+        pdf.set_line_width(2)
+        pdf.circle(250, y + 30, 35, style="FD")
+    y += 100
+
+    # Ellipse with opacity
+    pdf.text(50, y, "Ellipse with opacity:")
+    y += 20
+
+    with pdf.local_context(fill_opacity=0.7):
+        pdf.set_fill_color(200, 100, 50)
+        pdf.ellipse(50, y, 120, 60, style="F")
+
+    pdf.output(OUTPUT_DIR / "opacity.pdf")
+    print("  opacity.pdf")
+
+
 def gen_colors():
     """Generate color swatches reference with all 148 CSS named colors."""
     from fpdf import FPDF
@@ -2332,6 +2421,7 @@ GENERATORS = {
     "svg_use_defs": gen_svg_use_defs,
     "paths": gen_paths,
     "gradients": gen_gradients,
+    "opacity": gen_opacity,
     "landscape": gen_landscape,
     "colors": gen_colors,
 }

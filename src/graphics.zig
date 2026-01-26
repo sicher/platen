@@ -19,10 +19,36 @@ pub const Point = layout.Point;
 pub const StrokeStyle = layout.StrokeStyle;
 pub const FillStyle = layout.FillStyle;
 pub const ShapeStyle = layout.ShapeStyle;
+pub const OpacityState = layout.OpacityState;
 
 /// Kappa constant for approximating circles/arcs with cubic Bezier curves.
 /// This is (4/3)*tan(pi/8) ≈ 0.5522847498
 pub const KAPPA: f64 = 0.5522847498307936;
+
+/// Extract opacity state from a ShapeStyle.
+/// Returns null if fully opaque (no ExtGState needed).
+pub fn getShapeOpacity(style: ShapeStyle) ?OpacityState {
+    // Get stroke opacity (default 1.0 if no stroke)
+    const stroke_opacity: f64 = if (style.stroke) |s| s.opacity else 1.0;
+    // Get fill opacity (default 1.0 if no fill)
+    const fill_opacity: f64 = if (style.fill) |f| f.opacity else 1.0;
+
+    const state = OpacityState{ .fill_opacity = fill_opacity, .stroke_opacity = stroke_opacity };
+    if (state.isOpaque()) return null;
+    return state;
+}
+
+/// Write ExtGState reference operator (e.g., "/GS1 gs\n").
+/// Index is 0-based but resource names are 1-indexed (index 0 → "GS1").
+/// Returns number of bytes written.
+pub fn writeExtGStateRef(buf: []u8, index: usize) usize {
+    @memcpy(buf[0..3], "/GS");
+    // Resource names are 1-indexed: index 0 → "GS1", index 1 → "GS2", etc.
+    const idx_str = format.writeInt(buf[3..], @as(u32, @intCast(index + 1)));
+    const total = 3 + idx_str.len;
+    @memcpy(buf[total..][0..4], " gs\n");
+    return total + 4;
+}
 
 /// Get PDF path operator for a ShapeStyle.
 /// Returns the appropriate operator based on stroke/fill settings.
