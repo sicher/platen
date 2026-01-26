@@ -2454,6 +2454,68 @@ def gen_pdfa():
     print("  pdfa.pdf")
 
 
+def gen_pdfa_2b():
+    """Generate PDF/A-2b conformance test document with transparency."""
+    from fpdf.enums import OutputIntentSubType
+    from fpdf.output import PDFICCProfile
+    import pathlib
+
+    pdf = make_pdf()
+
+    # Read the ICC profile (same one zpdf uses)
+    icc_data = pathlib.Path("src/data/sRGB2014.icc").read_bytes()
+
+    # Add output intent for PDF/A-2b
+    icc_profile = PDFICCProfile(icc_data, n=3, alternate="DeviceRGB")
+    pdf.add_output_intent(
+        OutputIntentSubType.PDFA,
+        output_condition_identifier="sRGB IEC61966-2.1",
+        registry_name="http://www.color.org",
+        dest_output_profile=icc_profile,
+    )
+
+    # Add embedded font (required for PDF/A - no standard fonts)
+    pdf.add_font("Inter", "", "test/fonts/Inter/Inter-Regular.ttf")
+
+    # Enable text shaping with kerning
+    pdf.set_text_shaping(True, features={"liga": True, "kern": True})
+
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Inter", size=16)
+    shaped_text(pdf, 50, 30, "PDF/A-2b Conformance Test")
+
+    # Description
+    pdf.set_font("Inter", size=10)
+    y = 60
+    shaped_text(pdf, 50, y, "PDF/A-2b allows transparency (unlike PDF/A-1b):")
+    y += 15
+    shaped_text(pdf, 70, y, "- OutputIntent with sRGB ICC profile")
+    y += 12
+    shaped_text(pdf, 70, y, "- Embedded fonts (Inter)")
+    y += 12
+    shaped_text(pdf, 70, y, "- Transparency/opacity supported")
+    y += 25
+
+    # Overlapping rectangles with transparency to demonstrate PDF/A-2b
+    # Background rectangle (solid)
+    pdf.set_fill_color(100, 100, 200)
+    pdf.rect(50, y, 120, 60, style="F")
+
+    # Overlapping semi-transparent rectangles
+    with pdf.local_context(fill_opacity=0.5):
+        pdf.set_fill_color(255, 100, 100)
+        pdf.rect(80, y + 15, 80, 60, style="F")
+
+    with pdf.local_context(fill_opacity=0.7):
+        pdf.set_fill_color(100, 255, 100)
+        pdf.rect(110, y + 30, 80, 60, style="F")
+
+    pdf.output(OUTPUT_DIR / "pdfa_2b.pdf")
+    print("  pdfa_2b.pdf")
+
+
 GENERATORS = {
     "gentium_family": gen_gentium_family,
     "kerning": gen_kerning,
@@ -2486,6 +2548,7 @@ GENERATORS = {
     "landscape": gen_landscape,
     "colors": gen_colors,
     "pdfa": gen_pdfa,
+    "pdfa_2b": gen_pdfa_2b,
 }
 
 

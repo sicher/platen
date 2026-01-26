@@ -124,6 +124,30 @@ pub fn formatPdfDate(buf: *[24]u8) []const u8 {
     return buf[0..17]; // "D:YYYYMMDDHHmmSSZ"
 }
 
+/// Format current UTC time as ISO 8601 date string: YYYY-MM-DDTHH:mm:ssZ
+/// Required for XMP metadata in PDF/A documents.
+/// Returns a slice into the provided buffer.
+pub fn formatIsoDate(buf: *[20]u8) []const u8 {
+    const timestamp = std.time.timestamp();
+    const epoch_secs: u64 = @intCast(timestamp);
+    const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
+    const day = epoch.getEpochDay();
+    const year_day = day.calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = epoch.getDaySeconds();
+
+    _ = std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_secs.getHoursIntoDay(),
+        day_secs.getMinutesIntoHour(),
+        day_secs.getSecondsIntoMinute(),
+    }) catch unreachable;
+
+    return buf[0..20]; // "YYYY-MM-DDTHH:mm:ssZ"
+}
+
 // ============================================================================
 // Font Output Helpers
 // ============================================================================

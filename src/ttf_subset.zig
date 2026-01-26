@@ -23,9 +23,26 @@ pub fn padTo4(len: usize) usize {
     return (len + 3) & ~@as(usize, 3);
 }
 
-pub fn writeTableEntry(output: []u8, dir_offset: *usize, tag: *const [4]u8, offset: u32, length: u32) void {
+/// Calculate TrueType table checksum (sum of 32-bit big-endian values)
+pub fn calcTableChecksum(data: []const u8) u32 {
+    var sum: u32 = 0;
+    var i: usize = 0;
+    while (i + 4 <= data.len) : (i += 4) {
+        sum +%= std.mem.readInt(u32, data[i..][0..4], .big);
+    }
+    // Handle remaining bytes (pad with zeros)
+    if (i < data.len) {
+        var last: [4]u8 = .{ 0, 0, 0, 0 };
+        const remaining = data.len - i;
+        @memcpy(last[0..remaining], data[i..][0..remaining]);
+        sum +%= std.mem.readInt(u32, &last, .big);
+    }
+    return sum;
+}
+
+pub fn writeTableEntry(output: []u8, dir_offset: *usize, tag: *const [4]u8, checksum: u32, offset: u32, length: u32) void {
     @memcpy(output[dir_offset.*..][0..4], tag);
-    std.mem.writeInt(u32, output[dir_offset.* + 4 ..][0..4], 0, .big); // checksum placeholder
+    std.mem.writeInt(u32, output[dir_offset.* + 4 ..][0..4], checksum, .big);
     std.mem.writeInt(u32, output[dir_offset.* + 8 ..][0..4], offset, .big);
     std.mem.writeInt(u32, output[dir_offset.* + 12 ..][0..4], length, .big);
     dir_offset.* += 16;
@@ -249,12 +266,16 @@ pub const TTFTables = struct {
     glyf: []const u8,
     name: ?[]const u8,
     post: ?[]const u8,
+    os2: ?[]const u8, // OS/2 table - required by some PDF validators
     num_glyphs: u16,
 };
 
 /// Assemble a complete TTF file from tables
 pub fn assembleTTF(allocator: std.mem.Allocator, tables: TTFTables) ![]u8 {
-    const table_count: u16 = 9;
+    // Base tables: cmap, glyf, head, hhea, hmtx, loca, maxp, name, post (9)
+    // Optional: OS/2 (+1 if present)
+    const has_os2 = tables.os2 != null;
+    const table_count: u16 = if (has_os2) 10 else 9;
     const header_size: usize = 12 + @as(usize, table_count) * 16;
 
     // Update hhea with new numOfLongHorMetrics
@@ -262,21 +283,26 @@ pub fn assembleTTF(allocator: std.mem.Allocator, tables: TTFTables) ![]u8 {
         std.mem.writeInt(u16, tables.hhea[34..36], tables.num_glyphs, .big);
     }
 
-    // Build maxp
-    var new_maxp: [6]u8 = undefined;
-    std.mem.writeInt(u32, new_maxp[0..4], 0x00005000, .big);
-    std.mem.writeInt(u16, new_maxp[4..6], tables.num_glyphs, .big);
+    // Copy maxp and update numGlyphs (at offset 4)
+    // TrueType maxp is 32 bytes (version 1.0), CFF maxp is 6 bytes (version 0.5)
+    // We preserve the original table structure and only update numGlyphs
+    var new_maxp_buf: [32]u8 = undefined;
+    const maxp_len = @min(tables.maxp.len, 32);
+    @memcpy(new_maxp_buf[0..maxp_len], tables.maxp[0..maxp_len]);
+    std.mem.writeInt(u16, new_maxp_buf[4..6], tables.num_glyphs, .big);
 
     // Calculate padded sizes and offsets
     const head_padded = padTo4(tables.head.len);
     const hhea_padded = padTo4(tables.hhea.len);
-    const maxp_padded = padTo4(new_maxp.len);
+    const maxp_padded = padTo4(maxp_len);
     const hmtx_padded = padTo4(tables.hmtx.len);
     const cmap_padded = padTo4(tables.cmap.len);
     const loca_padded = padTo4(tables.loca.len);
     const glyf_padded = padTo4(tables.glyf.len);
     const name_len = if (tables.name) |n| n.len else 0;
     const name_padded = padTo4(name_len);
+    const os2_len = if (tables.os2) |o| o.len else 0;
+    const os2_padded = padTo4(os2_len);
     const post_len = if (tables.post) |p| @min(p.len, 32) else 32;
     const post_padded = padTo4(post_len);
 
@@ -297,6 +323,8 @@ pub fn assembleTTF(allocator: std.mem.Allocator, tables: TTFTables) ![]u8 {
     offset += @intCast(glyf_padded);
     const name_offset = offset;
     offset += @intCast(name_padded);
+    const os2_offset = offset;
+    offset += @intCast(os2_padded);
     const post_offset = offset;
     offset += @intCast(post_padded);
 
@@ -314,22 +342,10 @@ pub fn assembleTTF(allocator: std.mem.Allocator, tables: TTFTables) ![]u8 {
     std.mem.writeInt(u16, result[8..10], 3, .big); // entrySelector
     std.mem.writeInt(u16, result[10..12], 16, .big); // rangeShift
 
-    // Write table directory
-    var dir_offset: usize = 12;
-    writeTableEntry(result, &dir_offset, "cmap", cmap_offset, @intCast(tables.cmap.len));
-    writeTableEntry(result, &dir_offset, "glyf", glyf_offset, @intCast(tables.glyf.len));
-    writeTableEntry(result, &dir_offset, "head", head_offset, @intCast(tables.head.len));
-    writeTableEntry(result, &dir_offset, "hhea", hhea_offset, @intCast(tables.hhea.len));
-    writeTableEntry(result, &dir_offset, "hmtx", hmtx_offset, @intCast(tables.hmtx.len));
-    writeTableEntry(result, &dir_offset, "loca", loca_offset, @intCast(tables.loca.len));
-    writeTableEntry(result, &dir_offset, "maxp", maxp_offset, @intCast(new_maxp.len));
-    writeTableEntry(result, &dir_offset, "name", name_offset, @intCast(name_len));
-    writeTableEntry(result, &dir_offset, "post", post_offset, @intCast(post_len));
-
-    // Write table data
+    // Write table data first (needed for checksum calculation)
     @memcpy(result[head_offset..][0..tables.head.len], tables.head);
     @memcpy(result[hhea_offset..][0..tables.hhea.len], tables.hhea);
-    @memcpy(result[maxp_offset..][0..new_maxp.len], &new_maxp);
+    @memcpy(result[maxp_offset..][0..maxp_len], new_maxp_buf[0..maxp_len]);
     @memcpy(result[hmtx_offset..][0..tables.hmtx.len], tables.hmtx);
     @memcpy(result[cmap_offset..][0..tables.cmap.len], tables.cmap);
     @memcpy(result[loca_offset..][0..tables.loca.len], tables.loca);
@@ -339,13 +355,48 @@ pub fn assembleTTF(allocator: std.mem.Allocator, tables: TTFTables) ![]u8 {
         @memcpy(result[name_offset..][0..name_data.len], name_data);
     }
 
+    if (tables.os2) |os2_data| {
+        @memcpy(result[os2_offset..][0..os2_data.len], os2_data);
+    }
+
     if (tables.post) |post_data| {
         const copy_len = @min(post_data.len, 32);
         @memcpy(result[post_offset..][0..copy_len], post_data[0..copy_len]);
+        // Force post table to version 3.0 (no glyph names)
+        // Version 2.0 requires glyph name data beyond the 32-byte header
+        // Version 3.0 is exactly 32 bytes with no additional data required
+        std.mem.writeInt(u32, result[post_offset..][0..4], 0x00030000, .big);
     } else {
-        // Minimal post table
-        std.mem.writeInt(u32, result[post_offset..][0..4], 0x00020000, .big);
+        // Minimal post table - version 3.0
+        std.mem.writeInt(u32, result[post_offset..][0..4], 0x00030000, .big);
     }
+
+    // Calculate checksums after table data is written
+    const cmap_checksum = calcTableChecksum(result[cmap_offset..][0..tables.cmap.len]);
+    const glyf_checksum = calcTableChecksum(result[glyf_offset..][0..tables.glyf.len]);
+    const head_checksum = calcTableChecksum(result[head_offset..][0..tables.head.len]);
+    const hhea_checksum = calcTableChecksum(result[hhea_offset..][0..tables.hhea.len]);
+    const hmtx_checksum = calcTableChecksum(result[hmtx_offset..][0..tables.hmtx.len]);
+    const loca_checksum = calcTableChecksum(result[loca_offset..][0..tables.loca.len]);
+    const maxp_checksum = calcTableChecksum(result[maxp_offset..][0..maxp_len]);
+    const name_checksum = calcTableChecksum(result[name_offset..][0..name_len]);
+    const os2_checksum = calcTableChecksum(result[os2_offset..][0..os2_len]);
+    const post_checksum = calcTableChecksum(result[post_offset..][0..post_len]);
+
+    // Write table directory with checksums (alphabetically sorted)
+    var dir_offset: usize = 12;
+    writeTableEntry(result, &dir_offset, "cmap", cmap_checksum, cmap_offset, @intCast(tables.cmap.len));
+    writeTableEntry(result, &dir_offset, "glyf", glyf_checksum, glyf_offset, @intCast(tables.glyf.len));
+    writeTableEntry(result, &dir_offset, "head", head_checksum, head_offset, @intCast(tables.head.len));
+    writeTableEntry(result, &dir_offset, "hhea", hhea_checksum, hhea_offset, @intCast(tables.hhea.len));
+    writeTableEntry(result, &dir_offset, "hmtx", hmtx_checksum, hmtx_offset, @intCast(tables.hmtx.len));
+    writeTableEntry(result, &dir_offset, "loca", loca_checksum, loca_offset, @intCast(tables.loca.len));
+    writeTableEntry(result, &dir_offset, "maxp", maxp_checksum, maxp_offset, @intCast(maxp_len));
+    writeTableEntry(result, &dir_offset, "name", name_checksum, name_offset, @intCast(name_len));
+    if (has_os2) {
+        writeTableEntry(result, &dir_offset, "OS/2", os2_checksum, os2_offset, @intCast(os2_len));
+    }
+    writeTableEntry(result, &dir_offset, "post", post_checksum, post_offset, @intCast(post_len));
 
     return result;
 }

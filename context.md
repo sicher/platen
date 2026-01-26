@@ -1,16 +1,40 @@
 # zpdf Context
 
 ## Current Focus
-PDF/A conformance support **COMPLETED**.
+PDF/A conformance **FULLY VALIDATED** with VeraPDF.
 
 ## What's Next
-- Consider: PDF/A CID font embedding fix (VeraPDF shows 1 remaining validation error)
 - Consider: Text opacity support (non-stroking alpha for text)
 - Consider: Blend modes (Normal, Multiply, Screen, etc.)
+- Consider: Additional PDF/A levels (2a, 3a for tagged PDF)
+
+## What We Did (Session 2026-01-26 #5)
+- **Fixed VeraPDF PDF/A validation issues**:
+  1. **OS/2 table missing** - Added OS/2 table to TTF subset output
+  2. **Post table version 2.0 truncated** - Changed to version 3.0 (no glyph names)
+  3. **XMP dates missing** - Added xmp:CreateDate and xmp:ModifyDate in ISO 8601 format
+
+- **Files modified**:
+  - `src/ttf_subset.zig`:
+    - Added `os2: ?[]const u8` to `TTFTables` struct
+    - Modified `assembleTTF()` to include OS/2 table (10 tables when present)
+    - Changed post table version from 2.0 to 3.0 (fixes "End of file" parse error)
+  - `src/embedded.zig`: Pass original OS/2 table to `assembleTTF()`
+  - `src/pdf_output.zig`: Added `formatIsoDate()` for XMP timestamps
+  - `src/document.zig`: Pass create_date/modify_date to XMP metadata generator
+
+- **VeraPDF validation now passes**:
+  - PDF/A-1b: 129 rules passed, 0 failed
+  - PDF/A-2b: 144 rules passed, 0 failed
+
+- **Root cause analysis**:
+  - VeraPDF's `TrueTypePostTable.readTable()` was hitting "End of file" because
+    post table version 2.0 expects glyph name data beyond the 32-byte header
+  - Version 3.0 (0x00030000) means "no glyph names" and requires only 32 bytes
 
 ## What We Did (Session 2026-01-26 #4)
 - **Added PDF/A conformance support** (`src/pdfa.zig`, `src/document.zig`):
-  - New `Conformance` enum: `.none`, `.pdfa_1b`, `.pdfa_2b`, `.pdfa_3b`
+  - New `Conformance` enum: `.none`, `.pdfa_1b`, `.pdfa_2b`
   - Early validation: transparency (opacity < 1.0) rejected for PDF/A-1b
   - XMP metadata generation with PDF/A identification
   - OutputIntent with embedded sRGB ICC profile
@@ -26,7 +50,7 @@ PDF/A conformance support **COMPLETED**.
   try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 }});
   // Returns error.TransparencyNotAllowed
 
-  // PDF/A-2b and 3b allow transparency
+  // PDF/A-2b allows transparency
   doc.setConformance(.pdfa_2b);
   try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 }});  // OK
   ```
@@ -43,8 +67,7 @@ PDF/A conformance support **COMPLETED**.
 
 - **CLI command**: `zpdf pdfa-test [out]` - generates PDF/A-1b test document
 
-- **Verification with VeraPDF**: 128/129 rules pass. 1 remaining issue with CID font
-  embedding check (font is embedded but VeraPDF CIDFont validation needs investigation)
+- **Verification with VeraPDF**: All rules pass (fixed in Session #5)
 
 - **Integration test** (`src/integration_tests.zig`, `scripts/gen_references.py`):
   - `gen_pdfa()` in Python - generates fpdf2 reference PDF with PDF/A output intent

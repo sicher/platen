@@ -60,6 +60,7 @@ const test_cases = [_]TestCase{
     .{ .name = "insert_page", .generate = generateInsertPagePdf },
     .{ .name = "gentium_family", .generate = generateGentiumFamilyPdf },
     .{ .name = "pdfa", .generate = generatePdfaPdf, .skip_fonts = true }, // Has additional PDF/A structures
+    .{ .name = "pdfa_2b", .generate = generatePdfa2bPdf, .skip_fonts = true }, // PDF/A-2b with transparency
 };
 
 // ============================================================================
@@ -2858,6 +2859,53 @@ fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Enable PDF/A-2b conformance (allows transparency)
+    doc.setConformance(.pdfa_2b);
+
+    // Load embedded font (required for PDF/A - standard fonts not allowed)
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+
+    try doc.addPage(.{});
+
+    // Title
+    const title_style = zpdf.TextStyle{ .font = font, .size = 16 };
+    const body_style = zpdf.TextStyle{ .font = font, .size = 10 };
+
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "PDF/A-2b Conformance Test", title_style);
+
+    // Description
+    var y: f64 = 60;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "PDF/A-2b allows transparency (unlike PDF/A-1b):", body_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- OutputIntent with sRGB ICC profile", body_style);
+    y += 12;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- Embedded fonts (Inter)", body_style);
+    y += 12;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- Transparency/opacity supported", body_style);
+    y += 25;
+
+    // Overlapping rectangles with transparency to demonstrate PDF/A-2b
+    // Background rectangle (solid)
+    try doc.drawRect(.{ .x = 50, .y = y, .width = 120, .height = 60 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(100, 100, 200) },
+    });
+
+    // Overlapping semi-transparent rectangles
+    try doc.drawRect(.{ .x = 80, .y = y + 15, .width = 80, .height = 60 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(255, 100, 100), .opacity = 0.5 },
+    });
+
+    try doc.drawRect(.{ .x = 110, .y = y + 30, .width = 80, .height = 60 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(100, 255, 100), .opacity = 0.7 },
+    });
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -3018,6 +3066,11 @@ test "integration: gentium_family PDF" {
 test "integration: pdfa PDF" {
     // Tests PDF/A-1b conformance output
     try runIntegrationTestWithOptions("pdfa", generatePdfaPdf, .{ .skip_fonts = true });
+}
+
+test "integration: pdfa_2b PDF" {
+    // Tests PDF/A-2b conformance output with transparency
+    try runIntegrationTestWithOptions("pdfa_2b", generatePdfa2bPdf, .{ .skip_fonts = true });
 }
 
 const TestOptions = struct {

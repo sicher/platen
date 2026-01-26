@@ -16,6 +16,7 @@ A fast PDF rendering library for Zig.
 - **Gradients**: linear and radial
 - **Document metadata**: title, author, subject, keywords
 - **Links**: internal (TOC navigation) and external (URLs)
+- **PDF/A conformance**: PDF/A-1b and PDF/A-2b archival formats (VeraPDF validated)
 - **Compression**: FlateDecode for smaller file sizes
 
 ## Performance
@@ -466,6 +467,36 @@ _ = try outline.addChild(ch1, "Section 1.2: Overview", doc.destination(75).?);
 // Set the outline on the document
 doc.setOutline(&outline);
 ```
+
+### PDF/A Archival Format
+
+```zig
+var doc = zpdf.Document.init(allocator);
+defer doc.deinit();
+
+// Enable PDF/A-1b conformance (archival format)
+doc.setConformance(.pdfa_1b);
+
+// Set required metadata
+doc.setMetadata(.{
+    .title = "Archival Document",
+    .author = "Organization Name",
+});
+
+// Add content as usual
+try doc.addPage(.{});
+const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "This document conforms to PDF/A-1b.", style);
+
+// Output includes XMP metadata, ICC color profile, and PDF/A identification
+const pdf_data = try doc.output();
+```
+
+Available conformance levels:
+- `.pdfa_1b` - PDF/A-1b (ISO 19005-1): No transparency, all fonts embedded
+- `.pdfa_2b` - PDF/A-2b (ISO 19005-2): Allows transparency, JPEG2000, layers
+
+Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotAllowed`.
 
 ## API Reference
 

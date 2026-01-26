@@ -2803,6 +2803,10 @@ pub const Document = struct {
             const uuid_str = uuid_buf[0..32];
 
             // 1. XMP Metadata stream
+            // Generate ISO 8601 date for XMP (required for PDF/A)
+            var iso_date_buf: [20]u8 = undefined;
+            const iso_date = pdf_output.formatIsoDate(&iso_date_buf);
+
             const xmp_data = try pdfa.generateXmpMetadata(self.allocator, .{
                 .title = self.metadata.title,
                 .author = self.metadata.author,
@@ -2813,6 +2817,8 @@ pub const Document = struct {
                 .conformance = self.conformance,
                 .document_id = uuid_str,
                 .instance_id = uuid_str,
+                .create_date = iso_date,
+                .modify_date = iso_date,
             });
             defer self.allocator.free(xmp_data);
 

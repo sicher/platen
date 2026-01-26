@@ -1637,8 +1637,10 @@ fn finishTTFSubset(
 ) ![]const u8 {
     const orig_head = font.getTable("head".*) orelse return error.MissingTable;
     const orig_hhea = font.getTable("hhea".*) orelse return error.MissingTable;
+    const orig_maxp = font.getTable("maxp".*) orelse return error.MissingTable;
     const orig_name = font.getTable("name".*);
     const orig_post = font.getTable("post".*);
+    const orig_os2 = font.getTable("OS/2".*); // OS/2 table - required by PDF validators
 
     // assembleTTF needs mutable hhea to update numOfLongHorMetrics
     const new_hhea = try allocator.dupe(u8, orig_hhea);
@@ -1651,13 +1653,14 @@ fn finishTTFSubset(
     return assembleTTF(allocator, .{
         .head = orig_head,
         .hhea = new_hhea,
-        .maxp = &[_]u8{}, // Built internally by assembleTTF
+        .maxp = orig_maxp, // Original maxp - assembleTTF updates numGlyphs
         .hmtx = hmtx,
         .cmap = cmap,
         .loca = loca,
         .glyf = glyf,
         .name = min_name,
         .post = orig_post,
+        .os2 = orig_os2,
         .num_glyphs = num_glyphs,
     });
 }

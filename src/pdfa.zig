@@ -14,15 +14,12 @@ pub const Conformance = enum {
     pdfa_1b,
     /// PDF/A-2b: PDF 1.7, transparency allowed, JPEG2000 support.
     pdfa_2b,
-    /// PDF/A-3b: PDF 1.7, embedded files allowed (any format).
-    pdfa_3b,
 
     /// Returns the PDF version required for this conformance level.
     pub fn pdfVersion(self: Conformance) []const u8 {
         return switch (self) {
-            .none => "1.7",
+            .none, .pdfa_2b => "1.7",
             .pdfa_1b => "1.4",
-            .pdfa_2b, .pdfa_3b => "1.7",
         };
     }
 
@@ -32,7 +29,6 @@ pub const Conformance = enum {
             .none => 0,
             .pdfa_1b => 1,
             .pdfa_2b => 2,
-            .pdfa_3b => 3,
         };
     }
 
@@ -40,14 +36,14 @@ pub const Conformance = enum {
     pub fn conformanceLevel(self: Conformance) []const u8 {
         return switch (self) {
             .none => "",
-            .pdfa_1b, .pdfa_2b, .pdfa_3b => "B",
+            .pdfa_1b, .pdfa_2b => "B",
         };
     }
 
     /// Returns true if transparency is allowed.
     pub fn allowsTransparency(self: Conformance) bool {
         return switch (self) {
-            .none, .pdfa_2b, .pdfa_3b => true,
+            .none, .pdfa_2b => true,
             .pdfa_1b => false,
         };
     }
@@ -218,7 +214,6 @@ test "Conformance.allowsTransparency" {
     try testing.expect(Conformance.none.allowsTransparency());
     try testing.expect(!Conformance.pdfa_1b.allowsTransparency());
     try testing.expect(Conformance.pdfa_2b.allowsTransparency());
-    try testing.expect(Conformance.pdfa_3b.allowsTransparency());
 }
 
 test "validateOpacity allows transparency for none" {
@@ -227,10 +222,6 @@ test "validateOpacity allows transparency for none" {
 
 test "validateOpacity allows transparency for pdfa_2b" {
     try validateOpacity(.pdfa_2b, 0.5, 0.5);
-}
-
-test "validateOpacity allows transparency for pdfa_3b" {
-    try validateOpacity(.pdfa_3b, 0.5, 0.5);
 }
 
 test "validateOpacity rejects transparency for pdfa_1b" {
@@ -249,7 +240,6 @@ test "Conformance.pdfVersion" {
     try testing.expectEqualStrings("1.7", Conformance.none.pdfVersion());
     try testing.expectEqualStrings("1.4", Conformance.pdfa_1b.pdfVersion());
     try testing.expectEqualStrings("1.7", Conformance.pdfa_2b.pdfVersion());
-    try testing.expectEqualStrings("1.7", Conformance.pdfa_3b.pdfVersion());
 }
 
 test "Conformance.partNumber" {
@@ -257,7 +247,6 @@ test "Conformance.partNumber" {
     try testing.expectEqual(@as(u8, 0), Conformance.none.partNumber());
     try testing.expectEqual(@as(u8, 1), Conformance.pdfa_1b.partNumber());
     try testing.expectEqual(@as(u8, 2), Conformance.pdfa_2b.partNumber());
-    try testing.expectEqual(@as(u8, 3), Conformance.pdfa_3b.partNumber());
 }
 
 test "generateXmpMetadata basic" {
