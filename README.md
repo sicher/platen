@@ -26,12 +26,12 @@ A fast PDF rendering library for Zig.
 |-----------|------|
 | Font loading | 1ms |
 | Simple text | 2ms |
-| OpenType shaping | 13ms |
-| Unicode/marks | 6ms |
+| OpenType shaping | 11ms |
+| Unicode/marks | 5ms |
 | Text flow | 2ms |
-| Drawing shapes | 15ms |
-| PDF output | 61ms |
-| **Total** | **101ms** (~1000 pages/sec) |
+| Drawing shapes | 14ms |
+| PDF output | 26ms |
+| **Total** | **62ms** (~1600 pages/sec) |
 
 See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 

@@ -204,6 +204,8 @@ pub const Document = struct {
     page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .{},
     /// Document metadata (title, author, etc.)
     metadata: DocumentMetadata = .{},
+    /// Compression level for PDF streams (0-9). Default 1 for speed. Use 6 for smaller files.
+    compression_level: i32 = 1,
 
     /// Create a new PDF document.
     pub fn init(allocator: std.mem.Allocator) Document {
@@ -2594,6 +2596,7 @@ pub const Document = struct {
         pdf_output.last_output_timing = .{};
 
         var w = Writer.init(self.allocator);
+        w.compression_level = self.compression_level;
         defer w.deinit();
 
         // Reserve object IDs:
@@ -3185,30 +3188,42 @@ pub const Document = struct {
                                 .linear => |lg| {
                                     const pdf_y0 = self.currentPageSize().height - lg.y0;
                                     const pdf_y1 = self.currentPageSize().height - lg.y1;
-                                    try shading_writer.print("<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2}] /Extend [{s} {s}] /Function ", .{
-                                        lg.x0,
-                                        pdf_y0,
-                                        lg.x1,
-                                        pdf_y1,
-                                        if (lg.extend_before) "true" else "false",
-                                        if (lg.extend_after) "true" else "false",
-                                    });
+                                    // Use fast formatting for coordinates
+                                    try shading_writer.writeAll("<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [");
+                                    var coord_buf: [64]u8 = undefined;
+                                    var len = format.writeCoord2(&coord_buf, lg.x0, pdf_y0);
+                                    try shading_writer.writeAll(coord_buf[0..len]);
+                                    try shading_writer.writeByte(' ');
+                                    len = format.writeCoord2(&coord_buf, lg.x1, pdf_y1);
+                                    try shading_writer.writeAll(coord_buf[0..len]);
+                                    try shading_writer.writeAll("] /Extend [");
+                                    try shading_writer.writeAll(if (lg.extend_before) "true " else "false ");
+                                    try shading_writer.writeAll(if (lg.extend_after) "true" else "false");
+                                    try shading_writer.writeAll("] /Function ");
                                     try gradient.writeFunctionDict(lg.stops, shading_writer);
                                     try shading_writer.writeAll(" >>");
                                 },
                                 .radial => |rg| {
                                     const pdf_y0 = self.currentPageSize().height - rg.y0;
                                     const pdf_y1 = self.currentPageSize().height - rg.y1;
-                                    try shading_writer.print("<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}] /Extend [{s} {s}] /Function ", .{
-                                        rg.x0,
-                                        pdf_y0,
-                                        rg.r0,
-                                        rg.x1,
-                                        pdf_y1,
-                                        rg.r1,
-                                        if (rg.extend_before) "true" else "false",
-                                        if (rg.extend_after) "true" else "false",
-                                    });
+                                    // Use fast formatting for coordinates
+                                    try shading_writer.writeAll("<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [");
+                                    var coord_buf: [64]u8 = undefined;
+                                    var len = format.writeCoord2(&coord_buf, rg.x0, pdf_y0);
+                                    try shading_writer.writeAll(coord_buf[0..len]);
+                                    try shading_writer.writeByte(' ');
+                                    len = format.writeF64_2(&coord_buf, rg.r0).len;
+                                    try shading_writer.writeAll(coord_buf[0..len]);
+                                    try shading_writer.writeByte(' ');
+                                    len = format.writeCoord2(&coord_buf, rg.x1, pdf_y1);
+                                    try shading_writer.writeAll(coord_buf[0..len]);
+                                    try shading_writer.writeByte(' ');
+                                    len = format.writeF64_2(&coord_buf, rg.r1).len;
+                                    try shading_writer.writeAll(coord_buf[0..len]);
+                                    try shading_writer.writeAll("] /Extend [");
+                                    try shading_writer.writeAll(if (rg.extend_before) "true " else "false ");
+                                    try shading_writer.writeAll(if (rg.extend_after) "true" else "false");
+                                    try shading_writer.writeAll("] /Function ");
                                     try gradient.writeFunctionDict(rg.stops, shading_writer);
                                     try shading_writer.writeAll(" >>");
                                 },

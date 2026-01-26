@@ -28,6 +28,8 @@ pub const Writer = struct {
     output: std.ArrayListUnmanaged(u8),
     offsets: std.ArrayListUnmanaged(ObjectOffset),
     allocator: std.mem.Allocator,
+    /// Compression level for FlateDecode streams (0-9, default 1 for speed)
+    compression_level: i32 = 1,
 
     pub fn init(allocator: std.mem.Allocator) Writer {
         return .{
@@ -89,8 +91,8 @@ pub const Writer = struct {
     /// Write a compressed stream object using FlateDecode (zlib)
     /// Compresses the data and adds appropriate Filter entry to dict
     pub fn writeStreamCompressed(self: *Writer, dict: *Dict, data: []const u8) !void {
-        // Compress the data
-        const compressed = try zlib.compress(self.allocator, data);
+        // Compress the data using configured level (default 1 for speed)
+        const compressed = try zlib.compressLevel(self.allocator, data, self.compression_level);
         defer self.allocator.free(compressed);
 
         // Only use compression if it actually saves space

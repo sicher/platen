@@ -7,6 +7,7 @@
 //! arrays, dictionaries, streams, and null.
 
 const std = @import("std");
+const fmt = @import("format.zig");
 
 /// Object ID (the 'n' in 'n 0 obj')
 pub const ObjectId = u32;
@@ -17,7 +18,11 @@ pub const Ref = struct {
     gen: u16 = 0,
 
     pub fn format(self: Ref, writer: anytype) @TypeOf(writer).Error!void {
-        try writer.print("{d} {d} R", .{ self.id, self.gen });
+        var buf: [32]u8 = undefined;
+        try writer.writeAll(fmt.writeInt(&buf, self.id));
+        try writer.writeByte(' ');
+        try writer.writeAll(fmt.writeInt(&buf, self.gen));
+        try writer.writeAll(" R");
     }
 };
 
@@ -121,11 +126,12 @@ pub const Value = union(enum) {
     literal_val: []const u8, // Raw output (no escaping/wrapping)
 
     pub fn format(self: Value, writer: anytype) @TypeOf(writer).Error!void {
+        var buf: [32]u8 = undefined;
         switch (self) {
             .null_val => try writer.writeAll("null"),
             .bool_val => |b| try writer.writeAll(if (b) "true" else "false"),
-            .int_val => |i| try writer.print("{d}", .{i}),
-            .real_val => |r| try writer.print("{d:.4}", .{r}),
+            .int_val => |i| try writer.writeAll(fmt.writeInt(&buf, i)),
+            .real_val => |r| try writer.writeAll(fmt.writeF64_3(&buf, r)),
             .string_val => |s| {
                 try writer.writeByte('(');
                 // Escape special PDF string characters: \, (, )

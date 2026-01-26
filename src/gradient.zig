@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const Color = @import("color.zig").Color;
+const format = @import("format.zig");
 
 /// A color stop in a gradient.
 pub const ColorStop = struct {
@@ -38,23 +39,21 @@ pub const LinearGradient = struct {
         const pdf_y0 = page_height - self.y0;
         const pdf_y1 = page_height - self.y1;
 
-        try writer.print(
-            \\<<
-            \\/ShadingType 2
-            \\/ColorSpace /DeviceRGB
-            \\/Coords [{d:.2} {d:.2} {d:.2} {d:.2}]
-            \\/Function {d} 0 R
-            \\/Extend [{s} {s}]
-            \\>>
-        , .{
-            self.x0,
-            pdf_y0,
-            self.x1,
-            pdf_y1,
-            func_ref,
-            if (self.extend_before) "true" else "false",
-            if (self.extend_after) "true" else "false",
-        });
+        var buf: [32]u8 = undefined;
+        try writer.writeAll("<<\n/ShadingType 2\n/ColorSpace /DeviceRGB\n/Coords [");
+        try writer.writeAll(format.writeF64_2(&buf, self.x0));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, pdf_y0));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, self.x1));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, pdf_y1));
+        try writer.writeAll("]\n/Function ");
+        try writer.writeAll(format.writeInt(&buf, func_ref));
+        try writer.writeAll(" 0 R\n/Extend [");
+        try writer.writeAll(if (self.extend_before) "true " else "false ");
+        try writer.writeAll(if (self.extend_after) "true" else "false");
+        try writer.writeAll("]\n>>");
     }
 };
 
@@ -85,45 +84,59 @@ pub const RadialGradient = struct {
         const pdf_y0 = page_height - self.y0;
         const pdf_y1 = page_height - self.y1;
 
-        try writer.print(
-            \\<<
-            \\/ShadingType 3
-            \\/ColorSpace /DeviceRGB
-            \\/Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}]
-            \\/Function {d} 0 R
-            \\/Extend [{s} {s}]
-            \\>>
-        , .{
-            self.x0,
-            pdf_y0,
-            self.r0,
-            self.x1,
-            pdf_y1,
-            self.r1,
-            func_ref,
-            if (self.extend_before) "true" else "false",
-            if (self.extend_after) "true" else "false",
-        });
+        var buf: [32]u8 = undefined;
+        try writer.writeAll("<<\n/ShadingType 3\n/ColorSpace /DeviceRGB\n/Coords [");
+        try writer.writeAll(format.writeF64_2(&buf, self.x0));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, pdf_y0));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, self.r0));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, self.x1));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, pdf_y1));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_2(&buf, self.r1));
+        try writer.writeAll("]\n/Function ");
+        try writer.writeAll(format.writeInt(&buf, func_ref));
+        try writer.writeAll(" 0 R\n/Extend [");
+        try writer.writeAll(if (self.extend_before) "true " else "false ");
+        try writer.writeAll(if (self.extend_after) "true" else "false");
+        try writer.writeAll("]\n>>");
     }
 };
 
 /// Write a PDF Type 2 exponential interpolation function for two colors.
 fn writeType2Function(writer: anytype, c0: Color.Rgbf, c1: Color.Rgbf, comptime compact: bool) !void {
+    var buf: [32]u8 = undefined;
     if (compact) {
-        try writer.print(
-            "<< /FunctionType 2 /Domain [0 1] /C0 [{d:.3} {d:.3} {d:.3}] /C1 [{d:.3} {d:.3} {d:.3}] /N 1 >>\n",
-            .{ c0.r, c0.g, c0.b, c1.r, c1.g, c1.b },
-        );
+        try writer.writeAll("<< /FunctionType 2 /Domain [0 1] /C0 [");
+        try writer.writeAll(format.writeF64_3(&buf, c0.r));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c0.g));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c0.b));
+        try writer.writeAll("] /C1 [");
+        try writer.writeAll(format.writeF64_3(&buf, c1.r));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c1.g));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c1.b));
+        try writer.writeAll("] /N 1 >>\n");
     } else {
-        try writer.print(
-            \\<<
-            \\/FunctionType 2
-            \\/Domain [0 1]
-            \\/C0 [{d:.3} {d:.3} {d:.3}]
-            \\/C1 [{d:.3} {d:.3} {d:.3}]
-            \\/N 1
-            \\>>
-        , .{ c0.r, c0.g, c0.b, c1.r, c1.g, c1.b });
+        try writer.writeAll("<<\n/FunctionType 2\n/Domain [0 1]\n/C0 [");
+        try writer.writeAll(format.writeF64_3(&buf, c0.r));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c0.g));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c0.b));
+        try writer.writeAll("]\n/C1 [");
+        try writer.writeAll(format.writeF64_3(&buf, c1.r));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c1.g));
+        try writer.writeByte(' ');
+        try writer.writeAll(format.writeF64_3(&buf, c1.b));
+        try writer.writeAll("]\n/N 1\n>>");
     }
 }
 
@@ -150,9 +163,10 @@ pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
 
         // Bounds array (offsets between stops, excluding first and last)
         try writer.writeAll("/Bounds [");
+        var buf: [32]u8 = undefined;
         for (1..stops.len - 1) |i| {
             if (i > 1) try writer.writeAll(" ");
-            try writer.print("{d:.3}", .{stops[i].offset});
+            try writer.writeAll(format.writeF64_3(&buf, stops[i].offset));
         }
         try writer.writeAll("]\n");
 
