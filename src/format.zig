@@ -18,6 +18,37 @@ const digit_pairs = init: {
     break :init table;
 };
 
+/// Write a non-zero unsigned integer to buffer starting at index i.
+/// Returns the new index after writing.
+inline fn writeUnsignedInt(buf: []u8, i: usize, value: u64) usize {
+    var temp: [20]u8 = undefined;
+    var t: usize = 0;
+    var n = value;
+    while (n >= 100) {
+        const pair = digit_pairs[n % 100];
+        temp[t] = pair[1];
+        temp[t + 1] = pair[0];
+        t += 2;
+        n /= 100;
+    }
+    if (n >= 10) {
+        const pair = digit_pairs[n];
+        temp[t] = pair[1];
+        temp[t + 1] = pair[0];
+        t += 2;
+    } else if (n > 0) {
+        temp[t] = @intCast(n + '0');
+        t += 1;
+    }
+    var idx = i;
+    while (t > 0) {
+        t -= 1;
+        buf[idx] = temp[t];
+        idx += 1;
+    }
+    return idx;
+}
+
 /// Write f64 with 2 decimal places to buffer.
 /// Returns the slice of buf that was written.
 /// ~14x faster than std.fmt.bufPrint("{d:.2}", .{val}).
@@ -39,36 +70,12 @@ pub fn writeF64_2(buf: []u8, val: f64) []u8 {
     const int_part: u64 = @intFromFloat(v);
     const frac_part: u64 = @intFromFloat((v - @as(f64, @floatFromInt(int_part))) * 100.0 + 0.5);
 
-    // Write integer part using digit pair lookup
+    // Write integer part
     if (int_part == 0) {
         buf[i] = '0';
         i += 1;
     } else {
-        var temp: [20]u8 = undefined;
-        var t: usize = 0;
-        var n = int_part;
-        while (n >= 100) {
-            const pair = digit_pairs[n % 100];
-            temp[t] = pair[1];
-            temp[t + 1] = pair[0];
-            t += 2;
-            n /= 100;
-        }
-        if (n >= 10) {
-            const pair = digit_pairs[n];
-            temp[t] = pair[1];
-            temp[t + 1] = pair[0];
-            t += 2;
-        } else if (n > 0) {
-            temp[t] = @intCast(n + '0');
-            t += 1;
-        }
-        // Reverse into output buffer
-        while (t > 0) {
-            t -= 1;
-            buf[i] = temp[t];
-            i += 1;
-        }
+        i = writeUnsignedInt(buf, i, int_part);
     }
 
     // Decimal point and fractional part (always 2 digits)
@@ -104,30 +111,7 @@ pub fn writeF64_3(buf: []u8, val: f64) []u8 {
         buf[i] = '0';
         i += 1;
     } else {
-        var temp: [20]u8 = undefined;
-        var t: usize = 0;
-        var n = int_part;
-        while (n >= 100) {
-            const pair = digit_pairs[n % 100];
-            temp[t] = pair[1];
-            temp[t + 1] = pair[0];
-            t += 2;
-            n /= 100;
-        }
-        if (n >= 10) {
-            const pair = digit_pairs[n];
-            temp[t] = pair[1];
-            temp[t + 1] = pair[0];
-            t += 2;
-        } else if (n > 0) {
-            temp[t] = @intCast(n + '0');
-            t += 1;
-        }
-        while (t > 0) {
-            t -= 1;
-            buf[i] = temp[t];
-            i += 1;
-        }
+        i = writeUnsignedInt(buf, i, int_part);
     }
 
     // Decimal point and 3 fractional digits
@@ -196,7 +180,7 @@ pub fn writeCoord4Suffix(buf: []u8, x1: f64, y1: f64, x2: f64, y2: f64, suffix: 
     return len;
 }
 
-/// Write unsigned integer to buffer.
+/// Write integer to buffer.
 /// Returns the slice of buf that was written.
 pub fn writeInt(buf: []u8, val: anytype) []u8 {
     const T = @TypeOf(val);
@@ -216,34 +200,8 @@ pub fn writeInt(buf: []u8, val: anytype) []u8 {
         return buf[0 .. i + 1];
     }
 
-    var temp: [20]u8 = undefined;
-    var t: usize = 0;
-    var n: u64 = @intCast(if (is_signed) @as(u64, @intCast(v)) else v);
-
-    while (n >= 100) {
-        const pair = digit_pairs[n % 100];
-        temp[t] = pair[1];
-        temp[t + 1] = pair[0];
-        t += 2;
-        n /= 100;
-    }
-    if (n >= 10) {
-        const pair = digit_pairs[n];
-        temp[t] = pair[1];
-        temp[t + 1] = pair[0];
-        t += 2;
-    } else if (n > 0) {
-        temp[t] = @intCast(n + '0');
-        t += 1;
-    }
-
-    while (t > 0) {
-        t -= 1;
-        buf[i] = temp[t];
-        i += 1;
-    }
-
-    return buf[0..i];
+    const n: u64 = @intCast(if (is_signed) @as(u64, @intCast(v)) else v);
+    return buf[0..writeUnsignedInt(buf, i, n)];
 }
 
 // ============================================================================

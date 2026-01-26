@@ -101,51 +101,52 @@ pub var last_output_timing: OutputTiming = .{};
 // Helper Functions
 // ============================================================================
 
+/// Date/time components for formatting.
+const DateTime = struct {
+    year: i32,
+    month: u8,
+    day: u8,
+    hour: u8,
+    minute: u8,
+    second: u8,
+
+    fn now() DateTime {
+        const epoch_secs: u64 = @intCast(std.time.timestamp());
+        const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
+        const day = epoch.getEpochDay();
+        const year_day = day.calculateYearDay();
+        const month_day = year_day.calculateMonthDay();
+        const day_secs = epoch.getDaySeconds();
+        return .{
+            .year = year_day.year,
+            .month = month_day.month.numeric(),
+            .day = month_day.day_index + 1,
+            .hour = day_secs.getHoursIntoDay(),
+            .minute = day_secs.getMinutesIntoHour(),
+            .second = day_secs.getSecondsIntoMinute(),
+        };
+    }
+};
+
 /// Format current UTC time as PDF date string: D:YYYYMMDDHHmmSSZ
 /// Returns a slice into the provided buffer.
 pub fn formatPdfDate(buf: *[24]u8) []const u8 {
-    const timestamp = std.time.timestamp();
-    const epoch_secs: u64 = @intCast(timestamp);
-    const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
-    const day = epoch.getEpochDay();
-    const year_day = day.calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_secs = epoch.getDaySeconds();
-
+    const dt = DateTime.now();
     _ = std.fmt.bufPrint(buf, "D:{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}Z", .{
-        year_day.year,
-        month_day.month.numeric(),
-        month_day.day_index + 1,
-        day_secs.getHoursIntoDay(),
-        day_secs.getMinutesIntoHour(),
-        day_secs.getSecondsIntoMinute(),
+        dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
     }) catch unreachable;
-
-    return buf[0..17]; // "D:YYYYMMDDHHmmSSZ"
+    return buf[0..17];
 }
 
 /// Format current UTC time as ISO 8601 date string: YYYY-MM-DDTHH:mm:ssZ
 /// Required for XMP metadata in PDF/A documents.
 /// Returns a slice into the provided buffer.
-pub fn formatIsoDate(buf: *[20]u8) []const u8 {
-    const timestamp = std.time.timestamp();
-    const epoch_secs: u64 = @intCast(timestamp);
-    const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
-    const day = epoch.getEpochDay();
-    const year_day = day.calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_secs = epoch.getDaySeconds();
-
+pub fn formatIsoDate(buf: *[21]u8) []const u8 {
+    const dt = DateTime.now();
     _ = std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
-        year_day.year,
-        month_day.month.numeric(),
-        month_day.day_index + 1,
-        day_secs.getHoursIntoDay(),
-        day_secs.getMinutesIntoHour(),
-        day_secs.getSecondsIntoMinute(),
+        dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
     }) catch unreachable;
-
-    return buf[0..20]; // "YYYY-MM-DDTHH:mm:ssZ"
+    return buf[0..20];
 }
 
 // ============================================================================
