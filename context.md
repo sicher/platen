@@ -25,14 +25,20 @@ Performance optimization and code refactoring **COMPLETED**.
   - Release mode: 14ms for drawing (0.47μs/shape)
   - Full test: 101ms total for 100 pages (446 KB PDF)
 
+- **Added fast formatting to text rendering** (`src/page.zig`, `src/text_render.zig`):
+  - Added `writeTd()`, `writeTm()`, `writeRect()` to ContentWriter
+  - Updated text_render.zig to use fast Td/Tm positioning
+  - Updated text decorations (underline/strikethrough) to use fast formatting
+  - ~4% improvement in release mode (101ms → 97ms)
+
 - **Performance results** (release mode, 100 pages, 3 iterations):
-  - Drawing shapes: 14ms
-  - OpenType heavy: 13ms
-  - Unicode/marks: 6ms
+  - Drawing shapes: 14ms (1.85x faster with fast formatting)
+  - OpenType heavy: 11ms
+  - Unicode/marks: 5ms
   - Simple text: 2ms
   - Text flow: 2ms
-  - PDF output: 62ms (page writing: 45ms)
-  - Total: 101ms
+  - PDF output: 61ms
+  - Total: 97ms
 
 ## What We Did (Session 2026-01-25 #6)
 - **Added memory loading functions**:
