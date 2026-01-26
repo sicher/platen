@@ -1975,63 +1975,6 @@ pub const OpenTypeFeatures = struct {
         return result.toOwnedSlice(self.allocator);
     }
 
-    /// Apply discretionary ligatures (dlig feature)
-    pub fn applyDlig(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
-        const has_dlig_liga = self.dlig_lookups.items.len > 0;
-        const has_chain = self.dlig_chain_lookups.items.len > 0;
-
-        if (!has_dlig_liga and !has_chain) {
-            return try self.allocator.dupe(u16, glyphs);
-        }
-
-        // First apply chain context rules (e.g., f→f.i before i)
-        var intermediate: []u16 = undefined;
-        var owns_intermediate = false;
-        if (has_chain) {
-            intermediate = try self.applyChainContext(glyphs, self.dlig_chain_lookups.items);
-            owns_intermediate = true;
-        } else {
-            intermediate = @constCast(glyphs);
-        }
-        defer if (owns_intermediate) self.allocator.free(intermediate);
-
-        // Then apply dlig's direct ligatures (e.g., !? → interrobang)
-        if (has_dlig_liga) {
-            return self.applyFeatureLigatures(intermediate, self.dlig_lookups.items);
-        }
-
-        return try self.allocator.dupe(u16, intermediate);
-    }
-
-    /// Apply contextual ligatures (clig feature)
-    pub fn applyClig(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
-        return self.applyFeatureLigatures(glyphs, self.clig_lookups.items);
-    }
-
-    /// Apply historical ligatures (hlig feature)
-    pub fn applyHlig(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
-        return self.applyFeatureLigatures(glyphs, self.hlig_lookups.items);
-    }
-
-    /// Apply single substitution feature (tnum, pnum, etc.)
-    fn applySingleSubstFeature(self: *OpenTypeFeatures, glyphs: []const u16, lookups: []const SingleSubst) ![]u16 {
-        var result = try self.allocator.alloc(u16, glyphs.len);
-        errdefer self.allocator.free(result);
-
-        for (glyphs, 0..) |glyph, i| {
-            var substituted = glyph;
-            for (lookups) |lookup| {
-                if (lookup.substitute(glyph)) |new_glyph| {
-                    substituted = new_glyph;
-                    break;
-                }
-            }
-            result[i] = substituted;
-        }
-
-        return result;
-    }
-
     /// Get kerning adjustment between two glyphs (O(1) with lazy caching)
     pub fn getKerning(self: *OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
         // O(1) cache lookup
