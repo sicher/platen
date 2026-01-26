@@ -2,8 +2,7 @@
 
 We are going to write a library for creating PDF documents. It is supposed to be used by applications that need to produce PDF document output, but a command line tool should be provided for testing the library functionality.
 
-The library is a low level library.
-
+The library is a low level library. It should be stateless.
 
 All code should be written in Zig 0.15. It should be self contained. Users clone the repo and build, nothing more!
 
@@ -35,7 +34,7 @@ If doing refactoring, start by running "zigmap" and "simgrep" to get good overvi
 
 ## Testing
 
-- If a test fails. Never EVER do a "quick fix" to get the test to pass. Always investigate the cause of the fail. Reason and ask the user when wondering about direction!
+- If a test fails. Never EVER do a "quick fix" to get the test to pass. ALWAYS investigate the cause of the fail, and investigate THOROUGHLY!!!
 
 - If possible, generate REFERENCE pdf:s with the python fpdf2 library, then integration tests that generate the same with zpdf and compares them.
 
@@ -43,7 +42,7 @@ If doing refactoring, start by running "zigmap" and "simgrep" to get good overvi
 
 - Make sure to add proper tests, both unit tests and integration tests. If you have to manually test something, it should likely be part of the test suite.
 
-- NEVER mask failed test results with increased test tolerance!!!!!
+- NEVER, EVER mask failed test results with increased test tolerance!!!!!
 
 ## Pairing rules
 
