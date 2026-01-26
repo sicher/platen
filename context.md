@@ -15,22 +15,20 @@ PDF/A conformance **FULLY VALIDATED** with VeraPDF.
   3. **XMP dates missing** - Added xmp:CreateDate and xmp:ModifyDate in ISO 8601 format
 
 - **Files modified**:
-  - `src/ttf_subset.zig`:
-    - Added `os2: ?[]const u8` to `TTFTables` struct
-    - Modified `assembleTTF()` to include OS/2 table (10 tables when present)
-    - Changed post table version from 2.0 to 3.0 (fixes "End of file" parse error)
-  - `src/embedded.zig`: Pass original OS/2 table to `assembleTTF()`
-  - `src/pdf_output.zig`: Added `formatIsoDate()` for XMP timestamps
-  - `src/document.zig`: Pass create_date/modify_date to XMP metadata generator
+  - `src/ttf_subset.zig`: Added OS/2 to TTFTables, post v3.0
+  - `src/embedded.zig`: Pass OS/2 table to assembleTTF()
+  - `src/pdf_output.zig`: Added formatIsoDate() for XMP
+  - `src/document.zig`: Pass dates to XMP metadata
+  - `src/pdfa.zig`: Removed pdfa_3b conformance
+  - `src/integration_tests.zig`: Added pdfa_2b test
+  - `README.md`: Added PDF/A documentation
 
-- **VeraPDF validation now passes**:
-  - PDF/A-1b: 129 rules passed, 0 failed
-  - PDF/A-2b: 144 rules passed, 0 failed
+- **Validation results** (VeraPDF + online validator):
+  - PDF/A-1b: 129/129 rules, 995/995 checks
+  - PDF/A-2b: 144/144 rules, 766/766 checks
 
-- **Root cause analysis**:
-  - VeraPDF's `TrueTypePostTable.readTable()` was hitting "End of file" because
-    post table version 2.0 expects glyph name data beyond the 32-byte header
-  - Version 3.0 (0x00030000) means "no glyph names" and requires only 32 bytes
+- **Root cause**: Post table v2.0 expects glyph names beyond 32-byte header;
+  v3.0 means "no glyph names" and requires only 32 bytes
 
 ## What We Did (Session 2026-01-26 #4)
 - **Added PDF/A conformance support** (`src/pdfa.zig`, `src/document.zig`):
