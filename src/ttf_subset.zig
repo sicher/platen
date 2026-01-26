@@ -124,6 +124,120 @@ pub fn buildMinimalCmap(allocator: std.mem.Allocator) ![]u8 {
     return new_cmap.toOwnedSlice(allocator);
 }
 
+/// Build a minimal name table from the original, keeping only essential entries.
+/// This dramatically reduces font size (from ~17KB to ~300 bytes for Gentium fonts).
+/// Required name IDs for PDF: 1 (family), 2 (subfamily), 4 (full name), 6 (PostScript name)
+pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u8) ![]u8 {
+    var new_name = std.ArrayListUnmanaged(u8){};
+    errdefer new_name.deinit(allocator);
+
+    // If no original name table, create an empty one
+    const name_data = orig_name orelse {
+        // Empty name table: format 0, 0 records, storage offset 6
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 6)));
+        return new_name.toOwnedSlice(allocator);
+    };
+
+    if (name_data.len < 6) {
+        // Invalid name table, return empty
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 6)));
+        return new_name.toOwnedSlice(allocator);
+    }
+
+    // Parse original name table
+    const num_records = readU16(name_data, 2);
+    const storage_offset = readU16(name_data, 4);
+
+    // Name IDs we want to keep (for Windows Unicode BMP: platform 3, encoding 1)
+    const keep_ids = [_]u16{ 1, 2, 4, 6 }; // family, subfamily, full name, PostScript name
+
+    // Collect matching records
+    const NameEntry = struct {
+        name_id: u16,
+        string_data: []const u8,
+    };
+
+    var entries = std.ArrayListUnmanaged(NameEntry){};
+    defer entries.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < num_records) : (i += 1) {
+        const record_offset = 6 + i * 12;
+        if (record_offset + 12 > name_data.len) break;
+
+        const platform_id = readU16(name_data, record_offset);
+        const encoding_id = readU16(name_data, record_offset + 2);
+        const name_id = readU16(name_data, record_offset + 6);
+        const str_length = readU16(name_data, record_offset + 8);
+        const str_offset = readU16(name_data, record_offset + 10);
+
+        // Only keep Windows Unicode BMP entries (platform 3, encoding 1)
+        if (platform_id != 3 or encoding_id != 1) continue;
+
+        // Check if this is a name ID we want
+        var keep = false;
+        for (keep_ids) |kid| {
+            if (name_id == kid) {
+                keep = true;
+                break;
+            }
+        }
+        if (!keep) continue;
+
+        // Check if we already have this name ID (avoid duplicates)
+        var duplicate = false;
+        for (entries.items) |e| {
+            if (e.name_id == name_id) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue;
+
+        // Extract string data
+        const abs_str_offset = @as(usize, storage_offset) + @as(usize, str_offset);
+        if (abs_str_offset + str_length <= name_data.len) {
+            try entries.append(allocator, .{
+                .name_id = name_id,
+                .string_data = name_data[abs_str_offset..][0..str_length],
+            });
+        }
+    }
+
+    // Build minimal name table
+    const record_count: u16 = @intCast(entries.items.len);
+    const header_size: u16 = 6 + record_count * 12;
+
+    // Header
+    try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // format
+    try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, record_count)));
+    try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, header_size))); // storage offset
+
+    // Calculate string offsets and write records
+    var str_offset: u16 = 0;
+    for (entries.items) |entry| {
+        // Platform 3 (Windows), Encoding 1 (Unicode BMP), Language 0x0409 (English)
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 3))); // platformID
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // encodingID
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0x0409))); // languageID
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, entry.name_id)));
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(entry.string_data.len))));
+        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, str_offset)));
+        str_offset += @intCast(entry.string_data.len);
+    }
+
+    // Write string data
+    for (entries.items) |entry| {
+        try new_name.appendSlice(allocator, entry.string_data);
+    }
+
+    return new_name.toOwnedSlice(allocator);
+}
+
 /// TTF table data for assembly
 pub const TTFTables = struct {
     head: []const u8,
@@ -410,6 +524,58 @@ test "buildMinimalCmap" {
     try std.testing.expect(cmap.len > 0);
     // Version should be 0
     try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, cmap[0..2], .big));
+}
+
+test "buildMinimalNameTable null input" {
+    const allocator = std.testing.allocator;
+    const name = try buildMinimalNameTable(allocator, null);
+    defer allocator.free(name);
+
+    // Should produce empty name table: format(2) + count(2) + offset(2) = 6 bytes
+    try std.testing.expectEqual(@as(usize, 6), name.len);
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, name[0..2], .big)); // format
+    try std.testing.expectEqual(@as(u16, 0), std.mem.readInt(u16, name[2..4], .big)); // count
+    try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, name[4..6], .big)); // storage offset
+}
+
+test "buildMinimalNameTable extracts essential entries" {
+    const allocator = std.testing.allocator;
+
+    // Build a sample name table with 2 records (name IDs 1 and 6)
+    // Format: header(6) + records(12 each) + strings
+    var name_data = [_]u8{
+        0x00, 0x00, // format = 0
+        0x00, 0x02, // numRecords = 2
+        0x00, 0x1E, // storageOffset = 30 (6 + 2*12 = 30)
+        // Record 1: Platform 3 (Windows), Encoding 1 (Unicode), Language 0x0409, Name ID 1
+        0x00, 0x03, // platformID
+        0x00, 0x01, // encodingID
+        0x04, 0x09, // languageID
+        0x00, 0x01, // nameID = 1 (family)
+        0x00, 0x08, // length = 8 bytes (4 UTF-16 chars)
+        0x00, 0x00, // offset = 0
+        // Record 2: Platform 3 (Windows), Encoding 1 (Unicode), Language 0x0409, Name ID 6
+        0x00, 0x03, // platformID
+        0x00, 0x01, // encodingID
+        0x04, 0x09, // languageID
+        0x00, 0x06, // nameID = 6 (PostScript)
+        0x00, 0x08, // length = 8 bytes
+        0x00, 0x08, // offset = 8
+        // String data: "Test" (UTF-16BE)
+        0x00, 'T', 0x00, 'e', 0x00, 's', 0x00, 't',
+        // String data: "Font" (UTF-16BE)
+        0x00, 'F', 0x00, 'o', 0x00, 'n', 0x00, 't',
+    };
+
+    const min_name = try buildMinimalNameTable(allocator, &name_data);
+    defer allocator.free(min_name);
+
+    // Should have 2 records (IDs 1 and 6 are kept)
+    const record_count = std.mem.readInt(u16, min_name[2..4], .big);
+    try std.testing.expectEqual(@as(u16, 2), record_count);
+
+    // Size should be much smaller than a typical 17KB name table
+    try std.testing.expect(min_name.len < 100);
 }
 
 test "rewriteCompositeGlyphIDs remaps component references" {

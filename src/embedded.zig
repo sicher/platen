@@ -21,6 +21,7 @@ const writeTableEntry = ttf_subset.writeTableEntry;
 const getLocaOffset = ttf_subset.getLocaOffset;
 const buildHmtxForGlyphs = ttf_subset.buildHmtxForGlyphs;
 const buildMinimalCmap = ttf_subset.buildMinimalCmap;
+const buildMinimalNameTable = ttf_subset.buildMinimalNameTable;
 const assembleTTF = ttf_subset.assembleTTF;
 const TTFTables = ttf_subset.TTFTables;
 const getCompositeComponents = ttf_subset.getCompositeComponents;
@@ -1643,6 +1644,10 @@ fn finishTTFSubset(
     const new_hhea = try allocator.dupe(u8, orig_hhea);
     defer allocator.free(new_hhea);
 
+    // Build minimal name table (reduces ~17KB to ~300 bytes for Gentium fonts)
+    const min_name = try buildMinimalNameTable(allocator, orig_name);
+    defer allocator.free(min_name);
+
     return assembleTTF(allocator, .{
         .head = orig_head,
         .hhea = new_hhea,
@@ -1651,7 +1656,7 @@ fn finishTTFSubset(
         .cmap = cmap,
         .loca = loca,
         .glyf = glyf,
-        .name = orig_name,
+        .name = min_name,
         .post = orig_post,
         .num_glyphs = num_glyphs,
     });
