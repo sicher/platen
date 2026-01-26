@@ -4,7 +4,7 @@
 
 const std = @import("std");
 
-pub const version = "0.1.0";
+pub const version = @import("version.zig");
 
 // Core modules
 pub const document = @import("document.zig");

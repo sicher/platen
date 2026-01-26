@@ -1671,7 +1671,7 @@ test "setMetadata stores metadata" {
 
     try std.testing.expectEqualStrings("My Document", doc.metadata.title.?);
     try std.testing.expectEqualStrings("Test Author", doc.metadata.author.?);
-    try std.testing.expectEqualStrings("zpdf", doc.metadata.producer.?);
+    try std.testing.expectEqualStrings(zpdf.version.full, doc.metadata.producer.?);
 }
 
 test "metadata written to PDF Info dictionary" {
@@ -1697,7 +1697,7 @@ test "metadata written to PDF Info dictionary" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subject (Test Subject)") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Keywords (test, pdf, zig)") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Creator (Test App)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Producer (zpdf)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Producer (" ++ zpdf.version.full ++ ")") != null);
     // Check auto-generated dates are present (format: D:YYYYMMDDHHmmSSZ)
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/CreationDate (D:") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/ModDate (D:") != null);
