@@ -10,33 +10,19 @@
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - Color emoji support (parse COLR/CPAL tables, render as colored paths)
 
+## What We Did (Session 2026-01-26 #10)
+- **Simplified StyledText API**:
+  - Removed `appendOwned()` - wasn't used internally, added unnecessary complexity
+  - Removed `owned_text` field from StyledText struct
+  - Users use `append()` which stores references (typically string literals)
+  - Updated README to reflect simplified API
+- Commits: 3194f3e
+
 ## What We Did (Session 2026-01-26 #9)
-- **Added OpenType character variants cv01-cv99**:
-  - Added cv01-cv99 to Feature enum (99 new features)
-  - Added cvIndex() helper and character_variants constant array
-  - Added cv_lookups[99] array to OpenTypeFeatures
-  - Added cv application loop in applyGSUBWithFlags
-  - Added helper functions in embedded.zig (anyCharVariantEnabled, hasCharVariantLookups)
-
-- **Fixed FeatureFlags comptime limit**:
-  - EnumArray exceeded comptime branch limit with 132 features
-  - Replaced with custom bitset using [num_features]bool array
-  - Added featureIndex() comptime helper for O(1) lookup
-
-- **Updated inter_fonts integration test**:
-  - Added cv01-cv13 showcase (all character variants Inter supports)
-  - Removed Unicode Coverage section to fit on one page
-  - Fixed sample text to match what each cv feature actually affects
-
-- **Fixed CLI version reference**:
-  - Changed zpdf.version to zpdf.version.version (module vs string)
-
-- **Updated README** with complete OpenType features list:
-  - GSUB: liga, clig, dlig, hlig, calt, tnum, pnum, frac, zero, case, ss01-ss20, cv01-cv99
-  - GPOS: kern, mark, mkmk
-  - Added code example for enabling/disabling features
-
-- **Moved v1.0.0 tag** to include these features
+- **Added OpenType character variants cv01-cv99**
+- **Fixed FeatureFlags comptime limit** with custom bitset
+- **Updated inter_fonts integration test** with cv01-cv13 showcase
+- **Updated README** with complete OpenType features list
 - Commits: 8dc0cc3
 
 ## What We Did (Session 2026-01-26 #8)
