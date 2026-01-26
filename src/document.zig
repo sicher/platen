@@ -1354,12 +1354,49 @@ pub const Document = struct {
 
         // Draw border if specified
         if (region.border.top or region.border.bottom or region.border.left or region.border.right) {
-            // Set line width to 0.567pt (fpdf2 default: 0.2mm)
-            @memcpy(buf[len..][0..8], "0.567 w\n");
-            len += 8;
-            // Set stroke color to black
-            @memcpy(buf[len..][0..9], "0 0 0 RG\n");
-            len += 9;
+            const s = region.border.style;
+
+            // Set line width
+            const w_str = format.writeF64_3(buf[len..], s.width);
+            len += w_str.len;
+            @memcpy(buf[len..][0..3], " w\n");
+            len += 3;
+
+            // Set dash pattern
+            if (s.dash.dash > 0) {
+                buf[len] = '[';
+                len += 1;
+                const dash_str = format.writeF64_3(buf[len..], s.dash.dash);
+                len += dash_str.len;
+                buf[len] = ' ';
+                len += 1;
+                const gap_str = format.writeF64_3(buf[len..], s.dash.gap);
+                len += gap_str.len;
+                @memcpy(buf[len..][0..2], "] ");
+                len += 2;
+                const phase_str = format.writeF64_3(buf[len..], s.dash.phase);
+                len += phase_str.len;
+                @memcpy(buf[len..][0..3], " d\n");
+                len += 3;
+            }
+
+            // Set line cap and join
+            buf[len] = @intCast(@intFromEnum(s.cap) + '0');
+            len += 1;
+            @memcpy(buf[len..][0..3], " J ");
+            len += 3;
+            buf[len] = @intCast(@intFromEnum(s.join) + '0');
+            len += 1;
+            @memcpy(buf[len..][0..3], " j\n");
+            len += 3;
+
+            // Set stroke color
+            var color_buf: [64]u8 = undefined;
+            var fbs = std.io.fixedBufferStream(&color_buf);
+            s.color.writeStroke(fbs.writer()) catch unreachable;
+            const color_str = fbs.getWritten();
+            @memcpy(buf[len .. len + color_str.len], color_str);
+            len += color_str.len;
 
             if (region.border.top) {
                 const y_top = pdf_y + region.height;

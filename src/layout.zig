@@ -115,6 +115,8 @@ pub const Border = struct {
     bottom: bool = false,
     left: bool = false,
     right: bool = false,
+    /// Stroke style for the border (color, width, dash, etc.)
+    style: StrokeStyle = .{},
 
     pub const none = Border{};
     pub const all = Border{ .top = true, .bottom = true, .left = true, .right = true };
