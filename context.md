@@ -1,10 +1,38 @@
 # zpdf Context
 
 ## Current Focus
-Memory loading API and API consistency improvements **COMPLETED**.
+Performance optimization and code refactoring **COMPLETED**.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
+
+## What We Did (Session 2026-01-26)
+- **Created fast float formatting module** (`src/format.zig`):
+  - `writeF64_2()`, `writeF64_3()` - 11-14x faster than std.fmt.bufPrint
+  - `writeCoord2()`, `writeCoord2Suffix()`, `writeCubic()` - coordinate helpers
+  - Uses precomputed digit pair lookup table
+  - Integrated into graphics.zig and document.zig drawing functions
+
+- **Refactoring extractions from document.zig**:
+  - Moved `beginShapeCommand()` and `finishShapeCommand()` to graphics.zig
+  - Moved public API tests from document.zig to document_test.zig
+  - Removed redundant `renderCIDTextWithKerning` wrapper
+  - document.zig now ~3566 lines (down from 4470)
+
+- **Added drawing-intensive benchmark to perf_test.zig**:
+  - Tests rectangles, lines, ellipses, circles, rounded rects, polygons
+  - 20 pages × ~1500 shapes = 30,000 shapes per run
+  - Release mode: 14ms for drawing (0.47μs/shape)
+  - Full test: 101ms total for 100 pages (446 KB PDF)
+
+- **Performance results** (release mode, 100 pages, 3 iterations):
+  - Drawing shapes: 14ms
+  - OpenType heavy: 13ms
+  - Unicode/marks: 6ms
+  - Simple text: 2ms
+  - Text flow: 2ms
+  - PDF output: 62ms (page writing: 45ms)
+  - Total: 101ms
 
 ## What We Did (Session 2026-01-25 #6)
 - **Added memory loading functions**:

@@ -194,6 +194,39 @@ ascii_widths: [128]u16 = [_]u16{0} ** 128,
 has_ascii_widths: bool = false,
 ```
 
+### 15. Fast Float Formatting (format.zig)
+
+**Problem**: PDF coordinate output uses `std.fmt.bufPrint("{d:.2}", .{val})` extensively. Profiling showed this is slow due to parsing overhead.
+
+**Solution**: Created specialized float-to-string functions using precomputed digit pair lookup table.
+
+**Impact**: **2x speedup for drawing operations** (28ms → 14ms for 30,000 shapes)
+
+```zig
+// Precomputed digit pairs for fast conversion
+const digit_pairs = init: {
+    var table: [100][2]u8 = undefined;
+    for (0..100) |n| {
+        table[n][0] = @intCast(n / 10 + '0');
+        table[n][1] = @intCast(n % 10 + '0');
+    }
+    break :init table;
+};
+
+// 14x faster than std.fmt.bufPrint("{d:.2}")
+pub fn writeF64_2(buf: []u8, val: f64) []u8 { ... }
+```
+
+Microbenchmark (per-call):
+- `std.fmt.bufPrint("{d:.2}")`: 46.2 ns
+- `format.writeF64_2`: 3.4 ns (14x faster)
+
+Drawing benchmark (debug mode, 20 pages × ~1500 shapes = 30,000 shapes):
+| Metric | Before | After | Speedup |
+|--------|--------|-------|---------|
+| Drawing shapes | 163ms | 88ms | **1.85x** |
+| Per-shape | 5.4μs | 2.9μs | 1.85x |
+
 ## Shaping Microbenchmark Results
 
 Per-call timing for 5000 iterations:
@@ -274,4 +307,7 @@ zig build perf -- --pages=10 --iterations=1
 - `src/opentype.zig` - Scratch buffers, fast-path matching, pre-allocation, kerning cache, calt rule index
 - `src/embedded.zig` - Scratch buffers, O(1) lookup, cached kern/mark flags, output allocator parameter
 - `src/zpdf.zig` - Fast soft-hyphen check, early exit kerning check, fast hex conversion, output timing instrumentation, page arena allocator
-- `src/perf_test.zig` - Performance test suite with microbenchmarks, output timing breakdown display
+- `src/format.zig` - Fast float formatting with digit pair lookup table
+- `src/graphics.zig` - Uses fast formatting for path generation
+- `src/document.zig` - Uses fast formatting for drawing operations
+- `src/perf_test.zig` - Performance test suite with microbenchmarks, output timing breakdown display, drawing benchmark

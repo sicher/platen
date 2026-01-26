@@ -54,7 +54,7 @@ pub fn main() !void {
     std.debug.print("\n=== ZPDF Performance Test ===\n", .{});
     std.debug.print("Pages: {d}, Iterations: {d}\n\n", .{ config.pages, config.iterations });
 
-    var total_times = [_]i64{0} ** 6;
+    var total_times = [_]i64{0} ** 7;
     var pdf_bytes: ?[]u8 = null;
     defer if (pdf_bytes) |b| allocator.free(b);
 
@@ -69,7 +69,8 @@ pub fn main() !void {
         total_times[2] += result.opentype_ms;
         total_times[3] += result.unicode_ms;
         total_times[4] += result.text_flow_ms;
-        total_times[5] += result.output_ms;
+        total_times[5] += result.drawing_ms;
+        total_times[6] += result.output_ms;
 
         // Keep last PDF for output
         if (pdf_bytes) |b| allocator.free(b);
@@ -91,9 +92,10 @@ pub fn main() !void {
     std.debug.print("  OpenType heavy:  {d}ms\n", .{@divTrunc(total_times[2], n)});
     std.debug.print("  Unicode/marks:   {d}ms\n", .{@divTrunc(total_times[3], n)});
     std.debug.print("  Text flow:       {d}ms\n", .{@divTrunc(total_times[4], n)});
-    std.debug.print("  PDF output:      {d}ms\n", .{@divTrunc(total_times[5], n)});
+    std.debug.print("  Drawing shapes:  {d}ms\n", .{@divTrunc(total_times[5], n)});
+    std.debug.print("  PDF output:      {d}ms\n", .{@divTrunc(total_times[6], n)});
     std.debug.print("  ---\n", .{});
-    std.debug.print("  TOTAL:           {d}ms\n", .{@divTrunc(total_times[0] + total_times[1] + total_times[2] + total_times[3] + total_times[4] + total_times[5], n)});
+    std.debug.print("  TOTAL:           {d}ms\n", .{@divTrunc(total_times[0] + total_times[1] + total_times[2] + total_times[3] + total_times[4] + total_times[5] + total_times[6], n)});
 
     if (pdf_bytes) |data| {
         std.debug.print("  PDF size:        {d} KB\n", .{data.len / 1024});
@@ -212,6 +214,7 @@ const TestResult = struct {
     opentype_ms: i64,
     unicode_ms: i64,
     text_flow_ms: i64,
+    drawing_ms: i64,
     output_ms: i64,
     total_ms: i64,
     pdf_data: []u8,
@@ -255,7 +258,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     inter_ot.embedded.setFeature(.calt, true);
     inter_ot.embedded.setFeature(.frac, true);
 
-    const pages_per_section = config.pages / 4;
+    const pages_per_section = config.pages / 5;
 
     // 2. Simple text test (minimal OpenType)
     {
@@ -396,7 +399,97 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         result.text_flow_ms = t.endPrint(config.quiet);
     }
 
-    // 6. PDF output generation
+    // 6. Drawing shapes test (exercises fast coordinate formatting)
+    {
+        const t = Timer.begin("Drawing shapes");
+
+        for (0..pages_per_section) |_| {
+            try doc.addPage(.{});
+
+            // Many rectangles (50 per row, 20 rows = 1000 rects per page)
+            for (0..20) |row| {
+                const y = 50 + @as(f64, @floatFromInt(row)) * 35;
+                for (0..50) |col| {
+                    const x = 20 + @as(f64, @floatFromInt(col)) * 11;
+                    try doc.drawRect(.{ .x = x, .y = y, .width = 9, .height = 30 }, .{
+                        .stroke = .{ .color = zpdf.Color.rgbf(0.2, 0.4, 0.8), .width = 0.5 },
+                        .fill = .{ .color = zpdf.Color.rgbf(0.9, 0.95, 1.0) },
+                    });
+                }
+            }
+
+            // Many lines (grid pattern - 100 horizontal + 100 vertical = 200 lines)
+            for (0..100) |i| {
+                const offset = @as(f64, @floatFromInt(i)) * 5.5;
+                // Horizontal lines
+                try doc.drawLine(.{ .x = 50, .y = 50 + offset }, .{ .x = 500, .y = 50 + offset }, .{
+                    .color = zpdf.Color.greyscale(0.7),
+                    .width = 0.25,
+                });
+                // Vertical lines
+                try doc.drawLine(.{ .x = 50 + offset * 0.9, .y = 50 }, .{ .x = 50 + offset * 0.9, .y = 600 }, .{
+                    .color = zpdf.Color.greyscale(0.8),
+                    .width = 0.25,
+                });
+            }
+
+            // Ellipses (100 per page) - using bounding box rect
+            for (0..10) |row| {
+                const y = 100 + @as(f64, @floatFromInt(row)) * 60;
+                for (0..10) |col| {
+                    const x = 80 + @as(f64, @floatFromInt(col)) * 50;
+                    try doc.drawEllipse(.{ .x = x - 18, .y = y - 12, .width = 36, .height = 24 }, .{
+                        .stroke = .{ .color = zpdf.Color.rgbf(0.8, 0.2, 0.2) },
+                        .fill = .{ .color = zpdf.Color.rgbf(1.0, 0.9, 0.9) },
+                    });
+                }
+            }
+
+            // Circles (100 per page)
+            for (0..10) |row| {
+                const cy = 120 + @as(f64, @floatFromInt(row)) * 55;
+                for (0..10) |col| {
+                    const cx = 100 + @as(f64, @floatFromInt(col)) * 45;
+                    try doc.drawCircle(.{ .x = cx, .y = cy }, 8, .{
+                        .stroke = .{ .color = zpdf.Color.rgbf(0.2, 0.7, 0.2), .width = 1.0 },
+                    });
+                }
+            }
+
+            // Rounded rectangles (50 per page)
+            for (0..5) |row| {
+                const y = 80 + @as(f64, @floatFromInt(row)) * 130;
+                for (0..10) |col| {
+                    const x = 30 + @as(f64, @floatFromInt(col)) * 55;
+                    try doc.drawRoundedRect(.{ .x = x, .y = y, .width = 50, .height = 100 }, 5, .{
+                        .stroke = .{ .color = zpdf.Color.rgbf(0.5, 0.2, 0.7), .width = 0.75 },
+                        .fill = .{ .color = zpdf.Color.rgbf(0.95, 0.9, 1.0) },
+                    });
+                }
+            }
+
+            // Polygons (triangles, hexagons - 50 per page)
+            for (0..10) |row| {
+                const cy = 100 + @as(f64, @floatFromInt(row)) * 70;
+                for (0..5) |col| {
+                    const cx = 80 + @as(f64, @floatFromInt(col)) * 100;
+                    // Triangle
+                    const tri_points = [_]zpdf.Point{
+                        .{ .x = cx, .y = cy + 20 },
+                        .{ .x = cx - 15, .y = cy - 10 },
+                        .{ .x = cx + 15, .y = cy - 10 },
+                    };
+                    try doc.drawPolygon(&tri_points, .{
+                        .stroke = .{ .color = zpdf.Color.rgbf(0.9, 0.5, 0.1) },
+                        .fill = .{ .color = zpdf.Color.rgbf(1.0, 0.95, 0.85) },
+                    });
+                }
+            }
+        }
+        result.drawing_ms = t.endPrint(config.quiet);
+    }
+
+    // 7. PDF output generation
     {
         const t = Timer.begin("PDF output");
         result.pdf_data = try doc.output();
