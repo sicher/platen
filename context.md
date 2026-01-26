@@ -1,44 +1,44 @@
 # zpdf Context
 
 ## Current Focus
-Performance optimization and code refactoring **COMPLETED**.
+Performance optimization **COMPLETED**.
 
 ## What's Next
 - Add opacity support to graphics API (via ExtGState)
 
-## What We Did (Session 2026-01-26)
+## What We Did (Session 2026-01-26 #2)
+- **Fixed gentium_family PDF size issue** (`src/ttf_subset.zig`, `src/embedded.zig`):
+  - Added `buildMinimalNameTable()` - extracts only essential name IDs (1,2,4,6)
+  - Reduces font name tables from ~17KB to ~150 bytes each
+  - Result: gentium_family.pdf now 35KB smaller than fpdf2 (was 15KB larger)
+
+- **Optimized PDF output compression** (`src/writer.zig`, `src/document.zig`):
+  - Added `compression_level` field to Document (default 1 for speed)
+  - Users can set `doc.compression_level = 6` for smaller files
+  - Page writing: 45ms → 11ms (4x faster)
+
+- **Fast formatting in PDF dictionaries**:
+  - `src/gradient.zig` - All shading/gradient dicts use fast formatting
+  - `src/objects.zig` - Value.real(), Value.int(), Ref.format() use fast formatting
+  - `src/document.zig` - Inline shading dicts use fast formatting
+
+- **Performance results** (release mode, 100 pages):
+  - PDF output: 61ms → 26ms (57% faster)
+  - Total: 101ms → 62ms (39% faster, ~1600 pages/sec)
+  - Trade-off: PDF size 437KB → 517KB with level 1 compression
+
+- **Analyzed resource lookups** - O(n) linear search for fonts/images is fine
+  for typical documents (<20 fonts, <100 images). Not worth HashMap overhead.
+
+## What We Did (Session 2026-01-26 #1)
 - **Created fast float formatting module** (`src/format.zig`):
   - `writeF64_2()`, `writeF64_3()` - 11-14x faster than std.fmt.bufPrint
   - `writeCoord2()`, `writeCoord2Suffix()`, `writeCubic()` - coordinate helpers
-  - Uses precomputed digit pair lookup table
-  - Integrated into graphics.zig and document.zig drawing functions
-
-- **Refactoring extractions from document.zig**:
-  - Moved `beginShapeCommand()` and `finishShapeCommand()` to graphics.zig
-  - Moved public API tests from document.zig to document_test.zig
-  - Removed redundant `renderCIDTextWithKerning` wrapper
-  - document.zig now ~3566 lines (down from 4470)
+  - `writeHex4()`, `writeCMapEntry()` - fast hex formatting for fonts
 
 - **Added drawing-intensive benchmark to perf_test.zig**:
   - Tests rectangles, lines, ellipses, circles, rounded rects, polygons
   - 20 pages × ~1500 shapes = 30,000 shapes per run
-  - Release mode: 14ms for drawing (0.47μs/shape)
-  - Full test: 101ms total for 100 pages (446 KB PDF)
-
-- **Added fast formatting to text rendering** (`src/page.zig`, `src/text_render.zig`):
-  - Added `writeTd()`, `writeTm()`, `writeRect()` to ContentWriter
-  - Updated text_render.zig to use fast Td/Tm positioning
-  - Updated text decorations (underline/strikethrough) to use fast formatting
-  - ~4% improvement in release mode (101ms → 97ms)
-
-- **Performance results** (release mode, 100 pages, 3 iterations):
-  - Drawing shapes: 14ms (1.85x faster with fast formatting)
-  - OpenType heavy: 11ms
-  - Unicode/marks: 5ms
-  - Simple text: 2ms
-  - Text flow: 2ms
-  - PDF output: 61ms
-  - Total: 97ms
 
 ## What We Did (Session 2026-01-25 #6)
 - **Added memory loading functions**:
