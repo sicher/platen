@@ -9,20 +9,13 @@ const std = @import("std");
 const pagemod = @import("page.zig");
 const embedded = @import("embedded.zig");
 const opentype = @import("opentype.zig");
+const format = @import("format.zig");
 
 const ContentWriter = pagemod.ContentWriter;
 const EmbeddedFont = embedded.EmbeddedFont;
 
-// Fast hex conversion lookup table
-const hex_chars = "0123456789ABCDEF";
-
-/// Fast conversion of u16 to 4-character hex string
-pub fn writeHex4(buf: *[4]u8, val: u16) void {
-    buf[0] = hex_chars[(val >> 12) & 0xF];
-    buf[1] = hex_chars[(val >> 8) & 0xF];
-    buf[2] = hex_chars[(val >> 4) & 0xF];
-    buf[3] = hex_chars[val & 0xF];
-}
+// Re-export fast hex conversion from format module
+const writeHex4 = format.writeHex4;
 
 /// Render CID text with ligatures, kerning, and mark positioning
 /// Returns true if advanced positioning was used (kerning or marks)

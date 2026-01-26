@@ -10,6 +10,7 @@ const ttf = @import("ttf.zig");
 const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
 pub const opentype = @import("opentype.zig");
+const format = @import("format.zig");
 
 // Re-export commonly used functions from subsetting modules
 const readU16 = ttf_subset.readU16;
@@ -1018,11 +1019,11 @@ pub const EmbeddedFont = struct {
                     const adjusted = codepoint - 0x10000;
                     const high: u16 = @intCast(0xD800 + (adjusted >> 10));
                     const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
-                    const entry_s = std.fmt.bufPrint(&entry_buf, "<{X:0>4}> <{X:0>4}{X:0>4}>\n", .{ gid, high, low }) catch unreachable;
-                    try cmap.appendSlice(self.allocator, entry_s);
+                    const len = format.writeCMapEntrySurrogate(&entry_buf, gid, high, low);
+                    try cmap.appendSlice(self.allocator, entry_buf[0..len]);
                 } else {
-                    const entry_s = std.fmt.bufPrint(&entry_buf, "<{X:0>4}> <{X:0>4}>\n", .{ gid, codepoint }) catch unreachable;
-                    try cmap.appendSlice(self.allocator, entry_s);
+                    const len = format.writeCMapEntry(&entry_buf, gid, codepoint);
+                    try cmap.appendSlice(self.allocator, entry_buf[0..len]);
                 }
             }
 
@@ -1035,23 +1036,33 @@ pub const EmbeddedFont = struct {
 
                 // Format: <GID> <UTF16_CODEPOINT_SEQUENCE>
                 var entry_buf: [128]u8 = undefined;
-                var fbs = std.io.fixedBufferStream(&entry_buf);
-                const writer = fbs.writer();
+                var len: usize = 0;
 
-                try writer.print("<{X:0>4}> <", .{lig_gid});
+                entry_buf[len] = '<';
+                len += 1;
+                format.writeHex4(entry_buf[len..][0..4], lig_gid);
+                len += 4;
+                @memcpy(entry_buf[len..][0..3], "> <");
+                len += 3;
+
                 for (lig_codepoints) |cp| {
                     if (cp > 0xFFFF) {
                         const adjusted = cp - 0x10000;
                         const high: u16 = @intCast(0xD800 + (adjusted >> 10));
                         const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
-                        try writer.print("{X:0>4}{X:0>4}", .{ high, low });
+                        format.writeHex4(entry_buf[len..][0..4], high);
+                        len += 4;
+                        format.writeHex4(entry_buf[len..][0..4], low);
+                        len += 4;
                     } else {
-                        try writer.print("{X:0>4}", .{cp});
+                        format.writeHex4(entry_buf[len..][0..4], @intCast(cp));
+                        len += 4;
                     }
                 }
-                try writer.writeAll(">\n");
+                @memcpy(entry_buf[len..][0..2], ">\n");
+                len += 2;
 
-                try cmap.appendSlice(self.allocator, fbs.getWritten());
+                try cmap.appendSlice(self.allocator, entry_buf[0..len]);
             }
 
             try cmap.appendSlice(self.allocator, "endbfchar\n");
@@ -1103,8 +1114,16 @@ pub const EmbeddedFont = struct {
         // Note: space after each entry ensures proper parsing by all PDF readers
         for (gid_width_pairs.items) |pair| {
             var entry_buf: [32]u8 = undefined;
-            const entry = std.fmt.bufPrint(&entry_buf, "{d} [{d}] ", .{ pair.gid, pair.width }) catch unreachable;
-            try buf.appendSlice(self.allocator, entry);
+            var len: usize = 0;
+            const gid_str = format.writeInt(entry_buf[len..], pair.gid);
+            len += gid_str.len;
+            @memcpy(entry_buf[len..][0..2], " [");
+            len += 2;
+            const width_str = format.writeInt(entry_buf[len..], pair.width);
+            len += width_str.len;
+            @memcpy(entry_buf[len..][0..2], "] ");
+            len += 2;
+            try buf.appendSlice(self.allocator, entry_buf[0..len]);
         }
 
         try buf.appendSlice(self.allocator, "]");

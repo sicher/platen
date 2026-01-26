@@ -247,8 +247,86 @@ pub fn writeInt(buf: []u8, val: anytype) []u8 {
 }
 
 // ============================================================================
+// Hex Formatting
+// ============================================================================
+
+/// Hex character lookup table
+const hex_chars = "0123456789ABCDEF";
+
+/// Fast conversion of u16 to 4-character uppercase hex string.
+/// Writes exactly 4 characters to buf.
+pub fn writeHex4(buf: *[4]u8, val: u16) void {
+    buf[0] = hex_chars[(val >> 12) & 0xF];
+    buf[1] = hex_chars[(val >> 8) & 0xF];
+    buf[2] = hex_chars[(val >> 4) & 0xF];
+    buf[3] = hex_chars[val & 0xF];
+}
+
+/// Write "<XXXX>" hex glyph ID format. Returns bytes written (always 6).
+pub fn writeHexBracket4(buf: []u8, val: u16) usize {
+    buf[0] = '<';
+    writeHex4(buf[1..5], val);
+    buf[5] = '>';
+    return 6;
+}
+
+/// Write CMap entry "<GID> <CODEPOINT>\n" for BMP codepoints.
+/// Returns bytes written.
+pub fn writeCMapEntry(buf: []u8, gid: u16, codepoint: u21) usize {
+    var len: usize = 0;
+    buf[len] = '<';
+    len += 1;
+    writeHex4(buf[len..][0..4], gid);
+    len += 4;
+    @memcpy(buf[len..][0..3], "> <");
+    len += 3;
+    writeHex4(buf[len..][0..4], @intCast(codepoint));
+    len += 4;
+    @memcpy(buf[len..][0..2], ">\n");
+    len += 2;
+    return len;
+}
+
+/// Write CMap entry "<GID> <HIGH><LOW>\n" for surrogate pairs.
+/// Returns bytes written.
+pub fn writeCMapEntrySurrogate(buf: []u8, gid: u16, high: u16, low: u16) usize {
+    var len: usize = 0;
+    buf[len] = '<';
+    len += 1;
+    writeHex4(buf[len..][0..4], gid);
+    len += 4;
+    @memcpy(buf[len..][0..3], "> <");
+    len += 3;
+    writeHex4(buf[len..][0..4], high);
+    len += 4;
+    writeHex4(buf[len..][0..4], low);
+    len += 4;
+    @memcpy(buf[len..][0..2], ">\n");
+    len += 2;
+    return len;
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
+
+test "writeHex4" {
+    var buf: [4]u8 = undefined;
+    writeHex4(&buf, 0x0000);
+    try std.testing.expectEqualStrings("0000", &buf);
+    writeHex4(&buf, 0xFFFF);
+    try std.testing.expectEqualStrings("FFFF", &buf);
+    writeHex4(&buf, 0x1234);
+    try std.testing.expectEqualStrings("1234", &buf);
+    writeHex4(&buf, 0xABCD);
+    try std.testing.expectEqualStrings("ABCD", &buf);
+}
+
+test "writeCMapEntry" {
+    var buf: [32]u8 = undefined;
+    const len = writeCMapEntry(&buf, 0x0041, 0x0041);
+    try std.testing.expectEqualStrings("<0041> <0041>\n", buf[0..len]);
+}
 
 test "writeF64_2 basic values" {
     var buf: [32]u8 = undefined;
