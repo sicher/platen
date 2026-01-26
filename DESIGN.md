@@ -545,14 +545,20 @@ try doc.drawSvg(svg, x, y, width, height);
 ### Drawing Primitives
 
 ```zig
-// Lines
-try doc.drawLine(x1, y1, x2, y2);
+// Lines with stroke style
+try doc.drawLine(p1, p2, .{ .color = Color.blue, .width = 2 });
 
-// Shapes (stroke, fill, or fill_stroke)
-try doc.drawRect(x, y, w, h, .fill_stroke);
-try doc.drawCircle(cx, cy, radius, .fill);
-try doc.drawEllipse(x, y, w, h, .stroke);
-try doc.drawPolygon(&points, .fill_stroke);
+// Shapes with fill, stroke, or both
+try doc.drawRect(rect, .{ .fill = .{ .color = Color.red } });
+try doc.drawCircle(center, radius, .{ .stroke = .{ .width = 1.5 } });
+try doc.drawEllipse(rect, .{ .fill = .{}, .stroke = .{} });  // both
+try doc.drawPolygon(&points, .{ .fill = .{ .color = Color.green } });
+
+// Opacity support (0.0-1.0, uses PDF ExtGState)
+try doc.drawRect(rect, .{
+    .fill = .{ .color = Color.red, .opacity = 0.5 },
+    .stroke = .{ .color = Color.black, .opacity = 0.8 },
+});
 ```
 
 ### Path API
@@ -587,14 +593,24 @@ try doc.drawRadialGradient(&radial, x, y, w, h);
 
 ### Styling
 
+Shape styles are passed directly to draw methods:
+
 ```zig
-doc.setDrawColor(zpdf.Color.fromRgb(0, 0, 0));
-doc.setFillColor(zpdf.Color.fromRgb(0.9, 0.9, 0.9));
-doc.setLineWidth(1.5);
-doc.setLineCap(.round);    // .butt, .round, .square
-doc.setLineJoin(.miter);   // .miter, .round, .bevel
-doc.setDashPattern(4, 2, 0);  // dash, gap, phase
-doc.setSolidLine();           // reset to solid
+// StrokeStyle options
+.stroke = .{
+    .color = Color.black,       // default
+    .width = 0.567,             // default (1px at 72dpi)
+    .cap = .square,             // .butt, .round, .square
+    .join = .miter,             // .miter, .round, .bevel
+    .dash = .{ .dash = 4, .gap = 2, .phase = 0 },
+    .opacity = 1.0,             // 0.0-1.0
+}
+
+// FillStyle options
+.fill = .{
+    .color = Color.black,       // default
+    .opacity = 1.0,             // 0.0-1.0
+}
 ```
 
 ## Navigation
