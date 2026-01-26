@@ -245,4 +245,17 @@ pub const ContentWriter = struct {
         len += suffix.len;
         try self.append(buf[0..len]);
     }
+
+    /// Write "> N <" for TJ kerning adjustment (fast integer formatting)
+    pub fn writeKernAdjust(self: *ContentWriter, kern: i32) !void {
+        var buf: [24]u8 = undefined;
+        buf[0] = '>';
+        buf[1] = ' ';
+        var len: usize = 2;
+        const int_str = format.writeInt(buf[len..], kern);
+        len += int_str.len;
+        @memcpy(buf[len..][0..2], " <");
+        len += 2;
+        try self.append(buf[0..len]);
+    }
 };

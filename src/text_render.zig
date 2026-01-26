@@ -98,7 +98,7 @@ pub fn renderCIDTextWithKerning(
                 // Convert from font units to 1/1000 em, negate for TJ
                 // TJ uses positive values to move left (reduce spacing)
                 const kern_1000: i32 = @divTrunc(@as(i32, kern) * 1000, @as(i32, units_per_em));
-                try cw.print("> {d} <", .{-kern_1000});
+                try cw.writeKernAdjust(-kern_1000);
             }
         }
     }
