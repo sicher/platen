@@ -110,12 +110,6 @@ pub const FontStyle = struct {
     }
 };
 
-/// Get character width for a font (in 1000ths of an em)
-pub fn charWidth(font: fonts.StandardFont, char: u8) u16 {
-    const widths = getWidthTable(font);
-    return widths[char];
-}
-
 /// Measure text width in points
 pub fn measureTextWidth(text: []const u8, style: FontStyle) f64 {
     if (text.len == 0) return 0;

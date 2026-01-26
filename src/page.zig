@@ -240,32 +240,6 @@ pub const ContentWriter = struct {
         try self.append(buf[0..len]);
     }
 
-    /// Write "x y l\n" with fast formatting (line to)
-    pub fn writeLineTo(self: *ContentWriter, x: f64, y: f64) !void {
-        var buf: [64]u8 = undefined;
-        const len = format.writeCoord2Suffix(&buf, x, y, " l\n");
-        try self.append(buf[0..len]);
-    }
-
-    /// Write "x y m\n" with fast formatting (move to)
-    pub fn writeMoveTo(self: *ContentWriter, x: f64, y: f64) !void {
-        var buf: [64]u8 = undefined;
-        const len = format.writeCoord2Suffix(&buf, x, y, " m\n");
-        try self.append(buf[0..len]);
-    }
-
-    /// Write "x y w h re" with fast formatting (rectangle)
-    pub fn writeRect(self: *ContentWriter, x: f64, y: f64, w: f64, h: f64, suffix: []const u8) !void {
-        var buf: [128]u8 = undefined;
-        var len = format.writeCoord2(&buf, x, y);
-        buf[len] = ' ';
-        len += 1;
-        len += format.writeCoord2Suffix(buf[len..], w, h, " re ");
-        @memcpy(buf[len..][0..suffix.len], suffix);
-        len += suffix.len;
-        try self.append(buf[0..len]);
-    }
-
     /// Write "> N <" for TJ kerning adjustment (fast integer formatting)
     pub fn writeKernAdjust(self: *ContentWriter, kern: i32) !void {
         var buf: [24]u8 = undefined;

@@ -262,14 +262,6 @@ pub fn writeHex4(buf: *[4]u8, val: u16) void {
     buf[3] = hex_chars[val & 0xF];
 }
 
-/// Write "<XXXX>" hex glyph ID format. Returns bytes written (always 6).
-pub fn writeHexBracket4(buf: []u8, val: u16) usize {
-    buf[0] = '<';
-    writeHex4(buf[1..5], val);
-    buf[5] = '>';
-    return 6;
-}
-
 /// Write CMap entry "<GID> <CODEPOINT>\n" for BMP codepoints.
 /// Returns bytes written.
 pub fn writeCMapEntry(buf: []u8, gid: u16, codepoint: u21) usize {
