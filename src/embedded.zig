@@ -444,6 +444,24 @@ pub const EmbeddedFont = struct {
         return false;
     }
 
+    /// Check if any character variant feature is enabled
+    fn anyCharVariantEnabled(self: *const EmbeddedFont) bool {
+        for (opentype.Feature.character_variants) |cv| {
+            if (self.feature_flags.isEnabled(cv)) return true;
+        }
+        return false;
+    }
+
+    /// Check if any enabled character variant has lookups in the font
+    fn hasCharVariantLookups(self: *const EmbeddedFont, ot: *const opentype.OpenTypeFeatures) bool {
+        for (opentype.Feature.character_variants, 0..) |cv, i| {
+            if (self.feature_flags.isEnabled(cv) and ot.cv_lookups[i].items.len > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Mark Unicode codepoints as used (CID mode)
     /// Parses UTF-8 text and records Unicode→GlyphID mappings
     /// Applies ligature substitution if enabled
@@ -504,7 +522,8 @@ pub const EmbeddedFont = struct {
             self.feature_flags.isEnabled(.calt) or self.feature_flags.isEnabled(.kern) or
             self.feature_flags.isEnabled(.tnum) or self.feature_flags.isEnabled(.pnum) or
             self.feature_flags.isEnabled(.frac) or self.feature_flags.isEnabled(.zero) or
-            self.feature_flags.isEnabled(.case_) or self.anyStylisticSetEnabled();
+            self.feature_flags.isEnabled(.case_) or self.anyStylisticSetEnabled() or
+            self.anyCharVariantEnabled();
         if (needs_ot) {
             try self.initOpenTypeFeatures();
         }
@@ -523,9 +542,10 @@ pub const EmbeddedFont = struct {
                 const has_zero = self.feature_flags.isEnabled(.zero) and ot.zero_lookups.items.len > 0;
                 const has_case = self.feature_flags.isEnabled(.case_) and ot.case_lookups.items.len > 0;
                 const has_ss = self.hasStylisticSetLookups(ot);
+                const has_cv = self.hasCharVariantLookups(ot);
 
                 if (has_calt or has_liga or has_dlig or has_clig or has_hlig or
-                    has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss)
+                    has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss or has_cv)
                 {
                     // Apply GSUB substitutions, track results, and return glyphs
                     return try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale, out_alloc);

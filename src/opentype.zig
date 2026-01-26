@@ -45,6 +45,27 @@ pub const Feature = enum(u32) {
     ss18 = tag("ss18"),
     ss19 = tag("ss19"),
     ss20 = tag("ss20"),
+    // Character Variants 1-99
+    cv01 = tag("cv01"), cv02 = tag("cv02"), cv03 = tag("cv03"), cv04 = tag("cv04"), cv05 = tag("cv05"),
+    cv06 = tag("cv06"), cv07 = tag("cv07"), cv08 = tag("cv08"), cv09 = tag("cv09"), cv10 = tag("cv10"),
+    cv11 = tag("cv11"), cv12 = tag("cv12"), cv13 = tag("cv13"), cv14 = tag("cv14"), cv15 = tag("cv15"),
+    cv16 = tag("cv16"), cv17 = tag("cv17"), cv18 = tag("cv18"), cv19 = tag("cv19"), cv20 = tag("cv20"),
+    cv21 = tag("cv21"), cv22 = tag("cv22"), cv23 = tag("cv23"), cv24 = tag("cv24"), cv25 = tag("cv25"),
+    cv26 = tag("cv26"), cv27 = tag("cv27"), cv28 = tag("cv28"), cv29 = tag("cv29"), cv30 = tag("cv30"),
+    cv31 = tag("cv31"), cv32 = tag("cv32"), cv33 = tag("cv33"), cv34 = tag("cv34"), cv35 = tag("cv35"),
+    cv36 = tag("cv36"), cv37 = tag("cv37"), cv38 = tag("cv38"), cv39 = tag("cv39"), cv40 = tag("cv40"),
+    cv41 = tag("cv41"), cv42 = tag("cv42"), cv43 = tag("cv43"), cv44 = tag("cv44"), cv45 = tag("cv45"),
+    cv46 = tag("cv46"), cv47 = tag("cv47"), cv48 = tag("cv48"), cv49 = tag("cv49"), cv50 = tag("cv50"),
+    cv51 = tag("cv51"), cv52 = tag("cv52"), cv53 = tag("cv53"), cv54 = tag("cv54"), cv55 = tag("cv55"),
+    cv56 = tag("cv56"), cv57 = tag("cv57"), cv58 = tag("cv58"), cv59 = tag("cv59"), cv60 = tag("cv60"),
+    cv61 = tag("cv61"), cv62 = tag("cv62"), cv63 = tag("cv63"), cv64 = tag("cv64"), cv65 = tag("cv65"),
+    cv66 = tag("cv66"), cv67 = tag("cv67"), cv68 = tag("cv68"), cv69 = tag("cv69"), cv70 = tag("cv70"),
+    cv71 = tag("cv71"), cv72 = tag("cv72"), cv73 = tag("cv73"), cv74 = tag("cv74"), cv75 = tag("cv75"),
+    cv76 = tag("cv76"), cv77 = tag("cv77"), cv78 = tag("cv78"), cv79 = tag("cv79"), cv80 = tag("cv80"),
+    cv81 = tag("cv81"), cv82 = tag("cv82"), cv83 = tag("cv83"), cv84 = tag("cv84"), cv85 = tag("cv85"),
+    cv86 = tag("cv86"), cv87 = tag("cv87"), cv88 = tag("cv88"), cv89 = tag("cv89"), cv90 = tag("cv90"),
+    cv91 = tag("cv91"), cv92 = tag("cv92"), cv93 = tag("cv93"), cv94 = tag("cv94"), cv95 = tag("cv95"),
+    cv96 = tag("cv96"), cv97 = tag("cv97"), cv98 = tag("cv98"), cv99 = tag("cv99"),
 
     fn tag(comptime s: *const [4]u8) u32 {
         return std.mem.readInt(u32, s, .big);
@@ -56,11 +77,11 @@ pub const Feature = enum(u32) {
 
     /// Returns true if this feature is enabled by default
     pub fn defaultEnabled(self: Feature) bool {
+        // Stylistic sets and character variants are never enabled by default
+        if (self.ssIndex() != null or self.cvIndex() != null) return false;
         return switch (self) {
             .liga, .kern, .calt, .mark, .mkmk => true,
-            .clig, .dlig, .hlig, .tnum, .pnum, .frac, .zero, .case_ => false,
-            .ss01, .ss02, .ss03, .ss04, .ss05, .ss06, .ss07, .ss08, .ss09, .ss10 => false,
-            .ss11, .ss12, .ss13, .ss14, .ss15, .ss16, .ss17, .ss18, .ss19, .ss20 => false,
+            else => false,
         };
     }
 
@@ -96,37 +117,90 @@ pub const Feature = enum(u32) {
         .ss01, .ss02, .ss03, .ss04, .ss05, .ss06, .ss07, .ss08, .ss09, .ss10,
         .ss11, .ss12, .ss13, .ss14, .ss15, .ss16, .ss17, .ss18, .ss19, .ss20,
     };
+
+    /// Returns the character variant index (0-98) if this is a cv feature, null otherwise
+    pub fn cvIndex(self: Feature) ?usize {
+        return switch (self) {
+            .cv01 => 0, .cv02 => 1, .cv03 => 2, .cv04 => 3, .cv05 => 4,
+            .cv06 => 5, .cv07 => 6, .cv08 => 7, .cv09 => 8, .cv10 => 9,
+            .cv11 => 10, .cv12 => 11, .cv13 => 12, .cv14 => 13, .cv15 => 14,
+            .cv16 => 15, .cv17 => 16, .cv18 => 17, .cv19 => 18, .cv20 => 19,
+            .cv21 => 20, .cv22 => 21, .cv23 => 22, .cv24 => 23, .cv25 => 24,
+            .cv26 => 25, .cv27 => 26, .cv28 => 27, .cv29 => 28, .cv30 => 29,
+            .cv31 => 30, .cv32 => 31, .cv33 => 32, .cv34 => 33, .cv35 => 34,
+            .cv36 => 35, .cv37 => 36, .cv38 => 37, .cv39 => 38, .cv40 => 39,
+            .cv41 => 40, .cv42 => 41, .cv43 => 42, .cv44 => 43, .cv45 => 44,
+            .cv46 => 45, .cv47 => 46, .cv48 => 47, .cv49 => 48, .cv50 => 49,
+            .cv51 => 50, .cv52 => 51, .cv53 => 52, .cv54 => 53, .cv55 => 54,
+            .cv56 => 55, .cv57 => 56, .cv58 => 57, .cv59 => 58, .cv60 => 59,
+            .cv61 => 60, .cv62 => 61, .cv63 => 62, .cv64 => 63, .cv65 => 64,
+            .cv66 => 65, .cv67 => 66, .cv68 => 67, .cv69 => 68, .cv70 => 69,
+            .cv71 => 70, .cv72 => 71, .cv73 => 72, .cv74 => 73, .cv75 => 74,
+            .cv76 => 75, .cv77 => 76, .cv78 => 77, .cv79 => 78, .cv80 => 79,
+            .cv81 => 80, .cv82 => 81, .cv83 => 82, .cv84 => 83, .cv85 => 84,
+            .cv86 => 85, .cv87 => 86, .cv88 => 87, .cv89 => 88, .cv90 => 89,
+            .cv91 => 90, .cv92 => 91, .cv93 => 92, .cv94 => 93, .cv95 => 94,
+            .cv96 => 95, .cv97 => 96, .cv98 => 97, .cv99 => 98,
+            else => null,
+        };
+    }
+
+    /// All character variant features
+    pub const character_variants = [_]Feature{
+        .cv01, .cv02, .cv03, .cv04, .cv05, .cv06, .cv07, .cv08, .cv09, .cv10,
+        .cv11, .cv12, .cv13, .cv14, .cv15, .cv16, .cv17, .cv18, .cv19, .cv20,
+        .cv21, .cv22, .cv23, .cv24, .cv25, .cv26, .cv27, .cv28, .cv29, .cv30,
+        .cv31, .cv32, .cv33, .cv34, .cv35, .cv36, .cv37, .cv38, .cv39, .cv40,
+        .cv41, .cv42, .cv43, .cv44, .cv45, .cv46, .cv47, .cv48, .cv49, .cv50,
+        .cv51, .cv52, .cv53, .cv54, .cv55, .cv56, .cv57, .cv58, .cv59, .cv60,
+        .cv61, .cv62, .cv63, .cv64, .cv65, .cv66, .cv67, .cv68, .cv69, .cv70,
+        .cv71, .cv72, .cv73, .cv74, .cv75, .cv76, .cv77, .cv78, .cv79, .cv80,
+        .cv81, .cv82, .cv83, .cv84, .cv85, .cv86, .cv87, .cv88, .cv89, .cv90,
+        .cv91, .cv92, .cv93, .cv94, .cv95, .cv96, .cv97, .cv98, .cv99,
+    };
 };
 
-/// Feature enable/disable flags using EnumArray for O(1) lookup
+/// Feature enable/disable flags using a custom bitset (EnumArray exceeds comptime branch limit)
 pub const FeatureFlags = struct {
-    flags: std.EnumArray(Feature, bool),
+    const num_features = @typeInfo(Feature).@"enum".fields.len;
+    flags: [num_features]bool,
+
+    /// Comptime mapping from Feature to array index
+    fn featureIndex(feature: Feature) usize {
+        const fields = @typeInfo(Feature).@"enum".fields;
+        inline for (fields, 0..) |f, i| {
+            if (@intFromEnum(feature) == f.value) return i;
+        }
+        unreachable;
+    }
 
     /// Initialize with default values (liga, kern, calt, mark, mkmk enabled)
     pub fn init() FeatureFlags {
-        var f: FeatureFlags = .{ .flags = std.EnumArray(Feature, bool).initFill(false) };
-        for (std.enums.values(Feature)) |feat| {
-            f.flags.set(feat, feat.defaultEnabled());
+        var f: FeatureFlags = .{ .flags = [_]bool{false} ** num_features };
+        const fields = @typeInfo(Feature).@"enum".fields;
+        inline for (fields, 0..) |field, i| {
+            const feat: Feature = @enumFromInt(field.value);
+            f.flags[i] = feat.defaultEnabled();
         }
         return f;
     }
 
     /// Initialize with all features disabled
     pub fn initAllDisabled() FeatureFlags {
-        return .{ .flags = std.EnumArray(Feature, bool).initFill(false) };
+        return .{ .flags = [_]bool{false} ** num_features };
     }
 
     /// Initialize with all features enabled
     pub fn initAllEnabled() FeatureFlags {
-        return .{ .flags = std.EnumArray(Feature, bool).initFill(true) };
+        return .{ .flags = [_]bool{true} ** num_features };
     }
 
     pub fn isEnabled(self: FeatureFlags, feature: Feature) bool {
-        return self.flags.get(feature);
+        return self.flags[featureIndex(feature)];
     }
 
     pub fn set(self: *FeatureFlags, feature: Feature, enabled: bool) void {
-        self.flags.set(feature, enabled);
+        self.flags[featureIndex(feature)] = enabled;
     }
 };
 
@@ -671,12 +745,19 @@ pub const GSUBLookupRef = union(enum) {
     zero: usize, // Index into zero_lookups
     case_: usize, // Index into case_lookups
     ss: StylisticSetRef, // Index into ss_lookups[set]
+    cv: CharVariantRef, // Index into cv_lookups[variant]
     frac: usize, // Index into frac_chain_lookups
 
     /// Reference to a stylistic set lookup
     pub const StylisticSetRef = struct {
         set: u5, // 0-19 for ss01-ss20
         idx: usize, // Index into ss_lookups[set]
+    };
+
+    /// Reference to a character variant lookup
+    pub const CharVariantRef = struct {
+        variant: u7, // 0-98 for cv01-cv99
+        idx: usize, // Index into cv_lookups[variant]
     };
 };
 
@@ -697,6 +778,7 @@ pub const OpenTypeFeatures = struct {
     zero_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (slashed zero)
     case_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (case-sensitive forms)
     ss_lookups: [20]std.ArrayListUnmanaged(SingleSubst) = [_]std.ArrayListUnmanaged(SingleSubst){.{}} ** 20, // Stylistic sets 1-20
+    cv_lookups: [99]std.ArrayListUnmanaged(SingleSubst) = [_]std.ArrayListUnmanaged(SingleSubst){.{}} ** 99, // Character variants 1-99
     chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (calt)
     dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (dlig)
     frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (frac)
@@ -779,6 +861,9 @@ pub const OpenTypeFeatures = struct {
         for (&self.ss_lookups) |*ss| {
             ss.deinit(self.allocator);
         }
+        for (&self.cv_lookups) |*cv| {
+            cv.deinit(self.allocator);
+        }
 
         // Free chain context memory
         for (self.chain_coverage_memory.items) |slice| {
@@ -835,6 +920,10 @@ pub const OpenTypeFeatures = struct {
         // Parse all stylistic sets
         for (Feature.stylistic_sets) |ss| {
             try self.parseGSUBFeature(gsub_data, ss);
+        }
+        // Parse all character variants
+        for (Feature.character_variants) |cv| {
+            try self.parseGSUBFeature(gsub_data, cv);
         }
         // Then parse ALL lookups to enable nested lookup dispatch from calt
         try self.parseAllGSUBLookups(gsub_data);
@@ -996,6 +1085,10 @@ pub const OpenTypeFeatures = struct {
         for (&ss_starts, 0..) |*start, i| {
             start.* = self.ss_lookups[i].items.len;
         }
+        var cv_starts: [99]usize = undefined;
+        for (&cv_starts, 0..) |*start, i| {
+            start.* = self.cv_lookups[i].items.len;
+        }
         const liga_start = self.liga_lookups.items.len;
         const dlig_start = self.dlig_lookups.items.len;
         const clig_start = self.clig_lookups.items.len;
@@ -1019,6 +1112,8 @@ pub const OpenTypeFeatures = struct {
                         if (feature) |f| {
                             if (f.ssIndex()) |ss_idx| {
                                 try self.ss_lookups[ss_idx].append(self.allocator, single_subst);
+                            } else if (f.cvIndex()) |cv_idx| {
+                                try self.cv_lookups[cv_idx].append(self.allocator, single_subst);
                             } else switch (f) {
                                 .tnum => try self.tnum_lookups.append(self.allocator, single_subst),
                                 .pnum => try self.pnum_lookups.append(self.allocator, single_subst),
@@ -1088,6 +1183,11 @@ pub const OpenTypeFeatures = struct {
                         else => if (f.ssIndex()) |ss_idx| {
                             break :blk if (self.ss_lookups[ss_idx].items.len > ss_starts[ss_idx])
                                 GSUBLookupRef{ .ss = .{ .set = @intCast(ss_idx), .idx = ss_starts[ss_idx] } }
+                            else
+                                null;
+                        } else if (f.cvIndex()) |cv_idx| {
+                            break :blk if (self.cv_lookups[cv_idx].items.len > cv_starts[cv_idx])
+                                GSUBLookupRef{ .cv = .{ .variant = @intCast(cv_idx), .idx = cv_starts[cv_idx] } }
                             else
                                 null;
                         } else break :blk if (self.single_lookups.items.len > single_start)
@@ -2013,6 +2113,14 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
+                                .cv => |cv_ref| {
+                                    const lookups = self.cv_lookups[cv_ref.variant].items;
+                                    if (cv_ref.idx < lookups.len) {
+                                        if (lookups[cv_ref.idx].substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
                                 .frac => {
                                     // Nested frac chain context - skip to avoid recursion
                                 },
@@ -2166,6 +2274,14 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
+                                .cv => |cv_ref| {
+                                    const lookups = self.cv_lookups[cv_ref.variant].items;
+                                    if (cv_ref.idx < lookups.len) {
+                                        if (lookups[cv_ref.idx].substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
                                 .frac => {
                                     // Nested frac chain context - skip to avoid recursion
                                 },
@@ -2270,6 +2386,13 @@ pub const OpenTypeFeatures = struct {
         for (Feature.stylistic_sets, 0..) |ss, i| {
             if (flags.isEnabled(ss) and self.ss_lookups[i].items.len > 0) {
                 self.applySingleSubstInPlace(current.items, self.ss_lookups[i].items);
+            }
+        }
+
+        // Apply character variants (cv01-cv99)
+        for (Feature.character_variants, 0..) |cv, i| {
+            if (flags.isEnabled(cv) and self.cv_lookups[i].items.len > 0) {
+                self.applySingleSubstInPlace(current.items, self.cv_lookups[i].items);
             }
         }
 
@@ -2481,6 +2604,14 @@ pub const OpenTypeFeatures = struct {
                 const lookups = self.ss_lookups[ss_ref.set].items;
                 if (ss_ref.idx < lookups.len) {
                     if (lookups[ss_ref.idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .cv => |cv_ref| {
+                const lookups = self.cv_lookups[cv_ref.variant].items;
+                if (cv_ref.idx < lookups.len) {
+                    if (lookups[cv_ref.idx].substitute(output.items[target_pos])) |new_glyph| {
                         output.items[target_pos] = new_glyph;
                     }
                 }
@@ -2864,6 +2995,12 @@ test "Parse Inter calt feature (Type 1 and Type 6)" {
     for (features.ss_lookups, 1..) |ss, i| {
         if (ss.items.len > 0) {
             std.debug.print("  SS{d:0>2} lookups: {d}\n", .{ i, ss.items.len });
+        }
+    }
+    // Print character variants with non-zero lookups
+    for (features.cv_lookups, 1..) |cv, i| {
+        if (cv.items.len > 0) {
+            std.debug.print("  CV{d:0>2} lookups: {d}\n", .{ i, cv.items.len });
         }
     }
 

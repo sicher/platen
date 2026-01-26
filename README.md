@@ -7,7 +7,7 @@ A fast PDF rendering library for Zig.
 - **Text rendering** with standard PDF fonts (Helvetica, Times, Courier, Symbol, ZapfDingbats)
 - **TrueType/OpenType font embedding** with automatic subsetting
 - **Full Unicode support** via CID fonts (CJK, emoji, etc.)
-- **OpenType features**: ligatures, kerning, mark positioning (diacritics)
+- **OpenType features**: ligatures, kerning, mark positioning, stylistic sets, character variants, and more
 - **Text flow**: word wrapping, justified text, Knuth-Plass optimal line breaking
 - **Graphics**: lines, rectangles, circles, ellipses, polygons
 - **Path API**: moveTo, lineTo, curveTo, quadTo for custom shapes
@@ -716,17 +716,33 @@ zpdf.pt_per_cm    // 28.34...
 - `PageLabel` / `PageLabelStyle` - Page numbering (roman, arabic, etc.)
 
 **OpenType Features:**
+
+GSUB (Glyph Substitution):
+- `liga` - Standard ligatures (fi, fl, ff, etc.) - *enabled by default*
+- `clig` - Contextual ligatures
+- `dlig` - Discretionary ligatures
+- `hlig` - Historical ligatures
+- `calt` - Contextual alternates (e.g., -> to arrow) - *enabled by default*
+- `tnum` - Tabular figures (monospaced numbers)
+- `pnum` - Proportional figures
+- `frac` - Fractions (1/2 to ½)
+- `zero` - Slashed zero
+- `case` - Case-sensitive forms
+- `ss01`-`ss20` - Stylistic sets 1-20
+- `cv01`-`cv99` - Character variants 1-99
+
+GPOS (Glyph Positioning):
+- `kern` - Kerning - *enabled by default*
+- `mark` - Mark positioning (diacritics on base glyphs) - *enabled by default*
+- `mkmk` - Mark-to-mark positioning (stacked diacritics) - *enabled by default*
+
 ```zig
-// Available via zpdf.opentype.Feature
-.kern    // Kerning
-.liga    // Standard ligatures (fi, fl, etc.)
-.calt    // Contextual alternates
-.smcp    // Small caps
-.onum    // Old-style numerals
-.lnum    // Lining numerals
-.tnum    // Tabular numerals
-.pnum    // Proportional numerals
-// ... and more
+// Enable/disable features on embedded fonts
+const font = try doc.loadFont("fonts/Inter.ttf", null);
+font.embedded.setFeature(.dlig, true);   // Enable discretionary ligatures
+font.embedded.setFeature(.ss01, true);   // Enable stylistic set 1
+font.embedded.setFeature(.cv11, true);   // Enable character variant 11
+font.embedded.setFeature(.liga, false);  // Disable standard ligatures
 ```
 
 ## Requirements

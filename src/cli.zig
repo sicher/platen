@@ -24,7 +24,7 @@ pub fn main() !void {
     const cmd = args[1];
 
     if (std.mem.eql(u8, cmd, "version")) {
-        try print("zpdf version {s}\n", .{zpdf.version});
+        try print("zpdf version {s}\n", .{zpdf.version.version});
     } else if (std.mem.eql(u8, cmd, "test")) {
         // Generate a minimal test PDF
         const output_path = if (args.len > 2) args[2] else "test.pdf";

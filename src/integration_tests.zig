@@ -355,6 +355,34 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     const inter_ss08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     inter_ss08.embedded.setFeature(.ss08, true);
 
+    // Character variants (cv01-cv14)
+    const inter_cv01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv01.embedded.setFeature(.cv01, true); // Alternate 1
+    const inter_cv02 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv02.embedded.setFeature(.cv02, true); // Alternate 4
+    const inter_cv03 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv03.embedded.setFeature(.cv03, true); // Alternate 6
+    const inter_cv04 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv04.embedded.setFeature(.cv04, true); // Alternate 9
+    const inter_cv05 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv05.embedded.setFeature(.cv05, true); // Alternate l
+    const inter_cv06 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv06.embedded.setFeature(.cv06, true); // Alternate u
+    const inter_cv07 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv07.embedded.setFeature(.cv07, true); // Alternate ß
+    const inter_cv08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv08.embedded.setFeature(.cv08, true); // Alternate I
+    const inter_cv09 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv09.embedded.setFeature(.cv09, true); // Alternate 3
+    const inter_cv10 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv10.embedded.setFeature(.cv10, true); // Alternate G
+    const inter_cv11 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv11.embedded.setFeature(.cv11, true); // Alternate a
+    const inter_cv12 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv12.embedded.setFeature(.cv12, true); // Alternate f
+    const inter_cv13 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_cv13.embedded.setFeature(.cv13, true); // Alternate t
+
     try doc.addPage(.{});
 
     // Define all text styles
@@ -384,6 +412,19 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     const inter_ss05_12 = zpdf.TextStyle{ .font = inter_ss05, .size = 12 };
     const inter_ss06_12 = zpdf.TextStyle{ .font = inter_ss06, .size = 12 };
     const inter_ss08_12 = zpdf.TextStyle{ .font = inter_ss08, .size = 12 };
+    const inter_cv01_12 = zpdf.TextStyle{ .font = inter_cv01, .size = 12 };
+    const inter_cv02_12 = zpdf.TextStyle{ .font = inter_cv02, .size = 12 };
+    const inter_cv03_12 = zpdf.TextStyle{ .font = inter_cv03, .size = 12 };
+    const inter_cv04_12 = zpdf.TextStyle{ .font = inter_cv04, .size = 12 };
+    const inter_cv05_12 = zpdf.TextStyle{ .font = inter_cv05, .size = 12 };
+    const inter_cv06_12 = zpdf.TextStyle{ .font = inter_cv06, .size = 12 };
+    const inter_cv07_12 = zpdf.TextStyle{ .font = inter_cv07, .size = 12 };
+    const inter_cv08_12 = zpdf.TextStyle{ .font = inter_cv08, .size = 12 };
+    const inter_cv09_12 = zpdf.TextStyle{ .font = inter_cv09, .size = 12 };
+    const inter_cv10_12 = zpdf.TextStyle{ .font = inter_cv10, .size = 12 };
+    const inter_cv11_12 = zpdf.TextStyle{ .font = inter_cv11, .size = 12 };
+    const inter_cv12_12 = zpdf.TextStyle{ .font = inter_cv12, .size = 12 };
+    const inter_cv13_12 = zpdf.TextStyle{ .font = inter_cv13, .size = 12 };
 
     var y: f64 = 32;
 
@@ -501,60 +542,67 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss08 Square quotes", inter_10);
     _ = try doc.writeAt(.{ .x = 200, .y = y }, "\xe2\x80\x9ctext\xe2\x80\x9d \xe2\x80\x98hi\xe2\x80\x99", inter_12);
     _ = try doc.writeAt(.{ .x = 280, .y = y }, "\xe2\x80\x9ctext\xe2\x80\x9d \xe2\x80\x98hi\xe2\x80\x99", inter_ss08_12);
-    y += 24;
+    y += 20;
 
-    // ===== Unicode Coverage =====
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Unicode Coverage", inter_bold_13);
+    // --- Character Variants (cv01-cv14) ---
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Character Variants", inter_bold_13);
     y += 18;
-
-    // Latin Extended
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Latin", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 88, .y = y }, "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏ ÐÑÒÓÔÕÖØÙÚÛÜÝÞ\xc3\x9f àáâãäåæçèéêëìíîï ðñòóôõöøùúûüýþÿ", inter_10);
-    y += 14;
-    _ = try doc.writeAt(.{ .x = 88, .y = y }, "\xc4\x80\xc4\x81\xc4\x82\xc4\x83\xc4\x84\xc4\x85\xc4\x86\xc4\x87\xc4\x88\xc4\x89\xc4\x8a\xc4\x8b\xc4\x8c\xc4\x8d\xc4\x8e\xc4\x8f\xc4\x90\xc4\x91\xc4\x92\xc4\x93\xc4\x94\xc4\x95 Œœ\xc5\xa0\xc5\xa1\xc5\xb8\xc5\xbd\xc5\xbe\xc6\x92", inter_10);
-    y += 16;
-
-    // Greek & Cyrillic
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Greek", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 88, .y = y }, "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠ αβγδεζηθικλμνξοπ", inter_10);
-    y += 14;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cyrillic", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 98, .y = y }, "АБВГДЕЖЗИЙКЛМНОП абвгдежзийклмноп", inter_10);
-    y += 16;
-
-    // Punctuation
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Punctuation", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 118, .y = y }, "\xe2\x80\x98single\xe2\x80\x99 \xe2\x80\x9cdouble\xe2\x80\x9d \xc2\xabguillemets\xc2\xbb  hyphen- en\xe2\x80\x93dash em\xe2\x80\x94dash \xe2\x80\xa6", inter_10);
-    y += 16;
-
-    // Currency & Math
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Currency", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 105, .y = y }, "$ \xc2\xa2 \xc2\xa3 \xc2\xa5 \xe2\x82\xac \xe2\x82\xa3 \xe2\x82\xb9 \xe2\x82\xbd", inter_11);
-    _ = try doc.writeAt(.{ .x = 260, .y = y }, "Math", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 295, .y = y }, "+ \xe2\x88\x92 \xc3\x97 \xc3\xb7 = \xe2\x89\xa0 \xe2\x89\xa4 \xe2\x89\xa5 \xc2\xb1 \xe2\x88\x9e \xe2\x88\x9a \xe2\x88\x91", inter_11);
-    y += 16;
-
-    // Arrows & Symbols
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Arrows", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 95, .y = y }, "\xe2\x86\x90 \xe2\x86\x91 \xe2\x86\x92 \xe2\x86\x93 \xe2\x86\x94 \xe2\x86\x95 \xe2\x87\x90 \xe2\x87\x92 \xe2\x87\x94", inter_11);
-    _ = try doc.writeAt(.{ .x = 260, .y = y }, "Symbols", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 305, .y = y }, "\xc2\xa9 \xc2\xae \xe2\x84\xa2 \xc2\xb0 \xc2\xa7 \xc2\xb6 \xe2\x80\xa0 \xe2\x80\xa1 \xe2\x80\xa2", inter_11);
-    y += 16;
-
-    // Figures
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Figures", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 98, .y = y }, "0123456789  \xc2\xbc \xc2\xbd \xc2\xbe \xe2\x85\x93 \xe2\x85\x94  Super: \xc2\xb9\xc2\xb2\xc2\xb3\xe2\x81\xb4\xe2\x81\xb5  Sub: \xe2\x82\x80\xe2\x82\x81\xe2\x82\x82\xe2\x82\x83\xe2\x82\x84  H\xe2\x82\x82O CO\xe2\x82\x82 E=mc\xc2\xb2", inter_10);
-    y += 16;
-
-    // ASCII
-    const inter_9 = zpdf.TextStyle{ .font = inter, .size = 9 };
-    const inter_7 = zpdf.TextStyle{ .font = inter, .size = 7 };
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ASCII", inter_bold_9);
-    _ = try doc.writeAt(.{ .x = 85, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@ ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_` abcdefghijklmnopqrstuvwxyz{|}~", inter_9);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv01 Alt 1", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1 11 111", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "1 11 111", inter_cv01_12);
     y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv02 Alt 4", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "4 44 444", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "4 44 444", inter_cv02_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv03 Alt 6", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "6 66 666", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "6 66 666", inter_cv03_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv04 Alt 9", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "9 99 999", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "9 99 999", inter_cv04_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv05 Alt l", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "l label", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "l label", inter_cv05_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv06 Alt u", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "u under", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "u under", inter_cv06_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv07 Alt \xc3\x9f", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "\xc3\x9f stra\xc3\x9fe", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "\xc3\x9f stra\xc3\x9fe", inter_cv07_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv08 Alt I", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "I ILIAD", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "I ILIAD", inter_cv08_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv09 Alt 3", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "3 33 333", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "3 33 333", inter_cv09_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv10 Alt G", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "G GLYPH", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "G GLYPH", inter_cv10_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv11 Alt a", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "a alpha", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "a alpha", inter_cv11_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv12 Alt f", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "f staff", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "f staff", inter_cv12_12);
+    y += 18;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "cv13 Alt t", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "t text", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "t text", inter_cv13_12);
+    y += 20;
 
     // Footer: Available Features
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "GSUB: aalt calt case ccmp cv01-14 dlig dnom frac locl numr ordn pnum salt sinf ss01-08 subs sups tnum zero | GPOS: cpsp kern mark mkmk", inter_7);
+    const inter_7 = zpdf.TextStyle{ .font = inter, .size = 7 };
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "GSUB: aalt calt case ccmp cv01-13 dlig dnom frac locl numr ordn pnum salt sinf ss01-08 subs sups tnum zero | GPOS: cpsp kern mark mkmk", inter_7);
 
     return doc.output();
 }
