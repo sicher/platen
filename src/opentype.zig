@@ -1920,42 +1920,17 @@ pub const OpenTypeFeatures = struct {
                                 .chain_context => {
                                     // Nested chain context - skip to avoid recursion
                                 },
-                                .tnum => |idx| {
-                                    if (idx < self.tnum_lookups.items.len) {
-                                        const single = self.tnum_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .pnum => |idx| {
-                                    if (idx < self.pnum_lookups.items.len) {
-                                        const single = self.pnum_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .zero => |idx| {
-                                    if (idx < self.zero_lookups.items.len) {
-                                        const single = self.zero_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .case_ => |idx| {
-                                    if (idx < self.case_lookups.items.len) {
-                                        const single = self.case_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .ss01 => |idx| {
-                                    if (idx < self.ss01_lookups.items.len) {
-                                        const single = self.ss01_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                .tnum, .pnum, .zero, .case_, .ss01 => |idx| {
+                                    const lookups = switch (lookup_ref) {
+                                        .tnum => self.tnum_lookups.items,
+                                        .pnum => self.pnum_lookups.items,
+                                        .zero => self.zero_lookups.items,
+                                        .case_ => self.case_lookups.items,
+                                        .ss01 => self.ss01_lookups.items,
+                                        else => unreachable,
+                                    };
+                                    if (idx < lookups.len) {
+                                        if (lookups[idx].substitute(result.items[target_pos])) |new_glyph| {
                                             result.items[target_pos] = new_glyph;
                                         }
                                     }
@@ -2091,42 +2066,17 @@ pub const OpenTypeFeatures = struct {
                                 .chain_context => {
                                     // Nested chain context - skip for now to avoid recursion
                                 },
-                                .tnum => |idx| {
-                                    if (idx < self.tnum_lookups.items.len) {
-                                        const single = self.tnum_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .pnum => |idx| {
-                                    if (idx < self.pnum_lookups.items.len) {
-                                        const single = self.pnum_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .zero => |idx| {
-                                    if (idx < self.zero_lookups.items.len) {
-                                        const single = self.zero_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .case_ => |idx| {
-                                    if (idx < self.case_lookups.items.len) {
-                                        const single = self.case_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
-                                            result.items[target_pos] = new_glyph;
-                                        }
-                                    }
-                                },
-                                .ss01 => |idx| {
-                                    if (idx < self.ss01_lookups.items.len) {
-                                        const single = self.ss01_lookups.items[idx];
-                                        if (single.substitute(result.items[target_pos])) |new_glyph| {
+                                .tnum, .pnum, .zero, .case_, .ss01 => |idx| {
+                                    const lookups = switch (lookup_ref) {
+                                        .tnum => self.tnum_lookups.items,
+                                        .pnum => self.pnum_lookups.items,
+                                        .zero => self.zero_lookups.items,
+                                        .case_ => self.case_lookups.items,
+                                        .ss01 => self.ss01_lookups.items,
+                                        else => unreachable,
+                                    };
+                                    if (idx < lookups.len) {
+                                        if (lookups[idx].substitute(result.items[target_pos])) |new_glyph| {
                                             result.items[target_pos] = new_glyph;
                                         }
                                     }
@@ -2426,37 +2376,17 @@ pub const OpenTypeFeatures = struct {
                     }
                 }
             },
-            .tnum => |idx| {
-                if (idx < self.tnum_lookups.items.len) {
-                    if (self.tnum_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
-                        output.items[target_pos] = new_glyph;
-                    }
-                }
-            },
-            .pnum => |idx| {
-                if (idx < self.pnum_lookups.items.len) {
-                    if (self.pnum_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
-                        output.items[target_pos] = new_glyph;
-                    }
-                }
-            },
-            .zero => |idx| {
-                if (idx < self.zero_lookups.items.len) {
-                    if (self.zero_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
-                        output.items[target_pos] = new_glyph;
-                    }
-                }
-            },
-            .case_ => |idx| {
-                if (idx < self.case_lookups.items.len) {
-                    if (self.case_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
-                        output.items[target_pos] = new_glyph;
-                    }
-                }
-            },
-            .ss01 => |idx| {
-                if (idx < self.ss01_lookups.items.len) {
-                    if (self.ss01_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
+            .tnum, .pnum, .zero, .case_, .ss01 => |idx| {
+                const lookups = switch (lookup_ref) {
+                    .tnum => self.tnum_lookups.items,
+                    .pnum => self.pnum_lookups.items,
+                    .zero => self.zero_lookups.items,
+                    .case_ => self.case_lookups.items,
+                    .ss01 => self.ss01_lookups.items,
+                    else => unreachable,
+                };
+                if (idx < lookups.len) {
+                    if (lookups[idx].substitute(output.items[target_pos])) |new_glyph| {
                         output.items[target_pos] = new_glyph;
                     }
                 }
