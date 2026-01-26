@@ -127,8 +127,6 @@ pub const MeasureFn = *const fn (text: []const u8, style: TextStyleOptions, ctx:
 pub const StyledText = struct {
     allocator: std.mem.Allocator,
     spans: std.ArrayListUnmanaged(Span) = .{},
-    /// Owned copies of text (if using appendOwned).
-    owned_text: std.ArrayListUnmanaged([]const u8) = .{},
 
     // Preprocessed data for Knuth-Plass (populated by prepare())
     words: std.ArrayListUnmanaged(StyledWord) = .{},
@@ -141,11 +139,6 @@ pub const StyledText = struct {
     }
 
     pub fn deinit(self: *StyledText) void {
-        // Free owned text copies
-        for (self.owned_text.items) |text| {
-            self.allocator.free(text);
-        }
-        self.owned_text.deinit(self.allocator);
         // Free break point arrays
         for (self.break_point_storage.items) |bp_array| {
             self.allocator.free(bp_array);
@@ -156,18 +149,9 @@ pub const StyledText = struct {
     }
 
     /// Append a span of text with the given style.
-    /// The text slice must remain valid until rendering.
+    /// The text slice must remain valid until rendering completes.
     pub fn append(self: *StyledText, text: []const u8, style: TextStyleOptions) !void {
         try self.spans.append(self.allocator, .{ .text = text, .style = style });
-        self.prepared = false;
-    }
-
-    /// Append a span, taking ownership of the text (copies it).
-    /// Use when the source text won't remain valid.
-    pub fn appendOwned(self: *StyledText, text: []const u8, style: TextStyleOptions) !void {
-        const copy = try self.allocator.dupe(u8, text);
-        try self.owned_text.append(self.allocator, copy);
-        try self.spans.append(self.allocator, .{ .text = copy, .style = style });
         self.prepared = false;
     }
 
@@ -605,21 +589,6 @@ test "StyledText force break on newline" {
     try std.testing.expectEqual(@as(usize, 4), st.words.items.len);
     try std.testing.expect(st.words.items[1].force_break); // "one" has force_break
     try std.testing.expect(!st.words.items[3].force_break); // "two" doesn't
-}
-
-test "StyledText appendOwned copies text" {
-    const allocator = std.testing.allocator;
-    var st = StyledText.init(allocator);
-    defer st.deinit();
-
-    {
-        var buf: [10]u8 = "temporary!".*;
-        try st.appendOwned(&buf, .{});
-        // Modify original - should not affect StyledText
-        buf[0] = 'X';
-    }
-
-    try std.testing.expectEqualStrings("temporary!", st.spans.items[0].text);
 }
 
 test "StyledText detects soft-hyphens during prepare" {

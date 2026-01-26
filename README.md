@@ -646,7 +646,6 @@ Create with `doc.createStyledText()`, then:
 | Method | Description |
 |--------|-------------|
 | `append(text, TextStyleOptions)` | Add text span with style |
-| `appendOwned(text, TextStyleOptions)` | Add text span (takes ownership) |
 | `isEmpty() -> bool` | Check if empty |
 | `totalLength() -> usize` | Get total text length |
 | `deinit()` | Free resources |
