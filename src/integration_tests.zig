@@ -338,7 +338,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_nocalt.embedded.setFeature(.calt, false);
 
     const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    inter_case.embedded.setFeature(.case, true);
+    inter_case.embedded.setFeature(.case_, true);
 
     // Stylistic set 1 comparison (ss01 is OFF by default)
     const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);

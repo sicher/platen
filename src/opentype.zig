@@ -23,7 +23,7 @@ pub const Feature = enum(u32) {
     pnum = tag("pnum"), // Proportional Figures
     frac = tag("frac"), // Fractions
     zero = tag("zero"), // Slashed Zero
-    case = tag("case"), // Case-Sensitive Forms
+    case_ = tag("case"), // Case-Sensitive Forms (case_ to avoid keyword)
     ss01 = tag("ss01"), // Stylistic Set 1
 
     fn tag(comptime s: *const [4]u8) u32 {
@@ -31,42 +31,48 @@ pub const Feature = enum(u32) {
     }
 
     pub fn fromTag(t: u32) ?Feature {
-        return switch (t) {
-            tag("liga") => .liga,
-            tag("kern") => .kern,
-            tag("clig") => .clig,
-            tag("dlig") => .dlig,
-            tag("hlig") => .hlig,
-            tag("calt") => .calt,
-            tag("mark") => .mark,
-            tag("mkmk") => .mkmk,
-            tag("tnum") => .tnum,
-            tag("pnum") => .pnum,
-            tag("frac") => .frac,
-            tag("zero") => .zero,
-            tag("case") => .case,
-            tag("ss01") => .ss01,
-            else => null,
+        return std.meta.intToEnum(Feature, t) catch null;
+    }
+
+    /// Returns true if this feature is enabled by default
+    pub fn defaultEnabled(self: Feature) bool {
+        return switch (self) {
+            .liga, .kern, .calt, .mark, .mkmk => true,
+            .clig, .dlig, .hlig, .tnum, .pnum, .frac, .zero, .case_, .ss01 => false,
         };
     }
 };
 
-/// Feature enable/disable flags
+/// Feature enable/disable flags using EnumArray for O(1) lookup
 pub const FeatureFlags = struct {
-    liga: bool = true, // Ligatures on by default
-    kern: bool = true, // Kerning on by default
-    clig: bool = false,
-    dlig: bool = false,
-    hlig: bool = false,
-    calt: bool = true, // Contextual alternates on by default
-    mark: bool = true, // Mark positioning on by default
-    mkmk: bool = true, // Mark-to-mark on by default
-    tnum: bool = false, // Tabular figures off by default (proportional is default)
-    pnum: bool = false, // Proportional figures off by default (already default)
-    frac: bool = false, // Fractions off by default
-    zero: bool = false, // Slashed zero off by default
-    case: bool = false, // Case-sensitive forms off by default
-    ss01: bool = false, // Stylistic Set 1 off by default
+    flags: std.EnumArray(Feature, bool),
+
+    /// Initialize with default values (liga, kern, calt, mark, mkmk enabled)
+    pub fn init() FeatureFlags {
+        var f: FeatureFlags = .{ .flags = std.EnumArray(Feature, bool).initFill(false) };
+        for (std.enums.values(Feature)) |feat| {
+            f.flags.set(feat, feat.defaultEnabled());
+        }
+        return f;
+    }
+
+    /// Initialize with all features disabled
+    pub fn initAllDisabled() FeatureFlags {
+        return .{ .flags = std.EnumArray(Feature, bool).initFill(false) };
+    }
+
+    /// Initialize with all features enabled
+    pub fn initAllEnabled() FeatureFlags {
+        return .{ .flags = std.EnumArray(Feature, bool).initFill(true) };
+    }
+
+    pub fn isEnabled(self: FeatureFlags, feature: Feature) bool {
+        return self.flags.get(feature);
+    }
+
+    pub fn set(self: *FeatureFlags, feature: Feature, enabled: bool) void {
+        self.flags.set(feature, enabled);
+    }
 };
 
 /// Coverage table - maps glyph IDs to coverage indices
@@ -608,7 +614,7 @@ pub const GSUBLookupRef = union(enum) {
     tnum: usize, // Index into tnum_lookups
     pnum: usize, // Index into pnum_lookups
     zero: usize, // Index into zero_lookups
-    case: usize, // Index into case_lookups
+    case_: usize, // Index into case_lookups
     ss01: usize, // Index into ss01_lookups
     frac: usize, // Index into frac_chain_lookups
 };
@@ -762,7 +768,7 @@ pub const OpenTypeFeatures = struct {
         try self.parseGSUBFeature(gsub_data, Feature.pnum);
         try self.parseGSUBFeature(gsub_data, Feature.frac);
         try self.parseGSUBFeature(gsub_data, Feature.zero);
-        try self.parseGSUBFeature(gsub_data, Feature.case);
+        try self.parseGSUBFeature(gsub_data, Feature.case_);
         try self.parseGSUBFeature(gsub_data, Feature.ss01);
         // Then parse ALL lookups to enable nested lookup dispatch from calt
         try self.parseAllGSUBLookups(gsub_data);
@@ -946,7 +952,7 @@ pub const OpenTypeFeatures = struct {
                                 .tnum => try self.tnum_lookups.append(self.allocator, single_subst),
                                 .pnum => try self.pnum_lookups.append(self.allocator, single_subst),
                                 .zero => try self.zero_lookups.append(self.allocator, single_subst),
-                                .case => try self.case_lookups.append(self.allocator, single_subst),
+                                .case_ => try self.case_lookups.append(self.allocator, single_subst),
                                 .ss01 => try self.ss01_lookups.append(self.allocator, single_subst),
                                 else => try self.single_lookups.append(self.allocator, single_subst),
                             }
@@ -1005,8 +1011,8 @@ pub const OpenTypeFeatures = struct {
                             GSUBLookupRef{ .zero = zero_start }
                         else
                             null,
-                        .case => break :blk if (self.case_lookups.items.len > case_start)
-                            GSUBLookupRef{ .case = case_start }
+                        .case_ => break :blk if (self.case_lookups.items.len > case_start)
+                            GSUBLookupRef{ .case_ = case_start }
                         else
                             null,
                         .ss01 => break :blk if (self.ss01_lookups.items.len > ss01_start)
@@ -1938,7 +1944,7 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
-                                .case => |idx| {
+                                .case_ => |idx| {
                                     if (idx < self.case_lookups.items.len) {
                                         const single = self.case_lookups.items[idx];
                                         if (single.substitute(result.items[target_pos])) |new_glyph| {
@@ -2166,7 +2172,7 @@ pub const OpenTypeFeatures = struct {
                                         }
                                     }
                                 },
-                                .case => |idx| {
+                                .case_ => |idx| {
                                     if (idx < self.case_lookups.items.len) {
                                         const single = self.case_lookups.items[idx];
                                         if (single.substitute(result.items[target_pos])) |new_glyph| {
@@ -2202,7 +2208,7 @@ pub const OpenTypeFeatures = struct {
     /// Apply all GSUB substitutions (calt + ligatures) in proper order
     /// Uses default feature flags (liga enabled, dlig/clig/hlig disabled)
     pub fn applyGSUB(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
-        return self.applyGSUBWithFlags(glyphs, .{});
+        return self.applyGSUBWithFlags(glyphs, FeatureFlags.init());
     }
 
     /// Apply all GSUB substitutions with explicit feature flags
@@ -2222,7 +2228,7 @@ pub const OpenTypeFeatures = struct {
 
         // Apply calt first (contextual alternates)
         const has_calt = self.calt_liga_lookups.items.len > 0 or self.chain_context_lookups.items.len > 0;
-        if (flags.calt and has_calt) {
+        if (flags.isEnabled(.calt) and has_calt) {
             try self.applyCaltInto(current.items, next);
             const tmp = current;
             current = next;
@@ -2230,7 +2236,7 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Apply standard ligatures (liga)
-        if (flags.liga and self.liga_lookups.items.len > 0) {
+        if (flags.isEnabled(.liga) and self.liga_lookups.items.len > 0) {
             try self.applyLigaturesInto(current.items, next, self.liga_lookups.items);
             const tmp = current;
             current = next;
@@ -2239,7 +2245,7 @@ pub const OpenTypeFeatures = struct {
 
         // Apply discretionary ligatures (dlig)
         const has_dlig = self.dlig_lookups.items.len > 0 or self.dlig_chain_lookups.items.len > 0;
-        if (flags.dlig and has_dlig) {
+        if (flags.isEnabled(.dlig) and has_dlig) {
             try self.applyDligInto(current.items, next);
             const tmp = current;
             current = next;
@@ -2247,7 +2253,7 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Apply contextual ligatures (clig)
-        if (flags.clig and self.clig_lookups.items.len > 0) {
+        if (flags.isEnabled(.clig) and self.clig_lookups.items.len > 0) {
             try self.applyLigaturesInto(current.items, next, self.clig_lookups.items);
             const tmp = current;
             current = next;
@@ -2255,7 +2261,7 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Apply historical ligatures (hlig)
-        if (flags.hlig and self.hlig_lookups.items.len > 0) {
+        if (flags.isEnabled(.hlig) and self.hlig_lookups.items.len > 0) {
             try self.applyLigaturesInto(current.items, next, self.hlig_lookups.items);
             const tmp = current;
             current = next;
@@ -2263,32 +2269,32 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Apply tabular figures (tnum) - mutually exclusive with pnum
-        if (flags.tnum and self.tnum_lookups.items.len > 0) {
+        if (flags.isEnabled(.tnum) and self.tnum_lookups.items.len > 0) {
             self.applySingleSubstInPlace(current.items, self.tnum_lookups.items);
         }
 
         // Apply proportional figures (pnum) - mutually exclusive with tnum
-        if (flags.pnum and self.pnum_lookups.items.len > 0) {
+        if (flags.isEnabled(.pnum) and self.pnum_lookups.items.len > 0) {
             self.applySingleSubstInPlace(current.items, self.pnum_lookups.items);
         }
 
         // Apply slashed zero (zero)
-        if (flags.zero and self.zero_lookups.items.len > 0) {
+        if (flags.isEnabled(.zero) and self.zero_lookups.items.len > 0) {
             self.applySingleSubstInPlace(current.items, self.zero_lookups.items);
         }
 
         // Apply case-sensitive forms (case)
-        if (flags.case and self.case_lookups.items.len > 0) {
+        if (flags.isEnabled(.case_) and self.case_lookups.items.len > 0) {
             self.applySingleSubstInPlace(current.items, self.case_lookups.items);
         }
 
         // Apply stylistic set 1 (ss01)
-        if (flags.ss01 and self.ss01_lookups.items.len > 0) {
+        if (flags.isEnabled(.ss01) and self.ss01_lookups.items.len > 0) {
             self.applySingleSubstInPlace(current.items, self.ss01_lookups.items);
         }
 
         // Apply fractions (frac)
-        if (flags.frac and self.frac_chain_lookups.items.len > 0) {
+        if (flags.isEnabled(.frac) and self.frac_chain_lookups.items.len > 0) {
             try self.applyChainContextInto(current.items, next, self.frac_chain_lookups.items);
             const tmp = current;
             current = next;
@@ -2498,7 +2504,7 @@ pub const OpenTypeFeatures = struct {
                     }
                 }
             },
-            .case => |idx| {
+            .case_ => |idx| {
                 if (idx < self.case_lookups.items.len) {
                     if (self.case_lookups.items[idx].substitute(output.items[target_pos])) |new_glyph| {
                         output.items[target_pos] = new_glyph;
@@ -3250,11 +3256,13 @@ test "dlig/clig/hlig separate parsing" {
     const test_glyphs = [_]u16{ glyph_a, glyph_b };
 
     // Apply with default flags (liga on, dlig off)
-    const result1 = try features.applyGSUBWithFlags(&test_glyphs, .{});
+    const result1 = try features.applyGSUBWithFlags(&test_glyphs, FeatureFlags.init());
     defer allocator.free(result1);
 
     // Apply with dlig enabled
-    const result2 = try features.applyGSUBWithFlags(&test_glyphs, .{ .dlig = true });
+    var flags_with_dlig = FeatureFlags.init();
+    flags_with_dlig.set(.dlig, true);
+    const result2 = try features.applyGSUBWithFlags(&test_glyphs, flags_with_dlig);
     defer allocator.free(result2);
 
     // Both should complete without error (results may or may not differ depending on font)

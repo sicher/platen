@@ -187,10 +187,10 @@ fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
 
     for (test_cases) |tc| {
         // Set feature flags
-        emb.embedded.feature_flags.calt = tc.calt;
-        emb.embedded.feature_flags.liga = tc.liga;
-        emb.embedded.feature_flags.dlig = tc.dlig;
-        emb.embedded.feature_flags.frac = tc.frac;
+        emb.embedded.feature_flags.set(.calt, tc.calt);
+        emb.embedded.feature_flags.set(.liga, tc.liga);
+        emb.embedded.feature_flags.set(.dlig, tc.dlig);
+        emb.embedded.feature_flags.set(.frac, tc.frac);
 
         const t = Timer.begin(tc.name);
         for (0..iterations) |_| {

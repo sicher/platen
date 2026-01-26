@@ -44,8 +44,8 @@ pub fn renderCIDTextWithKerning(
     // Fast path: skip check loop if font has no kerning/mark data at all
     var has_kerning = false;
     var has_marks = false;
-    const check_kern = emb.feature_flags.kern and emb.has_kern_data;
-    const check_marks = (emb.feature_flags.mark or emb.feature_flags.mkmk) and emb.has_mark_data;
+    const check_kern = emb.feature_flags.isEnabled(.kern) and emb.has_kern_data;
+    const check_marks = (emb.feature_flags.isEnabled(.mark) or emb.feature_flags.isEnabled(.mkmk)) and emb.has_mark_data;
     if (check_kern or check_marks) {
         // Early exit once both are found (or we know we won't find the other)
         for (0..glyphs.len -| 1) |i| {

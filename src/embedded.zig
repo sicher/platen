@@ -203,7 +203,7 @@ pub const EmbeddedFont = struct {
 
     // OpenType feature support
     ot_features: ?*opentype.OpenTypeFeatures = null,
-    feature_flags: opentype.FeatureFlags = .{}, // liga=on, kern=on by default
+    feature_flags: opentype.FeatureFlags = opentype.FeatureFlags.init(), // liga=on, kern=on by default
 
     // Cached flags for fast render-time checks (set by initOpenTypeFeatures)
     has_kern_data: bool = false, // True if font has ANY kerning pairs
@@ -422,22 +422,7 @@ pub const EmbeddedFont = struct {
 
     /// Set OpenType feature flag
     pub fn setFeature(self: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
-        switch (feature) {
-            .liga => self.feature_flags.liga = enabled,
-            .kern => self.feature_flags.kern = enabled,
-            .clig => self.feature_flags.clig = enabled,
-            .dlig => self.feature_flags.dlig = enabled,
-            .hlig => self.feature_flags.hlig = enabled,
-            .calt => self.feature_flags.calt = enabled,
-            .mark => self.feature_flags.mark = enabled,
-            .mkmk => self.feature_flags.mkmk = enabled,
-            .tnum => self.feature_flags.tnum = enabled,
-            .pnum => self.feature_flags.pnum = enabled,
-            .frac => self.feature_flags.frac = enabled,
-            .zero => self.feature_flags.zero = enabled,
-            .case => self.feature_flags.case = enabled,
-            .ss01 => self.feature_flags.ss01 = enabled,
-        }
+        self.feature_flags.set(feature, enabled);
     }
 
     /// Mark Unicode codepoints as used (CID mode)
@@ -495,12 +480,12 @@ pub const EmbeddedFont = struct {
         const base_glyphs = &self.scratch_glyphs;
 
         // Initialize OpenType features if any GSUB/GPOS feature is enabled
-        const needs_ot = self.feature_flags.liga or self.feature_flags.dlig or
-            self.feature_flags.clig or self.feature_flags.hlig or
-            self.feature_flags.calt or self.feature_flags.kern or
-            self.feature_flags.tnum or self.feature_flags.pnum or
-            self.feature_flags.frac or self.feature_flags.zero or
-            self.feature_flags.case or self.feature_flags.ss01;
+        const needs_ot = self.feature_flags.isEnabled(.liga) or self.feature_flags.isEnabled(.dlig) or
+            self.feature_flags.isEnabled(.clig) or self.feature_flags.isEnabled(.hlig) or
+            self.feature_flags.isEnabled(.calt) or self.feature_flags.isEnabled(.kern) or
+            self.feature_flags.isEnabled(.tnum) or self.feature_flags.isEnabled(.pnum) or
+            self.feature_flags.isEnabled(.frac) or self.feature_flags.isEnabled(.zero) or
+            self.feature_flags.isEnabled(.case_) or self.feature_flags.isEnabled(.ss01);
         if (needs_ot) {
             try self.initOpenTypeFeatures();
         }
@@ -508,17 +493,17 @@ pub const EmbeddedFont = struct {
         // Apply GSUB substitutions if enabled (any substitution feature)
         if (base_glyphs.items.len > 0) {
             if (self.ot_features) |ot| {
-                const has_calt = self.feature_flags.calt and ot.chain_context_lookups.items.len > 0;
-                const has_liga = self.feature_flags.liga and ot.liga_lookups.items.len > 0;
-                const has_dlig = self.feature_flags.dlig and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0);
-                const has_clig = self.feature_flags.clig and ot.clig_lookups.items.len > 0;
-                const has_hlig = self.feature_flags.hlig and ot.hlig_lookups.items.len > 0;
-                const has_tnum = self.feature_flags.tnum and ot.tnum_lookups.items.len > 0;
-                const has_pnum = self.feature_flags.pnum and ot.pnum_lookups.items.len > 0;
-                const has_frac = self.feature_flags.frac and ot.frac_chain_lookups.items.len > 0;
-                const has_zero = self.feature_flags.zero and ot.zero_lookups.items.len > 0;
-                const has_case = self.feature_flags.case and ot.case_lookups.items.len > 0;
-                const has_ss01 = self.feature_flags.ss01 and ot.ss01_lookups.items.len > 0;
+                const has_calt = self.feature_flags.isEnabled(.calt) and ot.chain_context_lookups.items.len > 0;
+                const has_liga = self.feature_flags.isEnabled(.liga) and ot.liga_lookups.items.len > 0;
+                const has_dlig = self.feature_flags.isEnabled(.dlig) and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0);
+                const has_clig = self.feature_flags.isEnabled(.clig) and ot.clig_lookups.items.len > 0;
+                const has_hlig = self.feature_flags.isEnabled(.hlig) and ot.hlig_lookups.items.len > 0;
+                const has_tnum = self.feature_flags.isEnabled(.tnum) and ot.tnum_lookups.items.len > 0;
+                const has_pnum = self.feature_flags.isEnabled(.pnum) and ot.pnum_lookups.items.len > 0;
+                const has_frac = self.feature_flags.isEnabled(.frac) and ot.frac_chain_lookups.items.len > 0;
+                const has_zero = self.feature_flags.isEnabled(.zero) and ot.zero_lookups.items.len > 0;
+                const has_case = self.feature_flags.isEnabled(.case_) and ot.case_lookups.items.len > 0;
+                const has_ss01 = self.feature_flags.isEnabled(.ss01) and ot.ss01_lookups.items.len > 0;
 
                 if (has_calt or has_liga or has_dlig or has_clig or has_hlig or
                     has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss01)
@@ -577,11 +562,11 @@ pub const EmbeddedFont = struct {
 
                 // Check all enabled ligature features for a match
                 const lookup_arrays = [_][]const opentype.LigatureSubst{
-                    if (self.feature_flags.liga) ot.liga_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.dlig) ot.dlig_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.clig) ot.clig_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.hlig) ot.hlig_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.calt) ot.calt_liga_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.isEnabled(.liga)) ot.liga_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.isEnabled(.dlig)) ot.dlig_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.isEnabled(.clig)) ot.clig_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.isEnabled(.hlig)) ot.hlig_lookups.items else &[_]opentype.LigatureSubst{},
+                    if (self.feature_flags.isEnabled(.calt)) ot.calt_liga_lookups.items else &[_]opentype.LigatureSubst{},
                 };
 
                 outer: for (lookup_arrays) |lookups| {
@@ -594,7 +579,7 @@ pub const EmbeddedFont = struct {
                                 break :outer;
                             }
                             // Check if chain context substituted the ligature glyph to the output glyph
-                            if (self.feature_flags.calt) {
+                            if (self.feature_flags.isEnabled(.calt)) {
                                 for (ot.single_lookups.items) |single| {
                                     if (single.substitute(match.lig_glyph)) |subst_glyph| {
                                         if (subst_glyph == gid) {
@@ -706,17 +691,17 @@ pub const EmbeddedFont = struct {
 
         // Apply GSUB substitutions if enabled and available
         if (self.ot_features) |ot| {
-            const has_gsub = (self.feature_flags.calt and (ot.calt_liga_lookups.items.len > 0 or ot.chain_context_lookups.items.len > 0)) or
-                (self.feature_flags.liga and ot.liga_lookups.items.len > 0) or
-                (self.feature_flags.dlig and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0)) or
-                (self.feature_flags.clig and ot.clig_lookups.items.len > 0) or
-                (self.feature_flags.hlig and ot.hlig_lookups.items.len > 0) or
-                (self.feature_flags.tnum and ot.tnum_lookups.items.len > 0) or
-                (self.feature_flags.pnum and ot.pnum_lookups.items.len > 0) or
-                (self.feature_flags.frac and ot.frac_chain_lookups.items.len > 0) or
-                (self.feature_flags.zero and ot.zero_lookups.items.len > 0) or
-                (self.feature_flags.case and ot.case_lookups.items.len > 0) or
-                (self.feature_flags.ss01 and ot.ss01_lookups.items.len > 0);
+            const has_gsub = (self.feature_flags.isEnabled(.calt) and (ot.calt_liga_lookups.items.len > 0 or ot.chain_context_lookups.items.len > 0)) or
+                (self.feature_flags.isEnabled(.liga) and ot.liga_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.dlig) and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0)) or
+                (self.feature_flags.isEnabled(.clig) and ot.clig_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.hlig) and ot.hlig_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.tnum) and ot.tnum_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.pnum) and ot.pnum_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.frac) and ot.frac_chain_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.zero) and ot.zero_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.case_) and ot.case_lookups.items.len > 0) or
+                (self.feature_flags.isEnabled(.ss01) and ot.ss01_lookups.items.len > 0);
 
             if (has_gsub) {
                 return ot.applyGSUBWithFlags(base_glyphs.items, self.feature_flags);
@@ -728,7 +713,7 @@ pub const EmbeddedFont = struct {
 
     /// Get kerning value between two glyphs (in font units)
     pub fn getKerning(self: *EmbeddedFont, glyph1: u16, glyph2: u16) i16 {
-        if (!self.feature_flags.kern) return 0;
+        if (!self.feature_flags.isEnabled(.kern)) return 0;
 
         if (self.ot_features) |ot| {
             return ot.getKerning(glyph1, glyph2);
@@ -739,7 +724,7 @@ pub const EmbeddedFont = struct {
     /// Get mark positioning offset for a mark glyph following a base glyph
     /// Returns (dx, dy) in font units (design units), or null if no positioning applies
     pub fn getMarkOffset(self: *EmbeddedFont, base_glyph: u16, mark_glyph: u16) ?opentype.MarkOffset {
-        if (!self.feature_flags.mark and !self.feature_flags.mkmk) return null;
+        if (!self.feature_flags.isEnabled(.mark) and !self.feature_flags.isEnabled(.mkmk)) return null;
 
         if (self.ot_features) |ot| {
             return ot.getMarkOffset(base_glyph, mark_glyph);
@@ -850,7 +835,7 @@ pub const EmbeddedFont = struct {
             const units_per_em = self.font.head.?.units_per_em;
             const em: i32 = @intCast(units_per_em);
             const has_ascii_widths = self.font.has_ascii_widths;
-            const do_kerning = self.feature_flags.kern and self.has_kern_data and self.ot_features != null;
+            const do_kerning = self.feature_flags.isEnabled(.kern) and self.has_kern_data and self.ot_features != null;
 
             var total: i32 = 0;
             var prev_gid: u16 = 0;
@@ -2944,8 +2929,8 @@ test "OpenType features initialization" {
     try std.testing.expect(font.ot_features == null);
 
     // Default flags
-    try std.testing.expect(font.feature_flags.liga);
-    try std.testing.expect(font.feature_flags.kern);
+    try std.testing.expect(font.feature_flags.isEnabled(.liga));
+    try std.testing.expect(font.feature_flags.isEnabled(.kern));
 
     // Initialize features
     try font.initOpenTypeFeatures();
