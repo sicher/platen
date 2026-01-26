@@ -24,7 +24,27 @@ pub const Feature = enum(u32) {
     frac = tag("frac"), // Fractions
     zero = tag("zero"), // Slashed Zero
     case_ = tag("case"), // Case-Sensitive Forms (case_ to avoid keyword)
-    ss01 = tag("ss01"), // Stylistic Set 1
+    // Stylistic Sets 1-20
+    ss01 = tag("ss01"),
+    ss02 = tag("ss02"),
+    ss03 = tag("ss03"),
+    ss04 = tag("ss04"),
+    ss05 = tag("ss05"),
+    ss06 = tag("ss06"),
+    ss07 = tag("ss07"),
+    ss08 = tag("ss08"),
+    ss09 = tag("ss09"),
+    ss10 = tag("ss10"),
+    ss11 = tag("ss11"),
+    ss12 = tag("ss12"),
+    ss13 = tag("ss13"),
+    ss14 = tag("ss14"),
+    ss15 = tag("ss15"),
+    ss16 = tag("ss16"),
+    ss17 = tag("ss17"),
+    ss18 = tag("ss18"),
+    ss19 = tag("ss19"),
+    ss20 = tag("ss20"),
 
     fn tag(comptime s: *const [4]u8) u32 {
         return std.mem.readInt(u32, s, .big);
@@ -38,9 +58,44 @@ pub const Feature = enum(u32) {
     pub fn defaultEnabled(self: Feature) bool {
         return switch (self) {
             .liga, .kern, .calt, .mark, .mkmk => true,
-            .clig, .dlig, .hlig, .tnum, .pnum, .frac, .zero, .case_, .ss01 => false,
+            .clig, .dlig, .hlig, .tnum, .pnum, .frac, .zero, .case_ => false,
+            .ss01, .ss02, .ss03, .ss04, .ss05, .ss06, .ss07, .ss08, .ss09, .ss10 => false,
+            .ss11, .ss12, .ss13, .ss14, .ss15, .ss16, .ss17, .ss18, .ss19, .ss20 => false,
         };
     }
+
+    /// Returns the stylistic set index (0-19) if this is a stylistic set feature, null otherwise
+    pub fn ssIndex(self: Feature) ?usize {
+        return switch (self) {
+            .ss01 => 0,
+            .ss02 => 1,
+            .ss03 => 2,
+            .ss04 => 3,
+            .ss05 => 4,
+            .ss06 => 5,
+            .ss07 => 6,
+            .ss08 => 7,
+            .ss09 => 8,
+            .ss10 => 9,
+            .ss11 => 10,
+            .ss12 => 11,
+            .ss13 => 12,
+            .ss14 => 13,
+            .ss15 => 14,
+            .ss16 => 15,
+            .ss17 => 16,
+            .ss18 => 17,
+            .ss19 => 18,
+            .ss20 => 19,
+            else => null,
+        };
+    }
+
+    /// All stylistic set features
+    pub const stylistic_sets = [_]Feature{
+        .ss01, .ss02, .ss03, .ss04, .ss05, .ss06, .ss07, .ss08, .ss09, .ss10,
+        .ss11, .ss12, .ss13, .ss14, .ss15, .ss16, .ss17, .ss18, .ss19, .ss20,
+    };
 };
 
 /// Feature enable/disable flags using EnumArray for O(1) lookup
@@ -615,8 +670,14 @@ pub const GSUBLookupRef = union(enum) {
     pnum: usize, // Index into pnum_lookups
     zero: usize, // Index into zero_lookups
     case_: usize, // Index into case_lookups
-    ss01: usize, // Index into ss01_lookups
+    ss: StylisticSetRef, // Index into ss_lookups[set]
     frac: usize, // Index into frac_chain_lookups
+
+    /// Reference to a stylistic set lookup
+    pub const StylisticSetRef = struct {
+        set: u5, // 0-19 for ss01-ss20
+        idx: usize, // Index into ss_lookups[set]
+    };
 };
 
 /// OpenType features parsed from a font
@@ -635,7 +696,7 @@ pub const OpenTypeFeatures = struct {
     pnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (proportional figures)
     zero_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (slashed zero)
     case_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (case-sensitive forms)
-    ss01_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (stylistic set 1)
+    ss_lookups: [20]std.ArrayListUnmanaged(SingleSubst) = [_]std.ArrayListUnmanaged(SingleSubst){.{}} ** 20, // Stylistic sets 1-20
     chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (calt)
     dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (dlig)
     frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (frac)
@@ -715,7 +776,9 @@ pub const OpenTypeFeatures = struct {
         self.pnum_lookups.deinit(self.allocator);
         self.zero_lookups.deinit(self.allocator);
         self.case_lookups.deinit(self.allocator);
-        self.ss01_lookups.deinit(self.allocator);
+        for (&self.ss_lookups) |*ss| {
+            ss.deinit(self.allocator);
+        }
 
         // Free chain context memory
         for (self.chain_coverage_memory.items) |slice| {
@@ -769,7 +832,10 @@ pub const OpenTypeFeatures = struct {
         try self.parseGSUBFeature(gsub_data, Feature.frac);
         try self.parseGSUBFeature(gsub_data, Feature.zero);
         try self.parseGSUBFeature(gsub_data, Feature.case_);
-        try self.parseGSUBFeature(gsub_data, Feature.ss01);
+        // Parse all stylistic sets
+        for (Feature.stylistic_sets) |ss| {
+            try self.parseGSUBFeature(gsub_data, ss);
+        }
         // Then parse ALL lookups to enable nested lookup dispatch from calt
         try self.parseAllGSUBLookups(gsub_data);
         // Build rule index for fast chain context lookup
@@ -926,7 +992,10 @@ pub const OpenTypeFeatures = struct {
         const pnum_start = self.pnum_lookups.items.len;
         const zero_start = self.zero_lookups.items.len;
         const case_start = self.case_lookups.items.len;
-        const ss01_start = self.ss01_lookups.items.len;
+        var ss_starts: [20]usize = undefined;
+        for (&ss_starts, 0..) |*start, i| {
+            start.* = self.ss_lookups[i].items.len;
+        }
         const liga_start = self.liga_lookups.items.len;
         const dlig_start = self.dlig_lookups.items.len;
         const clig_start = self.clig_lookups.items.len;
@@ -948,12 +1017,13 @@ pub const OpenTypeFeatures = struct {
                 1 => { // Type 1: Single Substitution
                     if (try self.parseSingleSubtable(data, subtable_addr)) |single_subst| {
                         if (feature) |f| {
-                            switch (f) {
+                            if (f.ssIndex()) |ss_idx| {
+                                try self.ss_lookups[ss_idx].append(self.allocator, single_subst);
+                            } else switch (f) {
                                 .tnum => try self.tnum_lookups.append(self.allocator, single_subst),
                                 .pnum => try self.pnum_lookups.append(self.allocator, single_subst),
                                 .zero => try self.zero_lookups.append(self.allocator, single_subst),
                                 .case_ => try self.case_lookups.append(self.allocator, single_subst),
-                                .ss01 => try self.ss01_lookups.append(self.allocator, single_subst),
                                 else => try self.single_lookups.append(self.allocator, single_subst),
                             }
                         } else {
@@ -1015,11 +1085,12 @@ pub const OpenTypeFeatures = struct {
                             GSUBLookupRef{ .case_ = case_start }
                         else
                             null,
-                        .ss01 => break :blk if (self.ss01_lookups.items.len > ss01_start)
-                            GSUBLookupRef{ .ss01 = ss01_start }
-                        else
-                            null,
-                        else => break :blk if (self.single_lookups.items.len > single_start)
+                        else => if (f.ssIndex()) |ss_idx| {
+                            break :blk if (self.ss_lookups[ss_idx].items.len > ss_starts[ss_idx])
+                                GSUBLookupRef{ .ss = .{ .set = @intCast(ss_idx), .idx = ss_starts[ss_idx] } }
+                            else
+                                null;
+                        } else break :blk if (self.single_lookups.items.len > single_start)
                             GSUBLookupRef{ .single = single_start }
                         else
                             null,
@@ -1920,17 +1991,24 @@ pub const OpenTypeFeatures = struct {
                                 .chain_context => {
                                     // Nested chain context - skip to avoid recursion
                                 },
-                                .tnum, .pnum, .zero, .case_, .ss01 => |idx| {
+                                .tnum, .pnum, .zero, .case_ => |idx| {
                                     const lookups = switch (lookup_ref) {
                                         .tnum => self.tnum_lookups.items,
                                         .pnum => self.pnum_lookups.items,
                                         .zero => self.zero_lookups.items,
                                         .case_ => self.case_lookups.items,
-                                        .ss01 => self.ss01_lookups.items,
                                         else => unreachable,
                                     };
                                     if (idx < lookups.len) {
                                         if (lookups[idx].substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
+                                .ss => |ss_ref| {
+                                    const lookups = self.ss_lookups[ss_ref.set].items;
+                                    if (ss_ref.idx < lookups.len) {
+                                        if (lookups[ss_ref.idx].substitute(result.items[target_pos])) |new_glyph| {
                                             result.items[target_pos] = new_glyph;
                                         }
                                     }
@@ -2066,17 +2144,24 @@ pub const OpenTypeFeatures = struct {
                                 .chain_context => {
                                     // Nested chain context - skip for now to avoid recursion
                                 },
-                                .tnum, .pnum, .zero, .case_, .ss01 => |idx| {
+                                .tnum, .pnum, .zero, .case_ => |idx| {
                                     const lookups = switch (lookup_ref) {
                                         .tnum => self.tnum_lookups.items,
                                         .pnum => self.pnum_lookups.items,
                                         .zero => self.zero_lookups.items,
                                         .case_ => self.case_lookups.items,
-                                        .ss01 => self.ss01_lookups.items,
                                         else => unreachable,
                                     };
                                     if (idx < lookups.len) {
                                         if (lookups[idx].substitute(result.items[target_pos])) |new_glyph| {
+                                            result.items[target_pos] = new_glyph;
+                                        }
+                                    }
+                                },
+                                .ss => |ss_ref| {
+                                    const lookups = self.ss_lookups[ss_ref.set].items;
+                                    if (ss_ref.idx < lookups.len) {
+                                        if (lookups[ss_ref.idx].substitute(result.items[target_pos])) |new_glyph| {
                                             result.items[target_pos] = new_glyph;
                                         }
                                     }
@@ -2181,9 +2266,11 @@ pub const OpenTypeFeatures = struct {
             self.applySingleSubstInPlace(current.items, self.case_lookups.items);
         }
 
-        // Apply stylistic set 1 (ss01)
-        if (flags.isEnabled(.ss01) and self.ss01_lookups.items.len > 0) {
-            self.applySingleSubstInPlace(current.items, self.ss01_lookups.items);
+        // Apply stylistic sets (ss01-ss20)
+        for (Feature.stylistic_sets, 0..) |ss, i| {
+            if (flags.isEnabled(ss) and self.ss_lookups[i].items.len > 0) {
+                self.applySingleSubstInPlace(current.items, self.ss_lookups[i].items);
+            }
         }
 
         // Apply fractions (frac)
@@ -2376,17 +2463,24 @@ pub const OpenTypeFeatures = struct {
                     }
                 }
             },
-            .tnum, .pnum, .zero, .case_, .ss01 => |idx| {
+            .tnum, .pnum, .zero, .case_ => |idx| {
                 const lookups = switch (lookup_ref) {
                     .tnum => self.tnum_lookups.items,
                     .pnum => self.pnum_lookups.items,
                     .zero => self.zero_lookups.items,
                     .case_ => self.case_lookups.items,
-                    .ss01 => self.ss01_lookups.items,
                     else => unreachable,
                 };
                 if (idx < lookups.len) {
                     if (lookups[idx].substitute(output.items[target_pos])) |new_glyph| {
+                        output.items[target_pos] = new_glyph;
+                    }
+                }
+            },
+            .ss => |ss_ref| {
+                const lookups = self.ss_lookups[ss_ref.set].items;
+                if (ss_ref.idx < lookups.len) {
+                    if (lookups[ss_ref.idx].substitute(output.items[target_pos])) |new_glyph| {
                         output.items[target_pos] = new_glyph;
                     }
                 }
@@ -2766,7 +2860,12 @@ test "Parse Inter calt feature (Type 1 and Type 6)" {
     std.debug.print("  Hlig lookups: {d}\n", .{features.hlig_lookups.items.len});
     std.debug.print("  Zero lookups: {d}\n", .{features.zero_lookups.items.len});
     std.debug.print("  Case lookups: {d}\n", .{features.case_lookups.items.len});
-    std.debug.print("  SS01 lookups: {d}\n", .{features.ss01_lookups.items.len});
+    // Print stylistic sets with non-zero lookups
+    for (features.ss_lookups, 1..) |ss, i| {
+        if (ss.items.len > 0) {
+            std.debug.print("  SS{d:0>2} lookups: {d}\n", .{ i, ss.items.len });
+        }
+    }
 
     // Inter has extensive calt feature with arrow ligatures etc.
     // We should have some Type 1 or Type 6 lookups

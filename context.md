@@ -8,6 +8,7 @@
   - Text opacity support (non-stroking alpha for text)
   - Blend modes (Normal, Multiply, Screen, etc.)
   - Additional PDF/A levels (2a, 3a for tagged PDF)
+  - Color emoji support (parse COLR/CPAL tables, render as colored paths)
 
 ## What We Did (Session 2026-01-26 #8)
 - **Released v1.0.0** - Feature complete milestone

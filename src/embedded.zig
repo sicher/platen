@@ -426,6 +426,24 @@ pub const EmbeddedFont = struct {
         self.feature_flags.set(feature, enabled);
     }
 
+    /// Check if any stylistic set feature is enabled
+    fn anyStylisticSetEnabled(self: *const EmbeddedFont) bool {
+        for (opentype.Feature.stylistic_sets) |ss| {
+            if (self.feature_flags.isEnabled(ss)) return true;
+        }
+        return false;
+    }
+
+    /// Check if any enabled stylistic set has lookups in the font
+    fn hasStylisticSetLookups(self: *const EmbeddedFont, ot: *const opentype.OpenTypeFeatures) bool {
+        for (opentype.Feature.stylistic_sets, 0..) |ss, i| {
+            if (self.feature_flags.isEnabled(ss) and ot.ss_lookups[i].items.len > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// Mark Unicode codepoints as used (CID mode)
     /// Parses UTF-8 text and records Unicode→GlyphID mappings
     /// Applies ligature substitution if enabled
@@ -486,7 +504,7 @@ pub const EmbeddedFont = struct {
             self.feature_flags.isEnabled(.calt) or self.feature_flags.isEnabled(.kern) or
             self.feature_flags.isEnabled(.tnum) or self.feature_flags.isEnabled(.pnum) or
             self.feature_flags.isEnabled(.frac) or self.feature_flags.isEnabled(.zero) or
-            self.feature_flags.isEnabled(.case_) or self.feature_flags.isEnabled(.ss01);
+            self.feature_flags.isEnabled(.case_) or self.anyStylisticSetEnabled();
         if (needs_ot) {
             try self.initOpenTypeFeatures();
         }
@@ -504,10 +522,10 @@ pub const EmbeddedFont = struct {
                 const has_frac = self.feature_flags.isEnabled(.frac) and ot.frac_chain_lookups.items.len > 0;
                 const has_zero = self.feature_flags.isEnabled(.zero) and ot.zero_lookups.items.len > 0;
                 const has_case = self.feature_flags.isEnabled(.case_) and ot.case_lookups.items.len > 0;
-                const has_ss01 = self.feature_flags.isEnabled(.ss01) and ot.ss01_lookups.items.len > 0;
+                const has_ss = self.hasStylisticSetLookups(ot);
 
                 if (has_calt or has_liga or has_dlig or has_clig or has_hlig or
-                    has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss01)
+                    has_tnum or has_pnum or has_frac or has_zero or has_case or has_ss)
                 {
                     // Apply GSUB substitutions, track results, and return glyphs
                     return try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale, out_alloc);
@@ -702,7 +720,7 @@ pub const EmbeddedFont = struct {
                 (self.feature_flags.isEnabled(.frac) and ot.frac_chain_lookups.items.len > 0) or
                 (self.feature_flags.isEnabled(.zero) and ot.zero_lookups.items.len > 0) or
                 (self.feature_flags.isEnabled(.case_) and ot.case_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.ss01) and ot.ss01_lookups.items.len > 0);
+                self.hasStylisticSetLookups(ot);
 
             if (has_gsub) {
                 return ot.applyGSUBWithFlags(base_glyphs.items, self.feature_flags);

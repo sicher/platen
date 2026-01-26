@@ -341,9 +341,19 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     inter_case.embedded.setFeature(.case_, true);
 
-    // Stylistic set 1 comparison (ss01 is OFF by default)
+    // Stylistic sets (ss01-ss08 are OFF by default)
     const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     inter_ss01.embedded.setFeature(.ss01, true);
+    const inter_ss02 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_ss02.embedded.setFeature(.ss02, true);
+    const inter_ss03 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_ss03.embedded.setFeature(.ss03, true);
+    const inter_ss05 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_ss05.embedded.setFeature(.ss05, true);
+    const inter_ss06 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_ss06.embedded.setFeature(.ss06, true);
+    const inter_ss08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    inter_ss08.embedded.setFeature(.ss08, true);
 
     try doc.addPage(.{});
 
@@ -369,6 +379,11 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     const inter_nocalt_12 = zpdf.TextStyle{ .font = inter_nocalt, .size = 12 };
     const inter_case_12 = zpdf.TextStyle{ .font = inter_case, .size = 12 };
     const inter_ss01_12 = zpdf.TextStyle{ .font = inter_ss01, .size = 12 };
+    const inter_ss02_12 = zpdf.TextStyle{ .font = inter_ss02, .size = 12 };
+    const inter_ss03_12 = zpdf.TextStyle{ .font = inter_ss03, .size = 12 };
+    const inter_ss05_12 = zpdf.TextStyle{ .font = inter_ss05, .size = 12 };
+    const inter_ss06_12 = zpdf.TextStyle{ .font = inter_ss06, .size = 12 };
+    const inter_ss08_12 = zpdf.TextStyle{ .font = inter_ss08, .size = 12 };
 
     var y: f64 = 32;
 
@@ -458,11 +473,35 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "A@B (C) 3 + 9 = 12 * 1", inter_case_12);
     y += 28;
 
-    // --- Stylistic Set 1 (ss01) - alternate digits ---
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stylistic Set 1 (ss01)", inter_bold_10);
-    _ = try doc.writeAt(.{ .x = 80, .y = y + 12 }, "3 4 6 9", inter_12);
-    _ = try doc.writeAt(.{ .x = 330, .y = y + 12 }, "3 4 6 9", inter_ss01_12);
-    y += 28;
+    // --- Stylistic Sets (ss01-ss08) ---
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stylistic Sets", inter_bold_13);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "Default", inter_bold_10);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "Enabled", inter_bold_10);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss01 Open digits", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "3 4 6 9", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "3 4 6 9", inter_ss01_12);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss02 Disambiguation", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "Il1 0O", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "Il1 0O", inter_ss02_12);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss03 Round quotes", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "\xe2\x80\x9ctext\xe2\x80\x9d , .", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "\xe2\x80\x9ctext\xe2\x80\x9d , .", inter_ss03_12);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss05 Circled", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1 2 A B", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "1 2 A B", inter_ss05_12);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss06 Squared", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "1 2 A B", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "1 2 A B", inter_ss06_12);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ss08 Square quotes", inter_10);
+    _ = try doc.writeAt(.{ .x = 200, .y = y }, "\xe2\x80\x9ctext\xe2\x80\x9d \xe2\x80\x98hi\xe2\x80\x99", inter_12);
+    _ = try doc.writeAt(.{ .x = 280, .y = y }, "\xe2\x80\x9ctext\xe2\x80\x9d \xe2\x80\x98hi\xe2\x80\x99", inter_ss08_12);
+    y += 24;
 
     // ===== Unicode Coverage =====
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Unicode Coverage", inter_bold_13);
