@@ -1,5 +1,6 @@
 const std = @import("std");
 const ttf = @import("ttf.zig");
+const binary = @import("binary.zig");
 
 // =============================================================================
 // Common Utilities
@@ -100,8 +101,8 @@ pub fn buildHmtxForGlyphs(
             }
         }
 
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, advance)));
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, lsb)));
+        try binary.appendBE16(&new_hmtx, allocator, advance);
+        try binary.appendBEi16(&new_hmtx, allocator, lsb);
     }
 
     return new_hmtx.toOwnedSlice(allocator);
@@ -113,30 +114,30 @@ pub fn buildMinimalCmap(allocator: std.mem.Allocator) ![]u8 {
     errdefer new_cmap.deinit(allocator);
 
     // cmap header
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // version
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // numTables
+    try binary.appendBE16(&new_cmap, allocator, 0); // version
+    try binary.appendBE16(&new_cmap, allocator, 1); // numTables
 
     // Encoding record for Windows Unicode BMP
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 3))); // platformID
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // encodingID
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, 12))); // offset
+    try binary.appendBE16(&new_cmap, allocator, 3); // platformID
+    try binary.appendBE16(&new_cmap, allocator, 1); // encodingID
+    try binary.appendBE32(&new_cmap, allocator, 12); // offset
 
     // Minimal Format 4 subtable (just final segment 0xFFFF)
     const seg_count: u16 = 1;
     const seg_count_x2: u16 = seg_count * 2;
 
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 4))); // format
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 32))); // length
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, seg_count_x2)));
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 2))); // searchRange
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // entrySelector
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // rangeShift
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // endCode
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // reservedPad
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // startCode
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, 1))); // idDelta
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // idRangeOffset
+    try binary.appendBE16(&new_cmap, allocator, 4); // format
+    try binary.appendBE16(&new_cmap, allocator, 32); // length
+    try binary.appendBE16(&new_cmap, allocator, 0); // language
+    try binary.appendBE16(&new_cmap, allocator, seg_count_x2);
+    try binary.appendBE16(&new_cmap, allocator, 2); // searchRange
+    try binary.appendBE16(&new_cmap, allocator, 0); // entrySelector
+    try binary.appendBE16(&new_cmap, allocator, 0); // rangeShift
+    try binary.appendBE16(&new_cmap, allocator, 0xFFFF); // endCode
+    try binary.appendBE16(&new_cmap, allocator, 0); // reservedPad
+    try binary.appendBE16(&new_cmap, allocator, 0xFFFF); // startCode
+    try binary.appendBEi16(&new_cmap, allocator, 1); // idDelta
+    try binary.appendBE16(&new_cmap, allocator, 0); // idRangeOffset
 
     return new_cmap.toOwnedSlice(allocator);
 }
@@ -151,17 +152,17 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
     // If no original name table, create an empty one
     const name_data = orig_name orelse {
         // Empty name table: format 0, 0 records, storage offset 6
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 6)));
+        try binary.appendBE16(&new_name, allocator, 0);
+        try binary.appendBE16(&new_name, allocator, 0);
+        try binary.appendBE16(&new_name, allocator, 6);
         return new_name.toOwnedSlice(allocator);
     };
 
     if (name_data.len < 6) {
         // Invalid name table, return empty
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 6)));
+        try binary.appendBE16(&new_name, allocator, 0);
+        try binary.appendBE16(&new_name, allocator, 0);
+        try binary.appendBE16(&new_name, allocator, 6);
         return new_name.toOwnedSlice(allocator);
     }
 
@@ -230,20 +231,20 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
     const header_size: u16 = 6 + record_count * 12;
 
     // Header
-    try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // format
-    try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, record_count)));
-    try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, header_size))); // storage offset
+    try binary.appendBE16(&new_name, allocator, 0); // format
+    try binary.appendBE16(&new_name, allocator, record_count);
+    try binary.appendBE16(&new_name, allocator, header_size); // storage offset
 
     // Calculate string offsets and write records
     var str_offset: u16 = 0;
     for (entries.items) |entry| {
         // Platform 3 (Windows), Encoding 1 (Unicode BMP), Language 0x0409 (English)
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 3))); // platformID
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1))); // encodingID
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0x0409))); // languageID
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, entry.name_id)));
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(entry.string_data.len))));
-        try new_name.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, str_offset)));
+        try binary.appendBE16(&new_name, allocator, 3); // platformID
+        try binary.appendBE16(&new_name, allocator, 1); // encodingID
+        try binary.appendBE16(&new_name, allocator, 0x0409); // languageID
+        try binary.appendBE16(&new_name, allocator, entry.name_id);
+        try binary.appendBE16(&new_name, allocator, @intCast(entry.string_data.len));
+        try binary.appendBE16(&new_name, allocator, str_offset);
         str_offset += @intCast(entry.string_data.len);
     }
 

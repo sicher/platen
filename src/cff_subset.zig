@@ -2,6 +2,7 @@ const std = @import("std");
 
 // Import common utilities from ttf_subset
 const ttf_subset = @import("ttf_subset.zig");
+const binary = @import("binary.zig");
 pub const readU16 = ttf_subset.readU16;
 pub const readI16 = ttf_subset.readI16;
 pub const readU32 = ttf_subset.readU32;
@@ -275,20 +276,20 @@ pub fn buildSubsetStringIndex(
     const off_size: u8 = if (current_offset < 256) 1 else if (current_offset < 65536) 2 else if (current_offset < 16777216) 3 else 4;
 
     // Write count
-    try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, new_count)));
+    try binary.appendBE16(&output, allocator, new_count);
     // Write offSize
     try output.append(allocator, off_size);
     // Write offsets
     for (offsets.items) |off| {
         switch (off_size) {
             1 => try output.append(allocator, @intCast(off)),
-            2 => try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off)))),
+            2 => try binary.appendBE16(&output, allocator, @intCast(off)),
             3 => {
                 try output.append(allocator, @intCast((off >> 16) & 0xff));
                 try output.append(allocator, @intCast((off >> 8) & 0xff));
                 try output.append(allocator, @intCast(off & 0xff));
             },
-            4 => try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, off))),
+            4 => try binary.appendBE32(&output, allocator, off),
             else => {},
         }
     }
@@ -724,10 +725,10 @@ pub fn encodeCFFInt(allocator: std.mem.Allocator, output: *std.ArrayListUnmanage
         try output.append(allocator, @intCast(v & 0xff));
     } else if (value >= -32768 and value <= 32767) {
         try output.append(allocator, 28);
-        try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, @intCast(value))));
+        try binary.appendBEi16(output, allocator, @intCast(value));
     } else {
         try output.append(allocator, 29);
-        try output.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i32, value)));
+        try binary.appendBEi32(output, allocator, value);
     }
 }
 

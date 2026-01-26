@@ -11,6 +11,7 @@ const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
 pub const opentype = @import("opentype.zig");
 const format = @import("format.zig");
+const binary = @import("binary.zig");
 
 // Re-export commonly used functions from subsetting modules
 const readU16 = ttf_subset.readU16;
@@ -1165,9 +1166,9 @@ fn decodeFontName(raw: []const u8) []const u8 {
 fn appendLocaEntry(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, offset: u32, loca_format: i16) !void {
     if (loca_format == 0) {
         // Short format: offset / 2
-        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(offset / 2))));
+        try binary.appendBE16(list, allocator, @intCast(offset / 2));
     } else {
-        try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, offset)));
+        try binary.appendBE32(list, allocator, offset);
     }
 }
 
@@ -1313,42 +1314,42 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     const range_shift = seg_count_x2 - search_range;
 
     // Format 4 header
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 4))); // format
+    try binary.appendBE16(&format4, allocator, 4); // format
     // Length will be filled in later
     const format4_length_pos = format4.items.len;
     try format4.appendSlice(allocator, &[_]u8{ 0, 0 }); // length placeholder
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, seg_count_x2)));
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, search_range)));
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, entry_selector)));
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, range_shift)));
+    try binary.appendBE16(&format4, allocator, 0); // language
+    try binary.appendBE16(&format4, allocator, seg_count_x2);
+    try binary.appendBE16(&format4, allocator, search_range);
+    try binary.appendBE16(&format4, allocator, entry_selector);
+    try binary.appendBE16(&format4, allocator, range_shift);
 
     // endCode array
     for (unicode_mappings.items) |m| {
-        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, m.unicode)));
+        try binary.appendBE16(&format4, allocator, m.unicode);
     }
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // final segment
+    try binary.appendBE16(&format4, allocator, 0xFFFF); // final segment
 
     // reservedPad
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+    try binary.appendBE16(&format4, allocator, 0);
 
     // startCode array (same as endCode for single-char segments)
     for (unicode_mappings.items) |m| {
-        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, m.unicode)));
+        try binary.appendBE16(&format4, allocator, m.unicode);
     }
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0xFFFF))); // final segment
+    try binary.appendBE16(&format4, allocator, 0xFFFF); // final segment
 
     // idDelta array - we'll use idRangeOffset instead, so delta is 0
     // Actually, for single-char segments, we can use: delta = glyphId - charCode
     for (unicode_mappings.items) |m| {
         const delta: i16 = @as(i16, @intCast(m.glyph_id)) - @as(i16, @intCast(m.unicode));
-        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, delta)));
+        try binary.appendBEi16(&format4, allocator, delta);
     }
-    try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, 1))); // final segment delta
+    try binary.appendBEi16(&format4, allocator, 1); // final segment delta
 
     // idRangeOffset array (all zeros since we use idDelta)
     for (0..seg_count) |_| {
-        try format4.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0)));
+        try binary.appendBE16(&format4, allocator, 0);
     }
 
     // No glyphIdArray needed since we use idDelta
@@ -1364,18 +1365,18 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // Offset = 4 (header) + 16 (2 records) = 20
     const format0_offset: u32 = 20;
     try new_cmap.appendSlice(allocator, &[_]u8{ 0, 1, 0, 0 }); // platform 1, encoding 0
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, format0_offset)));
+    try binary.appendBE32(&new_cmap, allocator, format0_offset);
 
     // Encoding record 2: Platform 3 (Windows), Encoding 1 (Unicode BMP)
     // Offset = 20 + 262 (format0 size) = 282
     const format4_offset: u32 = 20 + 262;
     try new_cmap.appendSlice(allocator, &[_]u8{ 0, 3, 0, 1 }); // platform 3, encoding 1
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u32, format4_offset)));
+    try binary.appendBE32(&new_cmap, allocator, format4_offset);
 
     // Format 0 subtable (for MacRoman compatibility)
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // format
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 262))); // length
-    try new_cmap.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 0))); // language
+    try binary.appendBE16(&new_cmap, allocator, 0); // format
+    try binary.appendBE16(&new_cmap, allocator, 262); // length
+    try binary.appendBE16(&new_cmap, allocator, 0); // language
 
     // Format 0 glyph index array (256 bytes) - maps byte value to glyph
     for (0..256) |i| {
@@ -1491,8 +1492,8 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
             }
         }
 
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, advance)));
-        try new_hmtx.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(i16, lsb)));
+        try binary.appendBE16(&new_hmtx, allocator, advance);
+        try binary.appendBEi16(&new_hmtx, allocator, lsb);
     }
 
     // Build minimal cmap (Format 4 with just .notdef mapping)
@@ -1684,7 +1685,7 @@ const CFFLayout = struct {
 fn appendCffOffset(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, off: u32, off_size: u8) !void {
     switch (off_size) {
         1 => try list.append(allocator, @intCast(off)),
-        2 => try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, @intCast(off)))),
+        2 => try binary.appendBE16(list, allocator, @intCast(off)),
         3 => {
             const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, off));
             try list.appendSlice(allocator, off_bytes[1..4]);
@@ -1697,7 +1698,7 @@ fn appendCffOffset(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocat
 /// CFF INDEX format: count(2) + offSize(1) + offsets(offSize * (count+1)) + data
 fn appendCffSingleItemIndex(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, data: []const u8) !void {
     // Count = 1 (big-endian u16)
-    try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, 1)));
+    try binary.appendBE16(list, allocator, 1);
 
     // Determine offset size (1 byte if data fits, 2 bytes otherwise)
     const off_size: u8 = if (data.len < 256) 1 else 2;
@@ -1774,7 +1775,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     const new_cs_off_size: u8 = if (charstrings_data_size < 256) 1 else if (charstrings_data_size < 65536) 2 else 3;
 
     // Build CharStrings INDEX header
-    try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, num_glyphs)));
+    try binary.appendBE16(&new_charstrings, allocator, num_glyphs);
     try new_charstrings.append(allocator, new_cs_off_size);
 
     // Copy and convert offsets (may need to change offset size)
@@ -2084,7 +2085,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     var new_charstrings = std.ArrayListUnmanaged(u8){};
     defer new_charstrings.deinit(allocator);
 
-    try new_charstrings.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, num_glyphs)));
+    try binary.appendBE16(&new_charstrings, allocator, num_glyphs);
     try new_charstrings.append(allocator, new_cs_off_size);
 
     for (cs_offsets.items) |off| {
@@ -2141,7 +2142,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
             sid_remap.get(orig_sid) orelse orig_sid
         else
             orig_sid;
-        try new_charset.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, final_sid)));
+        try binary.appendBE16(&new_charset, allocator, final_sid);
     }
 
     // Private DICT handling
