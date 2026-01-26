@@ -23,6 +23,7 @@ pub const xml = @import("xml.zig");
 pub const testing = @import("testing.zig");
 pub const integration_tests = @import("integration_tests.zig");
 pub const pdf_output = @import("pdf_output.zig");
+pub const pdfa = @import("pdfa.zig");
 
 // Re-export Document as the primary type
 pub const Document = document.Document;
@@ -98,6 +99,10 @@ pub const StyledText = document.StyledText;
 pub const Span = document.Span;
 pub const BreakPoint = document.BreakPoint;
 
+// Re-export PDF/A types
+pub const Conformance = pdfa.Conformance;
+pub const ConformanceError = pdfa.ConformanceError;
+
 // ============================================================================
 // Units - all measurements in PDF are in points (1pt = 1/72 inch)
 // ============================================================================
@@ -140,6 +145,7 @@ test {
     _ = images;
     _ = xml;
     _ = svg;
+    _ = pdfa;
     _ = @import("writer.zig");
     _ = @import("testing.zig");
     _ = @import("integration_tests.zig");

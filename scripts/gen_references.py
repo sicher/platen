@@ -2393,6 +2393,67 @@ def gen_gentium_family():
     print("  gentium_family.pdf")
 
 
+def gen_pdfa():
+    """Generate PDF/A conformance test document."""
+    from fpdf.enums import OutputIntentSubType
+    from fpdf.output import PDFICCProfile
+    import pathlib
+
+    pdf = make_pdf()
+
+    # Read the ICC profile (same one zpdf uses)
+    icc_data = pathlib.Path("src/data/sRGB2014.icc").read_bytes()
+
+    # Add output intent for PDF/A
+    icc_profile = PDFICCProfile(icc_data, n=3, alternate="DeviceRGB")
+    pdf.add_output_intent(
+        OutputIntentSubType.PDFA,
+        output_condition_identifier="sRGB IEC61966-2.1",
+        registry_name="http://www.color.org",
+        dest_output_profile=icc_profile,
+    )
+
+    # Add embedded font (required for PDF/A - no standard fonts)
+    pdf.add_font("Inter", "", "test/fonts/Inter/Inter-Regular.ttf")
+
+    # Enable text shaping with kerning
+    pdf.set_text_shaping(True, features={"liga": True, "kern": True})
+
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Inter", size=16)
+    shaped_text(pdf, 50, 30, "PDF/A Conformance Test")
+
+    # Description
+    pdf.set_font("Inter", size=10)
+    y = 60
+    shaped_text(pdf, 50, y, "This document uses PDF/A structures:")
+    y += 15
+    shaped_text(pdf, 70, y, "- OutputIntent with sRGB ICC profile")
+    y += 12
+    shaped_text(pdf, 70, y, "- Embedded fonts (Inter)")
+    y += 12
+    shaped_text(pdf, 70, y, "- No transparency (fully opaque)")
+    y += 25
+
+    # Colored rectangles (no transparency for PDF/A-1b)
+    pdf.set_fill_color(200, 220, 255)
+    pdf.set_draw_color(0, 50, 150)
+    pdf.rect(50, y, 80, 40, style="DF")
+
+    pdf.set_fill_color(255, 220, 200)
+    pdf.set_draw_color(150, 50, 0)
+    pdf.rect(140, y, 80, 40, style="DF")
+
+    pdf.set_fill_color(220, 255, 220)
+    pdf.set_draw_color(0, 150, 50)
+    pdf.rect(230, y, 80, 40, style="DF")
+
+    pdf.output(OUTPUT_DIR / "pdfa.pdf")
+    print("  pdfa.pdf")
+
+
 GENERATORS = {
     "gentium_family": gen_gentium_family,
     "kerning": gen_kerning,
@@ -2424,6 +2485,7 @@ GENERATORS = {
     "opacity": gen_opacity,
     "landscape": gen_landscape,
     "colors": gen_colors,
+    "pdfa": gen_pdfa,
 }
 
 

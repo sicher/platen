@@ -26,6 +26,7 @@ pub const pdf_output = @import("pdf_output.zig");
 pub const pagemod = @import("page.zig");
 pub const text_render = @import("text_render.zig");
 pub const format = @import("format.zig");
+pub const pdfa = @import("pdfa.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -206,6 +207,8 @@ pub const Document = struct {
     metadata: DocumentMetadata = .{},
     /// Compression level for PDF streams (0-9). Default 1 for speed. Use 6 for smaller files.
     compression_level: i32 = 1,
+    /// PDF/A conformance level (default: none - no restrictions).
+    conformance: pdfa.Conformance = .none,
 
     /// Create a new PDF document.
     pub fn init(allocator: std.mem.Allocator) Document {
@@ -258,6 +261,13 @@ pub const Document = struct {
     /// Only non-null fields are written to the PDF Info dictionary.
     pub fn setMetadata(self: *Document, meta: DocumentMetadata) void {
         self.metadata = meta;
+    }
+
+    /// Set PDF/A conformance level.
+    /// This must be called before adding content that violates conformance rules.
+    /// For example, PDF/A-1b does not allow transparency (opacity < 1.0).
+    pub fn setConformance(self: *Document, conformance: pdfa.Conformance) void {
+        self.conformance = conformance;
     }
 
     /// Add a new page with the specified options (size, margins).
@@ -1441,8 +1451,11 @@ pub const Document = struct {
 
     /// Write opacity ExtGState reference if needed.
     /// Returns the number of bytes written (0 if fully opaque).
+    /// Returns ConformanceError.TransparencyNotAllowed for PDF/A-1b with non-opaque values.
     fn writeOpacityRef(self: *Document, page: *pagemod.Page, style: ShapeStyle, buf: []u8) !usize {
         const opacity = graphics.getShapeOpacity(style) orelse return 0;
+        // Validate opacity against PDF/A conformance requirements
+        try pdfa.validateOpacity(self.conformance, opacity.fill_opacity, opacity.stroke_opacity);
         const idx = try page.getOrAddOpacityState(self.allocator, opacity.fill_opacity, opacity.stroke_opacity) orelse return 0;
         return graphics.writeExtGStateRef(buf, idx);
     }
@@ -2707,6 +2720,19 @@ pub const Document = struct {
             next_id += 1;
         }
 
+        // Reserve IDs for PDF/A structures (XMP metadata, OutputIntent, ICC profile)
+        var pdfa_metadata_id: ?ObjectId = null;
+        var pdfa_output_intent_id: ?ObjectId = null;
+        var pdfa_icc_profile_id: ?ObjectId = null;
+        if (self.conformance != .none) {
+            pdfa_metadata_id = next_id;
+            next_id += 1;
+            pdfa_output_intent_id = next_id;
+            next_id += 1;
+            pdfa_icc_profile_id = next_id;
+            next_id += 1;
+        }
+
         const first_page_id = next_id;
 
         // Write header
@@ -2716,6 +2742,12 @@ pub const Document = struct {
         try w.beginObject(catalog_id);
         var catalog_dict = Dict.init(self.allocator);
         defer catalog_dict.deinit();
+        // PDF/A sub-structures (declared here to stay in scope until writeDict)
+        var output_intents = Array.init(self.allocator);
+        defer output_intents.deinit();
+        var mark_info = Dict.init(self.allocator);
+        defer mark_info.deinit();
+
         try catalog_dict.put("Type", Value.name("Catalog"));
         try catalog_dict.put("Pages", Value.ref(.{ .id = pages_root_id }));
         if (outlines_root_id) |id| {
@@ -2723,6 +2755,20 @@ pub const Document = struct {
         }
         if (page_labels_id) |id| {
             try catalog_dict.put("PageLabels", Value.ref(.{ .id = id }));
+        }
+        // PDF/A entries
+        if (pdfa_metadata_id) |id| {
+            try catalog_dict.put("Metadata", Value.ref(.{ .id = id }));
+        }
+        if (pdfa_output_intent_id) |id| {
+            // OutputIntents is an array
+            try output_intents.append(Value.ref(.{ .id = id }));
+            try catalog_dict.put("OutputIntents", .{ .array_val = &output_intents });
+        }
+        if (self.conformance != .none) {
+            // MarkInfo required for PDF/A
+            try mark_info.put("Marked", .{ .bool_val = false });
+            try catalog_dict.put("MarkInfo", .{ .dict_val = &mark_info });
         }
         try w.writeDict(catalog_dict);
         try w.endObject();
@@ -2747,6 +2793,58 @@ pub const Document = struct {
 
         try w.writeDict(pages_dict);
         try w.endObject();
+
+        // Write PDF/A objects (XMP metadata, OutputIntent, ICC profile)
+        if (self.conformance != .none) {
+            // Generate UUIDs for XMP document/instance IDs (simple pseudo-random)
+            var uuid_buf: [32]u8 = undefined;
+            const timestamp = @as(u64, @intCast(std.time.milliTimestamp()));
+            _ = std.fmt.bufPrint(&uuid_buf, "{x:0>16}{x:0>16}", .{ timestamp, timestamp ^ 0xDEADBEEF }) catch unreachable;
+            const uuid_str = uuid_buf[0..32];
+
+            // 1. XMP Metadata stream
+            const xmp_data = try pdfa.generateXmpMetadata(self.allocator, .{
+                .title = self.metadata.title,
+                .author = self.metadata.author,
+                .subject = self.metadata.subject,
+                .keywords = self.metadata.keywords,
+                .creator = self.metadata.creator,
+                .producer = self.metadata.producer,
+                .conformance = self.conformance,
+                .document_id = uuid_str,
+                .instance_id = uuid_str,
+            });
+            defer self.allocator.free(xmp_data);
+
+            try w.beginObject(pdfa_metadata_id.?);
+            var xmp_dict = Dict.init(self.allocator);
+            defer xmp_dict.deinit();
+            try xmp_dict.put("Type", Value.name("Metadata"));
+            try xmp_dict.put("Subtype", Value.name("XML"));
+            // XMP metadata must NOT be compressed for PDF/A
+            try w.writeStream(&xmp_dict, xmp_data);
+            try w.endObject();
+
+            // 2. ICC Profile stream
+            try w.beginObject(pdfa_icc_profile_id.?);
+            var icc_dict = Dict.init(self.allocator);
+            defer icc_dict.deinit();
+            try icc_dict.put("N", Value.int(3)); // RGB = 3 components
+            try w.writeStreamCompressed(&icc_dict, pdfa.srgb_icc_profile);
+            try w.endObject();
+
+            // 3. OutputIntent dictionary
+            try w.beginObject(pdfa_output_intent_id.?);
+            var intent_dict = Dict.init(self.allocator);
+            defer intent_dict.deinit();
+            try intent_dict.put("Type", Value.name("OutputIntent"));
+            try intent_dict.put("S", Value.name("GTS_PDFA1"));
+            try intent_dict.put("OutputConditionIdentifier", Value.string("sRGB IEC61966-2.1"));
+            try intent_dict.put("RegistryName", Value.string("http://www.color.org"));
+            try intent_dict.put("DestOutputProfile", Value.ref(.{ .id = pdfa_icc_profile_id.? }));
+            try w.writeDict(intent_dict);
+            try w.endObject();
+        }
 
         // Write standard font dictionaries
         for (font_list.items, 0..) |font, idx| {
@@ -3564,9 +3662,21 @@ pub const Document = struct {
 
         // Finish with xref and trailer
         const finish_start = std.time.milliTimestamp();
+
+        // Generate document ID for PDF/A (required in trailer)
+        var doc_id_buf: [32]u8 = undefined;
+        const doc_id: ?[]const u8 = if (self.conformance != .none) blk: {
+            // Generate pseudo-random ID based on timestamp and content
+            const timestamp = @as(u64, @intCast(std.time.milliTimestamp()));
+            const content_hash = @as(u64, @intCast(w.output.items.len)) ^ 0xCAFEBABE;
+            _ = std.fmt.bufPrint(&doc_id_buf, "{x:0>16}{x:0>16}", .{ timestamp, content_hash }) catch unreachable;
+            break :blk doc_id_buf[0..32];
+        } else null;
+
         const result = try w.finish(.{
             .catalog_ref = .{ .id = catalog_id },
             .info_ref = if (info_id) |id| .{ .id = id } else null,
+            .id = doc_id,
         });
         pdf_output.last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
         return result;

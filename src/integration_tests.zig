@@ -59,6 +59,7 @@ const test_cases = [_]TestCase{
     .{ .name = "kerning", .generate = generateKerningPdf },
     .{ .name = "insert_page", .generate = generateInsertPagePdf },
     .{ .name = "gentium_family", .generate = generateGentiumFamilyPdf },
+    .{ .name = "pdfa", .generate = generatePdfaPdf, .skip_fonts = true }, // Has additional PDF/A structures
 };
 
 // ============================================================================
@@ -2811,6 +2812,52 @@ fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
     return doc.output();
 }
 
+fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Enable PDF/A-1b conformance
+    doc.setConformance(.pdfa_1b);
+
+    // Load embedded font (required for PDF/A - standard fonts not allowed)
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+
+    try doc.addPage(.{});
+
+    // Title
+    const title_style = zpdf.TextStyle{ .font = font, .size = 16 };
+    const body_style = zpdf.TextStyle{ .font = font, .size = 10 };
+
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "PDF/A Conformance Test", title_style);
+
+    // Description
+    var y: f64 = 60;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "This document uses PDF/A structures:", body_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- OutputIntent with sRGB ICC profile", body_style);
+    y += 12;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- Embedded fonts (Inter)", body_style);
+    y += 12;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- No transparency (fully opaque)", body_style);
+    y += 25;
+
+    // Colored rectangles (no transparency for PDF/A-1b)
+    try doc.drawRect(.{ .x = 50, .y = y, .width = 80, .height = 40 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(200, 220, 255) },
+        .stroke = .{ .color = zpdf.Color.rgb(0, 50, 150) },
+    });
+    try doc.drawRect(.{ .x = 140, .y = y, .width = 80, .height = 40 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(255, 220, 200) },
+        .stroke = .{ .color = zpdf.Color.rgb(150, 50, 0) },
+    });
+    try doc.drawRect(.{ .x = 230, .y = y, .width = 80, .height = 40 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(220, 255, 220) },
+        .stroke = .{ .color = zpdf.Color.rgb(0, 150, 50) },
+    });
+
+    return doc.output();
+}
+
 test "integration: multi_font PDF" {
     try runIntegrationTest("multi_font", generateMultiFontPdf);
 }
@@ -2966,6 +3013,11 @@ test "integration: insert_page PDF" {
 test "integration: gentium_family PDF" {
     // Tests FontFamily API with all Gentium font weights
     try runIntegrationTest("gentium_family", generateGentiumFamilyPdf);
+}
+
+test "integration: pdfa PDF" {
+    // Tests PDF/A-1b conformance output
+    try runIntegrationTestWithOptions("pdfa", generatePdfaPdf, .{ .skip_fonts = true });
 }
 
 const TestOptions = struct {

@@ -2766,3 +2766,103 @@ test "opacity state deduplication" {
     }
     try std.testing.expectEqual(@as(usize, 1), count);
 }
+
+// ============================================================================
+// PDF/A Tests
+// ============================================================================
+
+test "PDF/A-1b output has required structures" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setConformance(.pdfa_1b);
+    try doc.addPage(.{});
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Check PDF/A required structures
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Metadata") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /XML") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /OutputIntent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/S /GTS_PDFA1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "sRGB IEC61966-2.1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/MarkInfo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/OutputIntents") != null);
+    // XMP metadata content
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "pdfaid:part") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "pdfaid:conformance") != null);
+}
+
+test "PDF/A-1b rejects transparency" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setConformance(.pdfa_1b);
+    try doc.addPage(.{});
+
+    // Try to draw with transparency - should fail
+    const result = doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.red, .opacity = 0.5 },
+    });
+    try std.testing.expectError(zpdf.pdfa.ConformanceError.TransparencyNotAllowed, result);
+}
+
+test "PDF/A-1b allows fully opaque drawing" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setConformance(.pdfa_1b);
+    try doc.addPage(.{});
+
+    // Fully opaque drawing should succeed
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.red }, // opacity defaults to 1.0
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Should have PDF/A structures but no ExtGState
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /OutputIntent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") == null);
+}
+
+test "PDF/A-2b allows transparency" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    doc.setConformance(.pdfa_2b);
+    try doc.addPage(.{});
+
+    // PDF/A-2b allows transparency
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.blue, .opacity = 0.5 },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Should have PDF/A structures AND ExtGState
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /OutputIntent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+}
+
+test "PDF/A none conformance has no PDF/A structures" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    // Default conformance is .none
+    try doc.addPage(.{});
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
+        .fill = .{ .color = Color.red },
+    });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // No PDF/A structures
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /OutputIntent") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Metadata") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/MarkInfo") == null);
+}

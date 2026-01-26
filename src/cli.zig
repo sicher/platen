@@ -97,6 +97,11 @@ pub fn main() !void {
         const output_path = if (args.len > 2) args[2] else "metadata_test.pdf";
         try generateMetadataTestPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "pdfa-test")) {
+        // Test PDF/A conformance
+        const output_path = if (args.len > 2) args[2] else "pdfa_test.pdf";
+        try generatePdfaTestPdf(allocator, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -129,6 +134,7 @@ fn printUsage() !void {
         \\  path-test [out]         Test path API (moveTo, lineTo, curveTo)
         \\  gradient-test [out]     Test gradient API (linear, radial)
         \\  opacity-test [out]      Test opacity API (fill/stroke alpha)
+        \\  pdfa-test [out]         Test PDF/A-1b conformance output
         \\
     ;
     try stdout.writeAll(usage);
@@ -867,6 +873,81 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 40;
 
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Use 'pdfinfo' or your PDF viewer's document properties to verify.", meta_italic10_style);
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf);
+}
+
+fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Set PDF/A-1b conformance
+    doc.setConformance(.pdfa_1b);
+
+    // Set document metadata (required for PDF/A)
+    doc.setMetadata(.{
+        .title = "zpdf PDF/A-1b Test Document",
+        .author = "zpdf Library",
+        .subject = "Testing PDF/A-1b conformance",
+        .keywords = "pdf, pdfa, archival, conformance",
+        .creator = "zpdf pdfa-test command",
+    });
+
+    // Load embedded font (PDF/A requires all fonts to be embedded)
+    const font = doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null) catch |err| {
+        try print("Error: Could not load font for PDF/A test: {}\n", .{err});
+        try print("  PDF/A-1b requires embedded fonts. Make sure test/fonts/Inter/Inter-Regular.ttf exists.\n", .{});
+        return err;
+    };
+
+    try doc.addPage(.{});
+
+    const title_style = zpdf.TextStyle{ .font = font, .size = 24 };
+    const body_style = zpdf.TextStyle{ .font = font, .size = 12 };
+    const small_style = zpdf.TextStyle{ .font = font, .size = 10 };
+
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "PDF/A-1b Test Document", title_style);
+
+    var y: f64 = 100;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "This PDF conforms to PDF/A-1b (ISO 19005-1:2005 Level B).", body_style);
+    y += 30;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "PDF/A-1b Requirements:", body_style);
+    y += 20;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- No transparency (opacity must be 1.0)", small_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- All fonts must be embedded (using Inter font)", small_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- XMP metadata required", small_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- OutputIntent with ICC profile required", small_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- MarkInfo dictionary required", small_style);
+    y += 15;
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- Document ID in trailer required", small_style);
+    y += 30;
+
+    // Draw some shapes (fully opaque - required for PDF/A-1b)
+    try doc.drawRect(.{ .x = 50, .y = y, .width = 100, .height = 50 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(200, 220, 255) },
+        .stroke = .{ .color = zpdf.Color.rgb(0, 50, 150) },
+    });
+    try doc.drawRect(.{ .x = 160, .y = y, .width = 100, .height = 50 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(255, 220, 200) },
+        .stroke = .{ .color = zpdf.Color.rgb(150, 50, 0) },
+    });
+    try doc.drawRect(.{ .x = 270, .y = y, .width = 100, .height = 50 }, .{
+        .fill = .{ .color = zpdf.Color.rgb(220, 255, 220) },
+        .stroke = .{ .color = zpdf.Color.rgb(0, 150, 50) },
+    });
+    y += 70;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Validate with: verapdf --flavour 1b <file>", small_style);
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

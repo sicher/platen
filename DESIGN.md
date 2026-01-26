@@ -22,6 +22,7 @@
 - `color.zig` - Color types (grayscale, RGB, CMYK)
 - `layout.zig` - Layout types (Point, TextBox, Margins, Padding)
 - `zlib.zig` - FlateDecode compression via C zlib
+- `pdfa.zig` - PDF/A conformance (validation, XMP metadata, ICC profile)
 - `cli.zig` - Command line tool
 
 ### PDF Structure
@@ -672,6 +673,60 @@ try doc.addLink(rect, chapter_dest);
 const url_rect = try doc.writeAt(72, 120, "Visit website");
 try doc.addExternalLink(url_rect, "https://example.com");
 ```
+
+## PDF/A Conformance
+
+PDF/A is the ISO standard for long-term archival of electronic documents.
+
+### Supported Levels
+
+```zig
+pub const Conformance = enum {
+    none,      // Default - no restrictions
+    pdfa_1b,   // PDF 1.4, no transparency, all fonts embedded
+    pdfa_2b,   // PDF 1.7, transparency allowed
+    pdfa_3b,   // PDF 1.7, embedded files allowed
+};
+```
+
+### Usage
+
+```zig
+var doc = Document.init(allocator);
+doc.setConformance(.pdfa_1b);  // Enable PDF/A-1b
+
+// For full compliance, use embedded fonts
+const font = try doc.loadFont("path/to/font.ttf", null);
+const style = TextStyle{ .font = font, .size = 12 };
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", style);
+
+// Transparency rejected for PDF/A-1b
+try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 }});
+// Returns error.TransparencyNotAllowed
+```
+
+### PDF/A Output Structures
+
+When conformance != `.none`, the output includes:
+
+1. **XMP Metadata stream** - XML with Dublin Core, PDF/A identification (`pdfaid:part`, `pdfaid:conformance`)
+2. **OutputIntent dictionary** - References ICC profile, `S=GTS_PDFA1`
+3. **ICC Profile stream** - Embedded sRGB IEC61966-2.1 (~3KB)
+4. **MarkInfo dictionary** - `/Marked false` in catalog
+5. **Document ID** - Hex string in trailer
+
+### Validation
+
+Use VeraPDF for validation:
+```bash
+zpdf pdfa-test output.pdf
+verapdf --flavour 1b output.pdf
+```
+
+### Known Limitations
+
+- **Standard fonts**: PDF/A requires embedded fonts. Using standard fonts (Helvetica, etc.) will fail VeraPDF validation. Use `loadFont()` for compliance.
+- **CID fonts**: VeraPDF shows validation warnings for CID font embedding that may require further investigation.
 
 ## API Design Guidelines
 

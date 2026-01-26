@@ -117,6 +117,9 @@ pub const Writer = struct {
     pub const FinishOptions = struct {
         catalog_ref: Ref,
         info_ref: ?Ref = null,
+        /// Document ID for trailer (required for PDF/A). Two 16-byte hex strings.
+        /// Format: "<hex1><hex2>" where each hex is 16 bytes
+        id: ?[]const u8 = null,
     };
 
     /// Write xref table and trailer, return the final PDF bytes
@@ -172,6 +175,14 @@ pub const Writer = struct {
         if (opts.info_ref) |info| {
             header = std.fmt.bufPrint(&buf, "/Info {d} 0 R\n", .{info.id}) catch unreachable;
             try self.output.appendSlice(self.allocator, header);
+        }
+        if (opts.id) |id| {
+            // Write ID array: two identical hex strings for new documents
+            try self.output.appendSlice(self.allocator, "/ID [<");
+            try self.output.appendSlice(self.allocator, id);
+            try self.output.appendSlice(self.allocator, "><");
+            try self.output.appendSlice(self.allocator, id);
+            try self.output.appendSlice(self.allocator, ">]\n");
         }
         try self.output.appendSlice(self.allocator, ">>\n");
 

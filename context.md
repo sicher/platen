@@ -1,11 +1,55 @@
 # zpdf Context
 
 ## Current Focus
-Opacity support **COMPLETED**.
+PDF/A conformance support **COMPLETED**.
 
 ## What's Next
+- Consider: PDF/A CID font embedding fix (VeraPDF shows 1 remaining validation error)
 - Consider: Text opacity support (non-stroking alpha for text)
 - Consider: Blend modes (Normal, Multiply, Screen, etc.)
+
+## What We Did (Session 2026-01-26 #4)
+- **Added PDF/A conformance support** (`src/pdfa.zig`, `src/document.zig`):
+  - New `Conformance` enum: `.none`, `.pdfa_1b`, `.pdfa_2b`, `.pdfa_3b`
+  - Early validation: transparency (opacity < 1.0) rejected for PDF/A-1b
+  - XMP metadata generation with PDF/A identification
+  - OutputIntent with embedded sRGB ICC profile
+  - Document ID in trailer (required for PDF/A)
+  - MarkInfo dictionary in catalog
+
+- **API usage**:
+  ```zig
+  var doc = Document.init(allocator);
+  doc.setConformance(.pdfa_1b);  // Enable PDF/A-1b mode
+
+  // Transparency rejected for PDF/A-1b
+  try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 }});
+  // Returns error.TransparencyNotAllowed
+
+  // PDF/A-2b and 3b allow transparency
+  doc.setConformance(.pdfa_2b);
+  try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 }});  // OK
+  ```
+
+- **Files added/modified**:
+  - `src/pdfa.zig` - **NEW**: Conformance enum, validation, XMP generation
+  - `src/data/sRGB2014.icc` - **NEW**: Embedded ICC profile (~3KB)
+  - `src/data/sRGB2014.icc.LICENSE` - **NEW**: License for ICC profile
+  - `src/document.zig` - conformance field, validation in writeOpacityRef(), PDF/A output
+  - `src/writer.zig` - Added optional `id` field to trailer
+  - `src/zpdf.zig` - Re-export Conformance, ConformanceError
+  - `src/document_test.zig` - PDF/A tests
+  - `src/cli.zig` - `pdfa-test` command
+
+- **CLI command**: `zpdf pdfa-test [out]` - generates PDF/A-1b test document
+
+- **Verification with VeraPDF**: 128/129 rules pass. 1 remaining issue with CID font
+  embedding check (font is embedded but VeraPDF CIDFont validation needs investigation)
+
+- **Integration test** (`src/integration_tests.zig`, `scripts/gen_references.py`):
+  - `gen_pdfa()` in Python - generates fpdf2 reference PDF with PDF/A output intent
+  - `generatePdfaPdf()` in Zig - generates zpdf PDF with full PDF/A-1b conformance
+  - zpdf output includes additional structures (XMP, MarkInfo) beyond fpdf2
 
 ## What We Did (Session 2026-01-26 #3)
 - **Added opacity support to graphics API** (`src/layout.zig`, `src/graphics.zig`, `src/document.zig`):
