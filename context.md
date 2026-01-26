@@ -1,12 +1,43 @@
 # zpdf Context
 
 ## Current Focus
-PDF/A conformance **FULLY VALIDATED** with VeraPDF.
+Code cleanup and maintainability improvements in OpenType handling.
 
 ## What's Next
 - Consider: Text opacity support (non-stroking alpha for text)
 - Consider: Blend modes (Normal, Multiply, Screen, etc.)
 - Consider: Additional PDF/A levels (2a, 3a for tagged PDF)
+- Consider: Further OpenType lookup array consolidation (Option 1 from session #6)
+
+## What We Did (Session 2026-01-26 #6)
+- **Refactored FeatureFlags to use EnumArray**:
+  - Replaced 14 bool fields with `EnumArray(Feature, bool)`
+  - Added `FeatureFlags.init()`, `isEnabled()`, `set()` methods
+  - Replaced `fromTag()` 14-line switch with `std.meta.intToEnum`
+  - Added `Feature.defaultEnabled()` to centralize defaults
+  - Simplified `setFeature()` from 14-line switch to 1 line
+  - Renamed `.case` to `.case_` to avoid Zig keyword conflict
+
+- **Removed dead code** (~57 lines):
+  - `applyDlig()` - only `applyDligInto()` was used
+  - `applyClig()` - never called
+  - `applyHlig()` - never called
+  - `applySingleSubstFeature()` - never called
+
+- **Consolidated single-subst switch arms** (~70 lines saved):
+  - Combined `.tnum, .pnum, .zero, .case_, .ss01` cases into grouped arms
+  - Applied pattern in 3 locations: `applyLookupRefAt`, `applyCalt`, `applyChainContext`
+
+- **Total reduction**: opentype.zig 3271 → 3144 lines (-127 lines, -3.9%)
+
+- **Performance**: No impact (verified with perf tests)
+
+- **Files modified**:
+  - `src/opentype.zig`: Main refactoring
+  - `src/embedded.zig`: Updated FeatureFlags usage
+  - `src/text_render.zig`: Updated flag access
+  - `src/perf_test.zig`: Updated flag setting
+  - `src/integration_tests.zig`: Updated `.case` → `.case_`
 
 ## What We Did (Session 2026-01-26 #5)
 - **Fixed VeraPDF PDF/A validation issues**:
