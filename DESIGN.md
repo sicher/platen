@@ -4,6 +4,7 @@
 
 ### Modules
 - `zpdf.zig` - Main library facade, re-exports from document.zig
+- `version.zig` - Version constants (version, name, full)
 - `document.zig` - Document struct, text/graphics rendering, PDF output
 - `objects.zig` - PDF object types (Dict, Array, Value, Ref, Name)
 - `fonts.zig` - Standard PDF fonts (Base 14)
@@ -14,6 +15,7 @@
 - `opentype.zig` - OpenType GSUB/GPOS (ligatures, kerning, marks)
 - `ttf_subset.zig` - TTF subsetting helpers
 - `cff_subset.zig` - CFF subsetting helpers
+- `binary.zig` - Big-endian serialization helpers for font table construction
 - `images.zig` - JPEG/PNG parsing and embedding
 - `svg.zig` - SVG parsing and Form XObject generation
 - `xml.zig` - Minimal XML parser for SVG

@@ -1,13 +1,58 @@
 # zpdf Context
 
 ## Current Focus
-Code cleanup and maintainability improvements in OpenType handling.
+**v1.0.0 released** - Library is feature complete.
 
 ## What's Next
-- Consider: Text opacity support (non-stroking alpha for text)
-- Consider: Blend modes (Normal, Multiply, Screen, etc.)
-- Consider: Additional PDF/A levels (2a, 3a for tagged PDF)
-- Consider: Further OpenType lookup array consolidation (Option 1 from session #6)
+- Future enhancements (if needed):
+  - Text opacity support (non-stroking alpha for text)
+  - Blend modes (Normal, Multiply, Screen, etc.)
+  - Additional PDF/A levels (2a, 3a for tagged PDF)
+
+## What We Did (Session 2026-01-26 #8)
+- **Released v1.0.0** - Feature complete milestone
+  - Added `src/version.zig` with version constants
+  - PDF producer now shows "zpdf 1.0.0"
+  - Git tag: `v1.0.0`
+
+- **Consolidated duplicate code** (41 lines saved):
+  - `format.zig`: Extracted `writeUnsignedInt` helper (42 lines saved)
+    - Eliminates 25-line duplication across writeF64_2, writeF64_3, writeInt
+  - `pdf_output.zig`: Extracted `DateTime` struct for timestamp extraction
+    - Consolidates duplicate code in formatPdfDate/formatIsoDate
+  - Committed: 60e54c9
+
+## What We Did (Session 2026-01-26 #7)
+- **Removed dead code** (~223 lines across 4 files):
+  - `page.zig`: writeLineTo, writeMoveTo, writeRect (~20 lines)
+  - `format.zig`: writeHexBracket4 (~6 lines)
+  - `metrics.zig`: charWidth (~4 lines)
+  - Committed: bf72bd5
+
+- **Consolidated Courier font width tables** (76 lines saved):
+  - Courier is monospace: all widths are 600
+  - Replaced 4 identical 18-line tables with comptime: `const courier_widths = [1]u16{600} ** 256;`
+  - Grouped switch arm for all Courier variants
+  - metrics.zig: 492 → 416 lines
+  - Committed: b5b1133
+
+- **Created binary.zig helpers** (68 call sites converted):
+  - New `src/binary.zig` with appendBE16, appendBE32, appendBEi16, appendBEi32
+  - Reduces verbose pattern: `try list.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeToBig(u16, val)));`
+  - To concise: `try binary.appendBE16(&list, allocator, val);`
+  - 40% line width reduction at call sites
+  - Files converted: ttf_subset.zig (34), embedded.zig (28), cff_subset.zig (5)
+  - Zero performance impact (functions inline completely)
+  - Committed: 82a6459
+
+- **Files added/modified**:
+  - `src/binary.zig` - **NEW**: Big-endian serialization helpers (50 lines)
+  - `src/ttf_subset.zig` - Added binary import, converted 34 sites
+  - `src/embedded.zig` - Added binary import, converted 28 sites
+  - `src/cff_subset.zig` - Added binary import, converted 5 sites
+  - `src/metrics.zig` - Courier table consolidation
+  - `src/page.zig` - Dead code removal
+  - `src/format.zig` - Dead code removal
 
 ## What We Did (Session 2026-01-26 #6)
 - **Refactored FeatureFlags to use EnumArray**:
