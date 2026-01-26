@@ -9,6 +9,7 @@ const images = @import("images.zig");
 const svg = @import("svg.zig");
 const layout = @import("layout.zig");
 const color = @import("color.zig");
+const format = @import("format.zig");
 
 pub const StandardFont = fonts.StandardFont;
 pub const EmbeddedFont = embedded.EmbeddedFont;
@@ -198,5 +199,50 @@ pub const ContentWriter = struct {
     fn writeBytes(self: *ContentWriter, bytes: []const u8) error{OutOfMemory}!usize {
         self.page.content.appendSlice(self.allocator, bytes) catch return error.OutOfMemory;
         return bytes.len;
+    }
+
+    // ========================================================================
+    // Fast formatting methods - bypass std.fmt for common patterns
+    // ========================================================================
+
+    /// Write "x y Td\n" with fast formatting (text position)
+    pub fn writeTd(self: *ContentWriter, x: f64, y: f64) !void {
+        var buf: [64]u8 = undefined;
+        const len = format.writeCoord2Suffix(&buf, x, y, " Td\n");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "1 0 0 1 x y Tm " with fast formatting (absolute text position matrix)
+    pub fn writeTm(self: *ContentWriter, x: f64, y: f64) !void {
+        var buf: [64]u8 = undefined;
+        @memcpy(buf[0..8], "1 0 0 1 ");
+        const len = 8 + format.writeCoord2Suffix(buf[8..], x, y, " Tm ");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "x y l\n" with fast formatting (line to)
+    pub fn writeLineTo(self: *ContentWriter, x: f64, y: f64) !void {
+        var buf: [64]u8 = undefined;
+        const len = format.writeCoord2Suffix(&buf, x, y, " l\n");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "x y m\n" with fast formatting (move to)
+    pub fn writeMoveTo(self: *ContentWriter, x: f64, y: f64) !void {
+        var buf: [64]u8 = undefined;
+        const len = format.writeCoord2Suffix(&buf, x, y, " m\n");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "x y w h re" with fast formatting (rectangle)
+    pub fn writeRect(self: *ContentWriter, x: f64, y: f64, w: f64, h: f64, suffix: []const u8) !void {
+        var buf: [128]u8 = undefined;
+        var len = format.writeCoord2(&buf, x, y);
+        buf[len] = ' ';
+        len += 1;
+        len += format.writeCoord2Suffix(buf[len..], w, h, " re ");
+        @memcpy(buf[len..][0..suffix.len], suffix);
+        len += suffix.len;
+        try self.append(buf[0..len]);
     }
 };

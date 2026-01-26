@@ -203,7 +203,8 @@ pub fn writePolygonPath(buf: []u8, points: []const Point) usize {
     }
 
     // Close path
-    len += (std.fmt.bufPrint(buf[len..], "h ", .{}) catch unreachable).len;
+    @memcpy(buf[len..][0..2], "h ");
+    len += 2;
 
     return len;
 }

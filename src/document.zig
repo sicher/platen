@@ -2235,8 +2235,19 @@ pub const Document = struct {
                     len += q_str.len;
 
                     if (run.color) |c| {
-                        const rgb = c.toRgb();
-                        len += (std.fmt.bufPrint(buf[len..], "{d:.3} {d:.3} {d:.3} rg\n", .{ rgb.r, rgb.g, rgb.b }) catch unreachable).len;
+                        const rgb = c.toRgbf();
+                        const r_str = format.writeF64_3(buf[len..], rgb.r);
+                        len += r_str.len;
+                        buf[len] = ' ';
+                        len += 1;
+                        const g_str = format.writeF64_3(buf[len..], rgb.g);
+                        len += g_str.len;
+                        buf[len] = ' ';
+                        len += 1;
+                        const b_str = format.writeF64_3(buf[len..], rgb.b);
+                        len += b_str.len;
+                        @memcpy(buf[len..][0..4], " rg\n");
+                        len += 4;
                     } else {
                         const g_str = "0.000 g\n";
                         @memcpy(buf[len..][0..g_str.len], g_str);
@@ -2247,14 +2258,14 @@ pub const Document = struct {
                     if (run.underline) {
                         const ul_y = self.currentPageSize().height - y_pos + underline_pos * scale;
                         const h = underline_thick * scale;
-                        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ run.start_x, ul_y, width, -h }) catch unreachable).len;
+                        len += format.writeCoord4Suffix(buf[len..], run.start_x, ul_y, width, -h, " re f\n");
                     }
 
                     // Draw strikethrough
                     if (run.strikethrough) {
                         const st_y = self.currentPageSize().height - y_pos + strikeout_pos * scale;
                         const h = strikeout_thick * scale;
-                        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re f\n", .{ run.start_x, st_y, width, -h }) catch unreachable).len;
+                        len += format.writeCoord4Suffix(buf[len..], run.start_x, st_y, width, -h, " re f\n");
                     }
 
                     // Restore graphics state
@@ -2399,8 +2410,9 @@ pub const Document = struct {
         var len: usize = 0;
 
         // Save graphics state, set clip path, paint shading, restore
-        len += (std.fmt.bufPrint(buf[len..], "q\n", .{}) catch unreachable).len;
-        len += (std.fmt.bufPrint(buf[len..], "{d:.2} {d:.2} {d:.2} {d:.2} re W n\n", .{ rect.x, pdf_y, rect.width, rect.height }) catch unreachable).len;
+        @memcpy(buf[len..][0..2], "q\n");
+        len += 2;
+        len += format.writeCoord4Suffix(buf[len..], rect.x, pdf_y, rect.width, rect.height, " re W n\n");
         len += (std.fmt.bufPrint(buf[len..], "/{s} sh\n", .{shadingResourceName(gradient_idx)}) catch unreachable).len;
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
 

@@ -73,7 +73,7 @@ pub fn renderCIDTextWithKerning(
     }
 
     // No marks - use Td for initial position
-    try cw.print("{d:.2} {d:.2} Td\n", .{ start_x, start_y });
+    try cw.writeTd(start_x, start_y);
 
     if (!has_kerning) {
         // No kerning - use simple hex string
@@ -165,8 +165,12 @@ fn renderWithMarkPositioning(
         const base_y = abs_y;
 
         // Position and output base glyph using Tm (absolute positioning)
-        try cw.print("1 0 0 1 {d:.2} {d:.2} Tm ", .{ abs_x, abs_y });
-        try cw.print("<{X:0>4}> Tj\n", .{final_gid});
+        try cw.writeTm(abs_x, abs_y);
+        var hex_buf: [4]u8 = undefined;
+        writeHex4(&hex_buf, final_gid);
+        try cw.append("<");
+        try cw.append(&hex_buf);
+        try cw.append("> Tj\n");
 
         // Advance position for next base glyph
         abs_x += glyph_width_pts;
@@ -206,8 +210,12 @@ fn renderWithMarkPositioning(
                     const mark_y = ref_y + dy_pts;
 
                     // Position and output mark using Tm (absolute positioning)
-                    try cw.print("1 0 0 1 {d:.2} {d:.2} Tm ", .{ mark_x, mark_y });
-                    try cw.print("<{X:0>4}> Tj\n", .{mark_final_gid});
+                    try cw.writeTm(mark_x, mark_y);
+                    var mark_hex_buf: [4]u8 = undefined;
+                    writeHex4(&mark_hex_buf, mark_final_gid);
+                    try cw.append("<");
+                    try cw.append(&mark_hex_buf);
+                    try cw.append("> Tj\n");
 
                     // Update prev position for potential mark-to-mark stacking
                     prev_gid = mark_gid;
