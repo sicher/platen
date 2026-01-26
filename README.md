@@ -20,19 +20,20 @@ A fast PDF rendering library for Zig.
 
 ## Performance
 
-100-page benchmark on Apple Silicon (release build):
+100-page benchmark on Apple Silicon (release build). Each section is 20 pages: simple text, OpenType shaping (ligatures/kerning), Unicode with diacritics, justified text flow, and vector graphics (~1500 shapes/page).
 
 | Operation | Time |
 |-----------|------|
-| Font loading | 2ms |
+| Font loading | 1ms |
 | Simple text | 2ms |
-| OpenType shaping | 14ms |
+| OpenType shaping | 13ms |
 | Unicode/marks | 6ms |
 | Text flow | 2ms |
-| PDF output | 24ms |
-| **Total** | **52ms** (~1900 pages/sec) |
+| Drawing shapes | 15ms |
+| PDF output | 61ms |
+| **Total** | **101ms** (~1000 pages/sec) |
 
-Debug build: 704ms. See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
+See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 
 ## Quick Start
 
