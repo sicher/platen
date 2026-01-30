@@ -292,7 +292,7 @@ pub const Document = struct {
     }
 
     /// Get the total number of pages.
-    pub fn pageCount(self: *const Document) usize {
+    pub fn getPageCount(self: *const Document) usize {
         return self.pages.items.len;
     }
 
@@ -708,10 +708,9 @@ pub const Document = struct {
     }
 
     /// Get a destination for a y position on the current page.
-    /// Get a destination for a y position on the current page.
     /// Used as target for internal links (e.g., TOC entries).
     /// Returns null if no pages have been added.
-    pub fn destination(self: *const Document, y: f64) ?Destination {
+    pub fn getDestination(self: *const Document, y: f64) ?Destination {
         if (self.pages.items.len == 0) return null;
         return .{ .page_index = self.current_page, .y = y };
     }

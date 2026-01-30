@@ -4,18 +4,18 @@ const std = @import("std");
 /// All values are normalized to 0.0-1.0 range.
 pub const Color = union(enum) {
     /// Grayscale: 0 = black, 1 = white
-    _greyscale: f64,
+    greyscale_val: f64,
     /// RGB color space (screen/web)
-    _rgb: struct { r: f64, g: f64, b: f64 },
+    rgb_val: struct { r: f64, g: f64, b: f64 },
     /// CMYK color space (print)
-    _cmyk: struct { c: f64, m: f64, y: f64, k: f64 },
+    cmyk_val: struct { c: f64, m: f64, y: f64, k: f64 },
 
     // CSS Named Colors (148 colors)
     // https://www.w3.org/TR/css-color-4/#named-colors
 
     // Blacks and Grays
-    pub const black = Color{ ._greyscale = 0 };
-    pub const white = Color{ ._greyscale = 1 };
+    pub const black = Color{ .greyscale_val = 0 };
+    pub const white = Color{ .greyscale_val = 1 };
     pub const gray = Color.rgb(128, 128, 128);
     pub const grey = gray;
     pub const silver = Color.rgb(192, 192, 192);
@@ -189,12 +189,12 @@ pub const Color = union(enum) {
 
     /// Create grayscale color (0 = black, 1 = white)
     pub fn greyscale(value: f64) Color {
-        return .{ ._greyscale = value };
+        return .{ .greyscale_val = value };
     }
 
     /// Create RGB color from 0-255 values
     pub fn rgb(r: u8, g: u8, b: u8) Color {
-        return .{ ._rgb = .{
+        return .{ .rgb_val = .{
             .r = @as(f64, @floatFromInt(r)) / 255.0,
             .g = @as(f64, @floatFromInt(g)) / 255.0,
             .b = @as(f64, @floatFromInt(b)) / 255.0,
@@ -203,12 +203,12 @@ pub const Color = union(enum) {
 
     /// Create RGB color (values 0.0-1.0)
     pub fn rgbf(r: f64, g: f64, b: f64) Color {
-        return .{ ._rgb = .{ .r = r, .g = g, .b = b } };
+        return .{ .rgb_val = .{ .r = r, .g = g, .b = b } };
     }
 
     /// Create CMYK color (values 0-1)
     pub fn cmyk(c: f64, m: f64, y: f64, k: f64) Color {
-        return .{ ._cmyk = .{ .c = c, .m = m, .y = y, .k = k } };
+        return .{ .cmyk_val = .{ .c = c, .m = m, .y = y, .k = k } };
     }
 
     /// Create RGB color from hex string (e.g., "#FF0000", "FF0000", "#F00", "F00")
@@ -254,18 +254,18 @@ pub const Color = union(enum) {
     /// Format color as PDF fill operator (g, rg, or k)
     pub fn writeFill(self: Color, writer: anytype) !void {
         switch (self) {
-            ._greyscale => |v| try writer.print("{d:.3} g\n", .{v}),
-            ._rgb => |c| try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{ c.r, c.g, c.b }),
-            ._cmyk => |c| try writer.print("{d:.3} {d:.3} {d:.3} {d:.3} k\n", .{ c.c, c.m, c.y, c.k }),
+            .greyscale_val => |v| try writer.print("{d:.3} g\n", .{v}),
+            .rgb_val => |c| try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{ c.r, c.g, c.b }),
+            .cmyk_val => |c| try writer.print("{d:.3} {d:.3} {d:.3} {d:.3} k\n", .{ c.c, c.m, c.y, c.k }),
         }
     }
 
     /// Format color as PDF stroke operator (G, RG, or K)
     pub fn writeStroke(self: Color, writer: anytype) !void {
         switch (self) {
-            ._greyscale => |v| try writer.print("{d:.3} G\n", .{v}),
-            ._rgb => |c| try writer.print("{d:.3} {d:.3} {d:.3} RG\n", .{ c.r, c.g, c.b }),
-            ._cmyk => |c| try writer.print("{d:.3} {d:.3} {d:.3} {d:.3} K\n", .{ c.c, c.m, c.y, c.k }),
+            .greyscale_val => |v| try writer.print("{d:.3} G\n", .{v}),
+            .rgb_val => |c| try writer.print("{d:.3} {d:.3} {d:.3} RG\n", .{ c.r, c.g, c.b }),
+            .cmyk_val => |c| try writer.print("{d:.3} {d:.3} {d:.3} {d:.3} K\n", .{ c.c, c.m, c.y, c.k }),
         }
     }
 
@@ -288,9 +288,9 @@ pub const Color = union(enum) {
     /// Convert to RGB float values (normalizing grayscale and approximating CMYK)
     pub fn toRgbf(self: Color) Rgbf {
         return switch (self) {
-            ._greyscale => |v| .{ .r = v, .g = v, .b = v },
-            ._rgb => |c| .{ .r = c.r, .g = c.g, .b = c.b },
-            ._cmyk => |c| .{
+            .greyscale_val => |v| .{ .r = v, .g = v, .b = v },
+            .rgb_val => |c| .{ .r = c.r, .g = c.g, .b = c.b },
+            .cmyk_val => |c| .{
                 // Simple CMYK to RGB conversion
                 .r = (1 - c.c) * (1 - c.k),
                 .g = (1 - c.m) * (1 - c.k),
@@ -472,16 +472,16 @@ pub const Color = union(enum) {
     /// Check if two colors are equal
     pub fn eql(self: Color, other: Color) bool {
         return switch (self) {
-            ._greyscale => |v| switch (other) {
-                ._greyscale => |ov| v == ov,
+            .greyscale_val => |v| switch (other) {
+                .greyscale_val => |ov| v == ov,
                 else => false,
             },
-            ._rgb => |c| switch (other) {
-                ._rgb => |oc| c.r == oc.r and c.g == oc.g and c.b == oc.b,
+            .rgb_val => |c| switch (other) {
+                .rgb_val => |oc| c.r == oc.r and c.g == oc.g and c.b == oc.b,
                 else => false,
             },
-            ._cmyk => |c| switch (other) {
-                ._cmyk => |oc| c.c == oc.c and c.m == oc.m and c.y == oc.y and c.k == oc.k,
+            .cmyk_val => |c| switch (other) {
+                .cmyk_val => |oc| c.c == oc.c and c.m == oc.m and c.y == oc.y and c.k == oc.k,
                 else => false,
             },
         };
@@ -490,40 +490,40 @@ pub const Color = union(enum) {
 
 test "Color greyscale" {
     const black = Color.black;
-    try std.testing.expectEqual(Color{ ._greyscale = 0 }, black);
+    try std.testing.expectEqual(Color{ .greyscale_val = 0 }, black);
 
     const white = Color.white;
-    try std.testing.expectEqual(Color{ ._greyscale = 1 }, white);
+    try std.testing.expectEqual(Color{ .greyscale_val = 1 }, white);
 
     const gray50 = Color.greyscale(0.5);
-    try std.testing.expectEqual(@as(f64, 0.5), gray50._greyscale);
+    try std.testing.expectEqual(@as(f64, 0.5), gray50.greyscale_val);
 }
 
 test "Color RGB" {
     const red = Color.red;
-    try std.testing.expectEqual(@as(f64, 1), red._rgb.r);
-    try std.testing.expectEqual(@as(f64, 0), red._rgb.g);
-    try std.testing.expectEqual(@as(f64, 0), red._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1), red.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 0), red.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 0), red.rgb_val.b);
 
     const custom = Color.rgbf(0.5, 0.25, 0.75);
-    try std.testing.expectEqual(@as(f64, 0.5), custom._rgb.r);
-    try std.testing.expectEqual(@as(f64, 0.25), custom._rgb.g);
-    try std.testing.expectEqual(@as(f64, 0.75), custom._rgb.b);
+    try std.testing.expectEqual(@as(f64, 0.5), custom.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 0.25), custom.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 0.75), custom.rgb_val.b);
 }
 
 test "Color RGB from 255" {
     const color = Color.rgb(255, 128, 0);
-    try std.testing.expectEqual(@as(f64, 1.0), color._rgb.r);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.502), color._rgb.g, 0.01);
-    try std.testing.expectEqual(@as(f64, 0.0), color._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1.0), color.rgb_val.r);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.502), color.rgb_val.g, 0.01);
+    try std.testing.expectEqual(@as(f64, 0.0), color.rgb_val.b);
 }
 
 test "Color CMYK" {
     const cyan = Color.cmyk(1, 0, 0, 0);
-    try std.testing.expectEqual(@as(f64, 1), cyan._cmyk.c);
-    try std.testing.expectEqual(@as(f64, 0), cyan._cmyk.m);
-    try std.testing.expectEqual(@as(f64, 0), cyan._cmyk.y);
-    try std.testing.expectEqual(@as(f64, 0), cyan._cmyk.k);
+    try std.testing.expectEqual(@as(f64, 1), cyan.cmyk_val.c);
+    try std.testing.expectEqual(@as(f64, 0), cyan.cmyk_val.m);
+    try std.testing.expectEqual(@as(f64, 0), cyan.cmyk_val.y);
+    try std.testing.expectEqual(@as(f64, 0), cyan.cmyk_val.k);
 }
 
 test "Color writeFill formats correctly" {
@@ -571,33 +571,33 @@ test "Color equality" {
 test "Color hex" {
     // Full hex with #
     const red = Color.hex("#FF0000").?;
-    try std.testing.expectEqual(@as(f64, 1.0), red._rgb.r);
-    try std.testing.expectEqual(@as(f64, 0.0), red._rgb.g);
-    try std.testing.expectEqual(@as(f64, 0.0), red._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1.0), red.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 0.0), red.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 0.0), red.rgb_val.b);
 
     // Full hex without #
     const green = Color.hex("00FF00").?;
-    try std.testing.expectEqual(@as(f64, 0.0), green._rgb.r);
-    try std.testing.expectEqual(@as(f64, 1.0), green._rgb.g);
-    try std.testing.expectEqual(@as(f64, 0.0), green._rgb.b);
+    try std.testing.expectEqual(@as(f64, 0.0), green.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 1.0), green.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 0.0), green.rgb_val.b);
 
     // Short hex with #
     const blue = Color.hex("#00F").?;
-    try std.testing.expectEqual(@as(f64, 0.0), blue._rgb.r);
-    try std.testing.expectEqual(@as(f64, 0.0), blue._rgb.g);
-    try std.testing.expectEqual(@as(f64, 1.0), blue._rgb.b);
+    try std.testing.expectEqual(@as(f64, 0.0), blue.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 0.0), blue.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 1.0), blue.rgb_val.b);
 
     // Short hex without #
     const white = Color.hex("FFF").?;
-    try std.testing.expectEqual(@as(f64, 1.0), white._rgb.r);
-    try std.testing.expectEqual(@as(f64, 1.0), white._rgb.g);
-    try std.testing.expectEqual(@as(f64, 1.0), white._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1.0), white.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 1.0), white.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 1.0), white.rgb_val.b);
 
     // Lowercase
     const coral = Color.hex("#ff7f50").?;
-    try std.testing.expectEqual(@as(f64, 1.0), coral._rgb.r);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.498), coral._rgb.g, 0.01);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.314), coral._rgb.b, 0.01);
+    try std.testing.expectEqual(@as(f64, 1.0), coral.rgb_val.r);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.498), coral.rgb_val.g, 0.01);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.314), coral.rgb_val.b, 0.01);
 
     // Invalid inputs return null
     try std.testing.expect(Color.hex("") == null);
@@ -609,18 +609,18 @@ test "Color hex" {
 test "Color presets" {
     // Verify some preset colors have expected values
     // Navy is #000080 = rgb(0, 0, 128)
-    try std.testing.expectEqual(@as(f64, 0.0), Color.navy._rgb.r);
-    try std.testing.expectEqual(@as(f64, 0.0), Color.navy._rgb.g);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.502), Color.navy._rgb.b, 0.01);
+    try std.testing.expectEqual(@as(f64, 0.0), Color.navy.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 0.0), Color.navy.rgb_val.g);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.502), Color.navy.rgb_val.b, 0.01);
 
     // Cyan is #00FFFF
-    try std.testing.expectEqual(@as(f64, 1.0), Color.cyan._rgb.g);
-    try std.testing.expectEqual(@as(f64, 1.0), Color.cyan._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1.0), Color.cyan.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 1.0), Color.cyan.rgb_val.b);
 
     // Yellow is #FFFF00
-    try std.testing.expectEqual(@as(f64, 1.0), Color.yellow._rgb.r);
-    try std.testing.expectEqual(@as(f64, 1.0), Color.yellow._rgb.g);
-    try std.testing.expectEqual(@as(f64, 0.0), Color.yellow._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1.0), Color.yellow.rgb_val.r);
+    try std.testing.expectEqual(@as(f64, 1.0), Color.yellow.rgb_val.g);
+    try std.testing.expectEqual(@as(f64, 0.0), Color.yellow.rgb_val.b);
 
     // Aliases work
     try std.testing.expect(Color.grey.eql(Color.gray));

@@ -83,22 +83,22 @@ test "getPageIndex and pageCount" {
     defer doc.deinit();
 
     // No pages yet
-    try std.testing.expectEqual(@as(usize, 0), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 0), doc.getPageCount());
     try std.testing.expectEqual(@as(usize, 0), doc.getPageIndex());
 
     // Add first page - current is 0
     try doc.addPage(.{});
-    try std.testing.expectEqual(@as(usize, 1), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 1), doc.getPageCount());
     try std.testing.expectEqual(@as(usize, 0), doc.getPageIndex());
 
     // Add second page - current is now 1
     try doc.addPage(.{});
-    try std.testing.expectEqual(@as(usize, 2), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 2), doc.getPageCount());
     try std.testing.expectEqual(@as(usize, 1), doc.getPageIndex());
 
     // Select first page
     doc.selectPage(0);
-    try std.testing.expectEqual(@as(usize, 2), doc.pageCount());
+    try std.testing.expectEqual(@as(usize, 2), doc.getPageCount());
     try std.testing.expectEqual(@as(usize, 0), doc.getPageIndex());
 }
 
@@ -783,7 +783,7 @@ test "writeStyled multi-page via overflow handling" {
     }
 
     // Should have created multiple pages
-    try std.testing.expect(doc.pageCount() > 1);
+    try std.testing.expect(doc.getPageCount() > 1);
 }
 
 test "drawRegion with border" {
@@ -1290,9 +1290,9 @@ test "Color CMYK stored in command" {
 
 test "Color.rgb" {
     const c = Color.rgb(255, 128, 0);
-    try std.testing.expectEqual(@as(f64, 1.0), c._rgb.r);
-    try std.testing.expectApproxEqAbs(@as(f64, 0.502), c._rgb.g, 0.01);
-    try std.testing.expectEqual(@as(f64, 0.0), c._rgb.b);
+    try std.testing.expectEqual(@as(f64, 1.0), c.rgb_val.r);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.502), c.rgb_val.g, 0.01);
+    try std.testing.expectEqual(@as(f64, 0.0), c.rgb_val.b);
 }
 
 test "getFontMetrics standard font" {

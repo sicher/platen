@@ -36,6 +36,8 @@ pub const StandardFont = document.StandardFont;
 pub const Font = document.Font;
 pub const FontHandle = document.FontHandle;
 pub const EmbeddedFont = document.EmbeddedFont;
+pub const FontFamilyOptions = Document.FontFamilyOptions;
+pub const FontFamilyMemoryOptions = Document.FontFamilyMemoryOptions;
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
