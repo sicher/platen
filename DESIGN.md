@@ -383,9 +383,11 @@ const Align = enum { left, center, right, justify };
 
 /// Vertical text alignment within line height
 const VAlign = enum {
-    top,     // baseline at content_y + font_size (simple)
-    middle,  // baseline centered, fpdf2 compatible
-    bottom,  // baseline at content_y + line_height
+    top,          // optical: baseline at content_y + cap_height (default)
+    top_ascent,   // optical: baseline at content_y + ascender
+    top_leading,  // legacy: baseline at content_y + (line_height + asc - desc) / 2
+    middle,       // baseline centered, fpdf2 compatible
+    bottom,       // baseline at content_y + line_height
 };
 
 /// Line breaking algorithm
@@ -475,27 +477,29 @@ for ([_]*TextBox{ &left, &right }) |box| {
 
 ### Baseline Positioning (VAlign)
 
-Vertical alignment controls where text sits within each line cell:
+Vertical alignment controls where text sits within each line cell. Uses real font metrics
+from the OS/2 table (cap_height, ascender, descender) for precise optical alignment.
 
 ```zig
-// valign: .top (default) - simple formula, baseline at content_y + font_size
-baseline = content_y + cursor_y + font_size
+// valign: .top (default) - optical cap-height alignment
+baseline = content_y + cap_height   // capitals touch top edge
 
-// valign: .middle - fpdf2 compatible, text centered in line height
-baseline = content_y + cursor_y + font_size - leading/2
+// valign: .top_ascent - optical ascender alignment
+baseline = content_y + ascender     // ascender line touches top edge
+
+// valign: .top_leading - legacy half-leading
+baseline = content_y + (line_height + ascender - descender) / 2
+
+// valign: .middle - text centered in line height
+baseline = content_y + line_height/2 + ascender/2
 
 // valign: .bottom - baseline at bottom of line height
-baseline = content_y + cursor_y + line_height
+baseline = content_y + line_height
 ```
 
-**fpdf2 compatibility**: Use `.valign = .middle` to match fpdf2's `cell()` and `multi_cell()`:
-
-```zig
-var st = doc.createStyledText();
-defer st.deinit();
-try st.append(text, .{});
-_ = try doc.writeStyled(&region, &st, .{ .valign = .middle });
-```
+**Note**: fpdf2 uses a fixed heuristic (`0.5*h + 0.3*fontSize`) that doesn't read font metrics.
+The `.top_leading` mode is closest to fpdf2 behavior but still differs slightly because it
+uses real ascender/descender values.
 
 ### Design Principles
 

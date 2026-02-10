@@ -10,6 +10,21 @@
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - Color emoji support (parse COLR/CPAL tables, render as colored paths)
 
+## What We Did (Session 2026-02-10 #11)
+- **Added optical top alignment** (VAlign):
+  - `.top` now uses cap-height from font metrics (optical alignment)
+  - `.top_ascent` aligns to ascender line
+  - `.top_leading` preserves legacy half-leading behavior
+  - Extracted `valignBaseline()` helper in document.zig
+  - All existing tests pinned to `.top_leading` to match fpdf2 references
+- **Added integration test** `optical_align` with reference PDF
+  - 5x3 grid: 5 fonts x 3 alignment modes
+  - Size comparison section (10pt-40pt)
+- **Added CLI command** `optical-test` for visual inspection
+- **Investigated fpdf2 positioning**: uses `0.5h + 0.3*fontSize` heuristic (no font metrics)
+- **Updated README** with optical alignment docs
+- Commits: 75b047e
+
 ## What We Did (Session 2026-01-26 #10)
 - **Simplified StyledText API**:
   - Removed `appendOwned()` - wasn't used internally, added unnecessary complexity
