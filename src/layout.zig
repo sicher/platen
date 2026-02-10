@@ -132,8 +132,12 @@ pub const Align = enum {
 
 /// Vertical text alignment within line height.
 pub const VAlign = enum {
-    /// Baseline at content_y + font_size (simple, no leading adjustment).
+    /// Optical top: baseline at content_y + cap_height (capital letters touch top edge).
     top,
+    /// Optical top: baseline at content_y + ascender (ascender line touches top edge).
+    top_ascent,
+    /// Legacy top: baseline at content_y + (line_height + ascender - descender) / 2 (includes half-leading).
+    top_leading,
     /// Baseline centered: content_y + font_size - leading/2 (fpdf2 compatible).
     middle,
     /// Baseline at content_y + line_height (text sits on bottom edge).

@@ -164,6 +164,18 @@ const TextCommand = pagemod.TextCommand;
 const ContentCommand = pagemod.ContentCommand;
 const LinkAnnotation = pagemod.LinkAnnotation;
 
+/// Compute baseline y position for a given VAlign mode.
+fn valignBaseline(region: *Region, line_height: f64, fm: metrics.FontMetrics, valign: VAlign) f64 {
+    const base = region.y + region.padding.top + region.cursor_y;
+    return switch (valign) {
+        .top => base + fm.cap_height,
+        .top_ascent => base + fm.ascender,
+        .top_leading => base + (line_height + fm.ascender - @abs(fm.descender)) / 2,
+        .middle => base + line_height / 2 + fm.ascender / 2,
+        .bottom => base + line_height,
+    };
+}
+
 // Resource naming functions are in pdf_output.zig
 const fontResourceName = pdf_output.fontResourceName;
 const embeddedFontResourceName = pdf_output.embeddedFontResourceName;
@@ -959,15 +971,19 @@ pub const Document = struct {
         const font_metrics = self.getFontMetricsStyled(style);
         const ascender = font_metrics.ascender;
         const descender = @abs(font_metrics.descender);
+        const cap_height = font_metrics.cap_height;
         const space_width = self.getTextWidthStyled(" ", style);
 
-        // Helper to compute y position based on valign (CSS-style)
+        // Helper to compute y position based on valign
         const getYPos = struct {
-            fn call(reg: *Region, lh: f64, asc: f64, desc: f64, valign: VAlign) f64 {
+            fn call(reg: *Region, lh: f64, asc: f64, desc: f64, cap_h: f64, valign: VAlign) f64 {
+                const base = reg.y + reg.padding.top + reg.cursor_y;
                 return switch (valign) {
-                    .top => reg.y + reg.padding.top + reg.cursor_y + (lh + asc - desc) / 2,
-                    .middle => reg.y + reg.padding.top + reg.cursor_y + lh / 2 + asc / 2,
-                    .bottom => reg.y + reg.padding.top + reg.cursor_y + lh,
+                    .top => base + cap_h,
+                    .top_ascent => base + asc,
+                    .top_leading => base + (lh + asc - desc) / 2,
+                    .middle => base + lh / 2 + asc / 2,
+                    .bottom => base + lh,
                 };
             }
         }.call;
@@ -1047,7 +1063,7 @@ pub const Document = struct {
                 if (is_newline) {
                     // Flush current line before newline
                     if (!opts.measure_only and line_has_content) {
-                        const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                        const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                         try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
                     }
                     region.newLine(line_height);
@@ -1083,7 +1099,7 @@ pub const Document = struct {
                     if (next_char == '\n') {
                         // Explicit newline - flush line and move to next
                         if (!opts.measure_only and line_has_content) {
-                            const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                            const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                             try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
                         }
                         region.newLine(line_height);
@@ -1128,7 +1144,7 @@ pub const Document = struct {
                     const hyphen_width = self.getTextWidthStyled("-", style);
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                        const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                         try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                         try self.writeTextStyled(.{ .x = abs_x + prefix_width, .y = abs_y }, "-", style, 0);
                     }
@@ -1146,7 +1162,7 @@ pub const Document = struct {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                        const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                         try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                     }
                     region.cursor_x = self.getTextWidthStyled(prefix, style);
@@ -1163,7 +1179,7 @@ pub const Document = struct {
                     const prefix = word[0..break_pos];
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                        const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                         try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                     }
                     region.cursor_x = self.getTextWidthStyled(prefix, style);
@@ -1180,7 +1196,7 @@ pub const Document = struct {
                     // Nothing fits, write word anyway (will overflow)
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
-                        const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                        const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                         try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
                     }
                     region.cursor_x = word_width;
@@ -1199,7 +1215,7 @@ pub const Document = struct {
                 // Word doesn't fit - wrap to next line
                 // Flush current line before wrapping
                 if (!opts.measure_only and line_has_content) {
-                    const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+                    const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                     try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
                 }
                 region.newLine(line_height);
@@ -1215,7 +1231,7 @@ pub const Document = struct {
 
         // Flush any remaining content on the last line
         if (!opts.measure_only and line_has_content) {
-            const abs_y = getYPos(region, line_height, ascender, descender, opts.valign);
+            const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
             try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
         }
 
@@ -1671,7 +1687,7 @@ pub const Document = struct {
         }
 
         // For middle/bottom valign, calculate block offset first
-        if (opts.valign != .top) {
+        if (opts.valign == .middle or opts.valign == .bottom) {
             const line_count = self.countStyledLinesStyled(text, style, line_width, space_width);
             const fm = self.getFontMetricsStyled(style);
             const ascender = fm.ascender;
@@ -1687,7 +1703,7 @@ pub const Document = struct {
             // This positions text slightly below mathematical center for better optical balance
             const leading = line_height - ascender - descender;
             const offset = switch (opts.valign) {
-                .top => 0, // Won't happen due to if check
+                .top, .top_ascent, .top_leading => 0, // Won't happen due to if check
                 .middle => @max(0, (available_height - text_height) / 2 + leading / 2),
                 .bottom => max_offset,
             };
@@ -1699,7 +1715,7 @@ pub const Document = struct {
         const render_opts = ParagraphOptions{
             .measure_only = opts.measure_only,
             .alignment = opts.alignment,
-            .valign = if (opts.valign == .middle) .top else opts.valign,
+            .valign = if (opts.valign == .middle) .top_leading else opts.valign,
             .break_on_hyphens = opts.break_on_hyphens,
             .line_breaking = opts.line_breaking,
             .line_height = opts.line_height,
@@ -1796,7 +1812,7 @@ pub const Document = struct {
                             // If remaining fits on one line, render it and we're done
                             if (remaining_width <= line_width + 0.01) {
                                 if (region.remainingHeight() >= line_height) {
-                                    const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                                    const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                                     _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style);
                                     region.newLine(line_height);
                                     lines_written += 1;
@@ -1827,7 +1843,7 @@ pub const Document = struct {
                                 const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
                                 const prefix_width = self.getTextWidthStyled(clean_prefix, style);
 
-                                const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                                const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                                 const x_pos = region.x + region.padding.left;
                                 _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, clean_prefix, render_style);
                                 _ = try self.writeAt(.{ .x = x_pos + prefix_width, .y = y_pos }, "-", render_style);
@@ -1840,7 +1856,7 @@ pub const Document = struct {
                             } else {
                                 // No break point fits, render remaining as-is (will overflow)
                                 if (region.remainingHeight() >= line_height) {
-                                    const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                                    const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                                     _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style);
                                     region.newLine(line_height);
                                     lines_written += 1;
@@ -1866,7 +1882,7 @@ pub const Document = struct {
 
                         // CSS-style .top valign
                         const fm = self.getFontMetricsStyled(style);
-                        const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                        const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
 
                         // Apply span color to style for rendering
                         var render_style = style;
@@ -1881,7 +1897,7 @@ pub const Document = struct {
 
                         // Render suffix on next line
                         if (suffix.len > 0 and region.remainingHeight() >= line_height) {
-                            const y_pos2 = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                            const y_pos2 = valignBaseline(region, line_height, fm, render_opts.valign);
                             _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos2 }, suffix, render_style);
                             region.newLine(line_height);
                             lines_written += 1;
@@ -1907,7 +1923,7 @@ pub const Document = struct {
                     render_style.decoration = span.style.decoration;
 
                     while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
-                        const y_pos = region.y + region.padding.top + region.cursor_y + (line_height + fm.ascender - @abs(fm.descender)) / 2;
+                        const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                         const x_pos = region.x + region.padding.left;
 
                         // Check if remaining text fits on line
@@ -2139,11 +2155,14 @@ pub const Document = struct {
         else
             0;
 
-        // Calculate y position based on valign (CSS-style)
+        // Calculate y position based on valign
+        const base = region.y + region.padding.top + region.cursor_y;
         const y_pos = switch (valign) {
-            .top => region.y + region.padding.top + region.cursor_y + (line_height + ascender - descender) / 2,
-            .middle => region.y + region.padding.top + region.cursor_y + line_height / 2 + cap_height / 2,
-            .bottom => region.y + region.padding.top + region.cursor_y + line_height,
+            .top => base + cap_height,
+            .top_ascent => base + ascender,
+            .top_leading => base + (line_height + ascender - descender) / 2,
+            .middle => base + line_height / 2 + cap_height / 2,
+            .bottom => base + line_height,
         };
 
         const x_start = region.x + region.padding.left + x_offset;

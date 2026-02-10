@@ -378,7 +378,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 try st.append(full_text, .{});
                 _ = try doc.writeStyled(&region, &st, charter_10, .{
                     .alignment = .justify,
-                    .valign = .top,
+                    .valign = .top_leading,
                     .line_breaking = .optimal,
                 });
             }
@@ -391,7 +391,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 try st.append(full_text, .{});
                 _ = try doc.writeStyled(&region, &st, charter_10, .{
                     .alignment = .justify,
-                    .valign = .top,
+                    .valign = .top_leading,
                     .line_breaking = .optimal,
                 });
             }

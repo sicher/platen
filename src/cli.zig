@@ -102,6 +102,11 @@ pub fn main() !void {
         const output_path = if (args.len > 2) args[2] else "pdfa_test.pdf";
         try generatePdfaTestPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "optical-test")) {
+        // Test optical alignment of text in boxes
+        const output_path = if (args.len > 2) args[2] else "optical_test.pdf";
+        try generateOpticalTestPdf(allocator, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -135,6 +140,7 @@ fn printUsage() !void {
         \\  gradient-test [out]     Test gradient API (linear, radial)
         \\  opacity-test [out]      Test opacity API (fill/stroke alpha)
         \\  pdfa-test [out]         Test PDF/A-1b conformance output
+        \\  optical-test [out]      Test optical alignment of text in boxes
         \\
     ;
     try stdout.writeAll(usage);
@@ -1176,4 +1182,189 @@ fn generateHtmlReport(allocator: std.mem.Allocator, results: []const TestResult,
     const file = try std.fs.cwd().createFile("test/output/report.html", .{});
     defer file.close();
     try file.writeAll(html.items);
+}
+
+fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
+    var doc = zpdf.Document.init(allocator);
+    defer doc.deinit();
+
+    // Load a variety of fonts
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
+    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", null);
+    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+
+    const FontEntry = struct {
+        name: []const u8,
+        font: zpdf.Font,
+    };
+    const test_fonts = [_]FontEntry{
+        .{ .name = "Inter", .font = inter },
+        .{ .name = "Charter", .font = charter },
+        .{ .name = "Gentium", .font = gentium },
+        .{ .name = "Satoshi", .font = satoshi },
+        .{ .name = "Courier Prime", .font = courier },
+    };
+
+    const font_size: f64 = 24;
+    const box_height: f64 = 44;
+    const box_width: f64 = 480;
+    const left_margin: f64 = 56;
+    const box_spacing: f64 = 12;
+    const label_style = zpdf.TextStyle{ .font = inter, .size = 9, .color = zpdf.Color.rgb(120, 120, 120) };
+    const title_style = zpdf.TextStyle{ .font = inter_bold, .size = 18 };
+    const subtitle_style = zpdf.TextStyle{ .font = inter, .size = 10, .color = zpdf.Color.rgb(100, 100, 100) };
+
+    const thin_stroke = zpdf.StrokeStyle{ .color = zpdf.Color.rgb(180, 180, 180), .width = 0.5 };
+    const cap_line_stroke = zpdf.StrokeStyle{ .color = zpdf.Color.rgb(255, 80, 80), .width = 0.3, .dash = .{ .dash = 2, .gap = 2 } };
+    const asc_line_stroke = zpdf.StrokeStyle{ .color = zpdf.Color.rgb(80, 80, 255), .width = 0.3, .dash = .{ .dash = 2, .gap = 2 } };
+
+    try doc.addPage(.{});
+    var y: f64 = 40;
+
+    // Title
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 18 }, "Optical Top Alignment Test", title_style);
+    y += 30;
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 10 }, "Text positioned so cap-height touches the box top edge", subtitle_style);
+    y += 20;
+
+    // Legend
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 9 }, "Legend:", label_style);
+    try doc.drawLine(.{ .x = left_margin + 40, .y = y + 5 }, .{ .x = left_margin + 60, .y = y + 5 }, cap_line_stroke);
+    _ = try doc.writeAt(.{ .x = left_margin + 62, .y = y + 9 }, "cap-height", .{ .font = inter, .size = 9, .color = zpdf.Color.rgb(255, 80, 80) });
+    try doc.drawLine(.{ .x = left_margin + 115, .y = y + 5 }, .{ .x = left_margin + 135, .y = y + 5 }, asc_line_stroke);
+    _ = try doc.writeAt(.{ .x = left_margin + 137, .y = y + 9 }, "ascender", .{ .font = inter, .size = 9, .color = zpdf.Color.rgb(80, 80, 255) });
+    y += 20;
+
+    // --- Section 1: Naive top alignment (baseline = box top + font_size) ---
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "NAIVE: baseline = box.y + font_size (visual gap at top)", .{ .font = inter_bold, .size = 11, .color = zpdf.Color.rgb(60, 60, 60) });
+    y += 22;
+
+    for (test_fonts) |entry| {
+        const style = zpdf.TextStyle{ .font = entry.font, .size = font_size };
+        const fm = doc.getFontMetricsStyled(style);
+
+        // Draw box
+        try doc.drawRect(.{ .x = left_margin, .y = y, .width = box_width, .height = box_height }, .{ .stroke = thin_stroke });
+
+        // Naive: place baseline at box top + font_size (ascender extends into font_size space)
+        const naive_baseline = y + font_size;
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = naive_baseline }, "Hbdgpq Ty", style);
+
+        // Draw cap-height line (from baseline upward)
+        const cap_y = naive_baseline - fm.cap_height;
+        try doc.drawLine(.{ .x = left_margin, .y = cap_y }, .{ .x = left_margin + box_width, .y = cap_y }, cap_line_stroke);
+
+        // Draw ascender line
+        const asc_y = naive_baseline - fm.ascender;
+        try doc.drawLine(.{ .x = left_margin, .y = asc_y }, .{ .x = left_margin + box_width, .y = asc_y }, asc_line_stroke);
+
+        // Label
+        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 14 }, entry.name, label_style);
+
+        y += box_height + box_spacing;
+    }
+
+    y += 10;
+
+    // --- Section 2: Optical alignment (baseline = box top + cap_height) ---
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "OPTICAL: baseline = box.y + cap_height (capitals touch top edge)", .{ .font = inter_bold, .size = 11, .color = zpdf.Color.rgb(60, 60, 60) });
+    y += 22;
+
+    for (test_fonts) |entry| {
+        const style = zpdf.TextStyle{ .font = entry.font, .size = font_size };
+        const fm = doc.getFontMetricsStyled(style);
+
+        // Draw box
+        try doc.drawRect(.{ .x = left_margin, .y = y, .width = box_width, .height = box_height }, .{ .stroke = thin_stroke });
+
+        // Optical: place baseline so cap_height aligns with box top
+        const optical_baseline = y + fm.cap_height;
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = optical_baseline }, "Hbdgpq Ty", style);
+
+        // Draw cap-height line (should be at box top)
+        const cap_y = optical_baseline - fm.cap_height;
+        try doc.drawLine(.{ .x = left_margin, .y = cap_y }, .{ .x = left_margin + box_width, .y = cap_y }, cap_line_stroke);
+
+        // Draw ascender line (above box top for tall letters)
+        const asc_y = optical_baseline - fm.ascender;
+        try doc.drawLine(.{ .x = left_margin, .y = asc_y }, .{ .x = left_margin + box_width, .y = asc_y }, asc_line_stroke);
+
+        // Label
+        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 14 }, entry.name, label_style);
+
+        y += box_height + box_spacing;
+    }
+
+    // --- Page 2: Different sizes and mixed-case text ---
+    try doc.addPage(.{});
+    y = 40;
+
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 18 }, "Optical Alignment at Various Sizes", title_style);
+    y += 30;
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 10 }, "All text uses cap-height optical alignment", subtitle_style);
+    y += 24;
+
+    const sizes = [_]f64{ 12, 16, 24, 36, 48 };
+    for (sizes) |size| {
+        const style = zpdf.TextStyle{ .font = inter, .size = size };
+        const fm = doc.getFontMetricsStyled(style);
+        const bh = fm.cap_height + @abs(fm.descender) + 8; // enough room for descenders + padding
+
+        // Draw box
+        try doc.drawRect(.{ .x = left_margin, .y = y, .width = box_width, .height = bh }, .{ .stroke = thin_stroke });
+
+        // Optical alignment
+        const baseline = y + fm.cap_height;
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = baseline }, "Hbdgpq Typography", style);
+
+        // Cap-height line
+        try doc.drawLine(.{ .x = left_margin, .y = y }, .{ .x = left_margin + box_width, .y = y }, cap_line_stroke);
+
+        // Size label
+        var size_buf: [32]u8 = undefined;
+        const size_label = std.fmt.bufPrint(&size_buf, "{d}pt", .{size}) catch "?";
+        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 12 }, size_label, label_style);
+
+        y += bh + box_spacing;
+    }
+
+    y += 16;
+
+    // Side-by-side comparison: naive vs optical in same row
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "Side by side: Naive (left) vs Optical (right)", .{ .font = inter_bold, .size = 11, .color = zpdf.Color.rgb(60, 60, 60) });
+    y += 24;
+
+    const half_width: f64 = 232;
+    const compare_size: f64 = 30;
+    for (test_fonts) |entry| {
+        const style = zpdf.TextStyle{ .font = entry.font, .size = compare_size };
+        const fm = doc.getFontMetricsStyled(style);
+        const bh: f64 = 50;
+
+        // Left box: naive
+        try doc.drawRect(.{ .x = left_margin, .y = y, .width = half_width, .height = bh }, .{ .stroke = thin_stroke });
+        const naive_bl = y + compare_size;
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = naive_bl }, "Hbdgpq", style);
+
+        // Right box: optical
+        try doc.drawRect(.{ .x = left_margin + half_width + 16, .y = y, .width = half_width, .height = bh }, .{ .stroke = thin_stroke });
+        const optical_bl = y + fm.cap_height;
+        _ = try doc.writeAt(.{ .x = left_margin + half_width + 22, .y = optical_bl }, "Hbdgpq", style);
+
+        // Labels
+        _ = try doc.writeAt(.{ .x = left_margin, .y = y - 3 }, entry.name, label_style);
+        _ = try doc.writeAt(.{ .x = left_margin + half_width + 16, .y = y - 3 }, entry.name, label_style);
+
+        y += bh + box_spacing + 4;
+    }
+
+    // Write output
+    const pdf_data = try doc.output();
+    defer allocator.free(pdf_data);
+    const file = try std.fs.cwd().createFile(output_path, .{});
+    defer file.close();
+    try file.writeAll(pdf_data);
 }

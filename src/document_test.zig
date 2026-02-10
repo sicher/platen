@@ -1021,7 +1021,7 @@ test "writeStyled respects margins via region" {
     }
 }
 
-test "valign top uses CSS-style half-leading calculation" {
+test "valign top_leading uses half-leading calculation" {
     var doc = Document.init(std.testing.allocator);
     defer doc.deinit();
 
@@ -1032,18 +1032,70 @@ test "valign top uses CSS-style half-leading calculation" {
     defer st.deinit();
     try st.append("Test", .{});
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .top });
+    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .top_leading });
 
     const page = &doc.pages.items[0];
     for (page.commands.items) |cmd| {
         if (cmd == .text) {
-            // CSS-style valign: baseline = cursor_y + (line_height + ascender - descender) / 2
+            // top_leading valign: baseline = cursor_y + (line_height + ascender - descender) / 2
             // Helvetica: ascender = 0.718 * 12 = 8.616, descender = 0.207 * 12 = 2.484
             // line_height = 12 * 1.2 = 14.4
             // baseline = 0 + (14.4 + 8.616 - 2.484) / 2 = 10.266
             // top-down y = region.y(100) + baseline(10.266) = 110.266
             // PDF y = page_height(841.89) - 110.266 = 731.624
             try std.testing.expectApproxEqAbs(@as(f64, 731.62), cmd.text.y, 0.1);
+        }
+    }
+}
+
+test "valign top aligns cap-height to top edge" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("Test", .{});
+    // Use Times: ascender=683, cap_height=662, descender=-217 (cap != ascender)
+    const style = TextStyle{ .font = Font.times, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .top });
+
+    const page = &doc.pages.items[0];
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            // .top valign: baseline = region.y + cap_height
+            // Times: cap_height = 0.662 * 12 = 7.944
+            // top-down y = region.y(100) + cap_height(7.944) = 107.944
+            // PDF y = page_height(841.89) - 107.944 = 733.946
+            try std.testing.expectApproxEqAbs(@as(f64, 733.95), cmd.text.y, 0.1);
+        }
+    }
+}
+
+test "valign top_ascent aligns ascender to top edge" {
+    var doc = Document.init(std.testing.allocator);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+
+    var region = Region{ .x = 50, .y = 100, .width = 200, .height = 200 };
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("Test", .{});
+    // Use Times: ascender=683, cap_height=662 (ascender > cap_height)
+    const style = TextStyle{ .font = Font.times, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{ .valign = .top_ascent });
+
+    const page = &doc.pages.items[0];
+    for (page.commands.items) |cmd| {
+        if (cmd == .text) {
+            // .top_ascent valign: baseline = region.y + ascender
+            // Times: ascender = 0.683 * 12 = 8.196
+            // top-down y = region.y(100) + ascender(8.196) = 108.196
+            // PDF y = page_height(841.89) - 108.196 = 733.694
+            try std.testing.expectApproxEqAbs(@as(f64, 733.69), cmd.text.y, 0.1);
         }
     }
 }

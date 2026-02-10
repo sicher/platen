@@ -194,6 +194,21 @@ try st.append("colored text", .{ .color = zpdf.Color.blue });
 _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
 ```
 
+#### Optical Top Alignment
+
+The default `.top` vertical alignment uses **cap-height optical alignment** — capital letters touch the top edge of the region, using real font metrics from the OS/2 table. This produces tighter, more visually precise layouts than the traditional half-leading approach.
+
+```zig
+// Default: cap-height aligned (capitals touch top edge)
+_ = try doc.write(&region, text, style, .{ .valign = .top });
+
+// Ascender aligned (b, d, l tops touch top edge)
+_ = try doc.write(&region, text, style, .{ .valign = .top_ascent });
+
+// Legacy half-leading (includes line-height whitespace above glyphs)
+_ = try doc.write(&region, text, style, .{ .valign = .top_leading });
+```
+
 ### Measure Text Before Rendering
 
 Use `write()` or `writeStyled()` with `.measure_only = true` to measure without rendering.
@@ -676,7 +691,7 @@ zpdf.pt_per_cm    // 28.34...
 
 **Text:**
 - `Align` - Horizontal: `.left`, `.center`, `.right`, `.justify`
-- `VAlign` - Vertical: `.top`, `.middle`, `.bottom`
+- `VAlign` - Vertical: `.top` (optical cap-height), `.top_ascent`, `.top_leading`, `.middle`, `.bottom`
 - `TextDecoration` - `.none`, `.underline`, `.strikethrough`, `.underline_strikethrough`
 - `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
 - `WriteOptions` / `LineOptions` / `ParagraphOptions` - Text layout options
