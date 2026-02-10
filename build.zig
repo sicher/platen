@@ -11,22 +11,22 @@ pub fn build(b: *std.Build) void {
     });
 
     // Library module
-    const zpdf_mod = b.createModule(.{
-        .root_source_file = b.path("src/zpdf.zig"),
+    const zapdf_mod = b.createModule(.{
+        .root_source_file = b.path("src/zapdf.zig"),
         .target = target,
         .optimize = optimize,
     });
-    zpdf_mod.linkLibrary(zlib_dep.artifact("z"));
+    zapdf_mod.linkLibrary(zlib_dep.artifact("z"));
 
     // CLI executable
     const exe = b.addExecutable(.{
-        .name = "zpdf",
+        .name = "zapdf",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/cli.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zpdf", .module = zpdf_mod },
+                .{ .name = "zapdf", .module = zapdf_mod },
             },
         }),
     });
@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) void {
 
     // Unit tests
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("src/zpdf.zig"),
+        .root_source_file = b.path("src/zapdf.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -61,13 +61,13 @@ pub fn build(b: *std.Build) void {
     // Performance test executable
     // Run with: zig build perf -Doptimize=ReleaseFast -- [args]
     const perf_exe = b.addExecutable(.{
-        .name = "zpdf-perf",
+        .name = "zapdf-perf",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/perf_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zpdf", .module = zpdf_mod },
+                .{ .name = "zapdf", .module = zapdf_mod },
             },
         }),
     });

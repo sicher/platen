@@ -2,7 +2,7 @@
 """
 Generate reference PDFs using fpdf2.
 
-These serve as the baseline for testing zpdf output.
+These serve as the baseline for testing zapdf output.
 Run with: python scripts/gen_references.py
 
 Options:
@@ -23,11 +23,11 @@ import sys
 from pathlib import Path
 
 # Tests excluded from automatic generation because fpdf2 can't generate
-# correct references. These must be manually maintained from zpdf output.
+# correct references. These must be manually maintained from zapdf output.
 EXCLUDED_TESTS = {
     "inter_fonts",  # fpdf2 doesn't apply Inter's <=> → ⇔ ligature
-    "text_style",   # Uses zpdf's write() API for inline-styled flowing text
-    "auto_height",  # zpdf positions text one line_height below padding; fpdf2 differs
+    "text_style",   # Uses zapdf's write() API for inline-styled flowing text
+    "auto_height",  # zapdf positions text one line_height below padding; fpdf2 differs
 }
 
 SCRIPT_DIR = Path(__file__).parent
@@ -196,7 +196,7 @@ def gen_multi_page():
 
 
 def gen_insert_page():
-    """Reference for insertPage test - same output as multi_page, tests zpdf's insertPage."""
+    """Reference for insertPage test - same output as multi_page, tests zapdf's insertPage."""
     pdf = make_pdf()
 
     pdf.add_page()
@@ -315,7 +315,7 @@ def gen_cid_fonts():
     """PDF with CID fonts (Identity-H encoding) for full Unicode support.
 
     Note: This test focuses on CID encoding and Unicode support, not OpenType features.
-    We use text() instead of shaped_text() for consistent positioning with zpdf.
+    We use text() instead of shaped_text() for consistent positioning with zapdf.
     """
     pdf = make_pdf()
 
@@ -618,7 +618,7 @@ def gen_opentype_features():
     y += 14
 
     # === Tabular Figures ===
-    # Note: tnum/pnum features not implemented in zpdf, so we just show the text with liga+kern
+    # Note: tnum/pnum features not implemented in zapdf, so we just show the text with liga+kern
     pdf.set_text_shaping(True, features={"liga": True, "kern": True})
     pdf.set_font("Satoshi", "B", size=11)
     shaped_text(pdf, 50, y, "Tabular vs Proportional Figures (tnum/pnum)")
@@ -628,7 +628,7 @@ def gen_opentype_features():
     shaped_text(pdf, 50, y, "Numbers align in columns when using tabular figures:")
     y += 10
 
-    # Show tnum vs pnum side by side (zpdf doesn't implement tnum/pnum, so just use liga+kern)
+    # Show tnum vs pnum side by side (zapdf doesn't implement tnum/pnum, so just use liga+kern)
     pdf.set_font("Satoshi", "", size=10)
     shaped_text(pdf, 50, y, "tnum: 1111  0000  1234")
     shaped_text(pdf, 200, y, "1,234.56")
@@ -645,21 +645,21 @@ def gen_opentype_features():
     y += 14
 
     # === Inter stylistic features ===
-    # Note: zero/tnum features not yet implemented in zpdf, so use text() for comparison
+    # Note: zero/tnum features not yet implemented in zapdf, so use text() for comparison
     pdf.set_font("Inter", "B", size=11)
     pdf.text(50, y, "Inter: Character Variants & Stylistic Sets")
     y += 11
 
     pdf.set_font("Inter", "", size=9)
-    # Default (no shaping - zpdf doesn't implement these features yet)
+    # Default (no shaping - zapdf doesn't implement these features yet)
     pdf.text(50, y, "Default: 0123456789 Il1| agy")
     y += 10
 
-    # Slashed zero (zero feature) - using text() since zpdf doesn't implement zero
+    # Slashed zero (zero feature) - using text() since zapdf doesn't implement zero
     pdf.text(50, y, "zero feature: 0123456789 (slashed zero)")
     y += 10
 
-    # Tabular with slashed zero - using text() since zpdf doesn't implement tnum/zero
+    # Tabular with slashed zero - using text() since zapdf doesn't implement tnum/zero
     pdf.text(50, y, "tnum+zero: 0123456789 (tabular + slashed)")
     y += 12
 
@@ -1540,7 +1540,7 @@ def gen_colors():
     """Generate color swatches reference with all 148 CSS named colors."""
     from fpdf import FPDF
 
-    # Use pt units to match zpdf coordinates
+    # Use pt units to match zapdf coordinates
     pdf = FPDF(unit="pt", format="A4")
     pdf.add_page()
 
@@ -2293,7 +2293,7 @@ def gen_kerning():
     shaped_text(pdf, 50, y, "Paragraph (cumulative kerning):")
     y += 14
 
-    # Use individual lines to match zpdf's writeAt positioning
+    # Use individual lines to match zapdf's writeAt positioning
     pdf.set_font("Charter", "", size=11)
     shaped_text(pdf, 50, y, "Typography is the art of arranging type to make written")
     y += 11 * 1.2
@@ -2401,7 +2401,7 @@ def gen_pdfa():
 
     pdf = make_pdf()
 
-    # Read the ICC profile (same one zpdf uses)
+    # Read the ICC profile (same one zapdf uses)
     icc_data = pathlib.Path("src/data/sRGB2014.icc").read_bytes()
 
     # Add output intent for PDF/A
@@ -2462,7 +2462,7 @@ def gen_pdfa_2b():
 
     pdf = make_pdf()
 
-    # Read the ICC profile (same one zpdf uses)
+    # Read the ICC profile (same one zapdf uses)
     icc_data = pathlib.Path("src/data/sRGB2014.icc").read_bytes()
 
     # Add output intent for PDF/A-2b
@@ -2656,7 +2656,7 @@ def main():
             sys.exit(1)
         if args.test in EXCLUDED_TESTS and not args.all:
             print(f"Warning: {args.test} is excluded (fpdf2 can't generate correct reference)")
-            print("Use --all to force generation, or maintain this reference manually from zpdf output")
+            print("Use --all to force generation, or maintain this reference manually from zapdf output")
             sys.exit(1)
         print(f"Generating {args.test}.pdf...")
         GENERATORS[args.test]()

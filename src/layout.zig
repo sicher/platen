@@ -1,4 +1,4 @@
-//! Layout types for zpdf - content areas, alignment, margins, and page sizes.
+//! Layout types for zapdf - content areas, alignment, margins, and page sizes.
 
 const color = @import("color.zig");
 const metrics = @import("metrics.zig");

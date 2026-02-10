@@ -4,12 +4,12 @@
 //! These tests verify the complete PDF generation pipeline.
 
 const std = @import("std");
-const zpdf = @import("zpdf.zig");
+const zapdf = @import("zapdf.zig");
 const testing = @import("testing.zig");
 const embedded = @import("embedded.zig");
 
 /// Helper to write plain text using writeStyled
-fn writeText(doc: *zpdf.Document, region: *zpdf.Region, text: []const u8, style: zpdf.TextStyle, opts: zpdf.ParagraphOptions) !zpdf.WriteResult {
+fn writeText(doc: *zapdf.Document, region: *zapdf.Region, text: []const u8, style: zapdf.TextStyle, opts: zapdf.ParagraphOptions) !zapdf.WriteResult {
     var st = doc.createStyledText();
     defer st.deinit();
     try st.append(text, .{});
@@ -70,39 +70,39 @@ const test_cases = [_]TestCase{
 // ============================================================================
 
 fn generateMinimalPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
     try doc.addPage(.{});
     return doc.output();
 }
 
 fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", .{ .font = zpdf.Font.helvetica, .size = 24 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", .{ .font = zapdf.Font.helvetica, .size = 24 });
     return doc.output();
 }
 
 fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
     try doc.addPage(.{});
 
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica Normal", .{ .font = zpdf.Font.helvetica, .size = 12 });
-    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Helvetica Bold", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true });
-    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times Roman", .{ .font = zpdf.Font.times, .size = 12 });
-    _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Courier", .{ .font = zpdf.Font.courier, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica Normal", .{ .font = zapdf.Font.helvetica, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Helvetica Bold", .{ .font = zapdf.Font.helvetica, .size = 12, .bold = true });
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times Roman", .{ .font = zapdf.Font.times, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Courier", .{ .font = zapdf.Font.courier, .size = 12 });
 
     return doc.output();
 }
 
 fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
     try doc.addPage(.{});
 
-    const fonts = [_]zpdf.StandardFont{
+    const fonts = [_]zapdf.StandardFont{
         .helvetica,
         .helvetica_bold,
         .helvetica_oblique,
@@ -122,19 +122,19 @@ fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     var y: f64 = 30;
     for (fonts) |font| {
         // Convert StandardFont to TextStyle
-        const style: zpdf.TextStyle = switch (font) {
-            .helvetica => .{ .font = zpdf.Font.helvetica, .size = 10 },
-            .helvetica_bold => .{ .font = zpdf.Font.helvetica, .size = 10, .bold = true },
-            .helvetica_oblique => .{ .font = zpdf.Font.helvetica, .size = 10, .italic = true },
-            .helvetica_bold_oblique => .{ .font = zpdf.Font.helvetica, .size = 10, .bold = true, .italic = true },
-            .times_roman => .{ .font = zpdf.Font.times, .size = 10 },
-            .times_bold => .{ .font = zpdf.Font.times, .size = 10, .bold = true },
-            .times_italic => .{ .font = zpdf.Font.times, .size = 10, .italic = true },
-            .times_bold_italic => .{ .font = zpdf.Font.times, .size = 10, .bold = true, .italic = true },
-            .courier => .{ .font = zpdf.Font.courier, .size = 10 },
-            .courier_bold => .{ .font = zpdf.Font.courier, .size = 10, .bold = true },
-            .courier_oblique => .{ .font = zpdf.Font.courier, .size = 10, .italic = true },
-            .courier_bold_oblique => .{ .font = zpdf.Font.courier, .size = 10, .bold = true, .italic = true },
+        const style: zapdf.TextStyle = switch (font) {
+            .helvetica => .{ .font = zapdf.Font.helvetica, .size = 10 },
+            .helvetica_bold => .{ .font = zapdf.Font.helvetica, .size = 10, .bold = true },
+            .helvetica_oblique => .{ .font = zapdf.Font.helvetica, .size = 10, .italic = true },
+            .helvetica_bold_oblique => .{ .font = zapdf.Font.helvetica, .size = 10, .bold = true, .italic = true },
+            .times_roman => .{ .font = zapdf.Font.times, .size = 10 },
+            .times_bold => .{ .font = zapdf.Font.times, .size = 10, .bold = true },
+            .times_italic => .{ .font = zapdf.Font.times, .size = 10, .italic = true },
+            .times_bold_italic => .{ .font = zapdf.Font.times, .size = 10, .bold = true, .italic = true },
+            .courier => .{ .font = zapdf.Font.courier, .size = 10 },
+            .courier_bold => .{ .font = zapdf.Font.courier, .size = 10, .bold = true },
+            .courier_oblique => .{ .font = zapdf.Font.courier, .size = 10, .italic = true },
+            .courier_bold_oblique => .{ .font = zapdf.Font.courier, .size = 10, .bold = true, .italic = true },
             .symbol => .{ .font = .symbol, .size = 10 },
             .zapf_dingbats => .{ .font = .zapf_dingbats, .size = 10 },
         };
@@ -146,10 +146,10 @@ fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 };
+    const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24 };
 
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
@@ -164,7 +164,7 @@ fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load font families (use win_ansi to match fpdf2 reference)
@@ -206,7 +206,7 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 24;
 
     // Unicode - Latin Extended (WinAnsi compatible)
-    const charter_12 = zpdf.TextStyle{ .font = charter_regular, .size = 12 };
+    const charter_12 = zapdf.TextStyle{ .font = charter_regular, .size = 12 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Extended Latin: \xc0\xc1\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xcb \xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb", charter_12);
     y += 16;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "More Latin: \xd1\xf1 \xd8\xf8 \xdf \xc6\xe6 \xd0\xf0 \xde\xfe \xbf\xa1", charter_12);
@@ -219,7 +219,7 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 24;
 
     // Mixed standard and embedded
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica (standard): ABCDEFGHIJKLMNOPQRSTUVWXYZ", .{ .font = zpdf.Font.helvetica, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica (standard): ABCDEFGHIJKLMNOPQRSTUVWXYZ", .{ .font = zapdf.Font.helvetica, .size = 12 });
     y += 16;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier Prime (embedded): ABCDEFGHIJKLMNOPQRSTUVWXYZ", .{ .font = courier_regular, .size = 12 });
     y += 24;
@@ -237,7 +237,7 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load fonts and set to CID (Identity-H) mode for full Unicode
@@ -251,9 +251,9 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(.{});
     var y: f64 = 50;
 
-    const charter_24 = zpdf.TextStyle{ .font = charter, .size = 24 };
-    const charter_12 = zpdf.TextStyle{ .font = charter, .size = 12 };
-    const courier_12 = zpdf.TextStyle{ .font = courier, .size = 12 };
+    const charter_24 = zapdf.TextStyle{ .font = charter, .size = 24 };
+    const charter_12 = zapdf.TextStyle{ .font = charter, .size = 12 };
+    const courier_12 = zapdf.TextStyle{ .font = courier, .size = 12 };
 
     // Title (using CID font)
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "CID Font Test (Identity-H Encoding)", charter_24);
@@ -286,7 +286,7 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     // Compare with WinAnsi mode (should look the same for basic chars)
     const charter_winansi = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", .win_ansi);
     charter_winansi.embedded.setFeature(.kern, false);
-    const charter_winansi_12 = zpdf.TextStyle{ .font = charter_winansi, .size = 12 };
+    const charter_winansi_12 = zapdf.TextStyle{ .font = charter_winansi, .size = 12 };
 
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "WinAnsi comparison: The quick brown fox", charter_winansi_12);
     y += 20;
@@ -297,7 +297,7 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load all font variants
@@ -387,45 +387,45 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(.{});
 
     // Define all text styles
-    const inter_bold_22 = zpdf.TextStyle{ .font = inter_bold, .size = 22 };
-    const inter_bold_13 = zpdf.TextStyle{ .font = inter_bold, .size = 13 };
-    const inter_bold_10 = zpdf.TextStyle{ .font = inter_bold, .size = 10 };
-    const inter_bold_9 = zpdf.TextStyle{ .font = inter_bold, .size = 9 };
-    const inter_bold_11 = zpdf.TextStyle{ .font = inter_bold, .size = 11 };
-    const inter_11 = zpdf.TextStyle{ .font = inter, .size = 11 };
-    const inter_10 = zpdf.TextStyle{ .font = inter, .size = 10 };
-    const inter_8 = zpdf.TextStyle{ .font = inter, .size = 8 };
-    const inter_12 = zpdf.TextStyle{ .font = inter, .size = 12 };
-    const inter_italic_11 = zpdf.TextStyle{ .font = inter_italic, .size = 11 };
-    const inter_bolditalic_11 = zpdf.TextStyle{ .font = inter_bolditalic, .size = 11 };
-    const inter_no_kern_12 = zpdf.TextStyle{ .font = inter_no_kern, .size = 12 };
-    const inter_no_mark_12 = zpdf.TextStyle{ .font = inter_no_mark, .size = 12 };
-    const inter_no_calt_11 = zpdf.TextStyle{ .font = inter_no_calt, .size = 11 };
-    const inter_dlig_12 = zpdf.TextStyle{ .font = inter_dlig, .size = 12 };
-    const inter_tnum_10 = zpdf.TextStyle{ .font = inter_tnum, .size = 10 };
-    const inter_frac_12 = zpdf.TextStyle{ .font = inter_frac, .size = 12 };
-    const inter_zero_12 = zpdf.TextStyle{ .font = inter_zero, .size = 12 };
-    const inter_nocalt_12 = zpdf.TextStyle{ .font = inter_nocalt, .size = 12 };
-    const inter_case_12 = zpdf.TextStyle{ .font = inter_case, .size = 12 };
-    const inter_ss01_12 = zpdf.TextStyle{ .font = inter_ss01, .size = 12 };
-    const inter_ss02_12 = zpdf.TextStyle{ .font = inter_ss02, .size = 12 };
-    const inter_ss03_12 = zpdf.TextStyle{ .font = inter_ss03, .size = 12 };
-    const inter_ss05_12 = zpdf.TextStyle{ .font = inter_ss05, .size = 12 };
-    const inter_ss06_12 = zpdf.TextStyle{ .font = inter_ss06, .size = 12 };
-    const inter_ss08_12 = zpdf.TextStyle{ .font = inter_ss08, .size = 12 };
-    const inter_cv01_12 = zpdf.TextStyle{ .font = inter_cv01, .size = 12 };
-    const inter_cv02_12 = zpdf.TextStyle{ .font = inter_cv02, .size = 12 };
-    const inter_cv03_12 = zpdf.TextStyle{ .font = inter_cv03, .size = 12 };
-    const inter_cv04_12 = zpdf.TextStyle{ .font = inter_cv04, .size = 12 };
-    const inter_cv05_12 = zpdf.TextStyle{ .font = inter_cv05, .size = 12 };
-    const inter_cv06_12 = zpdf.TextStyle{ .font = inter_cv06, .size = 12 };
-    const inter_cv07_12 = zpdf.TextStyle{ .font = inter_cv07, .size = 12 };
-    const inter_cv08_12 = zpdf.TextStyle{ .font = inter_cv08, .size = 12 };
-    const inter_cv09_12 = zpdf.TextStyle{ .font = inter_cv09, .size = 12 };
-    const inter_cv10_12 = zpdf.TextStyle{ .font = inter_cv10, .size = 12 };
-    const inter_cv11_12 = zpdf.TextStyle{ .font = inter_cv11, .size = 12 };
-    const inter_cv12_12 = zpdf.TextStyle{ .font = inter_cv12, .size = 12 };
-    const inter_cv13_12 = zpdf.TextStyle{ .font = inter_cv13, .size = 12 };
+    const inter_bold_22 = zapdf.TextStyle{ .font = inter_bold, .size = 22 };
+    const inter_bold_13 = zapdf.TextStyle{ .font = inter_bold, .size = 13 };
+    const inter_bold_10 = zapdf.TextStyle{ .font = inter_bold, .size = 10 };
+    const inter_bold_9 = zapdf.TextStyle{ .font = inter_bold, .size = 9 };
+    const inter_bold_11 = zapdf.TextStyle{ .font = inter_bold, .size = 11 };
+    const inter_11 = zapdf.TextStyle{ .font = inter, .size = 11 };
+    const inter_10 = zapdf.TextStyle{ .font = inter, .size = 10 };
+    const inter_8 = zapdf.TextStyle{ .font = inter, .size = 8 };
+    const inter_12 = zapdf.TextStyle{ .font = inter, .size = 12 };
+    const inter_italic_11 = zapdf.TextStyle{ .font = inter_italic, .size = 11 };
+    const inter_bolditalic_11 = zapdf.TextStyle{ .font = inter_bolditalic, .size = 11 };
+    const inter_no_kern_12 = zapdf.TextStyle{ .font = inter_no_kern, .size = 12 };
+    const inter_no_mark_12 = zapdf.TextStyle{ .font = inter_no_mark, .size = 12 };
+    const inter_no_calt_11 = zapdf.TextStyle{ .font = inter_no_calt, .size = 11 };
+    const inter_dlig_12 = zapdf.TextStyle{ .font = inter_dlig, .size = 12 };
+    const inter_tnum_10 = zapdf.TextStyle{ .font = inter_tnum, .size = 10 };
+    const inter_frac_12 = zapdf.TextStyle{ .font = inter_frac, .size = 12 };
+    const inter_zero_12 = zapdf.TextStyle{ .font = inter_zero, .size = 12 };
+    const inter_nocalt_12 = zapdf.TextStyle{ .font = inter_nocalt, .size = 12 };
+    const inter_case_12 = zapdf.TextStyle{ .font = inter_case, .size = 12 };
+    const inter_ss01_12 = zapdf.TextStyle{ .font = inter_ss01, .size = 12 };
+    const inter_ss02_12 = zapdf.TextStyle{ .font = inter_ss02, .size = 12 };
+    const inter_ss03_12 = zapdf.TextStyle{ .font = inter_ss03, .size = 12 };
+    const inter_ss05_12 = zapdf.TextStyle{ .font = inter_ss05, .size = 12 };
+    const inter_ss06_12 = zapdf.TextStyle{ .font = inter_ss06, .size = 12 };
+    const inter_ss08_12 = zapdf.TextStyle{ .font = inter_ss08, .size = 12 };
+    const inter_cv01_12 = zapdf.TextStyle{ .font = inter_cv01, .size = 12 };
+    const inter_cv02_12 = zapdf.TextStyle{ .font = inter_cv02, .size = 12 };
+    const inter_cv03_12 = zapdf.TextStyle{ .font = inter_cv03, .size = 12 };
+    const inter_cv04_12 = zapdf.TextStyle{ .font = inter_cv04, .size = 12 };
+    const inter_cv05_12 = zapdf.TextStyle{ .font = inter_cv05, .size = 12 };
+    const inter_cv06_12 = zapdf.TextStyle{ .font = inter_cv06, .size = 12 };
+    const inter_cv07_12 = zapdf.TextStyle{ .font = inter_cv07, .size = 12 };
+    const inter_cv08_12 = zapdf.TextStyle{ .font = inter_cv08, .size = 12 };
+    const inter_cv09_12 = zapdf.TextStyle{ .font = inter_cv09, .size = 12 };
+    const inter_cv10_12 = zapdf.TextStyle{ .font = inter_cv10, .size = 12 };
+    const inter_cv11_12 = zapdf.TextStyle{ .font = inter_cv11, .size = 12 };
+    const inter_cv12_12 = zapdf.TextStyle{ .font = inter_cv12, .size = 12 };
+    const inter_cv13_12 = zapdf.TextStyle{ .font = inter_cv13, .size = 12 };
 
     var y: f64 = 32;
 
@@ -602,7 +602,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 20;
 
     // Footer: Available Features
-    const inter_7 = zpdf.TextStyle{ .font = inter, .size = 7 };
+    const inter_7 = zapdf.TextStyle{ .font = inter, .size = 7 };
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "GSUB: aalt calt case ccmp cv01-13 dlig dnom frac locl numr ordn pnum salt sinf ss01-08 subs sups tnum zero | GPOS: cpsp kern mark mkmk", inter_7);
 
     return doc.output();
@@ -611,7 +611,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 /// Comprehensive diacritics test using Gentium font
 /// Gentium has extensive mark positioning support for combining diacritics
 fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
@@ -619,14 +619,14 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf", null);
 
     // Define styles
-    const title_style = zpdf.TextStyle{ .font = gentium_bold, .size = 18 };
-    const header_style = zpdf.TextStyle{ .font = gentium_bold, .size = 11 };
-    const main_style = zpdf.TextStyle{ .font = gentium, .size = 13 };
-    const desc_style = zpdf.TextStyle{ .font = gentium, .size = 9 };
-    const sample_style = zpdf.TextStyle{ .font = gentium, .size = 11 };
-    const sample_italic_style = zpdf.TextStyle{ .font = gentium_italic, .size = 11 };
-    const bold_11_style = zpdf.TextStyle{ .font = gentium_bold, .size = 11 };
-    const italic_11_style = zpdf.TextStyle{ .font = gentium_italic, .size = 11 };
+    const title_style = zapdf.TextStyle{ .font = gentium_bold, .size = 18 };
+    const header_style = zapdf.TextStyle{ .font = gentium_bold, .size = 11 };
+    const main_style = zapdf.TextStyle{ .font = gentium, .size = 13 };
+    const desc_style = zapdf.TextStyle{ .font = gentium, .size = 9 };
+    const sample_style = zapdf.TextStyle{ .font = gentium, .size = 11 };
+    const sample_italic_style = zapdf.TextStyle{ .font = gentium_italic, .size = 11 };
+    const bold_11_style = zapdf.TextStyle{ .font = gentium_bold, .size = 11 };
+    const italic_11_style = zapdf.TextStyle{ .font = gentium_italic, .size = 11 };
 
     try doc.addPage(.{});
     var y: f64 = 32;
@@ -643,17 +643,17 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // grave, acute, circumflex, tilde, macron - Aa Ee Oo pairs
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x80a\xcc\x80 A\xcc\x81a\xcc\x81 A\xcc\x82a\xcc\x82 A\xcc\x83a\xcc\x83 A\xcc\x84a\xcc\x84", main_style);
-    var region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    var region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "grave, acute, circumflex, tilde, macron", desc_style, .{ .valign = .top_leading });
     y += 17;
     // breve, dot above, diaeresis, hook above, ring above
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x86a\xcc\x86 A\xcc\x87a\xcc\x87 A\xcc\x88a\xcc\x88 A\xcc\x89a\xcc\x89 A\xcc\x8aa\xcc\x8a", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "breve, dot above, diaeresis, hook above, ring above", desc_style, .{ .valign = .top_leading });
     y += 17;
     // double acute, caron, double grave
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x8ba\xcc\x8b A\xcc\x8ca\xcc\x8c A\xcc\x8fa\xcc\x8f O\xcc\x8bo\xcc\x8b O\xcc\x8co\xcc\x8c", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "double acute, caron, double grave (Hungarian, Czech)", desc_style, .{ .valign = .top_leading });
     y += 20;
 
@@ -662,12 +662,12 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // cedilla, ogonek, dot below
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "C\xcc\xa7c\xcc\xa7 S\xcc\xa7s\xcc\xa7 A\xcc\xa8a\xcc\xa8 E\xcc\xa8e\xcc\xa8 A\xcc\xa3a\xcc\xa3", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "cedilla (French, Turkish), ogonek (Polish), dot below (Vietnamese)", desc_style, .{ .valign = .top_leading });
     y += 17;
     // macron below, line below, ring below
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xb1a\xcc\xb1 A\xcc\xb2a\xcc\xb2 A\xcc\xa5a\xcc\xa5 O\xcc\xa3o\xcc\xa3 U\xcc\xa3u\xcc\xa3", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "macron below, line below, ring below, more dot below", desc_style, .{ .valign = .top_leading });
     y += 20;
 
@@ -676,12 +676,12 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // circumflex + tone marks
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x82\xcc\x81a\xcc\x82\xcc\x81 E\xcc\x82\xcc\x80e\xcc\x82\xcc\x80 O\xcc\x82\xcc\x89o\xcc\x82\xcc\x89 A\xcc\x82\xcc\x83a\xcc\x82\xcc\x83", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "circumflex + acute, grave, hook above, tilde (Vietnamese vowels)", desc_style, .{ .valign = .top_leading });
     y += 17;
     // breve + tone, horn + tone (precomposed)
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\x86\xcc\x81a\xcc\x86\xcc\x81 A\xcc\x86\xcc\x80a\xcc\x86\xcc\x80 \xe1\xbb\x9a\xe1\xbb\x9b \xe1\xbb\x9c\xe1\xbb\x9d \xe1\xbb\xa8\xe1\xbb\xa9 \xe1\xbb\xaa\xe1\xbb\xab", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "breve+tone (combining), horn+tone (precomposed: Ớờ Ứừ)", desc_style, .{ .valign = .top_leading });
     y += 20;
 
@@ -690,12 +690,12 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // cedilla + above marks
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "S\xcc\xa7\xcc\x81s\xcc\xa7\xcc\x81 C\xcc\xa7\xcc\x82c\xcc\xa7\xcc\x82 T\xcc\xa7\xcc\x83t\xcc\xa7\xcc\x83", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "cedilla combined with acute, circumflex, tilde above", desc_style, .{ .valign = .top_leading });
     y += 17;
     // ogonek + above marks
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xa8\xcc\x84a\xcc\xa8\xcc\x84 E\xcc\xa8\xcc\x81e\xcc\xa8\xcc\x81 O\xcc\xa3\xcc\x82o\xcc\xa3\xcc\x82", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "ogonek + macron, ogonek + acute, dot below + circumflex", desc_style, .{ .valign = .top_leading });
     y += 20;
 
@@ -704,12 +704,12 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // Precomposed grave, acute, circumflex, tilde
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x83\xc3\xa3 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Precomposed Latin letters with grave, acute, circumflex, tilde", desc_style, .{ .valign = .top_leading });
     y += 17;
     // Vietnamese precomposed
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xe1\xba\xa0\xe1\xba\xa1 \xe1\xba\xa2\xe1\xba\xa3 \xe1\xba\xa4\xe1\xba\xa5 \xc6\xa0\xc6\xa1 \xc6\xaf\xc6\xb0", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Vietnamese precomposed: A with dot, hook, circumflex+acute, horn", desc_style, .{ .valign = .top_leading });
     y += 20;
 
@@ -718,12 +718,12 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // Polish ogonek
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc4\x84\xc4\x85 \xc4\x98\xc4\x99 \xc4\xae\xc4\xaf \xc5\xb2\xc5\xb3", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Polish: A, E, I, U with ogonek", desc_style, .{ .valign = .top_leading });
     y += 17;
     // Turkish/Romanian cedilla, Czech caron
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "\xc5\x9e\xc5\x9f \xc5\xa2\xc5\xa3 \xc4\x8e\xc4\x8f \xc4\xbd\xc4\xbe \xc5\xa4\xc5\xa5 \xc5\x87\xc5\x88", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Turkish/Romanian cedilla; Czech/Slovak caron", desc_style, .{ .valign = .top_leading });
     y += 20;
 
@@ -732,7 +732,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
     // Triple stacked marks
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "A\xcc\xa3\xcc\x82\xcc\x81a\xcc\xa3\xcc\x82\xcc\x81 E\xcc\xa8\xcc\x84\xcc\x87e\xcc\xa8\xcc\x84\xcc\x87 O\xcc\xa7\xcc\x83\xcc\x8ao\xcc\xa7\xcc\x83\xcc\x8a", main_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 40 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 40 };
     _ = try writeText(&doc, &region, "dot below + circumflex + acute; ogonek + macron + dot above; cedilla + tilde + ring", desc_style, .{ .valign = .top_leading });
     y += 22;
 
@@ -740,19 +740,19 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Sample Text", header_style);
     y += 15;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ti\xe1\xba\xbfng Vi\xe1\xbb\x87t: X\xc3\xa3 h\xe1\xbb\x99i ch\xe1\xbb\xa7 ngh\xc4\xa9a Vi\xe1\xbb\x87t Nam", sample_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Vietnamese with stacked diacritics and horn", desc_style, .{ .valign = .top_leading });
     y += 15;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Polski: Zwy\xc5\xbc\xc4\x87 \xc5\x82\xc3\xb3dki\xc4\x99 sta\xc5\x84cie\xc4\x87 \xc5\xbcmij\xc4\x85", sample_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Polish with ogonek, kreska, overdot", desc_style, .{ .valign = .top_leading });
     y += 15;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "T\xc3\xbcrk\xc3\xa7e: \xc3\x87al\xc4\xb1\xc5\x9fkan \xc3\xb6\xc4\x9frenciler", sample_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "Turkish with cedilla, dotless i, breve", desc_style, .{ .valign = .top_leading });
     y += 15;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fran\xc3\xa7ais: L'\xc3\xa9l\xc3\xa8ve na\xc3\xaff re\xc3\xa7oit", sample_italic_style);
-    region = zpdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+    region = zapdf.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
     _ = try writeText(&doc, &region, "French with cedilla, accents, diaeresis", desc_style, .{ .valign = .top_leading });
     y += 18;
 
@@ -769,7 +769,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Satoshi has liga (fi, fl, ff, ffi, ffl), kern, tnum, pnum
@@ -789,19 +789,19 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
     inter_bold.embedded.setFeature(.kern, false);
 
     // Define styles
-    const satoshi_bold_20 = zpdf.TextStyle{ .font = satoshi_bold, .size = 20 };
-    const satoshi_7 = zpdf.TextStyle{ .font = satoshi, .size = 7 };
-    const satoshi_bold_11 = zpdf.TextStyle{ .font = satoshi_bold, .size = 11 };
-    const satoshi_9 = zpdf.TextStyle{ .font = satoshi, .size = 9 };
-    const satoshi_10 = zpdf.TextStyle{ .font = satoshi, .size = 10 };
-    const satoshi_8 = zpdf.TextStyle{ .font = satoshi, .size = 8 };
-    const satoshi_bold_10 = zpdf.TextStyle{ .font = satoshi_bold, .size = 10 };
-    const satoshi_italic_10 = zpdf.TextStyle{ .font = satoshi_italic, .size = 10 };
-    const satoshi_6 = zpdf.TextStyle{ .font = satoshi, .size = 6 };
-    const charter_bold_11 = zpdf.TextStyle{ .font = charter_bold, .size = 11 };
-    const charter_10 = zpdf.TextStyle{ .font = charter, .size = 10 };
-    const inter_bold_11 = zpdf.TextStyle{ .font = inter_bold, .size = 11 };
-    const inter_9 = zpdf.TextStyle{ .font = inter, .size = 9 };
+    const satoshi_bold_20 = zapdf.TextStyle{ .font = satoshi_bold, .size = 20 };
+    const satoshi_7 = zapdf.TextStyle{ .font = satoshi, .size = 7 };
+    const satoshi_bold_11 = zapdf.TextStyle{ .font = satoshi_bold, .size = 11 };
+    const satoshi_9 = zapdf.TextStyle{ .font = satoshi, .size = 9 };
+    const satoshi_10 = zapdf.TextStyle{ .font = satoshi, .size = 10 };
+    const satoshi_8 = zapdf.TextStyle{ .font = satoshi, .size = 8 };
+    const satoshi_bold_10 = zapdf.TextStyle{ .font = satoshi_bold, .size = 10 };
+    const satoshi_italic_10 = zapdf.TextStyle{ .font = satoshi_italic, .size = 10 };
+    const satoshi_6 = zapdf.TextStyle{ .font = satoshi, .size = 6 };
+    const charter_bold_11 = zapdf.TextStyle{ .font = charter_bold, .size = 11 };
+    const charter_10 = zapdf.TextStyle{ .font = charter, .size = 10 };
+    const inter_bold_11 = zapdf.TextStyle{ .font = inter_bold, .size = 11 };
+    const inter_9 = zapdf.TextStyle{ .font = inter, .size = 9 };
 
     try doc.addPage(.{});
     var y: f64 = 25;
@@ -891,16 +891,16 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Define styles used in this test
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
-    const body_11 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
-    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
-    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
+    const body_11 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
+    const body_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10 };
+    const header_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12, .bold = true };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     // Add page with 1 inch margins (72pt)
     try doc.addPage(.{ .margins = .{ .left = 72, .right = 72, .top = 72, .bottom = 72 } });
@@ -915,21 +915,21 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Left aligned (default)
     {
-        var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
+        var line_region = zapdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
         _ = try doc.writeLine(&line_region, "Left aligned line (default)", body_12, .{ .alignment = .left, .valign = .top_leading });
     }
     y += line_height;
 
     // Center aligned
     {
-        var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
+        var line_region = zapdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
         _ = try doc.writeLine(&line_region, "Center aligned line", body_12, .{ .alignment = .center, .valign = .top_leading });
     }
     y += line_height;
 
     // Right aligned
     {
-        var line_region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
+        var line_region = zapdf.Region{ .x = 72, .y = y, .width = region_width, .height = line_height };
         _ = try doc.writeLine(&line_region, "Right aligned line", body_12, .{ .alignment = .right, .valign = .top_leading });
     }
     y += line_height;
@@ -941,7 +941,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 14.4;
 
     // Use writeStyled with valign: .top for top-aligned text positioning
-    var region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = 200 };
+    var region = zapdf.Region{ .x = 72, .y = y, .width = region_width, .height = 200 };
     const paragraph1 = "This is a test paragraph that demonstrates word wrapping. " ++
         "The text should automatically wrap to fit within the region width. " ++
         "Long words like supercalifragilisticexpialidocious should also be handled.";
@@ -955,7 +955,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     // At 11pt: "Look:" ~22pt, "state-of-the-art" ~86pt
     // "Look: state-of-the-art" ~111pt > 100pt, so word wraps to next line
     // With break_on_hyphens=false, the compound word stays intact
-    region = zpdf.Region{ .x = 72, .y = y, .width = 100, .height = 60 };
+    region = zapdf.Region{ .x = 72, .y = y, .width = 100, .height = 60 };
     const paragraph2a = "Look: state-of-the-art works.";
     _ = try writeText(&doc, &region, paragraph2a, body_11, .{ .valign = .top_leading, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
@@ -966,7 +966,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // At 11pt: "in-" ~12.8pt, "com-" ~24.4pt, both fit in 26pt
     // Word breaks recursively at soft-hyphen points
-    region = zpdf.Region{ .x = 72, .y = y, .width = 26, .height = 80 };
+    region = zapdf.Region{ .x = 72, .y = y, .width = 26, .height = 80 };
     // Word has soft-hyphens: in­com­pre­hen­si­ble
     const paragraph2b = "in\xc2\xadcom\xc2\xadpre\xc2\xadhen\xc2\xadsi\xc2\xadble";
     _ = try writeText(&doc, &region, paragraph2b, body_11, .{ .valign = .top_leading, .break_on_hyphens = false });
@@ -978,7 +978,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // "supercalifragilisticexpialidocious" is ~155pt at 11pt, won't fit in 50pt
     // Without soft-hyphens, it overflows the line (character-level handling)
-    region = zpdf.Region{ .x = 72, .y = y, .width = 50, .height = 80 };
+    region = zapdf.Region{ .x = 72, .y = y, .width = 50, .height = 80 };
     _ = try writeText(&doc, &region, "supercalifragilisticexpialidocious", body_11, .{ .valign = .top_leading, .break_on_hyphens = false });
     y = region.y + region.cursor_y + 12;
 
@@ -986,7 +986,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 72, .y = y }, "Centered Paragraph:", header_12);
     y += 14.4;
 
-    region = zpdf.Region{ .x = 72, .y = y, .width = region_width, .height = 100 };
+    region = zapdf.Region{ .x = 72, .y = y, .width = region_width, .height = 100 };
     const paragraph3 = "This paragraph is center aligned. Each line of text " ++
         "will be centered within the region width.";
     _ = try writeText(&doc, &region, paragraph3, body_11, .{ .alignment = .center, .valign = .top_leading, .break_on_hyphens = false });
@@ -997,7 +997,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 14.4;
 
     // 150pt width forces more line wraps; 30pt height fits ~2 lines at 13.2pt each
-    region = zpdf.Region{ .x = 72, .y = y, .width = 150, .height = 30 };
+    region = zapdf.Region{ .x = 72, .y = y, .width = 150, .height = 30 };
     const overflow_text = "Line one fits here. Line two fits here. " ++
         "Line three overflows. Line four overflows.";
     const result = try writeText(&doc, &region, overflow_text, body_11, .{ .valign = .top_leading, .break_on_hyphens = false });
@@ -1019,13 +1019,13 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 72, .y = y }, "Region with Border:", header_12);
     y += 14.4;
 
-    var boxed_region = zpdf.Region{
+    var boxed_region = zapdf.Region{
         .x = 72,
         .y = y,
         .width = region_width,
         .height = 60,
-        .border = zpdf.Border.all,
-        .fill = zpdf.Color.rgbf(0.95, 0.95, 0.95),
+        .border = zapdf.Border.all,
+        .fill = zapdf.Color.rgbf(0.95, 0.95, 0.95),
     };
     try doc.drawRegion(boxed_region);
 
@@ -1037,12 +1037,12 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
-    const header_11 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .bold = true };
-    const body_11 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
+    const header_11 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .bold = true };
+    const body_11 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
 
     try doc.addPage(.{});
     var y: f64 = 50;
@@ -1058,7 +1058,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Long Justified Paragraph:", header_11);
     y += 14.4;
 
-    var region = zpdf.Region{ .x = 50, .y = y, .width = region_width, .height = 200 };
+    var region = zapdf.Region{ .x = 50, .y = y, .width = region_width, .height = 200 };
     const text1 = "Typography is the art and technique of arranging type to make written " ++
         "language legible, readable, and appealing when displayed. The arrangement " ++
         "of type involves selecting typefaces, point sizes, line lengths, line spacing, " ++
@@ -1073,7 +1073,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Narrow Column (200pt):", header_11);
     y += 14.4;
 
-    region = zpdf.Region{ .x = 50, .y = y, .width = 200, .height = 150 };
+    region = zapdf.Region{ .x = 50, .y = y, .width = 200, .height = 150 };
     const text2 = "In narrow columns, justified text requires more word spacing adjustment. " ++
         "Each line must stretch to fill the available width, which can create " ++
         "noticeable gaps between words. Good typography balances readability with " ++
@@ -1089,30 +1089,30 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Left Aligned:", header_11);
     y += 14.4;
 
-    region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+    region = zapdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
     _ = try doc.writeLine(&region, compare_text, body_11, .{ .alignment = .left, .break_on_hyphens = false, .valign = .top_leading });
     y = region.y + region.cursor_y + 12;
 
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Justified:", header_11);
     y += 14.4;
 
-    region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+    region = zapdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
     _ = try doc.writeLine(&region, compare_text, body_11, .{ .alignment = .justify, .break_on_hyphens = false, .valign = .top_leading });
 
     return doc.output();
 }
 
 fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_9 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 9 };
-    const body_8 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 8 };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
-    const header_9 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 9, .bold = true };
-    const courier_12 = zpdf.TextStyle{ .font = zpdf.Font.courier, .size = 12 };
-    const times_10 = zpdf.TextStyle{ .font = zpdf.Font.times, .size = 10 };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_9 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 9 };
+    const body_8 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 8 };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
+    const header_9 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 9, .bold = true };
+    const courier_12 = zapdf.TextStyle{ .font = zapdf.Font.courier, .size = 12 };
+    const times_10 = zapdf.TextStyle{ .font = zapdf.Font.times, .size = 10 };
 
     try doc.addPage(.{});
     var y: f64 = 40;
@@ -1126,7 +1126,7 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
         \\The greedy algorithm fills each line as much as possible. Knuth-Plass minimizes total
         \\"badness" (slack squared) across all lines, often leaving space on one line to improve others.
     ;
-    var exp_region = zpdf.Region{ .x = 50, .y = y, .width = 495, .height = 30 };
+    var exp_region = zapdf.Region{ .x = 50, .y = y, .width = 495, .height = 30 };
     {
         var st = doc.createStyledText();
         defer st.deinit();
@@ -1144,8 +1144,8 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     const mono_width = 14 * char_width;
 
     // Two small boxes side by side for monospace
-    var mono_greedy = zpdf.Region{ .x = 50, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
-    var mono_optimal = zpdf.Region{ .x = 180, .y = y, .width = mono_width, .height = 110, .border = zpdf.Border.all };
+    var mono_greedy = zapdf.Region{ .x = 50, .y = y, .width = mono_width, .height = 110, .border = zapdf.Border.all };
+    var mono_optimal = zapdf.Region{ .x = 180, .y = y, .width = mono_width, .height = 110, .border = zapdf.Border.all };
     _ = try writeText(&doc, &mono_greedy, mono_text, courier_12, .{ .line_breaking = .greedy, .valign = .top_leading });
     _ = try writeText(&doc, &mono_optimal, mono_text, courier_12, .{ .line_breaking = .optimal, .valign = .top_leading });
     try doc.drawRegion(mono_greedy);
@@ -1177,12 +1177,12 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 12;
 
     // Left column - Greedy
-    var left_col = zpdf.Region{ .x = left_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
+    var left_col = zapdf.Region{ .x = left_x, .y = y, .width = col_width, .height = col_height, .border = zapdf.Border.all };
     _ = try writeText(&doc, &left_col, lorem, times_10, .{ .line_breaking = .greedy, .alignment = .justify, .valign = .top_leading });
     try doc.drawRegion(left_col);
 
     // Right column - Optimal
-    var right_col = zpdf.Region{ .x = right_x, .y = y, .width = col_width, .height = col_height, .border = zpdf.Border.all };
+    var right_col = zapdf.Region{ .x = right_x, .y = y, .width = col_width, .height = col_height, .border = zapdf.Border.all };
     _ = try writeText(&doc, &right_col, lorem, times_10, .{ .line_breaking = .optimal, .alignment = .justify, .valign = .top_leading });
     try doc.drawRegion(right_col);
 
@@ -1190,12 +1190,12 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
-    const body_bold = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
+    const body_bold = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12, .bold = true };
 
     try doc.addPage(.{});
     var y: f64 = 50;
@@ -1209,23 +1209,23 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 20;
 
     // Red text
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text (RGB: 255, 0, 0)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.red });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text (RGB: 255, 0, 0)", .{ .font = zapdf.Font.helvetica, .size = 12, .color = zapdf.Color.red });
     y += 20;
 
     // Lime green text (CSS "green" is 0,128,0 - this is "lime")
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Lime text (RGB: 0, 255, 0)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.lime });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Lime text (RGB: 0, 255, 0)", .{ .font = zapdf.Font.helvetica, .size = 12, .color = zapdf.Color.lime });
     y += 20;
 
     // Blue text
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text (RGB: 0, 0, 255)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.blue });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text (RGB: 0, 0, 255)", .{ .font = zapdf.Font.helvetica, .size = 12, .color = zapdf.Color.blue });
     y += 20;
 
     // Gray text (using grayscale) - 128/255 = 0.502
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gray text (50% gray)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.greyscale(128.0 / 255.0) });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Gray text (50% gray)", .{ .font = zapdf.Font.helvetica, .size = 12, .color = zapdf.Color.greyscale(128.0 / 255.0) });
     y += 20;
 
     // Custom color (orange) - RGB 255, 165, 0
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Orange text (RGB: 255, 165, 0)", .{ .font = zpdf.Font.helvetica, .size = 12, .color = zpdf.Color.rgb(255, 165, 0) });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Orange text (RGB: 255, 165, 0)", .{ .font = zapdf.Font.helvetica, .size = 12, .color = zapdf.Color.rgb(255, 165, 0) });
     y += 20;
 
     // Back to black
@@ -1234,19 +1234,19 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Multiple colors on same line (using multiple writeAt calls)
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mixed colors: ", body_bold);
-    _ = try doc.writeAt(.{ .x = 145, .y = y }, "Red ", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true, .color = zpdf.Color.red });
-    _ = try doc.writeAt(.{ .x = 175, .y = y }, "Lime ", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true, .color = zpdf.Color.lime });
-    _ = try doc.writeAt(.{ .x = 220, .y = y }, "Blue", .{ .font = zpdf.Font.helvetica, .size = 12, .bold = true, .color = zpdf.Color.blue });
+    _ = try doc.writeAt(.{ .x = 145, .y = y }, "Red ", .{ .font = zapdf.Font.helvetica, .size = 12, .bold = true, .color = zapdf.Color.red });
+    _ = try doc.writeAt(.{ .x = 175, .y = y }, "Lime ", .{ .font = zapdf.Font.helvetica, .size = 12, .bold = true, .color = zapdf.Color.lime });
+    _ = try doc.writeAt(.{ .x = 220, .y = y }, "Blue", .{ .font = zapdf.Font.helvetica, .size = 12, .bold = true, .color = zapdf.Color.blue });
 
     return doc.output();
 }
 
 fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12, .bold = true };
 
     try doc.addPage(.{});
 
@@ -1268,11 +1268,11 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 10;
 
     // Colored line
-    try doc.drawLine(.{ .x = 50, .y = y }, .{ .x = 150, .y = y }, .{ .color = zpdf.Color.red, .width = 2 });
+    try doc.drawLine(.{ .x = 50, .y = y }, .{ .x = 150, .y = y }, .{ .color = zapdf.Color.red, .width = 2 });
     y += 10;
 
     // Dashed line
-    try doc.drawLine(.{ .x = 50, .y = y }, .{ .x = 150, .y = y }, .{ .color = zpdf.Color.blue, .dash = .{ .dash = 5, .gap = 3 } });
+    try doc.drawLine(.{ .x = 50, .y = y }, .{ .x = 150, .y = y }, .{ .color = zapdf.Color.blue, .dash = .{ .dash = 5, .gap = 3 } });
     y += 20;
 
     // === Rectangles ===
@@ -1283,12 +1283,12 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawRect(.{ .x = 50, .y = y, .width = 60, .height = 30 }, .{ .stroke = .{} });
 
     // Fill only
-    try doc.drawRect(.{ .x = 130, .y = y, .width = 60, .height = 30 }, .{ .fill = .{ .color = zpdf.Color.rgb(200, 200, 255) } });
+    try doc.drawRect(.{ .x = 130, .y = y, .width = 60, .height = 30 }, .{ .fill = .{ .color = zapdf.Color.rgb(200, 200, 255) } });
 
     // Fill and stroke
     try doc.drawRect(.{ .x = 210, .y = y, .width = 60, .height = 30 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 200, 200) },
-        .stroke = .{ .color = zpdf.Color.red, .width = 2 },
+        .fill = .{ .color = zapdf.Color.rgb(255, 200, 200) },
+        .stroke = .{ .color = zapdf.Color.red, .width = 2 },
     });
     y += 45;
 
@@ -1300,12 +1300,12 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawRoundedRect(.{ .x = 50, .y = y, .width = 60, .height = 30 }, 5, .{ .stroke = .{} });
 
     // Medium radius
-    try doc.drawRoundedRect(.{ .x = 130, .y = y, .width = 60, .height = 30 }, 10, .{ .fill = .{ .color = zpdf.Color.rgb(255, 230, 200) } });
+    try doc.drawRoundedRect(.{ .x = 130, .y = y, .width = 60, .height = 30 }, 10, .{ .fill = .{ .color = zapdf.Color.rgb(255, 230, 200) } });
 
     // Large radius (pill shape) - use 14 not 15 to avoid fpdf2 edge case bug
     try doc.drawRoundedRect(.{ .x = 210, .y = y, .width = 80, .height = 30 }, 14, .{
-        .fill = .{ .color = zpdf.Color.rgb(200, 230, 255) },
-        .stroke = .{ .color = zpdf.Color.blue, .width = 2 },
+        .fill = .{ .color = zapdf.Color.rgb(200, 230, 255) },
+        .stroke = .{ .color = zapdf.Color.blue, .width = 2 },
     });
     y += 45;
 
@@ -1317,12 +1317,12 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawCircle(.{ .x = 80, .y = y + 25 }, 25, .{ .stroke = .{} });
 
     // Filled circle
-    try doc.drawCircle(.{ .x = 160, .y = y + 25 }, 25, .{ .fill = .{ .color = zpdf.Color.rgb(200, 255, 200) } });
+    try doc.drawCircle(.{ .x = 160, .y = y + 25 }, 25, .{ .fill = .{ .color = zapdf.Color.rgb(200, 255, 200) } });
 
     // Fill and stroke
     try doc.drawCircle(.{ .x = 240, .y = y + 25 }, 25, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 255, 200) },
-        .stroke = .{ .color = zpdf.Color.rgb(0, 128, 0), .width = 2 },
+        .fill = .{ .color = zapdf.Color.rgb(255, 255, 200) },
+        .stroke = .{ .color = zapdf.Color.rgb(0, 128, 0), .width = 2 },
     });
     y += 65;
 
@@ -1335,12 +1335,12 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Vertical ellipse
     try doc.drawEllipse(.{ .x = 180, .y = y + 20, .width = 20, .height = 30 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 200, 255) },
+        .fill = .{ .color = zapdf.Color.rgb(255, 200, 255) },
         .stroke = .{},
     });
 
     // Large ellipse
-    try doc.drawEllipse(.{ .x = 280, .y = y + 20, .width = 50, .height = 20 }, .{ .fill = .{ .color = zpdf.Color.rgb(200, 255, 255) } });
+    try doc.drawEllipse(.{ .x = 280, .y = y + 20, .width = 50, .height = 20 }, .{ .fill = .{ .color = zapdf.Color.rgb(200, 255, 255) } });
     y += 55;
 
     // === Polygons ===
@@ -1348,7 +1348,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 15;
 
     // Triangle
-    const triangle = [_]zpdf.Point{
+    const triangle = [_]zapdf.Point{
         .{ .x = 80, .y = y },
         .{ .x = 50, .y = y + 40 },
         .{ .x = 110, .y = y + 40 },
@@ -1356,20 +1356,20 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.drawPolygon(&triangle, .{ .stroke = .{} });
 
     // Square
-    const square = [_]zpdf.Point{
+    const square = [_]zapdf.Point{
         .{ .x = 140, .y = y },
         .{ .x = 180, .y = y },
         .{ .x = 180, .y = y + 40 },
         .{ .x = 140, .y = y + 40 },
     };
-    try doc.drawPolygon(&square, .{ .fill = .{ .color = zpdf.Color.rgb(255, 220, 180) } });
+    try doc.drawPolygon(&square, .{ .fill = .{ .color = zapdf.Color.rgb(255, 220, 180) } });
 
     // Pentagon
     const std_math = @import("std").math;
     const cx: f64 = 250;
     const cy: f64 = y + 20;
     const r: f64 = 25;
-    var pentagon: [5]zpdf.Point = undefined;
+    var pentagon: [5]zapdf.Point = undefined;
     for (0..5) |i| {
         const angle = std_math.pi / 2.0 + @as(f64, @floatFromInt(i)) * 2.0 * std_math.pi / 5.0;
         pentagon[i] = .{
@@ -1378,19 +1378,19 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
         };
     }
     try doc.drawPolygon(&pentagon, .{
-        .fill = .{ .color = zpdf.Color.rgb(220, 220, 255) },
-        .stroke = .{ .color = zpdf.Color.rgb(100, 100, 200), .width = 2 },
+        .fill = .{ .color = zapdf.Color.rgb(220, 220, 255) },
+        .stroke = .{ .color = zapdf.Color.rgb(100, 100, 200), .width = 2 },
     });
 
     return doc.output();
 }
 
 fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     try doc.addPage(.{});
 
@@ -1419,11 +1419,11 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     try doc.addPage(.{});
 
@@ -1458,11 +1458,11 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10 };
 
     try doc.addPage(.{});
 
@@ -1482,8 +1482,8 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     try path.lineTo(.{ .x = 140, .y = y + 60 });
     try path.closePath();
     try doc.drawPath(&path, .{
-        .stroke = .{ .color = zpdf.Color.rgb(0, 0, 255), .width = 2 },
-        .fill = .{ .color = zpdf.Color.rgb(200, 200, 255) },
+        .stroke = .{ .color = zapdf.Color.rgb(0, 0, 255), .width = 2 },
+        .fill = .{ .color = zapdf.Color.rgb(200, 200, 255) },
     });
     y += 80;
 
@@ -1496,7 +1496,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     try bezier.moveTo(.{ .x = 50, .y = y + 50 });
     try bezier.curveTo(.{ .x = 100, .y = y }, .{ .x = 200, .y = y }, .{ .x = 250, .y = y + 50 });
     try doc.drawPath(&bezier, .{
-        .stroke = .{ .color = zpdf.Color.rgb(255, 0, 0), .width = 2 },
+        .stroke = .{ .color = zapdf.Color.rgb(255, 0, 0), .width = 2 },
     });
     y += 70;
 
@@ -1512,14 +1512,14 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
     defer left_heart.deinit();
     try left_heart.moveTo(.{ .x = hx, .y = hy });
     try left_heart.curveTo(.{ .x = hx - 30, .y = hy - 30 }, .{ .x = hx - 50, .y = hy + 10 }, .{ .x = hx, .y = hy + 50 });
-    try doc.drawPath(&left_heart, .{ .fill = .{ .color = zpdf.Color.rgb(255, 0, 0) } });
+    try doc.drawPath(&left_heart, .{ .fill = .{ .color = zapdf.Color.rgb(255, 0, 0) } });
 
     // Right half of heart
     var right_heart = doc.createPath();
     defer right_heart.deinit();
     try right_heart.moveTo(.{ .x = hx, .y = hy });
     try right_heart.curveTo(.{ .x = hx + 30, .y = hy - 30 }, .{ .x = hx + 50, .y = hy + 10 }, .{ .x = hx, .y = hy + 50 });
-    try doc.drawPath(&right_heart, .{ .fill = .{ .color = zpdf.Color.rgb(255, 0, 0) } });
+    try doc.drawPath(&right_heart, .{ .fill = .{ .color = zapdf.Color.rgb(255, 0, 0) } });
     y += 95; // Extra spacing to avoid overlap with zigzag label
 
     // Zigzag stroke
@@ -1535,17 +1535,17 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
         const py = if (i % 2 == 0) y + 30 else y;
         try zigzag.lineTo(.{ .x = px, .y = py });
     }
-    try doc.drawPath(&zigzag, .{ .stroke = .{ .color = zpdf.Color.rgb(0, 128, 0), .width = 3 } });
+    try doc.drawPath(&zigzag, .{ .stroke = .{ .color = zapdf.Color.rgb(0, 128, 0), .width = 3 } });
 
     return doc.output();
 }
 
 fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10 };
 
     try doc.addPage(.{});
 
@@ -1563,9 +1563,9 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .y0 = y,
         .x1 = 250,
         .y1 = y,
-        .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.rgb(255, 0, 0) },
-            .{ .offset = 1, .color = zpdf.Color.rgb(0, 0, 255) },
+        .stops = &[_]zapdf.ColorStop{
+            .{ .offset = 0, .color = zapdf.Color.rgb(255, 0, 0) },
+            .{ .offset = 1, .color = zapdf.Color.rgb(0, 0, 255) },
         },
     });
     try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 50 }, grad1);
@@ -1580,9 +1580,9 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .y0 = y,
         .x1 = 50,
         .y1 = y + 50,
-        .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.rgb(255, 255, 0) },
-            .{ .offset = 1, .color = zpdf.Color.rgb(0, 128, 0) },
+        .stops = &[_]zapdf.ColorStop{
+            .{ .offset = 0, .color = zapdf.Color.rgb(255, 255, 0) },
+            .{ .offset = 1, .color = zapdf.Color.rgb(0, 128, 0) },
         },
     });
     try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 50 }, grad2);
@@ -1597,10 +1597,10 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .y0 = y,
         .x1 = 250,
         .y1 = y,
-        .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.rgb(255, 0, 0) },
-            .{ .offset = 0.5, .color = zpdf.Color.rgb(255, 255, 255) },
-            .{ .offset = 1, .color = zpdf.Color.rgb(0, 0, 255) },
+        .stops = &[_]zapdf.ColorStop{
+            .{ .offset = 0, .color = zapdf.Color.rgb(255, 0, 0) },
+            .{ .offset = 0.5, .color = zapdf.Color.rgb(255, 255, 255) },
+            .{ .offset = 1, .color = zapdf.Color.rgb(0, 0, 255) },
         },
     });
     try doc.fillRectGradient(.{ .x = 50, .y = y, .width = 200, .height = 50 }, grad3);
@@ -1617,9 +1617,9 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
         .x1 = 150,
         .y1 = y + 40,
         .r1 = 60,
-        .stops = &[_]zpdf.ColorStop{
-            .{ .offset = 0, .color = zpdf.Color.rgb(255, 255, 255) },
-            .{ .offset = 1, .color = zpdf.Color.rgb(0, 0, 128) },
+        .stops = &[_]zapdf.ColorStop{
+            .{ .offset = 0, .color = zapdf.Color.rgb(255, 255, 255) },
+            .{ .offset = 1, .color = zapdf.Color.rgb(0, 0, 128) },
         },
         .extend_after = false,
     });
@@ -1629,11 +1629,11 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10 };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10 };
 
     try doc.addPage(.{});
 
@@ -1648,17 +1648,17 @@ fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // First rect - solid red
     try doc.drawRect(.{ .x = 50, .y = y, .width = 120, .height = 80 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 0, 0) },
+        .fill = .{ .color = zapdf.Color.rgb(255, 0, 0) },
     });
 
     // Second rect - blue with 50% opacity
     try doc.drawRect(.{ .x = 90, .y = y + 20, .width = 120, .height = 80 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(0, 0, 255), .opacity = 0.5 },
+        .fill = .{ .color = zapdf.Color.rgb(0, 0, 255), .opacity = 0.5 },
     });
 
     // Third rect - green with 50% opacity
     try doc.drawRect(.{ .x = 130, .y = y + 40, .width = 120, .height = 80 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(0, 200, 0), .opacity = 0.5 },
+        .fill = .{ .color = zapdf.Color.rgb(0, 200, 0), .opacity = 0.5 },
     });
     y += 150;
 
@@ -1669,7 +1669,7 @@ fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
     const opacities = [_]f64{ 1.0, 0.75, 0.5, 0.25 };
     for (opacities, 0..) |op, i| {
         try doc.drawRect(.{ .x = 50 + @as(f64, @floatFromInt(i)) * 55, .y = y, .width = 50, .height = 50 }, .{
-            .fill = .{ .color = zpdf.Color.rgb(0, 100, 200), .opacity = op },
+            .fill = .{ .color = zapdf.Color.rgb(0, 100, 200), .opacity = op },
         });
     }
     y += 80;
@@ -1680,13 +1680,13 @@ fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Solid red line
     try doc.drawLine(.{ .x = 50, .y = y }, .{ .x = 250, .y = y + 60 }, .{
-        .color = zpdf.Color.rgb(255, 0, 0),
+        .color = zapdf.Color.rgb(255, 0, 0),
         .width = 8,
     });
 
     // Blue line with 50% stroke opacity
     try doc.drawLine(.{ .x = 50, .y = y + 60 }, .{ .x = 250, .y = y }, .{
-        .color = zpdf.Color.rgb(0, 0, 255),
+        .color = zapdf.Color.rgb(0, 0, 255),
         .width = 8,
         .opacity = 0.5,
     });
@@ -1698,14 +1698,14 @@ fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Rounded rect with fill opacity 0.6, stroke opacity 0.8
     try doc.drawRoundedRect(.{ .x = 50, .y = y, .width = 100, .height = 60 }, 10, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 200, 0), .opacity = 0.6 },
-        .stroke = .{ .color = zpdf.Color.rgb(100, 0, 100), .width = 4, .opacity = 0.8 },
+        .fill = .{ .color = zapdf.Color.rgb(255, 200, 0), .opacity = 0.6 },
+        .stroke = .{ .color = zapdf.Color.rgb(100, 0, 100), .width = 4, .opacity = 0.8 },
     });
 
     // Semi-transparent circle
     try doc.drawCircle(.{ .x = 250, .y = y + 30 }, 35, .{
-        .fill = .{ .color = zpdf.Color.rgb(0, 180, 180), .opacity = 0.4 },
-        .stroke = .{ .color = zpdf.Color.black, .width = 2 },
+        .fill = .{ .color = zapdf.Color.rgb(0, 180, 180), .opacity = 0.4 },
+        .stroke = .{ .color = zapdf.Color.black, .width = 2 },
     });
     y += 100;
 
@@ -1714,25 +1714,25 @@ fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 20;
 
     try doc.drawEllipse(.{ .x = 50, .y = y, .width = 120, .height = 60 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(200, 100, 50), .opacity = 0.7 },
+        .fill = .{ .color = zapdf.Color.rgb(200, 100, 50), .opacity = 0.7 },
     });
 
     return doc.output();
 }
 
 fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const body_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
 
     var buf: [64]u8 = undefined;
-    var size: zpdf.PageSize = undefined;
+    var size: zapdf.PageSize = undefined;
     var len: usize = undefined;
 
     // Page 1: A4 portrait (default)
-    size = zpdf.PageSize.A4;
+    size = zapdf.PageSize.A4;
     try doc.addPage(.{ .size = size });
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1: A4 Portrait (595 x 842)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{size.width}) catch unreachable).len;
@@ -1741,7 +1741,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 2: A4 landscape
-    size = zpdf.PageSize.A4.landscape();
+    size = zapdf.PageSize.A4.landscape();
     try doc.addPage(.{ .size = size });
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: A4 Landscape (842 x 595)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{size.width}) catch unreachable).len;
@@ -1750,7 +1750,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 3: Letter portrait
-    size = zpdf.PageSize.Letter;
+    size = zapdf.PageSize.Letter;
     try doc.addPage(.{ .size = size });
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 3: Letter Portrait (612 x 792)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{size.width}) catch unreachable).len;
@@ -1759,7 +1759,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, buf[0..len], body_12);
 
     // Page 4: Letter landscape
-    size = zpdf.PageSize.Letter.landscape();
+    size = zapdf.PageSize.Letter.landscape();
     try doc.addPage(.{ .size = size });
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 4: Letter Landscape (792 x 612)", title_style);
     len = (std.fmt.bufPrint(&buf, "Width: {d:.2} pt", .{size.width}) catch unreachable).len;
@@ -1780,10 +1780,10 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
 
     try doc.addPage(.{});
 
@@ -1791,159 +1791,159 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = 25 }, "CSS Named Colors", title_style);
 
     // All 148 CSS named colors (excluding aliases: grey variants, aqua, fuchsia)
-    const ColorDef = struct { name: []const u8, color: zpdf.Color };
+    const ColorDef = struct { name: []const u8, color: zapdf.Color };
     const colors = [_]ColorDef{
         // Blacks and Grays (11)
-        .{ .name = "black", .color = zpdf.Color.black },
-        .{ .name = "white", .color = zpdf.Color.white },
-        .{ .name = "gray", .color = zpdf.Color.gray },
-        .{ .name = "silver", .color = zpdf.Color.silver },
-        .{ .name = "darkgray", .color = zpdf.Color.darkgray },
-        .{ .name = "dimgray", .color = zpdf.Color.dimgray },
-        .{ .name = "lightgray", .color = zpdf.Color.lightgray },
-        .{ .name = "gainsboro", .color = zpdf.Color.gainsboro },
-        .{ .name = "whitesmoke", .color = zpdf.Color.whitesmoke },
-        .{ .name = "slategray", .color = zpdf.Color.slategray },
-        .{ .name = "lightslategray", .color = zpdf.Color.lightslategray },
-        .{ .name = "darkslategray", .color = zpdf.Color.darkslategray },
+        .{ .name = "black", .color = zapdf.Color.black },
+        .{ .name = "white", .color = zapdf.Color.white },
+        .{ .name = "gray", .color = zapdf.Color.gray },
+        .{ .name = "silver", .color = zapdf.Color.silver },
+        .{ .name = "darkgray", .color = zapdf.Color.darkgray },
+        .{ .name = "dimgray", .color = zapdf.Color.dimgray },
+        .{ .name = "lightgray", .color = zapdf.Color.lightgray },
+        .{ .name = "gainsboro", .color = zapdf.Color.gainsboro },
+        .{ .name = "whitesmoke", .color = zapdf.Color.whitesmoke },
+        .{ .name = "slategray", .color = zapdf.Color.slategray },
+        .{ .name = "lightslategray", .color = zapdf.Color.lightslategray },
+        .{ .name = "darkslategray", .color = zapdf.Color.darkslategray },
         // Reds (7)
-        .{ .name = "red", .color = zpdf.Color.red },
-        .{ .name = "darkred", .color = zpdf.Color.darkred },
-        .{ .name = "firebrick", .color = zpdf.Color.firebrick },
-        .{ .name = "indianred", .color = zpdf.Color.indianred },
-        .{ .name = "lightcoral", .color = zpdf.Color.lightcoral },
-        .{ .name = "crimson", .color = zpdf.Color.crimson },
-        .{ .name = "maroon", .color = zpdf.Color.maroon },
+        .{ .name = "red", .color = zapdf.Color.red },
+        .{ .name = "darkred", .color = zapdf.Color.darkred },
+        .{ .name = "firebrick", .color = zapdf.Color.firebrick },
+        .{ .name = "indianred", .color = zapdf.Color.indianred },
+        .{ .name = "lightcoral", .color = zapdf.Color.lightcoral },
+        .{ .name = "crimson", .color = zapdf.Color.crimson },
+        .{ .name = "maroon", .color = zapdf.Color.maroon },
         // Pinks (6)
-        .{ .name = "pink", .color = zpdf.Color.pink },
-        .{ .name = "lightpink", .color = zpdf.Color.lightpink },
-        .{ .name = "hotpink", .color = zpdf.Color.hotpink },
-        .{ .name = "deeppink", .color = zpdf.Color.deeppink },
-        .{ .name = "palevioletred", .color = zpdf.Color.palevioletred },
-        .{ .name = "mediumvioletred", .color = zpdf.Color.mediumvioletred },
+        .{ .name = "pink", .color = zapdf.Color.pink },
+        .{ .name = "lightpink", .color = zapdf.Color.lightpink },
+        .{ .name = "hotpink", .color = zapdf.Color.hotpink },
+        .{ .name = "deeppink", .color = zapdf.Color.deeppink },
+        .{ .name = "palevioletred", .color = zapdf.Color.palevioletred },
+        .{ .name = "mediumvioletred", .color = zapdf.Color.mediumvioletred },
         // Oranges (5)
-        .{ .name = "orange", .color = zpdf.Color.orange },
-        .{ .name = "darkorange", .color = zpdf.Color.darkorange },
-        .{ .name = "orangered", .color = zpdf.Color.orangered },
-        .{ .name = "tomato", .color = zpdf.Color.tomato },
-        .{ .name = "coral", .color = zpdf.Color.coral },
+        .{ .name = "orange", .color = zapdf.Color.orange },
+        .{ .name = "darkorange", .color = zapdf.Color.darkorange },
+        .{ .name = "orangered", .color = zapdf.Color.orangered },
+        .{ .name = "tomato", .color = zapdf.Color.tomato },
+        .{ .name = "coral", .color = zapdf.Color.coral },
         // Yellows (11)
-        .{ .name = "yellow", .color = zpdf.Color.yellow },
-        .{ .name = "lightyellow", .color = zpdf.Color.lightyellow },
-        .{ .name = "lemonchiffon", .color = zpdf.Color.lemonchiffon },
-        .{ .name = "lightgoldenrodyellow", .color = zpdf.Color.lightgoldenrodyellow },
-        .{ .name = "papayawhip", .color = zpdf.Color.papayawhip },
-        .{ .name = "moccasin", .color = zpdf.Color.moccasin },
-        .{ .name = "peachpuff", .color = zpdf.Color.peachpuff },
-        .{ .name = "palegoldenrod", .color = zpdf.Color.palegoldenrod },
-        .{ .name = "khaki", .color = zpdf.Color.khaki },
-        .{ .name = "darkkhaki", .color = zpdf.Color.darkkhaki },
-        .{ .name = "gold", .color = zpdf.Color.gold },
+        .{ .name = "yellow", .color = zapdf.Color.yellow },
+        .{ .name = "lightyellow", .color = zapdf.Color.lightyellow },
+        .{ .name = "lemonchiffon", .color = zapdf.Color.lemonchiffon },
+        .{ .name = "lightgoldenrodyellow", .color = zapdf.Color.lightgoldenrodyellow },
+        .{ .name = "papayawhip", .color = zapdf.Color.papayawhip },
+        .{ .name = "moccasin", .color = zapdf.Color.moccasin },
+        .{ .name = "peachpuff", .color = zapdf.Color.peachpuff },
+        .{ .name = "palegoldenrod", .color = zapdf.Color.palegoldenrod },
+        .{ .name = "khaki", .color = zapdf.Color.khaki },
+        .{ .name = "darkkhaki", .color = zapdf.Color.darkkhaki },
+        .{ .name = "gold", .color = zapdf.Color.gold },
         // Browns (11)
-        .{ .name = "brown", .color = zpdf.Color.brown },
-        .{ .name = "saddlebrown", .color = zpdf.Color.saddlebrown },
-        .{ .name = "sienna", .color = zpdf.Color.sienna },
-        .{ .name = "chocolate", .color = zpdf.Color.chocolate },
-        .{ .name = "peru", .color = zpdf.Color.peru },
-        .{ .name = "sandybrown", .color = zpdf.Color.sandybrown },
-        .{ .name = "burlywood", .color = zpdf.Color.burlywood },
-        .{ .name = "tan", .color = zpdf.Color.tan },
-        .{ .name = "rosybrown", .color = zpdf.Color.rosybrown },
-        .{ .name = "goldenrod", .color = zpdf.Color.goldenrod },
-        .{ .name = "darkgoldenrod", .color = zpdf.Color.darkgoldenrod },
+        .{ .name = "brown", .color = zapdf.Color.brown },
+        .{ .name = "saddlebrown", .color = zapdf.Color.saddlebrown },
+        .{ .name = "sienna", .color = zapdf.Color.sienna },
+        .{ .name = "chocolate", .color = zapdf.Color.chocolate },
+        .{ .name = "peru", .color = zapdf.Color.peru },
+        .{ .name = "sandybrown", .color = zapdf.Color.sandybrown },
+        .{ .name = "burlywood", .color = zapdf.Color.burlywood },
+        .{ .name = "tan", .color = zapdf.Color.tan },
+        .{ .name = "rosybrown", .color = zapdf.Color.rosybrown },
+        .{ .name = "goldenrod", .color = zapdf.Color.goldenrod },
+        .{ .name = "darkgoldenrod", .color = zapdf.Color.darkgoldenrod },
         // Greens (21)
-        .{ .name = "green", .color = zpdf.Color.green },
-        .{ .name = "lime", .color = zpdf.Color.lime },
-        .{ .name = "limegreen", .color = zpdf.Color.limegreen },
-        .{ .name = "lightgreen", .color = zpdf.Color.lightgreen },
-        .{ .name = "palegreen", .color = zpdf.Color.palegreen },
-        .{ .name = "darkgreen", .color = zpdf.Color.darkgreen },
-        .{ .name = "forestgreen", .color = zpdf.Color.forestgreen },
-        .{ .name = "seagreen", .color = zpdf.Color.seagreen },
-        .{ .name = "mediumseagreen", .color = zpdf.Color.mediumseagreen },
-        .{ .name = "springgreen", .color = zpdf.Color.springgreen },
-        .{ .name = "mediumspringgreen", .color = zpdf.Color.mediumspringgreen },
-        .{ .name = "mediumaquamarine", .color = zpdf.Color.mediumaquamarine },
-        .{ .name = "aquamarine", .color = zpdf.Color.aquamarine },
-        .{ .name = "darkseagreen", .color = zpdf.Color.darkseagreen },
-        .{ .name = "yellowgreen", .color = zpdf.Color.yellowgreen },
-        .{ .name = "greenyellow", .color = zpdf.Color.greenyellow },
-        .{ .name = "chartreuse", .color = zpdf.Color.chartreuse },
-        .{ .name = "lawngreen", .color = zpdf.Color.lawngreen },
-        .{ .name = "olive", .color = zpdf.Color.olive },
-        .{ .name = "olivedrab", .color = zpdf.Color.olivedrab },
-        .{ .name = "darkolivegreen", .color = zpdf.Color.darkolivegreen },
+        .{ .name = "green", .color = zapdf.Color.green },
+        .{ .name = "lime", .color = zapdf.Color.lime },
+        .{ .name = "limegreen", .color = zapdf.Color.limegreen },
+        .{ .name = "lightgreen", .color = zapdf.Color.lightgreen },
+        .{ .name = "palegreen", .color = zapdf.Color.palegreen },
+        .{ .name = "darkgreen", .color = zapdf.Color.darkgreen },
+        .{ .name = "forestgreen", .color = zapdf.Color.forestgreen },
+        .{ .name = "seagreen", .color = zapdf.Color.seagreen },
+        .{ .name = "mediumseagreen", .color = zapdf.Color.mediumseagreen },
+        .{ .name = "springgreen", .color = zapdf.Color.springgreen },
+        .{ .name = "mediumspringgreen", .color = zapdf.Color.mediumspringgreen },
+        .{ .name = "mediumaquamarine", .color = zapdf.Color.mediumaquamarine },
+        .{ .name = "aquamarine", .color = zapdf.Color.aquamarine },
+        .{ .name = "darkseagreen", .color = zapdf.Color.darkseagreen },
+        .{ .name = "yellowgreen", .color = zapdf.Color.yellowgreen },
+        .{ .name = "greenyellow", .color = zapdf.Color.greenyellow },
+        .{ .name = "chartreuse", .color = zapdf.Color.chartreuse },
+        .{ .name = "lawngreen", .color = zapdf.Color.lawngreen },
+        .{ .name = "olive", .color = zapdf.Color.olive },
+        .{ .name = "olivedrab", .color = zapdf.Color.olivedrab },
+        .{ .name = "darkolivegreen", .color = zapdf.Color.darkolivegreen },
         // Cyans (11)
-        .{ .name = "cyan", .color = zpdf.Color.cyan },
-        .{ .name = "lightcyan", .color = zpdf.Color.lightcyan },
-        .{ .name = "paleturquoise", .color = zpdf.Color.paleturquoise },
-        .{ .name = "turquoise", .color = zpdf.Color.turquoise },
-        .{ .name = "mediumturquoise", .color = zpdf.Color.mediumturquoise },
-        .{ .name = "darkturquoise", .color = zpdf.Color.darkturquoise },
-        .{ .name = "darkcyan", .color = zpdf.Color.darkcyan },
-        .{ .name = "teal", .color = zpdf.Color.teal },
-        .{ .name = "lightseagreen", .color = zpdf.Color.lightseagreen },
-        .{ .name = "cadetblue", .color = zpdf.Color.cadetblue },
+        .{ .name = "cyan", .color = zapdf.Color.cyan },
+        .{ .name = "lightcyan", .color = zapdf.Color.lightcyan },
+        .{ .name = "paleturquoise", .color = zapdf.Color.paleturquoise },
+        .{ .name = "turquoise", .color = zapdf.Color.turquoise },
+        .{ .name = "mediumturquoise", .color = zapdf.Color.mediumturquoise },
+        .{ .name = "darkturquoise", .color = zapdf.Color.darkturquoise },
+        .{ .name = "darkcyan", .color = zapdf.Color.darkcyan },
+        .{ .name = "teal", .color = zapdf.Color.teal },
+        .{ .name = "lightseagreen", .color = zapdf.Color.lightseagreen },
+        .{ .name = "cadetblue", .color = zapdf.Color.cadetblue },
         // Blues (16)
-        .{ .name = "blue", .color = zpdf.Color.blue },
-        .{ .name = "navy", .color = zpdf.Color.navy },
-        .{ .name = "darkblue", .color = zpdf.Color.darkblue },
-        .{ .name = "mediumblue", .color = zpdf.Color.mediumblue },
-        .{ .name = "midnightblue", .color = zpdf.Color.midnightblue },
-        .{ .name = "royalblue", .color = zpdf.Color.royalblue },
-        .{ .name = "steelblue", .color = zpdf.Color.steelblue },
-        .{ .name = "dodgerblue", .color = zpdf.Color.dodgerblue },
-        .{ .name = "deepskyblue", .color = zpdf.Color.deepskyblue },
-        .{ .name = "cornflowerblue", .color = zpdf.Color.cornflowerblue },
-        .{ .name = "skyblue", .color = zpdf.Color.skyblue },
-        .{ .name = "lightskyblue", .color = zpdf.Color.lightskyblue },
-        .{ .name = "lightblue", .color = zpdf.Color.lightblue },
-        .{ .name = "lightsteelblue", .color = zpdf.Color.lightsteelblue },
-        .{ .name = "powderblue", .color = zpdf.Color.powderblue },
-        .{ .name = "aliceblue", .color = zpdf.Color.aliceblue },
+        .{ .name = "blue", .color = zapdf.Color.blue },
+        .{ .name = "navy", .color = zapdf.Color.navy },
+        .{ .name = "darkblue", .color = zapdf.Color.darkblue },
+        .{ .name = "mediumblue", .color = zapdf.Color.mediumblue },
+        .{ .name = "midnightblue", .color = zapdf.Color.midnightblue },
+        .{ .name = "royalblue", .color = zapdf.Color.royalblue },
+        .{ .name = "steelblue", .color = zapdf.Color.steelblue },
+        .{ .name = "dodgerblue", .color = zapdf.Color.dodgerblue },
+        .{ .name = "deepskyblue", .color = zapdf.Color.deepskyblue },
+        .{ .name = "cornflowerblue", .color = zapdf.Color.cornflowerblue },
+        .{ .name = "skyblue", .color = zapdf.Color.skyblue },
+        .{ .name = "lightskyblue", .color = zapdf.Color.lightskyblue },
+        .{ .name = "lightblue", .color = zapdf.Color.lightblue },
+        .{ .name = "lightsteelblue", .color = zapdf.Color.lightsteelblue },
+        .{ .name = "powderblue", .color = zapdf.Color.powderblue },
+        .{ .name = "aliceblue", .color = zapdf.Color.aliceblue },
         // Purples (18)
-        .{ .name = "purple", .color = zpdf.Color.purple },
-        .{ .name = "magenta", .color = zpdf.Color.magenta },
-        .{ .name = "darkmagenta", .color = zpdf.Color.darkmagenta },
-        .{ .name = "indigo", .color = zpdf.Color.indigo },
-        .{ .name = "darkslateblue", .color = zpdf.Color.darkslateblue },
-        .{ .name = "slateblue", .color = zpdf.Color.slateblue },
-        .{ .name = "mediumslateblue", .color = zpdf.Color.mediumslateblue },
-        .{ .name = "mediumpurple", .color = zpdf.Color.mediumpurple },
-        .{ .name = "blueviolet", .color = zpdf.Color.blueviolet },
-        .{ .name = "darkviolet", .color = zpdf.Color.darkviolet },
-        .{ .name = "darkorchid", .color = zpdf.Color.darkorchid },
-        .{ .name = "mediumorchid", .color = zpdf.Color.mediumorchid },
-        .{ .name = "orchid", .color = zpdf.Color.orchid },
-        .{ .name = "violet", .color = zpdf.Color.violet },
-        .{ .name = "plum", .color = zpdf.Color.plum },
-        .{ .name = "thistle", .color = zpdf.Color.thistle },
-        .{ .name = "lavender", .color = zpdf.Color.lavender },
-        .{ .name = "rebeccapurple", .color = zpdf.Color.rebeccapurple },
+        .{ .name = "purple", .color = zapdf.Color.purple },
+        .{ .name = "magenta", .color = zapdf.Color.magenta },
+        .{ .name = "darkmagenta", .color = zapdf.Color.darkmagenta },
+        .{ .name = "indigo", .color = zapdf.Color.indigo },
+        .{ .name = "darkslateblue", .color = zapdf.Color.darkslateblue },
+        .{ .name = "slateblue", .color = zapdf.Color.slateblue },
+        .{ .name = "mediumslateblue", .color = zapdf.Color.mediumslateblue },
+        .{ .name = "mediumpurple", .color = zapdf.Color.mediumpurple },
+        .{ .name = "blueviolet", .color = zapdf.Color.blueviolet },
+        .{ .name = "darkviolet", .color = zapdf.Color.darkviolet },
+        .{ .name = "darkorchid", .color = zapdf.Color.darkorchid },
+        .{ .name = "mediumorchid", .color = zapdf.Color.mediumorchid },
+        .{ .name = "orchid", .color = zapdf.Color.orchid },
+        .{ .name = "violet", .color = zapdf.Color.violet },
+        .{ .name = "plum", .color = zapdf.Color.plum },
+        .{ .name = "thistle", .color = zapdf.Color.thistle },
+        .{ .name = "lavender", .color = zapdf.Color.lavender },
+        .{ .name = "rebeccapurple", .color = zapdf.Color.rebeccapurple },
         // Whites and off-whites (19)
-        .{ .name = "snow", .color = zpdf.Color.snow },
-        .{ .name = "honeydew", .color = zpdf.Color.honeydew },
-        .{ .name = "mintcream", .color = zpdf.Color.mintcream },
-        .{ .name = "azure", .color = zpdf.Color.azure },
-        .{ .name = "ghostwhite", .color = zpdf.Color.ghostwhite },
-        .{ .name = "floralwhite", .color = zpdf.Color.floralwhite },
-        .{ .name = "ivory", .color = zpdf.Color.ivory },
-        .{ .name = "beige", .color = zpdf.Color.beige },
-        .{ .name = "linen", .color = zpdf.Color.linen },
-        .{ .name = "oldlace", .color = zpdf.Color.oldlace },
-        .{ .name = "antiquewhite", .color = zpdf.Color.antiquewhite },
-        .{ .name = "bisque", .color = zpdf.Color.bisque },
-        .{ .name = "blanchedalmond", .color = zpdf.Color.blanchedalmond },
-        .{ .name = "navajowhite", .color = zpdf.Color.navajowhite },
-        .{ .name = "wheat", .color = zpdf.Color.wheat },
-        .{ .name = "cornsilk", .color = zpdf.Color.cornsilk },
-        .{ .name = "seashell", .color = zpdf.Color.seashell },
-        .{ .name = "lavenderblush", .color = zpdf.Color.lavenderblush },
-        .{ .name = "mistyrose", .color = zpdf.Color.mistyrose },
+        .{ .name = "snow", .color = zapdf.Color.snow },
+        .{ .name = "honeydew", .color = zapdf.Color.honeydew },
+        .{ .name = "mintcream", .color = zapdf.Color.mintcream },
+        .{ .name = "azure", .color = zapdf.Color.azure },
+        .{ .name = "ghostwhite", .color = zapdf.Color.ghostwhite },
+        .{ .name = "floralwhite", .color = zapdf.Color.floralwhite },
+        .{ .name = "ivory", .color = zapdf.Color.ivory },
+        .{ .name = "beige", .color = zapdf.Color.beige },
+        .{ .name = "linen", .color = zapdf.Color.linen },
+        .{ .name = "oldlace", .color = zapdf.Color.oldlace },
+        .{ .name = "antiquewhite", .color = zapdf.Color.antiquewhite },
+        .{ .name = "bisque", .color = zapdf.Color.bisque },
+        .{ .name = "blanchedalmond", .color = zapdf.Color.blanchedalmond },
+        .{ .name = "navajowhite", .color = zapdf.Color.navajowhite },
+        .{ .name = "wheat", .color = zapdf.Color.wheat },
+        .{ .name = "cornsilk", .color = zapdf.Color.cornsilk },
+        .{ .name = "seashell", .color = zapdf.Color.seashell },
+        .{ .name = "lavenderblush", .color = zapdf.Color.lavenderblush },
+        .{ .name = "mistyrose", .color = zapdf.Color.mistyrose },
         // Salmons (3)
-        .{ .name = "salmon", .color = zpdf.Color.salmon },
-        .{ .name = "lightsalmon", .color = zpdf.Color.lightsalmon },
-        .{ .name = "darksalmon", .color = zpdf.Color.darksalmon },
+        .{ .name = "salmon", .color = zapdf.Color.salmon },
+        .{ .name = "lightsalmon", .color = zapdf.Color.lightsalmon },
+        .{ .name = "darksalmon", .color = zapdf.Color.darksalmon },
     };
 
     // Layout: 8 columns to fit 134 colors on one page
@@ -1955,7 +1955,7 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
     const gap_x: f64 = 6;
     const gap_y: f64 = 14;
 
-    const label_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 5 };
+    const label_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 5 };
 
     for (colors, 0..) |cdef, i| {
         const col = i % cols;
@@ -1966,7 +1966,7 @@ fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
         // Draw swatch
         try doc.drawRect(.{ .x = x, .y = y, .width = swatch_w, .height = swatch_h }, .{
             .fill = .{ .color = cdef.color },
-            .stroke = .{ .color = zpdf.Color.black, .width = 0.25 },
+            .stroke = .{ .color = zapdf.Color.black, .width = 0.25 },
         });
 
         // Draw label below swatch (offset by font size since PDF text uses baseline)
@@ -1989,11 +1989,11 @@ test "integration: hello_world PDF" {
 }
 
 fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     try doc.addPage(.{});
 
@@ -2015,11 +2015,11 @@ fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     try doc.addPage(.{});
 
@@ -2037,11 +2037,11 @@ fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     try doc.addPage(.{});
 
@@ -2064,12 +2064,12 @@ fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_24 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
-    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
-    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+    const title_24 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24, .bold = true };
+    const title_18 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 18, .bold = true };
+    const body_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
 
     // Page 1: Table of Contents with internal links
     try doc.addPage(.{});
@@ -2079,13 +2079,13 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // TOC entry 1 - link to page 2
     const toc1 = try doc.writeAt(.{ .x = 50, .y = y }, "Chapter 1: Introduction", body_12);
-    const dest1 = zpdf.Destination{ .page_index = 1, .y = 50 };
+    const dest1 = zapdf.Destination{ .page_index = 1, .y = 50 };
     try doc.addLink(toc1, dest1);
     y += 20;
 
     // TOC entry 2 - link to page 3
     const toc2 = try doc.writeAt(.{ .x = 50, .y = y }, "Chapter 2: Getting Started", body_12);
-    const dest2 = zpdf.Destination{ .page_index = 2, .y = 50 };
+    const dest2 = zapdf.Destination{ .page_index = 2, .y = 50 };
     try doc.addLink(toc2, dest2);
     y += 20;
 
@@ -2105,7 +2105,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Link back to TOC
     const back1 = try doc.writeAt(.{ .x = 50, .y = 700 }, "Back to Table of Contents", body_12);
-    const dest_toc = zpdf.Destination{ .page_index = 0, .y = 50 };
+    const dest_toc = zapdf.Destination{ .page_index = 0, .y = 50 };
     try doc.addLink(back1, dest_toc);
 
     // Page 3: Chapter 2
@@ -2123,13 +2123,13 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_24 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24, .bold = true };
-    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
-    const title_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
-    const body_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12 };
+    const title_24 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24, .bold = true };
+    const title_18 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 18, .bold = true };
+    const title_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
+    const body_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
 
     // Build outline as we go
     var outline = doc.createOutline();
@@ -2193,15 +2193,15 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
-    const header_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
-    const body_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14 };
-    const underline_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } };
-    const strike_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .strikethrough = true } };
-    const both_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true, .strikethrough = true } };
+    const title_18 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 18, .bold = true };
+    const header_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
+    const body_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14 };
+    const underline_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } };
+    const strike_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .decoration = .{ .strikethrough = true } };
+    const both_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true, .strikethrough = true } };
 
     try doc.addPage(.{});
 
@@ -2232,37 +2232,37 @@ fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Different font sizes:", header_14);
     y += 25;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "10pt underlined", .{ .font = zpdf.Font.helvetica, .size = 10, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "10pt underlined", .{ .font = zapdf.Font.helvetica, .size = 10, .decoration = .{ .underline = true } });
     y += 20;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "14pt underlined", .{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "14pt underlined", .{ .font = zapdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } });
     y += 25;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "20pt underlined", .{ .font = zpdf.Font.helvetica, .size = 20, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "20pt underlined", .{ .font = zapdf.Font.helvetica, .size = 20, .decoration = .{ .underline = true } });
     y += 40;
 
     // Different fonts
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Different fonts:", header_14);
     y += 25;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica underlined", .{ .font = zpdf.Font.helvetica, .size = 12, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Helvetica underlined", .{ .font = zapdf.Font.helvetica, .size = 12, .decoration = .{ .underline = true } });
     y += 20;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Times Roman underlined", .{ .font = zpdf.Font.times, .size = 12, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Times Roman underlined", .{ .font = zapdf.Font.times, .size = 12, .decoration = .{ .underline = true } });
     y += 20;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier underlined", .{ .font = zpdf.Font.courier, .size = 12, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Courier underlined", .{ .font = zapdf.Font.courier, .size = 12, .decoration = .{ .underline = true } });
 
     return doc.output();
 }
 
 fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_18 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 18, .bold = true };
-    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
-    const body_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14 };
+    const title_18 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 18, .bold = true };
+    const header_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12, .bold = true };
+    const body_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14 };
 
     try doc.addPage(.{});
 
@@ -2278,30 +2278,30 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     y += line_height;
 
     // Color only
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(1, 0, 0) });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red text", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.rgbf(1, 0, 0) });
     y += line_height;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Green text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0, 0.5, 0) });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Green text", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.rgbf(0, 0.5, 0) });
     y += line_height;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0, 0, 1) });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue text", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.rgbf(0, 0, 1) });
     y += line_height + 10;
 
     // Decoration only
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Underlined (black)", .{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Underlined (black)", .{ .font = zapdf.Font.helvetica, .size = 14, .decoration = .{ .underline = true } });
     y += line_height;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Strikethrough (black)", .{ .font = zpdf.Font.helvetica, .size = 14, .decoration = .{ .strikethrough = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Strikethrough (black)", .{ .font = zapdf.Font.helvetica, .size = 14, .decoration = .{ .strikethrough = true } });
     y += line_height + 10;
 
     // Color + decoration combined
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red underlined", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(1, 0, 0), .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Red underlined", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.rgbf(1, 0, 0), .decoration = .{ .underline = true } });
     y += line_height;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue strikethrough", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0, 0, 1), .decoration = .{ .strikethrough = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Blue strikethrough", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.rgbf(0, 0, 1), .decoration = .{ .strikethrough = true } });
     y += line_height;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Purple with both decorations", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.rgbf(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Purple with both decorations", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.rgbf(0.5, 0, 0.5), .decoration = .{ .underline = true, .strikethrough = true } });
     y += line_height + 10;
 
     // Reset and verify
@@ -2309,10 +2309,10 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     y += line_height;
 
     // Grayscale colors
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "50% gray text", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.greyscale(0.5) });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "50% gray text", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.greyscale(0.5) });
     y += line_height;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "30% gray underlined", .{ .font = zpdf.Font.helvetica, .size = 14, .color = zpdf.Color.greyscale(0.3), .decoration = .{ .underline = true } });
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "30% gray underlined", .{ .font = zapdf.Font.helvetica, .size = 14, .color = zapdf.Color.greyscale(0.3), .decoration = .{ .underline = true } });
     y += line_height + 20;
 
     // Styled text box using write() for flowing text with inline styles
@@ -2331,12 +2331,12 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
         .y = box_y,
         .width = box_width,
         .height = box_height,
-        .fill = zpdf.Color.rgbf(0.95, 0.95, 0.95),
+        .fill = zapdf.Color.rgbf(0.95, 0.95, 0.95),
         .border = .{ .top = true, .bottom = true, .left = true, .right = true },
     });
 
     // Create a Region region for flowing text
-    var region = zpdf.Region{
+    var region = zapdf.Region{
         .x = box_x,
         .y = box_y,
         .width = box_width,
@@ -2345,29 +2345,29 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     };
 
     // Write styled text using write() - text flows and wraps automatically
-    const base_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const base_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
 
     _ = try doc.write(&region, "The ", base_style, .{ .valign = .top_leading });
-    _ = try doc.write(&region, "quick brown fox ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0.6, 0.3, 0) }, .{ .valign = .top_leading });
-    _ = try doc.write(&region, "jumps ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .decoration = .{ .underline = true } }, .{ .valign = .top_leading });
+    _ = try doc.write(&region, "quick brown fox ", zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .color = zapdf.Color.rgbf(0.6, 0.3, 0) }, .{ .valign = .top_leading });
+    _ = try doc.write(&region, "jumps ", zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .decoration = .{ .underline = true } }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "over the ", base_style, .{ .valign = .top_leading });
-    _ = try doc.write(&region, "lazy ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } }, .{ .valign = .top_leading });
+    _ = try doc.write(&region, "lazy ", zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .color = zapdf.Color.greyscale(0.5), .decoration = .{ .strikethrough = true } }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "dog, demonstrating how ", base_style, .{ .valign = .top_leading });
-    _ = try doc.write(&region, "different ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0, 0, 0.8) }, .{ .valign = .top_leading });
+    _ = try doc.write(&region, "different ", zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .color = zapdf.Color.rgbf(0, 0, 0.8) }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "words can have ", base_style, .{ .valign = .top_leading });
-    _ = try doc.write(&region, "unique colors ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } }, .{ .valign = .top_leading });
+    _ = try doc.write(&region, "unique colors ", zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .color = zapdf.Color.rgbf(0.8, 0, 0), .decoration = .{ .underline = true } }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "and ", base_style, .{ .valign = .top_leading });
-    _ = try doc.write(&region, "decorations ", zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11, .color = zpdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } }, .{ .valign = .top_leading });
+    _ = try doc.write(&region, "decorations ", zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11, .color = zapdf.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "within the same wrapped paragraph.", base_style, .{ .valign = .top_leading });
 
     return doc.output();
 }
 
 fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_14 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 14, .bold = true };
+    const title_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
 
     try doc.addPage(.{});
 
@@ -2382,14 +2382,14 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
         "The text wraps within the specified width, and the box grows to fit.";
 
     // Measure text to get required height using write with measure_only
-    var measure_region = zpdf.Region{
+    var measure_region = zapdf.Region{
         .x = 50,
         .y = 80,
         .width = box_width,
         .height = 10000, // Large enough to fit all text for measurement
         .padding = .{ .left = box_padding, .right = box_padding, .top = box_padding, .bottom = box_padding },
     };
-    const text_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const text_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
     const measure_result = try doc.write(&measure_region, sample_text, text_style, .{ .measure_only = true, .valign = .top_leading });
     // Use lines_written to calculate height with the style's font size (not stateful doc.getLineHeightPts())
     const line_height = text_style.size * 1.2; // default line_height multiplier
@@ -2403,12 +2403,12 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
         .y = box_y,
         .width = box_width,
         .height = box_height,
-        .fill = zpdf.Color.rgbf(0.9, 0.95, 1.0),
+        .fill = zapdf.Color.rgbf(0.9, 0.95, 1.0),
         .border = .{ .top = true, .bottom = true, .left = true, .right = true },
     });
 
     // Write text inside
-    var region = zpdf.Region{
+    var region = zapdf.Region{
         .x = 50,
         .y = box_y,
         .width = box_width,
@@ -2421,11 +2421,11 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12, .bold = true };
 
     try doc.addPage(.{});
 
@@ -2444,15 +2444,15 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         defer text.deinit();
 
         try text.append("This sentence has ", .{});
-        try text.append("red text", .{ .color = zpdf.Color.red });
+        try text.append("red text", .{ .color = zapdf.Color.red });
         try text.append(", ", .{});
-        try text.append("blue text", .{ .color = zpdf.Color.blue });
+        try text.append("blue text", .{ .color = zapdf.Color.blue });
         try text.append(", and ", .{});
-        try text.append("green text", .{ .color = zpdf.Color.green });
+        try text.append("green text", .{ .color = zapdf.Color.green });
         try text.append(" inline.", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
         y += 35;
     }
 
@@ -2470,8 +2470,8 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         try text.append("strikethrough", .{ .decoration = .{ .strikethrough = true } });
         try text.append(" text.", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
         y += 35;
     }
 
@@ -2484,13 +2484,13 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         defer text.deinit();
 
         try text.append("Mix ", .{});
-        try text.append("red underline", .{ .color = zpdf.Color.red, .decoration = .{ .underline = true } });
+        try text.append("red underline", .{ .color = zapdf.Color.red, .decoration = .{ .underline = true } });
         try text.append(" with ", .{});
-        try text.append("blue strikethrough", .{ .color = zpdf.Color.blue, .decoration = .{ .strikethrough = true } });
+        try text.append("blue strikethrough", .{ .color = zapdf.Color.blue, .decoration = .{ .strikethrough = true } });
         try text.append(" easily.", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 400, .height = 50 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
         y += 35;
     }
 
@@ -2503,17 +2503,17 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         defer text.deinit();
 
         try text.append("The ", .{});
-        try text.append("quick brown", .{ .color = zpdf.Color.rgb(139, 69, 19) }); // brown
+        try text.append("quick brown", .{ .color = zapdf.Color.rgb(139, 69, 19) }); // brown
         try text.append(" fox jumps over the ", .{});
         try text.append("lazy", .{ .decoration = .{ .strikethrough = true } });
         try text.append(" dog. This paragraph demonstrates that styled text wraps correctly across multiple lines while ", .{});
-        try text.append("preserving", .{ .color = zpdf.Color.red });
+        try text.append("preserving", .{ .color = zapdf.Color.red });
         try text.append(" each word's ", .{});
-        try text.append("individual style", .{ .color = zpdf.Color.blue, .decoration = .{ .underline = true } });
+        try text.append("individual style", .{ .color = zapdf.Color.blue, .decoration = .{ .underline = true } });
         try text.append(".", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{ .valign = .top_leading });
         y += 80;
     }
 
@@ -2526,19 +2526,19 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         defer text.deinit();
 
         try text.append("Justified text spreads words evenly across each line, creating clean edges on both the left and right margins. This paragraph demonstrates how ", .{});
-        try text.append("styled text", .{ .color = zpdf.Color.navy });
+        try text.append("styled text", .{ .color = zapdf.Color.navy });
         try text.append(" with ", .{});
         try text.append("inline formatting", .{ .decoration = .{ .underline = true } });
         try text.append(" integrates seamlessly with justified alignment. The spacing between words is ", .{});
-        try text.append("automatically adjusted", .{ .color = zpdf.Color.maroon });
+        try text.append("automatically adjusted", .{ .color = zapdf.Color.maroon });
         try text.append(" to fill each line completely, while preserving all the ", .{});
-        try text.append("color", .{ .color = zpdf.Color.teal });
+        try text.append("color", .{ .color = zapdf.Color.teal });
         try text.append(" and ", .{});
         try text.append("decoration", .{ .decoration = .{ .strikethrough = true } });
         try text.append(" attributes of each styled span.", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .alignment = .justify, .valign = .top_leading });
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{ .alignment = .justify, .valign = .top_leading });
         y += 110;
     }
 
@@ -2551,11 +2551,11 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         defer text.deinit();
 
         try text.append("Centered ", .{});
-        try text.append("styled", .{ .color = zpdf.Color.purple });
+        try text.append("styled", .{ .color = zapdf.Color.purple });
         try text.append(" text", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 300, .height = 30 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{ .alignment = .center, .valign = .top_leading });
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 300, .height = 30 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{ .alignment = .center, .valign = .top_leading });
         y += 40;
     }
 
@@ -2568,19 +2568,19 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
         defer text.deinit();
 
         try text.append("This paragraph uses the ", .{});
-        try text.append("Knuth-Plass", .{ .color = zpdf.Color.teal });
+        try text.append("Knuth-Plass", .{ .color = zapdf.Color.teal });
         try text.append(" optimal line breaking algorithm, which considers the ", .{});
         try text.append("entire paragraph", .{ .decoration = .{ .underline = true } });
         try text.append(" when deciding where to break lines. Unlike the greedy approach that fills each line as much as possible, this algorithm minimizes the total ", .{});
-        try text.append("badness", .{ .color = zpdf.Color.crimson });
+        try text.append("badness", .{ .color = zapdf.Color.crimson });
         try text.append(" across all lines, producing more ", .{});
-        try text.append("balanced", .{ .color = zpdf.Color.forestgreen });
+        try text.append("balanced", .{ .color = zapdf.Color.forestgreen });
         try text.append(" and ", .{});
         try text.append("aesthetically pleasing", .{ .decoration = .{ .underline = true } });
         try text.append(" results. The difference is most noticeable in narrow columns where word lengths vary significantly.", .{});
 
-        var region = zpdf.Region{ .x = 50, .y = y, .width = 280, .height = 120 };
-        _ = try doc.writeStyled(&region, &text, .{ .font = zpdf.Font.helvetica, .size = 12 }, .{
+        var region = zapdf.Region{ .x = 50, .y = y, .width = 280, .height = 120 };
+        _ = try doc.writeStyled(&region, &text, .{ .font = zapdf.Font.helvetica, .size = 12 }, .{
             .alignment = .justify,
             .line_breaking = .optimal,
             .valign = .top_leading,
@@ -2591,12 +2591,12 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const title_16 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 16, .bold = true };
-    const header_12 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 12, .bold = true };
-    const label_10 = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 10, .bold = true };
+    const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+    const header_12 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12, .bold = true };
+    const label_10 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 10, .bold = true };
 
     // Load embedded fonts (identity encoding is now default)
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
@@ -2615,14 +2615,14 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
     const sample_text = "The quick brown fox jumps over the lazy dog. " ++
         "Pack my box with five dozen liquor jugs.";
 
-    const valigns = [_]struct { label: []const u8, valign: zpdf.VAlign }{
+    const valigns = [_]struct { label: []const u8, valign: zapdf.VAlign }{
         .{ .label = "Top (valign=T)", .valign = .top_leading },
         .{ .label = "Middle (valign=M)", .valign = .middle },
         .{ .label = "Bottom (valign=B)", .valign = .bottom },
     };
 
     // Font configurations: null means use built-in Helvetica
-    const FontConfig = struct { font: ?zpdf.Font, label: []const u8 };
+    const FontConfig = struct { font: ?zapdf.Font, label: []const u8 };
     const fonts_config = [_]FontConfig{
         .{ .font = null, .label = "Helvetica (built-in):" },
         .{ .font = inter, .label = "Inter (embedded):" },
@@ -2643,26 +2643,26 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
 
             // Draw box border
             try doc.drawRect(.{ .x = x, .y = y, .width = box_width, .height = box_height }, .{
-                .stroke = .{ .color = zpdf.Color.black, .width = 0.5 },
+                .stroke = .{ .color = zapdf.Color.black, .width = 0.5 },
             });
 
             // Draw alignment guide lines (before text)
-            try doc.drawLine(.{ .x = x, .y = y + padding }, .{ .x = x + box_width, .y = y + padding }, .{ .color = zpdf.Color.red, .width = 0.3 });
-            try doc.drawLine(.{ .x = x, .y = y + box_height / 2 }, .{ .x = x + box_width, .y = y + box_height / 2 }, .{ .color = zpdf.Color.blue, .width = 0.3 });
-            try doc.drawLine(.{ .x = x, .y = y + box_height - padding }, .{ .x = x + box_width, .y = y + box_height - padding }, .{ .color = zpdf.Color.rgb(0, 180, 0), .width = 0.3 });
+            try doc.drawLine(.{ .x = x, .y = y + padding }, .{ .x = x + box_width, .y = y + padding }, .{ .color = zapdf.Color.red, .width = 0.3 });
+            try doc.drawLine(.{ .x = x, .y = y + box_height / 2 }, .{ .x = x + box_width, .y = y + box_height / 2 }, .{ .color = zapdf.Color.blue, .width = 0.3 });
+            try doc.drawLine(.{ .x = x, .y = y + box_height - padding }, .{ .x = x + box_width, .y = y + box_height - padding }, .{ .color = zapdf.Color.rgb(0, 180, 0), .width = 0.3 });
 
             // Set text style (built-in or embedded font)
-            const text_style: zpdf.TextStyle = if (f.font) |fnt|
+            const text_style: zapdf.TextStyle = if (f.font) |fnt|
                 .{ .font = fnt, .size = 11 }
             else
-                .{ .font = zpdf.Font.helvetica, .size = 11 };
+                .{ .font = zapdf.Font.helvetica, .size = 11 };
 
             // Write text inside with valign
             var st = doc.createStyledText();
             defer st.deinit();
             try st.append(sample_text, .{});
 
-            var region = zpdf.Region{
+            var region = zapdf.Region{
                 .x = x,
                 .y = y,
                 .width = box_width,
@@ -2677,7 +2677,7 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load Charter font (has good kerning data)
@@ -2686,13 +2686,13 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
     const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf", null);
 
     // Define styles
-    const charter_bold_16 = zpdf.TextStyle{ .font = charter_bold, .size = 16 };
-    const charter_bold_11 = zpdf.TextStyle{ .font = charter_bold, .size = 11 };
-    const charter_bold_14 = zpdf.TextStyle{ .font = charter_bold, .size = 14 };
-    const charter_14 = zpdf.TextStyle{ .font = charter, .size = 14 };
-    const charter_12 = zpdf.TextStyle{ .font = charter, .size = 12 };
-    const charter_11 = zpdf.TextStyle{ .font = charter, .size = 11 };
-    const charter_italic_14 = zpdf.TextStyle{ .font = charter_italic, .size = 14 };
+    const charter_bold_16 = zapdf.TextStyle{ .font = charter_bold, .size = 16 };
+    const charter_bold_11 = zapdf.TextStyle{ .font = charter_bold, .size = 11 };
+    const charter_bold_14 = zapdf.TextStyle{ .font = charter_bold, .size = 14 };
+    const charter_14 = zapdf.TextStyle{ .font = charter, .size = 14 };
+    const charter_12 = zapdf.TextStyle{ .font = charter, .size = 12 };
+    const charter_11 = zapdf.TextStyle{ .font = charter, .size = 11 };
+    const charter_italic_14 = zapdf.TextStyle{ .font = charter_italic, .size = 14 };
 
     // Kerning is enabled by default
     try doc.addPage(.{});
@@ -2751,7 +2751,7 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
 
     const sizes = [_]f64{ 10, 14, 18, 24 };
     for (sizes) |size| {
-        const style = zpdf.TextStyle{ .font = charter, .size = size };
+        const style = zapdf.TextStyle{ .font = charter, .size = size };
         _ = try doc.writeAt(.{ .x = 50, .y = y }, "AWAY Today", style);
         y += size + 4;
     }
@@ -2796,10 +2796,10 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateInsertPagePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
-    const style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 24 };
+    const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24 };
 
     // Build pages in reverse order using insertPage(0)
     // This tests that insertPage correctly shifts existing pages
@@ -2816,7 +2816,7 @@ fn generateInsertPagePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load main family using the font family API
@@ -2836,22 +2836,22 @@ fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
     const extrabold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBoldItalic.ttf", null);
 
     // Title style (using family with bold)
-    const title_style = zpdf.TextStyle{ .font = gentium, .size = 24, .bold = true };
-    const section_style = zpdf.TextStyle{ .font = gentium, .size = 14, .bold = true };
+    const title_style = zapdf.TextStyle{ .font = gentium, .size = 24, .bold = true };
+    const section_style = zapdf.TextStyle{ .font = gentium, .size = 14, .bold = true };
 
     // Main family styles - uses bold/italic flags
-    const regular_style = zpdf.TextStyle{ .font = gentium, .size = 12 };
-    const bold_style = zpdf.TextStyle{ .font = gentium, .size = 12, .bold = true };
-    const italic_style = zpdf.TextStyle{ .font = gentium, .size = 12, .italic = true };
-    const bold_italic_style = zpdf.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
+    const regular_style = zapdf.TextStyle{ .font = gentium, .size = 12 };
+    const bold_style = zapdf.TextStyle{ .font = gentium, .size = 12, .bold = true };
+    const italic_style = zapdf.TextStyle{ .font = gentium, .size = 12, .italic = true };
+    const bold_italic_style = zapdf.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
 
     // Extra weight styles - uses specific fonts
-    const medium_style = zpdf.TextStyle{ .font = medium, .size = 12 };
-    const medium_italic_style = zpdf.TextStyle{ .font = medium_italic, .size = 12 };
-    const semibold_style = zpdf.TextStyle{ .font = semibold, .size = 12 };
-    const semibold_italic_style = zpdf.TextStyle{ .font = semibold_italic, .size = 12 };
-    const extrabold_style = zpdf.TextStyle{ .font = extrabold, .size = 12 };
-    const extrabold_italic_style = zpdf.TextStyle{ .font = extrabold_italic, .size = 12 };
+    const medium_style = zapdf.TextStyle{ .font = medium, .size = 12 };
+    const medium_italic_style = zapdf.TextStyle{ .font = medium_italic, .size = 12 };
+    const semibold_style = zapdf.TextStyle{ .font = semibold, .size = 12 };
+    const semibold_italic_style = zapdf.TextStyle{ .font = semibold_italic, .size = 12 };
+    const extrabold_style = zapdf.TextStyle{ .font = extrabold, .size = 12 };
+    const extrabold_italic_style = zapdf.TextStyle{ .font = extrabold_italic, .size = 12 };
 
     try doc.addPage(.{});
     var y: f64 = 40;
@@ -2904,7 +2904,7 @@ fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Enable PDF/A-1b conformance
@@ -2916,8 +2916,8 @@ fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(.{});
 
     // Title
-    const title_style = zpdf.TextStyle{ .font = font, .size = 16 };
-    const body_style = zpdf.TextStyle{ .font = font, .size = 10 };
+    const title_style = zapdf.TextStyle{ .font = font, .size = 16 };
+    const body_style = zapdf.TextStyle{ .font = font, .size = 10 };
 
     _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "PDF/A Conformance Test", title_style);
 
@@ -2934,23 +2934,23 @@ fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Colored rectangles (no transparency for PDF/A-1b)
     try doc.drawRect(.{ .x = 50, .y = y, .width = 80, .height = 40 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(200, 220, 255) },
-        .stroke = .{ .color = zpdf.Color.rgb(0, 50, 150) },
+        .fill = .{ .color = zapdf.Color.rgb(200, 220, 255) },
+        .stroke = .{ .color = zapdf.Color.rgb(0, 50, 150) },
     });
     try doc.drawRect(.{ .x = 140, .y = y, .width = 80, .height = 40 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 220, 200) },
-        .stroke = .{ .color = zpdf.Color.rgb(150, 50, 0) },
+        .fill = .{ .color = zapdf.Color.rgb(255, 220, 200) },
+        .stroke = .{ .color = zapdf.Color.rgb(150, 50, 0) },
     });
     try doc.drawRect(.{ .x = 230, .y = y, .width = 80, .height = 40 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(220, 255, 220) },
-        .stroke = .{ .color = zpdf.Color.rgb(0, 150, 50) },
+        .fill = .{ .color = zapdf.Color.rgb(220, 255, 220) },
+        .stroke = .{ .color = zapdf.Color.rgb(0, 150, 50) },
     });
 
     return doc.output();
 }
 
 fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Enable PDF/A-2b conformance (allows transparency)
@@ -2962,8 +2962,8 @@ fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
     try doc.addPage(.{});
 
     // Title
-    const title_style = zpdf.TextStyle{ .font = font, .size = 16 };
-    const body_style = zpdf.TextStyle{ .font = font, .size = 10 };
+    const title_style = zapdf.TextStyle{ .font = font, .size = 16 };
+    const body_style = zapdf.TextStyle{ .font = font, .size = 10 };
 
     _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "PDF/A-2b Conformance Test", title_style);
 
@@ -2981,23 +2981,23 @@ fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
     // Overlapping rectangles with transparency to demonstrate PDF/A-2b
     // Background rectangle (solid)
     try doc.drawRect(.{ .x = 50, .y = y, .width = 120, .height = 60 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(100, 100, 200) },
+        .fill = .{ .color = zapdf.Color.rgb(100, 100, 200) },
     });
 
     // Overlapping semi-transparent rectangles
     try doc.drawRect(.{ .x = 80, .y = y + 15, .width = 80, .height = 60 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(255, 100, 100), .opacity = 0.5 },
+        .fill = .{ .color = zapdf.Color.rgb(255, 100, 100), .opacity = 0.5 },
     });
 
     try doc.drawRect(.{ .x = 110, .y = y + 30, .width = 80, .height = 60 }, .{
-        .fill = .{ .color = zpdf.Color.rgb(100, 255, 100), .opacity = 0.7 },
+        .fill = .{ .color = zapdf.Color.rgb(100, 255, 100), .opacity = 0.7 },
     });
 
     return doc.output();
 }
 
 fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load Noto Emoji in different weights
@@ -3011,12 +3011,12 @@ fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
 
     try doc.addPage(.{});
 
-    const title_style = zpdf.TextStyle{ .font = inter, .size = 16 };
-    const label_style = zpdf.TextStyle{ .font = inter, .size = 11 };
-    const emoji_24 = zpdf.TextStyle{ .font = emoji_regular, .size = 24 };
-    const emoji_bold_24 = zpdf.TextStyle{ .font = emoji_bold, .size = 24 };
-    const emoji_light_24 = zpdf.TextStyle{ .font = emoji_light, .size = 24 };
-    const emoji_48 = zpdf.TextStyle{ .font = emoji_regular, .size = 48 };
+    const title_style = zapdf.TextStyle{ .font = inter, .size = 16 };
+    const label_style = zapdf.TextStyle{ .font = inter, .size = 11 };
+    const emoji_24 = zapdf.TextStyle{ .font = emoji_regular, .size = 24 };
+    const emoji_bold_24 = zapdf.TextStyle{ .font = emoji_bold, .size = 24 };
+    const emoji_light_24 = zapdf.TextStyle{ .font = emoji_light, .size = 24 };
+    const emoji_48 = zapdf.TextStyle{ .font = emoji_regular, .size = 48 };
 
     var y: f64 = 50;
 
@@ -3070,7 +3070,7 @@ fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Load fonts with different metric profiles
@@ -3081,15 +3081,15 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
     const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", null);
     const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
 
-    const title_style = zpdf.TextStyle{ .font = inter_bold, .size = 16 };
-    const subtitle_style = zpdf.TextStyle{ .font = inter, .size = 9, .color = zpdf.Color.rgb(100, 100, 100) };
-    const label_style = zpdf.TextStyle{ .font = inter, .size = 8, .color = zpdf.Color.rgb(120, 120, 120) };
+    const title_style = zapdf.TextStyle{ .font = inter_bold, .size = 16 };
+    const subtitle_style = zapdf.TextStyle{ .font = inter, .size = 9, .color = zapdf.Color.rgb(100, 100, 100) };
+    const label_style = zapdf.TextStyle{ .font = inter, .size = 8, .color = zapdf.Color.rgb(120, 120, 120) };
 
-    const thin_stroke = zpdf.StrokeStyle{ .color = zpdf.Color.rgb(180, 180, 180), .width = 0.5 };
-    const cap_stroke = zpdf.StrokeStyle{ .color = zpdf.Color.rgb(220, 60, 60), .width = 0.25, .dash = .{ .dash = 1.5, .gap = 1.5 } };
-    const asc_stroke = zpdf.StrokeStyle{ .color = zpdf.Color.rgb(60, 60, 220), .width = 0.25, .dash = .{ .dash = 1.5, .gap = 1.5 } };
+    const thin_stroke = zapdf.StrokeStyle{ .color = zapdf.Color.rgb(180, 180, 180), .width = 0.5 };
+    const cap_stroke = zapdf.StrokeStyle{ .color = zapdf.Color.rgb(220, 60, 60), .width = 0.25, .dash = .{ .dash = 1.5, .gap = 1.5 } };
+    const asc_stroke = zapdf.StrokeStyle{ .color = zapdf.Color.rgb(60, 60, 220), .width = 0.25, .dash = .{ .dash = 1.5, .gap = 1.5 } };
 
-    const FontEntry = struct { name: []const u8, font: zpdf.Font };
+    const FontEntry = struct { name: []const u8, font: zapdf.Font };
     const test_fonts = [_]FontEntry{
         .{ .name = "Inter", .font = inter },
         .{ .name = "Charter", .font = charter },
@@ -3109,9 +3109,9 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Legend
     try doc.drawLine(.{ .x = 50, .y = y + 4 }, .{ .x = 66, .y = y + 4 }, cap_stroke);
-    _ = try doc.writeAt(.{ .x = 68, .y = y + 8 }, "cap-height", .{ .font = inter, .size = 7, .color = zpdf.Color.rgb(220, 60, 60) });
+    _ = try doc.writeAt(.{ .x = 68, .y = y + 8 }, "cap-height", .{ .font = inter, .size = 7, .color = zapdf.Color.rgb(220, 60, 60) });
     try doc.drawLine(.{ .x = 118, .y = y + 4 }, .{ .x = 134, .y = y + 4 }, asc_stroke);
-    _ = try doc.writeAt(.{ .x = 136, .y = y + 8 }, "ascender", .{ .font = inter, .size = 7, .color = zpdf.Color.rgb(60, 60, 220) });
+    _ = try doc.writeAt(.{ .x = 136, .y = y + 8 }, "ascender", .{ .font = inter, .size = 7, .color = zapdf.Color.rgb(60, 60, 220) });
     y += 16;
 
     // --- Grid: 5 fonts x 3 alignments ---
@@ -3123,7 +3123,7 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
     const x_start: f64 = 100;
     const sample = "Hbdgpq Ty";
 
-    const AlignMode = struct { label: []const u8, valign: zpdf.VAlign };
+    const AlignMode = struct { label: []const u8, valign: zapdf.VAlign };
     const modes = [_]AlignMode{
         .{ .label = ".top (cap-height)", .valign = .top },
         .{ .label = ".top_ascent", .valign = .top_ascent },
@@ -3138,7 +3138,7 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
     y += 14;
 
     for (test_fonts) |entry| {
-        const style = zpdf.TextStyle{ .font = entry.font, .size = font_size };
+        const style = zapdf.TextStyle{ .font = entry.font, .size = font_size };
         const fm = doc.getFontMetricsStyled(style);
 
         // Row label
@@ -3151,7 +3151,7 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
             try doc.drawRect(.{ .x = x, .y = y, .width = box_w, .height = box_h }, .{ .stroke = thin_stroke });
 
             // Text with alignment
-            var region = zpdf.Region{ .x = x, .y = y, .width = box_w, .height = box_h, .padding = .{ .left = 4, .right = 4 } };
+            var region = zapdf.Region{ .x = x, .y = y, .width = box_w, .height = box_h, .padding = .{ .left = 4, .right = 4 } };
             _ = try doc.write(&region, sample, style, .{ .valign = m.valign });
 
             // Metric guide lines (from baseline)
@@ -3178,13 +3178,13 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
 
     const sizes = [_]f64{ 10, 14, 20, 28, 40 };
     for (sizes) |size| {
-        const style = zpdf.TextStyle{ .font = inter, .size = size };
+        const style = zapdf.TextStyle{ .font = inter, .size = size };
         const fm = doc.getFontMetricsStyled(style);
         const bh = @max(fm.cap_height + @abs(fm.descender) + 6, size * 1.2);
 
         try doc.drawRect(.{ .x = 100, .y = y, .width = 390, .height = bh }, .{ .stroke = thin_stroke });
 
-        var region = zpdf.Region{ .x = 100, .y = y, .width = 390, .height = bh, .padding = .{ .left = 4, .right = 4 } };
+        var region = zapdf.Region{ .x = 100, .y = y, .width = 390, .height = bh, .padding = .{ .left = 4, .right = 4 } };
         _ = try doc.write(&region, "Hbdgpq Typography", style, .{ .valign = .top });
 
         // Cap-height line should be at box top
@@ -3221,7 +3221,7 @@ test "integration: embedded_fonts PDF" {
 }
 
 test "integration: cid_fonts PDF" {
-    // Compares zpdf CID output against fpdf2 reference
+    // Compares zapdf CID output against fpdf2 reference
     try runIntegrationTest("cid_fonts", generateCIDFontsPdf);
 }
 
@@ -3297,7 +3297,7 @@ test "integration: svg_use_defs PDF" {
 }
 
 test "integration: svg_equation PDF" {
-    // Tests MathJax equation SVG with xlink:href (reference generated by zpdf)
+    // Tests MathJax equation SVG with xlink:href (reference generated by zapdf)
     try runIntegrationTest("svg_equation", generateSvgEquationPdf);
 }
 
@@ -3436,22 +3436,22 @@ pub const Case = TestCase;
 
 test "debug: font metrics" {
     const allocator = std.testing.allocator;
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // Built-in font
-    const helvetica_style = zpdf.TextStyle{ .font = zpdf.Font.helvetica, .size = 11 };
+    const helvetica_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
     const hm = doc.getFontMetricsStyled(helvetica_style);
     std.debug.print("\nHelvetica 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ hm.ascender, hm.y_max, hm.cap_height });
 
     // Embedded fonts
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    const inter_style = zpdf.TextStyle{ .font = inter, .size = 11 };
+    const inter_style = zapdf.TextStyle{ .font = inter, .size = 11 };
     const im = doc.getFontMetricsStyled(inter_style);
     std.debug.print("Inter 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ im.ascender, im.y_max, im.cap_height });
 
     const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-    const gentium_style = zpdf.TextStyle{ .font = gentium, .size = 11 };
+    const gentium_style = zapdf.TextStyle{ .font = gentium, .size = 11 };
     const gm = doc.getFontMetricsStyled(gentium_style);
     std.debug.print("Gentium 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ gm.ascender, gm.y_max, gm.cap_height });
 

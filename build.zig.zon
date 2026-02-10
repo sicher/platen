@@ -1,5 +1,5 @@
 .{
-    .name = .zpdf,
+    .name = .zapdf,
     .version = "0.15.2",
     .dependencies = .{
         .zlib = .{
@@ -8,5 +8,5 @@
         },
     },
     .paths = .{""},
-    .fingerprint = 0xd4779d7a84d3abd5,
+    .fingerprint = 0x76b9d8bb504117f,
 }

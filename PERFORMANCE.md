@@ -1,4 +1,4 @@
-# ZPDF Performance Report
+# ZAPDF Performance Report
 
 ## Executive Summary
 
@@ -93,7 +93,7 @@ if (self.input_coverages[0].getCoverageIndex(glyphs[pos]) == null) return null;
 
 **Impact**: Eliminated O(n) iteration per ligature
 
-### 6. Fast Soft-Hyphen Check (zpdf.zig:1037-1041)
+### 6. Fast Soft-Hyphen Check (zapdf.zig:1037-1041)
 
 **Problem**: `stripSoftHyphens` scanned byte-by-byte even when no soft-hyphens present.
 
@@ -101,7 +101,7 @@ if (self.input_coverages[0].getCoverageIndex(glyphs[pos]) == null) return null;
 
 **Impact**: Minor improvement (~1%)
 
-### 7. Early Exit from Kerning/Mark Check (zpdf.zig:666-684)
+### 7. Early Exit from Kerning/Mark Check (zapdf.zig:666-684)
 
 **Problem**: The kerning/mark detection loop checked ALL glyph pairs even after finding one with kerning.
 
@@ -117,7 +117,7 @@ if (self.input_coverages[0].getCoverageIndex(glyphs[pos]) == null) return null;
 
 **Impact**: Skip kerning check loop entirely for fonts without GPOS kerning data
 
-### 9. Fast Hex Conversion (zpdf.zig:32-41)
+### 9. Fast Hex Conversion (zapdf.zig:32-41)
 
 **Problem**: Each glyph ID was converted to hex using `std.fmt.bufPrint`, which has parsing overhead.
 
@@ -141,7 +141,7 @@ if (self.input_coverages[0].getCoverageIndex(glyphs[pos]) == null) return null;
 
 **Impact**: **51% faster OpenType shaping (2x speedup)** - most glyphs have 0 applicable rules, so the check is skipped entirely. Only special glyphs (-, >, /, etc.) have rules to check.
 
-### 12. Arena Allocator per Page (zpdf.zig:278-295)
+### 12. Arena Allocator per Page (zapdf.zig:278-295)
 
 **Problem**: Each text command allocated `text_data` and `cached_glyphs` individually. These were freed one by one when the page was destroyed.
 
@@ -306,7 +306,7 @@ zig build perf -- --pages=10 --iterations=1
 - `src/ttf.zig` - Cmap subtable cache, ASCII glyph lookup table
 - `src/opentype.zig` - Scratch buffers, fast-path matching, pre-allocation, kerning cache, calt rule index
 - `src/embedded.zig` - Scratch buffers, O(1) lookup, cached kern/mark flags, output allocator parameter
-- `src/zpdf.zig` - Fast soft-hyphen check, early exit kerning check, fast hex conversion, output timing instrumentation, page arena allocator
+- `src/zapdf.zig` - Fast soft-hyphen check, early exit kerning check, fast hex conversion, output timing instrumentation, page arena allocator
 - `src/format.zig` - Fast float formatting with digit pair lookup table
 - `src/graphics.zig` - Uses fast formatting for path generation
 - `src/document.zig` - Uses fast formatting for drawing operations

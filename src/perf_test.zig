@@ -10,7 +10,7 @@
 //!   --quiet         Only show summary
 
 const std = @import("std");
-const zpdf = @import("zpdf");
+const zapdf = @import("zapdf");
 
 const Timer = struct {
     start: i64,
@@ -51,7 +51,7 @@ pub fn main() !void {
         return;
     };
 
-    std.debug.print("\n=== ZPDF Performance Test ===\n", .{});
+    std.debug.print("\n=== ZAPDF Performance Test ===\n", .{});
     std.debug.print("Pages: {d}, Iterations: {d}\n\n", .{ config.pages, config.iterations });
 
     var total_times = [_]i64{0} ** 7;
@@ -143,7 +143,7 @@ fn runCompressionBenchmark(allocator: std.mem.Allocator) !void {
 
     for (levels) |l| {
         const t = Timer.begin(l.name);
-        const compressed = try zpdf.zlib.compressLevel(allocator, test_data.items, l.level);
+        const compressed = try zapdf.zlib.compressLevel(allocator, test_data.items, l.level);
         const elapsed = t.end();
         defer allocator.free(compressed);
 
@@ -159,7 +159,7 @@ fn runCompressionBenchmark(allocator: std.mem.Allocator) !void {
 
 fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
     // Load Inter font with OpenType features
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     const emb = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
@@ -224,13 +224,13 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     const total_timer = Timer.begin("Total");
     var result: TestResult = undefined;
 
-    var doc = zpdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator);
     defer doc.deinit();
 
     // 1. Font loading test (use separate doc to avoid polluting main doc with unused fonts)
     {
         const t = Timer.begin("Font loading");
-        var timing_doc = zpdf.Document.init(allocator);
+        var timing_doc = zapdf.Document.init(allocator);
         defer timing_doc.deinit();
 
         // Load multiple fonts to measure parsing time
@@ -268,7 +268,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         simple_font.embedded.setFeature(.liga, false);
         simple_font.embedded.setFeature(.calt, false);
 
-        const simple_style = zpdf.TextStyle{ .font = simple_font, .size = 10 };
+        const simple_style = zapdf.TextStyle{ .font = simple_font, .size = 10 };
         for (0..pages_per_section) |_| {
             try doc.addPage(.{});
             var y: f64 = 30;
@@ -284,8 +284,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 3. OpenType heavy test (ligatures, kerning, contextual alternates)
     {
         const t = Timer.begin("OpenType heavy");
-        const inter_ot_style = zpdf.TextStyle{ .font = inter_ot, .size = 11 };
-        const inter_bold_style = zpdf.TextStyle{ .font = inter_bold, .size = 12 };
+        const inter_ot_style = zapdf.TextStyle{ .font = inter_ot, .size = 11 };
+        const inter_bold_style = zapdf.TextStyle{ .font = inter_bold, .size = 12 };
         for (0..pages_per_section) |_| {
             try doc.addPage(.{});
             var y: f64 = 30;
@@ -320,8 +320,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 4. Unicode and diacritics test
     {
         const t = Timer.begin("Unicode/marks");
-        const gentium_style = zpdf.TextStyle{ .font = gentium, .size = 11 };
-        const inter_style = zpdf.TextStyle{ .font = inter, .size = 11 };
+        const gentium_style = zapdf.TextStyle{ .font = gentium, .size = 11 };
+        const inter_style = zapdf.TextStyle{ .font = inter, .size = 11 };
         for (0..pages_per_section) |_| {
             try doc.addPage(.{});
             var y: f64 = 30;
@@ -365,13 +365,13 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
         const lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ";
         const full_text = lorem ++ lorem ++ lorem;
-        const charter_10 = zpdf.TextStyle{ .font = charter, .size = 10 };
+        const charter_10 = zapdf.TextStyle{ .font = charter, .size = 10 };
 
         for (0..pages_per_section) |_| {
             try doc.addPage(.{});
 
             // Left column - justified with optimal line breaking
-            var region = zpdf.Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
+            var region = zapdf.Region{ .x = 50, .y = 50, .width = 230, .height = 700 };
             {
                 var st = doc.createStyledText();
                 defer st.deinit();
@@ -384,7 +384,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
             }
 
             // Right column - justified with optimal line breaking
-            region = zpdf.Region{ .x = 320, .y = 50, .width = 230, .height = 700 };
+            region = zapdf.Region{ .x = 320, .y = 50, .width = 230, .height = 700 };
             {
                 var st = doc.createStyledText();
                 defer st.deinit();
@@ -412,8 +412,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 for (0..50) |col| {
                     const x = 20 + @as(f64, @floatFromInt(col)) * 11;
                     try doc.drawRect(.{ .x = x, .y = y, .width = 9, .height = 30 }, .{
-                        .stroke = .{ .color = zpdf.Color.rgbf(0.2, 0.4, 0.8), .width = 0.5 },
-                        .fill = .{ .color = zpdf.Color.rgbf(0.9, 0.95, 1.0) },
+                        .stroke = .{ .color = zapdf.Color.rgbf(0.2, 0.4, 0.8), .width = 0.5 },
+                        .fill = .{ .color = zapdf.Color.rgbf(0.9, 0.95, 1.0) },
                     });
                 }
             }
@@ -423,12 +423,12 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 const offset = @as(f64, @floatFromInt(i)) * 5.5;
                 // Horizontal lines
                 try doc.drawLine(.{ .x = 50, .y = 50 + offset }, .{ .x = 500, .y = 50 + offset }, .{
-                    .color = zpdf.Color.greyscale(0.7),
+                    .color = zapdf.Color.greyscale(0.7),
                     .width = 0.25,
                 });
                 // Vertical lines
                 try doc.drawLine(.{ .x = 50 + offset * 0.9, .y = 50 }, .{ .x = 50 + offset * 0.9, .y = 600 }, .{
-                    .color = zpdf.Color.greyscale(0.8),
+                    .color = zapdf.Color.greyscale(0.8),
                     .width = 0.25,
                 });
             }
@@ -439,8 +439,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 for (0..10) |col| {
                     const x = 80 + @as(f64, @floatFromInt(col)) * 50;
                     try doc.drawEllipse(.{ .x = x - 18, .y = y - 12, .width = 36, .height = 24 }, .{
-                        .stroke = .{ .color = zpdf.Color.rgbf(0.8, 0.2, 0.2) },
-                        .fill = .{ .color = zpdf.Color.rgbf(1.0, 0.9, 0.9) },
+                        .stroke = .{ .color = zapdf.Color.rgbf(0.8, 0.2, 0.2) },
+                        .fill = .{ .color = zapdf.Color.rgbf(1.0, 0.9, 0.9) },
                     });
                 }
             }
@@ -451,7 +451,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 for (0..10) |col| {
                     const cx = 100 + @as(f64, @floatFromInt(col)) * 45;
                     try doc.drawCircle(.{ .x = cx, .y = cy }, 8, .{
-                        .stroke = .{ .color = zpdf.Color.rgbf(0.2, 0.7, 0.2), .width = 1.0 },
+                        .stroke = .{ .color = zapdf.Color.rgbf(0.2, 0.7, 0.2), .width = 1.0 },
                     });
                 }
             }
@@ -462,8 +462,8 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 for (0..10) |col| {
                     const x = 30 + @as(f64, @floatFromInt(col)) * 55;
                     try doc.drawRoundedRect(.{ .x = x, .y = y, .width = 50, .height = 100 }, 5, .{
-                        .stroke = .{ .color = zpdf.Color.rgbf(0.5, 0.2, 0.7), .width = 0.75 },
-                        .fill = .{ .color = zpdf.Color.rgbf(0.95, 0.9, 1.0) },
+                        .stroke = .{ .color = zapdf.Color.rgbf(0.5, 0.2, 0.7), .width = 0.75 },
+                        .fill = .{ .color = zapdf.Color.rgbf(0.95, 0.9, 1.0) },
                     });
                 }
             }
@@ -474,14 +474,14 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
                 for (0..5) |col| {
                     const cx = 80 + @as(f64, @floatFromInt(col)) * 100;
                     // Triangle
-                    const tri_points = [_]zpdf.Point{
+                    const tri_points = [_]zapdf.Point{
                         .{ .x = cx, .y = cy + 20 },
                         .{ .x = cx - 15, .y = cy - 10 },
                         .{ .x = cx + 15, .y = cy - 10 },
                     };
                     try doc.drawPolygon(&tri_points, .{
-                        .stroke = .{ .color = zpdf.Color.rgbf(0.9, 0.5, 0.1) },
-                        .fill = .{ .color = zpdf.Color.rgbf(1.0, 0.95, 0.85) },
+                        .stroke = .{ .color = zapdf.Color.rgbf(0.9, 0.5, 0.1) },
+                        .fill = .{ .color = zapdf.Color.rgbf(1.0, 0.95, 0.85) },
                     });
                 }
             }
@@ -497,7 +497,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
         // Print output timing breakdown
         if (!config.quiet) {
-            const ot = zpdf.pdf_output.last_output_timing;
+            const ot = zapdf.pdf_output.last_output_timing;
             std.debug.print("    - Subset generation: {d}ms\n", .{ot.subset_ms});
             std.debug.print("    - Page rendering:    {d}ms\n", .{ot.render_ms});
             std.debug.print("    - Font writing:      {d}ms\n", .{ot.font_write_ms});
@@ -528,7 +528,7 @@ fn parseArgs(allocator: std.mem.Allocator) !TestConfig {
             config.quiet = true;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             std.debug.print(
-                \\ZPDF Performance Test
+                \\ZAPDF Performance Test
                 \\
                 \\Usage: zig build perf -- [options]
                 \\

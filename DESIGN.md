@@ -3,7 +3,7 @@
 ## Architecture
 
 ### Modules
-- `zpdf.zig` - Main library facade, re-exports from document.zig
+- `zapdf.zig` - Main library facade, re-exports from document.zig
 - `version.zig` - Version constants (version, name, full)
 - `document.zig` - Document struct, text/graphics rendering, PDF output
 - `objects.zig` - PDF object types (Dict, Array, Value, Ref, Name)
@@ -200,7 +200,7 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - Exact coordinate values (allows different coordinate systems)
 
 **CLI commands:**
-- `zpdf check-refs` - Run semantic comparison, generate HTML report
+- `zapdf check-refs` - Run semantic comparison, generate HTML report
 
 **Test cases (23 integration tests):**
 - `minimal` - Empty page
@@ -246,7 +246,7 @@ Use `write()` or `writeStyled()` with `.measure_only = true` to measure text lay
 Measurement is side-effect free - cursor position is unchanged. Uses the same code path as rendering.
 
 ```zig
-var region = zpdf.Region{
+var region = zapdf.Region{
     .x = 50, .y = 100,
     .width = 200, .height = 10000,
     .padding = .{ .left = 8, .right = 8, .top = 8, .bottom = 8 },
@@ -290,7 +290,7 @@ doc.setMetadata(.{
     .subject = "Q4 Financial Results",
     .keywords = "finance, report, 2026",
     .creator = "MyApp v1.0",    // Application that created the content
-    .producer = "zpdf",         // Default - PDF producer
+    .producer = "zapdf",         // Default - PDF producer
     .creation_date = "D:20260121120000",  // Optional - auto-generated if null
 });
 ```
@@ -427,7 +427,7 @@ fn drawTextBox(self: *Document, box: *const TextBox) !void
 
 **Simplest case - dump text into PDF:**
 ```zig
-var doc = try zpdf.Document.init(allocator);
+var doc = try zapdf.Document.init(allocator);
 try doc.setFont(.helvetica, 12);
 try doc.addPage(.a4);
 
@@ -588,13 +588,13 @@ try doc.drawPath(&path, .fill_stroke);
 
 ```zig
 // Linear gradient
-var gradient = zpdf.LinearGradient.init(x1, y1, x2, y2);
-gradient.addStop(0.0, zpdf.Color.fromRgb(1, 0, 0));  // red at start
-gradient.addStop(1.0, zpdf.Color.fromRgb(0, 0, 1));  // blue at end
+var gradient = zapdf.LinearGradient.init(x1, y1, x2, y2);
+gradient.addStop(0.0, zapdf.Color.fromRgb(1, 0, 0));  // red at start
+gradient.addStop(1.0, zapdf.Color.fromRgb(0, 0, 1));  // blue at end
 try doc.drawLinearGradient(&gradient, x, y, w, h);
 
 // Radial gradient
-var radial = zpdf.RadialGradient.init(cx, cy, r);
+var radial = zapdf.RadialGradient.init(cx, cy, r);
 try doc.drawRadialGradient(&radial, x, y, w, h);
 ```
 
@@ -725,7 +725,7 @@ When conformance != `.none`, the output includes:
 
 Use VeraPDF for validation:
 ```bash
-zpdf pdfa-test output.pdf
+zapdf pdfa-test output.pdf
 verapdf --flavour 1b output.pdf
 ```
 
@@ -736,7 +736,7 @@ verapdf --flavour 1b output.pdf
 
 ## API Design Guidelines
 
-Principles for zpdf's public API:
+Principles for zapdf's public API:
 
 ### 1. Unify common types
 Define shared types once in `layout.zig` and re-export everywhere:

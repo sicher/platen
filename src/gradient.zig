@@ -1,4 +1,4 @@
-//! Gradient support for zpdf - linear and radial gradients.
+//! Gradient support for zapdf - linear and radial gradients.
 //!
 //! PDF gradients are implemented using:
 //! - Shading dictionaries (Type 2 for linear/axial, Type 3 for radial)

@@ -1,4 +1,4 @@
-//! Page and content writer types for zpdf.
+//! Page and content writer types for zapdf.
 //!
 //! This module contains the internal page representation and content stream writer.
 

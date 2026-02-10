@@ -1,4 +1,4 @@
-//! zpdf - Fast PDF rendering library for Zig
+//! zapdf - Fast PDF rendering library for Zig
 //!
 //! A library for creating PDF documents, based on fpdf2.
 

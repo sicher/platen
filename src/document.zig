@@ -1,4 +1,4 @@
-//! Document struct for zpdf - PDF document creation and management.
+//! Document struct for zapdf - PDF document creation and management.
 //!
 //! This module contains the core Document type that handles page management,
 //! text rendering, font handling, and PDF output generation.
@@ -108,7 +108,7 @@ pub const DocumentMetadata = struct {
     keywords: ?[]const u8 = null,
     /// Application that created the original document content.
     creator: ?[]const u8 = null,
-    /// Application that produced the PDF (defaults to "zpdf <version>").
+    /// Application that produced the PDF (defaults to "zapdf <version>").
     producer: ?[]const u8 = version.full,
     /// Creation date in PDF format (D:YYYYMMDDHHmmSS).
     /// If null, current time is used automatically.
