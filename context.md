@@ -10,6 +10,16 @@
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - Color emoji support (parse COLR/CPAL tables, render as colored paths)
 
+## What We Did (Session 2026-02-10 #12)
+- **Renamed project from zpdf to zapdf**:
+  - Renamed `src/zpdf.zig` → `src/zapdf.zig`
+  - Updated package name, module imports, executable names (`zapdf`, `zapdf-perf`)
+  - Updated all documentation, tests, CLI help text, build config (21 files, 906 replacements)
+  - Updated `build.zig.zon` fingerprint (required after name change)
+  - Updated remote URL to `codeberg.org/sicher/zapdf.git`
+- **Updated README description** for search discoverability
+- Commits: 52027e7, 19938ee
+
 ## What We Did (Session 2026-02-10 #11)
 - **Added optical top alignment** (VAlign):
   - `.top` now uses cap-height from font metrics (optical alignment)
