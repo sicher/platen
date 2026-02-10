@@ -1,6 +1,6 @@
 # zapdf
 
-A fast PDF rendering library for Zig.
+A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, images, vector graphics, and PDF/A archival output. No external C dependencies.
 
 ## Features
 
