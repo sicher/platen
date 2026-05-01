@@ -51,15 +51,17 @@ pub const CompareResult = struct {
 
 /// Compare two PDFs using the specified mode
 pub fn comparePdfs(
+    io: std.Io,
     allocator: std.mem.Allocator,
     actual: []const u8,
     expected: []const u8,
 ) !CompareResult {
-    return comparePdfsWithOptions(allocator, actual, expected, .auto, .{});
+    return comparePdfsWithOptions(io, allocator, actual, expected, .auto, .{});
 }
 
 /// Compare two PDFs with options
 pub fn comparePdfsWithOptions(
+    io: std.Io,
     allocator: std.mem.Allocator,
     actual: []const u8,
     expected: []const u8,
@@ -73,7 +75,7 @@ pub fn comparePdfsWithOptions(
 
     switch (mode) {
         .structural => {
-            return comparePdfsStructural(allocator, actual, expected, options) catch |err| {
+            return comparePdfsStructural(io, allocator, actual, expected, options) catch |err| {
                 if (err == error.QpdfNotAvailable) {
                     return .{ .equal = false, .diff = try allocator.dupe(u8, "qpdf not available"), .allocator = allocator };
                 }
@@ -81,7 +83,7 @@ pub fn comparePdfsWithOptions(
             };
         },
         .semantic => {
-            return comparePdfsSemantic(allocator, actual, expected) catch |err| {
+            return comparePdfsSemantic(io, allocator, actual, expected) catch |err| {
                 if (err == error.ComparatorNotAvailable) {
                     return hashComparison(actual, expected, .semantic);
                 }
@@ -92,7 +94,7 @@ pub fn comparePdfsWithOptions(
             // For comparing against external references (like fpdf2), use semantic
             // Structural comparison would fail because PDF structure differs
             // Structural is best for regression testing (comparing against self)
-            return comparePdfsSemantic(allocator, actual, expected) catch |err| {
+            return comparePdfsSemantic(io, allocator, actual, expected) catch |err| {
                 if (err == error.ComparatorNotAvailable) {
                     return hashComparison(actual, expected, .auto);
                 }
@@ -110,27 +112,24 @@ fn hashComparison(actual: []const u8, expected: []const u8, mode: CompareMode) C
 
 /// Compare PDFs using qpdf structural comparison
 fn comparePdfsStructural(
+    io: std.Io,
     allocator: std.mem.Allocator,
     actual: []const u8,
     expected: []const u8,
     options: StructuralOptions,
 ) !CompareResult {
     // Write PDFs to temp files
-    var tmp_actual = try createTempFile(allocator, "actual_", ".pdf");
-    defer tmp_actual.cleanup(allocator);
-    try tmp_actual.file.writeAll(actual);
-    tmp_actual.file.close();
+    var tmp_actual = try createTempFile(io, allocator, "actual_", ".pdf", actual);
+    defer tmp_actual.cleanup(io, allocator);
 
-    var tmp_expected = try createTempFile(allocator, "expected_", ".pdf");
-    defer tmp_expected.cleanup(allocator);
-    try tmp_expected.file.writeAll(expected);
-    tmp_expected.file.close();
+    var tmp_expected = try createTempFile(io, allocator, "expected_", ".pdf", expected);
+    defer tmp_expected.cleanup(io, allocator);
 
     // Run qpdf on both files to get normalized QDF output
-    const actual_qdf = runQpdf(allocator, tmp_actual.path) catch return error.QpdfNotAvailable;
+    const actual_qdf = runQpdf(io, allocator, tmp_actual.path) catch return error.QpdfNotAvailable;
     defer allocator.free(actual_qdf);
 
-    const expected_qdf = runQpdf(allocator, tmp_expected.path) catch return error.QpdfNotAvailable;
+    const expected_qdf = runQpdf(io, allocator, tmp_expected.path) catch return error.QpdfNotAvailable;
     defer allocator.free(expected_qdf);
 
     // Filter and compare lines
@@ -160,17 +159,22 @@ fn comparePdfsStructural(
 }
 
 /// Run qpdf to normalize PDF to QDF format
-fn runQpdf(allocator: std.mem.Allocator, pdf_path: []const u8) ![]const u8 {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+fn runQpdf(io: std.Io, allocator: std.mem.Allocator, pdf_path: []const u8) ![]const u8 {
+    const result = std.process.run(allocator, io, .{
         .argv = &.{ "qpdf", "--deterministic-id", "--qdf", pdf_path, "-" },
     }) catch return error.QpdfNotAvailable;
 
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) {
-        allocator.free(result.stdout);
-        return error.QpdfFailed;
+    switch (result.term) {
+        .exited => |code| if (code != 0) {
+            allocator.free(result.stdout);
+            return error.QpdfFailed;
+        },
+        else => {
+            allocator.free(result.stdout);
+            return error.QpdfFailed;
+        },
     }
 
     return result.stdout;
@@ -197,8 +201,8 @@ fn filterLines(
     options: StructuralOptions,
 ) !FilteredLines {
     var result = FilteredLines{
-        .lines = .{},
-        .allocated = .{},
+        .lines = .empty,
+        .allocated = .empty,
     };
     errdefer result.deinit(allocator);
 
@@ -231,7 +235,7 @@ fn filterLines(
         }
 
         // Apply filters
-        if (options.ignore_id and std.mem.startsWith(u8, std.mem.trimLeft(u8, line, " "), "/ID [")) {
+        if (options.ignore_id and std.mem.startsWith(u8, std.mem.trimStart(u8, line, " "), "/ID [")) {
             continue;
         }
         if (options.ignore_obj_ids and std.mem.startsWith(u8, line, "%% Original object ID:")) {
@@ -253,7 +257,7 @@ fn generateDiff(
     expected: []const []const u8,
     actual: []const []const u8,
 ) ![]const u8 {
-    var diff = std.ArrayListUnmanaged(u8){};
+    var diff = std.ArrayListUnmanaged(u8).empty;
     errdefer diff.deinit(allocator);
 
     try diff.appendSlice(allocator, "=== Structural diff ===\n");
@@ -297,85 +301,72 @@ fn generateDiff(
 }
 
 /// Compare PDFs using semantic comparison (text + positions)
-fn comparePdfsSemantic(allocator: std.mem.Allocator, actual: []const u8, expected: []const u8) !CompareResult {
-    return comparePdfsSemanticWithOptions(allocator, actual, expected, .{});
+fn comparePdfsSemantic(io: std.Io, allocator: std.mem.Allocator, actual: []const u8, expected: []const u8) !CompareResult {
+    return comparePdfsSemanticWithOptions(io, allocator, actual, expected, .{});
 }
 
 /// Compare PDFs using semantic comparison with options
-fn comparePdfsSemanticWithOptions(allocator: std.mem.Allocator, actual: []const u8, expected: []const u8, options: SemanticOptions) !CompareResult {
+fn comparePdfsSemanticWithOptions(io: std.Io, allocator: std.mem.Allocator, actual: []const u8, expected: []const u8, options: SemanticOptions) !CompareResult {
     // Write PDFs to temp files
-    var tmp_actual = try createTempFile(allocator, "actual_", ".pdf");
-    defer tmp_actual.cleanup(allocator);
-    try tmp_actual.file.writeAll(actual);
-    tmp_actual.file.close();
+    var tmp_actual = try createTempFile(io, allocator, "actual_", ".pdf", actual);
+    defer tmp_actual.cleanup(io, allocator);
 
-    var tmp_expected = try createTempFile(allocator, "expected_", ".pdf");
-    defer tmp_expected.cleanup(allocator);
-    try tmp_expected.file.writeAll(expected);
-    tmp_expected.file.close();
+    var tmp_expected = try createTempFile(io, allocator, "expected_", ".pdf", expected);
+    defer tmp_expected.cleanup(io, allocator);
 
     // Run semantic comparator
     // Tolerance of 1pt for minor floating-point rounding differences
-    const args = if (options.skip_fonts)
-        &[_][]const u8{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0", "--skip-fonts" }
+    const argv: []const []const u8 = if (options.skip_fonts)
+        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0", "--skip-fonts" }
     else
-        &[_][]const u8{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" };
+        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" };
 
-    var child = std.process.Child.init(args, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+    const result = std.process.run(allocator, io, .{ .argv = argv }) catch return error.ComparatorNotAvailable;
+    defer allocator.free(result.stderr);
 
-    child.spawn() catch return error.ComparatorNotAvailable;
+    const exited = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
 
-    // Read output
-    var output = std.ArrayListUnmanaged(u8){};
-    defer output.deinit(allocator);
-
-    var buf: [4096]u8 = undefined;
-    const stdout_file = child.stdout.?;
-    while (true) {
-        const n = try stdout_file.read(&buf);
-        if (n == 0) break;
-        try output.appendSlice(allocator, buf[0..n]);
-    }
-
-    const result = try child.wait();
-    const exit_code = result.Exited;
-
-    if (exit_code == 0) {
+    if (exited) {
+        allocator.free(result.stdout);
         return .{ .equal = true, .mode_used = .semantic };
     } else {
-        const diff = try output.toOwnedSlice(allocator);
-        return .{ .equal = false, .mode_used = .semantic, .diff = diff, .allocator = allocator };
+        return .{ .equal = false, .mode_used = .semantic, .diff = result.stdout, .allocator = allocator };
     }
 }
 
 const TempFile = struct {
-    file: std.fs.File,
     path: []const u8,
 
-    fn cleanup(self: *TempFile, allocator: std.mem.Allocator) void {
-        std.fs.cwd().deleteFile(self.path) catch {};
+    fn cleanup(self: *TempFile, io: std.Io, allocator: std.mem.Allocator) void {
+        std.Io.Dir.cwd().deleteFile(io, self.path) catch {};
         allocator.free(self.path);
     }
 };
 
-fn createTempFile(allocator: std.mem.Allocator, prefix: []const u8, suffix: []const u8) !TempFile {
-    const timestamp = std.time.timestamp();
-    const rand = std.crypto.random.int(u32);
-    const path = try std.fmt.allocPrint(allocator, "/tmp/{s}{d}_{d}{s}", .{ prefix, timestamp, rand, suffix });
-    const file = try std.fs.cwd().createFile(path, .{});
-    return .{ .file = file, .path = path };
+var temp_file_counter: u32 = 0;
+
+fn createTempFile(io: std.Io, allocator: std.mem.Allocator, prefix: []const u8, suffix: []const u8, contents: []const u8) !TempFile {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    temp_file_counter +%= 1;
+    const counter = temp_file_counter;
+    const path = try std.fmt.allocPrint(allocator, "/tmp/{s}{d}_{d}{s}", .{ prefix, ts.nsec, counter, suffix });
+    errdefer allocator.free(path);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = contents });
+    return .{ .path = path };
 }
 
 /// Compare a PDF against a reference file
-pub fn compareWithReference(allocator: std.mem.Allocator, actual: []const u8, reference_path: []const u8) !CompareResult {
-    return compareWithReferenceSemantic(allocator, actual, reference_path, .{});
+pub fn compareWithReference(io: std.Io, allocator: std.mem.Allocator, actual: []const u8, reference_path: []const u8) !CompareResult {
+    return compareWithReferenceSemantic(io, allocator, actual, reference_path, .{});
 }
 
 /// Compare a PDF against a reference file with semantic options
-pub fn compareWithReferenceSemantic(allocator: std.mem.Allocator, actual: []const u8, reference_path: []const u8, options: SemanticOptions) !CompareResult {
-    const expected = std.fs.cwd().readFileAlloc(allocator, reference_path, 10 * 1024 * 1024) catch |err| {
+pub fn compareWithReferenceSemantic(io: std.Io, allocator: std.mem.Allocator, actual: []const u8, reference_path: []const u8, options: SemanticOptions) !CompareResult {
+    const expected = std.Io.Dir.cwd().readFileAlloc(io, reference_path, allocator, .limited(10 * 1024 * 1024)) catch |err| {
         if (err == error.FileNotFound) {
             return .{ .equal = false, .diff = try allocator.dupe(u8, "Reference file not found"), .allocator = allocator };
         }
@@ -388,18 +379,19 @@ pub fn compareWithReferenceSemantic(allocator: std.mem.Allocator, actual: []cons
         return .{ .equal = true, .mode_used = .semantic };
     }
 
-    return comparePdfsSemanticWithOptions(allocator, actual, expected, options);
+    return comparePdfsSemanticWithOptions(io, allocator, actual, expected, options);
 }
 
 /// Compare a PDF against a reference file with options
 pub fn compareWithReferenceMode(
+    io: std.Io,
     allocator: std.mem.Allocator,
     actual: []const u8,
     reference_path: []const u8,
     mode: CompareMode,
     options: StructuralOptions,
 ) !CompareResult {
-    const expected = std.fs.cwd().readFileAlloc(allocator, reference_path, 10 * 1024 * 1024) catch |err| {
+    const expected = std.Io.Dir.cwd().readFileAlloc(io, reference_path, allocator, .limited(10 * 1024 * 1024)) catch |err| {
         if (err == error.FileNotFound) {
             return .{ .equal = false, .diff = try allocator.dupe(u8, "Reference file not found"), .allocator = allocator };
         }
@@ -407,17 +399,20 @@ pub fn compareWithReferenceMode(
     };
     defer allocator.free(expected);
 
-    return comparePdfsWithOptions(allocator, actual, expected, mode, options);
+    return comparePdfsWithOptions(io, allocator, actual, expected, mode, options);
 }
 
 /// Check if qpdf is available
-pub fn isQpdfAvailable() bool {
-    var child = std.process.Child.init(&.{ "qpdf", "--version" }, std.heap.page_allocator);
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    child.spawn() catch return false;
-    const result = child.wait() catch return false;
-    return result.Exited == 0;
+pub fn isQpdfAvailable(io: std.Io) bool {
+    const result = std.process.run(std.heap.page_allocator, io, .{
+        .argv = &.{ "qpdf", "--version" },
+    }) catch return false;
+    defer std.heap.page_allocator.free(result.stdout);
+    defer std.heap.page_allocator.free(result.stderr);
+    return switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
 }
 
 // ============================================================================
@@ -426,7 +421,7 @@ pub fn isQpdfAvailable() bool {
 
 test "identical PDFs compare equal" {
     const pdf = "%PDF-1.4\ntest";
-    var result = try comparePdfs(std.testing.allocator, pdf, pdf);
+    var result = try comparePdfs(std.testing.io, std.testing.allocator, pdf, pdf);
     defer result.deinit();
     try std.testing.expect(result.equal);
 }
@@ -434,19 +429,19 @@ test "identical PDFs compare equal" {
 test "different PDFs compare not equal" {
     const pdf1 = "%PDF-1.4\ntest1";
     const pdf2 = "%PDF-1.4\ntest2";
-    var result = try comparePdfs(std.testing.allocator, pdf1, pdf2);
+    var result = try comparePdfs(std.testing.io, std.testing.allocator, pdf1, pdf2);
     defer result.deinit();
     try std.testing.expect(!result.equal);
 }
 
 test "qpdf availability check" {
     // Just verify the function runs without crashing
-    _ = isQpdfAvailable();
+    _ = isQpdfAvailable(std.testing.io);
 }
 
 test "structural comparison with valid PDFs" {
     // Skip if qpdf not available
-    if (!isQpdfAvailable()) return;
+    if (!isQpdfAvailable(std.testing.io)) return;
 
     // Use a minimal valid PDF for testing
     const pdf1 =
@@ -475,6 +470,7 @@ test "structural comparison with valid PDFs" {
 
     // Same PDF should be equal
     var result = try comparePdfsWithOptions(
+        std.testing.io,
         std.testing.allocator,
         pdf1,
         pdf1,

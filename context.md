@@ -1,7 +1,7 @@
 # zapdf Context
 
 ## Current Focus
-**v1.0.0 released** - Library is feature complete.
+**v1.0.0 released** - Library is feature complete. Migrated to Zig 0.16.
 
 ## What's Next
 - Future enhancements (if needed):
@@ -9,6 +9,33 @@
   - Blend modes (Normal, Multiply, Screen, etc.)
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - Color emoji support (parse COLR/CPAL tables, render as colored paths)
+- Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
+- Update README to mention Zig 0.16 requirement.
+- Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
+
+## What We Did (Session 2026-05-01 #13)
+- **Migrated from Zig 0.15 to 0.16**. All 336 unit tests + 38 integration reference tests pass.
+- **API breaking changes for users**:
+  - `Document.init(allocator)` → `Document.init(allocator, io)` (`io: std.Io`).
+  - `ttf.Font.fromFile(allocator, path)` → `(io, allocator, path)`.
+  - `images.Image.fromFile(allocator, path)` → `(io, allocator, path)`.
+  - `svg.Svg.fromFile(allocator, path)` → `(io, allocator, path)`.
+  - `embedded.EmbeddedFont.fromFile(allocator, path)` → `(io, allocator, path)`.
+  - `testing.compareWithReference*` and `comparePdfs*` now take `io: std.Io` first.
+- **Internal upstream-API migrations**:
+  - `std.heap.GeneralPurposeAllocator(.{}){}` → `std.heap.DebugAllocator(.{}) = .init`.
+  - `std.ArrayListUnmanaged(T){}` / `= .{}` → `.empty` (and same for HashMap variants).
+  - `std.io.fixedBufferStream(buf)` → `std.Io.Writer.fixed(buf)`; `.writer()` removed (pass `&w`); `.getWritten()` → `.buffered()`; `.pos` → `.end`.
+  - Custom `format(writer: anytype) @TypeOf(writer).Error!void` → `format(writer: *std.Io.Writer) std.Io.Writer.Error!void` in `objects.zig`.
+  - `std.fs.cwd()` / `std.fs.File` removed → `std.Io.Dir.cwd()` / `std.Io.File` (everything takes `io`).
+  - `std.process.argsAlloc` → `init.minimal.args.toSlice(arena)` (main signature now `pub fn main(init: std.process.Init) !void`).
+  - `std.process.Child.run` API changed → `std.process.run(allocator, io, .{ .argv = ... })`.
+  - `std.time.milliTimestamp()` / `std.time.timestamp()` removed — replaced with `pdf_output.milliTimestamp()` helper using `std.c.clock_gettime(.REALTIME, ...)`.
+  - `std.meta.intToEnum` → `std.enums.fromInt`.
+  - `std.mem.trimLeft` → `std.mem.trimStart`.
+- **`app_io` pattern**: `cli.zig`, `perf_test.zig`, and `integration_tests.zig` declare a `pub var app_io: std.Io` (defaulting to `std.testing.io` in test builds for `integration_tests.zig`). `cli.zig` sets `zapdf.integration_tests.app_io = init.io` so the CLI's `check-refs` command shares the same generators as the test suite.
+- **stdout in CLI**: now buffered through `std.Io.File.stdout().writer(io, &buf)`; flushed in a `defer`.
+- **zlib dep**: bumped manifest hash from 1.3.1 to 1.3.2 to match what the registry now serves.
 
 ## What We Did (Session 2026-02-10 #12)
 - **Renamed project from zpdf to zapdf**:

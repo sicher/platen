@@ -33,8 +33,8 @@ pub const Writer = struct {
 
     pub fn init(allocator: std.mem.Allocator) Writer {
         return .{
-            .output = .{},
-            .offsets = .{},
+            .output = .empty,
+            .offsets = .empty,
             .allocator = allocator,
         };
     }
@@ -68,14 +68,14 @@ pub const Writer = struct {
     /// Write a dictionary as the object content
     pub fn writeDict(self: *Writer, dict: Dict) !void {
         try self.output.ensureUnusedCapacity(self.allocator, 4096);
-        var stream = std.io.fixedBufferStream(self.output.unusedCapacitySlice());
-        dict.format(stream.writer()) catch {
+        var w = std.Io.Writer.fixed(self.output.unusedCapacitySlice());
+        dict.format(&w) catch {
             // Need more space, expand and retry
             try self.output.ensureUnusedCapacity(self.allocator, 8192);
-            stream = std.io.fixedBufferStream(self.output.unusedCapacitySlice());
-            try dict.format(stream.writer());
+            w = std.Io.Writer.fixed(self.output.unusedCapacitySlice());
+            try dict.format(&w);
         };
-        self.output.items.len += stream.pos;
+        self.output.items.len += w.end;
         try self.output.append(self.allocator, '\n');
     }
 

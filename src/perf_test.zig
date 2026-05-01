@@ -12,16 +12,18 @@
 const std = @import("std");
 const zapdf = @import("zapdf");
 
+var app_io: std.Io = undefined;
+
 const Timer = struct {
     start: i64,
     name: []const u8,
 
     fn begin(name: []const u8) Timer {
-        return .{ .start = std.time.milliTimestamp(), .name = name };
+        return .{ .start = zapdf.pdf_output.milliTimestamp(), .name = name };
     }
 
     fn end(self: Timer) i64 {
-        return std.time.milliTimestamp() - self.start;
+        return zapdf.pdf_output.milliTimestamp() - self.start;
     }
 
     fn endPrint(self: Timer, quiet: bool) i64 {
@@ -40,13 +42,12 @@ const TestConfig = struct {
     quiet: bool = false,
 };
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    app_io = init.io;
 
     // Parse args
-    const config = parseArgs(allocator) catch |err| {
+    const config = parseArgs(init.minimal.args) catch |err| {
         std.debug.print("Error parsing arguments: {}\n", .{err});
         return;
     };
@@ -104,9 +105,7 @@ pub fn main() !void {
     // Write output if requested
     if (config.output_path) |path| {
         if (pdf_bytes) |data| {
-            const file = try std.fs.cwd().createFile(path, .{});
-            defer file.close();
-            try file.writeAll(data);
+            try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = path, .data = data });
             std.debug.print("\nWrote: {s}\n", .{path});
         }
     }
@@ -126,7 +125,7 @@ fn runCompressionBenchmark(allocator: std.mem.Allocator) !void {
     const repeat_count = 10000; // ~500KB of content
 
     // Build test data
-    var test_data = std.ArrayListUnmanaged(u8){};
+    var test_data = std.ArrayListUnmanaged(u8).empty;
     defer test_data.deinit(allocator);
     for (0..repeat_count) |_| {
         try test_data.appendSlice(allocator, sample_line);
@@ -159,7 +158,7 @@ fn runCompressionBenchmark(allocator: std.mem.Allocator) !void {
 
 fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
     // Load Inter font with OpenType features
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const emb = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
@@ -224,13 +223,13 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     const total_timer = Timer.begin("Total");
     var result: TestResult = undefined;
 
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // 1. Font loading test (use separate doc to avoid polluting main doc with unused fonts)
     {
         const t = Timer.begin("Font loading");
-        var timing_doc = zapdf.Document.init(allocator);
+        var timing_doc = zapdf.Document.init(allocator, app_io);
         defer timing_doc.deinit();
 
         // Load multiple fonts to measure parsing time
@@ -510,12 +509,11 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     return result;
 }
 
-fn parseArgs(allocator: std.mem.Allocator) !TestConfig {
-    _ = allocator;
+fn parseArgs(args_obj: std.process.Args) !TestConfig {
     var config = TestConfig{};
 
-    var args = std.process.args();
-    _ = args.skip(); // program name
+    var args = args_obj.iterate();
+    _ = args.next(); // program name
 
     while (args.next()) |arg| {
         if (std.mem.startsWith(u8, arg, "--pages=")) {

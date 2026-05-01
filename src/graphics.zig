@@ -114,9 +114,9 @@ pub fn writeShapeGraphicsState(style: ShapeStyle, buf: []u8) usize {
 
         // Stroke color
         var color_buf: [64]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&color_buf);
-        s.color.writeStroke(fbs.writer()) catch unreachable;
-        const color_str = fbs.getWritten();
+        var fbs = std.Io.Writer.fixed(&color_buf);
+        s.color.writeStroke(&fbs) catch unreachable;
+        const color_str = fbs.buffered();
         @memcpy(buf[len .. len + color_str.len], color_str);
         len += color_str.len;
     }
@@ -124,9 +124,9 @@ pub fn writeShapeGraphicsState(style: ShapeStyle, buf: []u8) usize {
     // Write fill color if filling
     if (style.fill) |f| {
         var color_buf: [64]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&color_buf);
-        f.color.writeFill(fbs.writer()) catch unreachable;
-        const color_str = fbs.getWritten();
+        var fbs = std.Io.Writer.fixed(&color_buf);
+        f.color.writeFill(&fbs) catch unreachable;
+        const color_str = fbs.buffered();
         @memcpy(buf[len .. len + color_str.len], color_str);
         len += color_str.len;
     }

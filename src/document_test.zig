@@ -21,12 +21,12 @@ const mm = zapdf.mm;
 const cm = zapdf.cm;
 
 test "Document init/deinit" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 }
 
 test "Document output minimal PDF" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const pdf = try doc.output();
@@ -42,7 +42,7 @@ test "Document output minimal PDF" {
 }
 
 test "Document with text" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -79,7 +79,7 @@ test "page format landscape" {
 }
 
 test "getPageIndex and pageCount" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // No pages yet
@@ -103,7 +103,7 @@ test "getPageIndex and pageCount" {
 }
 
 test "addPage with PageOptions" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Default page is A4
@@ -118,7 +118,7 @@ test "addPage with PageOptions" {
 }
 
 test "selectPage switches current page" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Add A4 page
@@ -140,7 +140,7 @@ test "selectPage switches current page" {
 // since writeAt() now takes TextStyle which always includes the font.
 
 test "text without page returns error" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Should fail because no page is added
@@ -150,7 +150,7 @@ test "text without page returns error" {
 
 test "multiple fonts on single page" {
     // fpdf2: test_text_positioning - multiple fonts
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -175,7 +175,7 @@ test "multiple fonts on single page" {
 
 test "font styles" {
     // fpdf2: tests various font styles
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -202,7 +202,7 @@ test "font styles" {
 }
 
 test "multiple pages" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -241,7 +241,7 @@ fn standardFontToStyle(std_font: StandardFont, size: f64) TextStyle {
 
 test "all 14 standard fonts" {
     // fpdf2: tests all standard fonts
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -291,7 +291,7 @@ test "all 14 standard fonts" {
 }
 
 test "Document measureText" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
@@ -304,7 +304,7 @@ test "Document measureText" {
 }
 
 test "Document measureText with spacing" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const style = TextStyle{ .font = Font.helvetica, .size = 12, .char_spacing = 2.0 };
@@ -319,7 +319,7 @@ test "Document measureText with spacing" {
 // ============================================================================
 
 test "load embedded font from file" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
@@ -337,7 +337,7 @@ test "load embedded font from file" {
 }
 
 test "embedded font character widths" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
@@ -358,7 +358,7 @@ test "embedded font character widths" {
 }
 
 test "embedded font text measurement" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
@@ -373,7 +373,7 @@ test "embedded font text measurement" {
 }
 
 test "render text with embedded font" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
@@ -407,7 +407,7 @@ test "render text with embedded font" {
 }
 
 test "mix standard and embedded fonts" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const courier_prime = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
@@ -439,7 +439,7 @@ test "mix standard and embedded fonts" {
 }
 
 test "multiple embedded fonts" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const courier_regular = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
@@ -474,7 +474,7 @@ test "multiple embedded fonts" {
 }
 
 test "embedded font on multiple pages" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
@@ -504,7 +504,7 @@ test "embedded font on multiple pages" {
 }
 
 test "embedded font flags - monospace detection" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Courier Prime is monospace
@@ -513,7 +513,7 @@ test "embedded font flags - monospace detection" {
 }
 
 test "embedded font bbox scaling" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
@@ -528,7 +528,7 @@ test "embedded font bbox scaling" {
 }
 
 test "embedded font widths array in PDF" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .win_ansi);
@@ -549,7 +549,7 @@ test "embedded font widths array in PDF" {
 }
 
 test "variable font loading" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Inter Variable is a variable font - should still load basic metrics
@@ -565,7 +565,7 @@ test "variable font loading" {
 }
 
 test "PDF output is valid with embedded font" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
@@ -608,7 +608,7 @@ test "unit conversions" {
 }
 
 test "getPageRegion respects margins" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{ .margins = .{ .left = 50, .right = 50, .top = 100, .bottom = 100 } });
@@ -621,7 +621,7 @@ test "getPageRegion respects margins" {
 }
 
 test "writeStyled advances cursor" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -641,7 +641,7 @@ test "writeStyled advances cursor" {
 }
 
 test "writeStyled alignment" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -680,7 +680,7 @@ test "writeStyled alignment" {
 }
 
 test "writeLine alignment" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -707,7 +707,7 @@ test "writeLine alignment" {
 }
 
 test "writeStyled wraps text to multiple lines" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -726,7 +726,7 @@ test "writeStyled wraps text to multiple lines" {
 }
 
 test "writeStyled overflow" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -748,7 +748,7 @@ test "writeStyled overflow" {
 }
 
 test "writeStyled multi-page via overflow handling" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const page_opts = zapdf.PageOptions{ .margins = .{ .left = 50, .right = 50, .top = 50, .bottom = 50 } };
@@ -787,7 +787,7 @@ test "writeStyled multi-page via overflow handling" {
 }
 
 test "drawRegion with border" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -814,7 +814,7 @@ test "drawRegion with border" {
 }
 
 test "drawRegion with fill" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -843,7 +843,7 @@ test "drawRegion with fill" {
 // Break helper tests moved to document.zig (internal tests)
 
 test "soft hyphens stripped from text output" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -860,7 +860,7 @@ test "soft hyphens stripped from text output" {
 }
 
 test "writeStyled in narrow column" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -882,7 +882,7 @@ test "writeStyled in narrow column" {
 // Soft hyphen width test moved to document.zig (internal test)
 
 test "writeStyled overflow returns remaining text" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -902,7 +902,7 @@ test "writeStyled overflow returns remaining text" {
 }
 
 test "writeStyled newline forces line break" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -921,7 +921,7 @@ test "writeStyled newline forces line break" {
 }
 
 test "writeStyled returns overflow when no room" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -951,7 +951,7 @@ test "writeStyled returns overflow when no room" {
 }
 
 test "region padding affects content area" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -981,7 +981,7 @@ test "region padding affects content area" {
 }
 
 test "writeStyled handles empty text" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1000,7 +1000,7 @@ test "writeStyled handles empty text" {
 }
 
 test "writeStyled respects margins via region" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{ .margins = .{ .left = 100, .right = 100, .top = 100, .bottom = 100 } });
@@ -1022,7 +1022,7 @@ test "writeStyled respects margins via region" {
 }
 
 test "valign top_leading uses half-leading calculation" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1049,7 +1049,7 @@ test "valign top_leading uses half-leading calculation" {
 }
 
 test "valign top aligns cap-height to top edge" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1075,7 +1075,7 @@ test "valign top aligns cap-height to top edge" {
 }
 
 test "valign top_ascent aligns ascender to top edge" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1101,7 +1101,7 @@ test "valign top_ascent aligns ascender to top edge" {
 }
 
 test "valign middle centers text block in region" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1124,7 +1124,7 @@ test "valign middle centers text block in region" {
 }
 
 test "valign bottom puts text block at bottom of region" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1149,7 +1149,7 @@ test "valign bottom puts text block at bottom of region" {
 }
 
 test "writeStyled greedy vs optimal line counts" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1187,7 +1187,7 @@ test "writeStyled greedy vs optimal line counts" {
 }
 
 test "writeStyled greedy and optimal both render successfully" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1226,7 +1226,7 @@ test "mark positioning with Tm absolute coordinates" {
     // Each glyph gets: "1 0 0 1 x y Tm <glyph> Tj"
     // Marks should have higher Y coordinates than base glyphs (positioned above).
 
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
@@ -1290,7 +1290,7 @@ test "mark positioning with Tm absolute coordinates" {
 }
 
 test "TextStyle color stored in command" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1309,7 +1309,7 @@ test "TextStyle color stored in command" {
 }
 
 test "Color grayscale stored in command" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1325,7 +1325,7 @@ test "Color grayscale stored in command" {
 }
 
 test "Color CMYK stored in command" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1348,7 +1348,7 @@ test "Color.rgb" {
 }
 
 test "getFontMetrics standard font" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
@@ -1369,7 +1369,7 @@ test "getFontMetrics standard font" {
 }
 
 test "getFontMetrics different sizes" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const style24 = TextStyle{ .font = Font.helvetica, .size = 24 };
@@ -1384,7 +1384,7 @@ test "getFontMetrics different sizes" {
 }
 
 test "getFontMetrics Times vs Helvetica" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
@@ -1401,7 +1401,7 @@ test "getFontMetrics Times vs Helvetica" {
 }
 
 test "getFontMetrics lineHeight" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
@@ -1418,7 +1418,7 @@ test "getFontMetrics lineHeight" {
 // ============================================================================
 
 test "drawLine basic" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1433,14 +1433,14 @@ test "drawLine basic" {
 }
 
 test "drawLine without page returns error" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try std.testing.expectError(error.NoPage, doc.drawLine(.{ .x = 0, .y = 0 }, .{ .x = 100, .y = 100 }, .{}));
 }
 
 test "drawRect stroke" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1455,7 +1455,7 @@ test "drawRect stroke" {
 }
 
 test "drawRect fill" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1468,7 +1468,7 @@ test "drawRect fill" {
 }
 
 test "drawRect fill_stroke" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1481,7 +1481,7 @@ test "drawRect fill_stroke" {
 }
 
 test "drawRoundedRect basic" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1496,7 +1496,7 @@ test "drawRoundedRect basic" {
 }
 
 test "drawRoundedRect zero radius falls back to rect" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1512,7 +1512,7 @@ test "drawRoundedRect zero radius falls back to rect" {
 }
 
 test "drawRoundedRect radius clamped to half min dimension" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1528,7 +1528,7 @@ test "drawRoundedRect radius clamped to half min dimension" {
 }
 
 test "drawCircle basic" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1542,7 +1542,7 @@ test "drawCircle basic" {
 }
 
 test "drawEllipse basic" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1556,7 +1556,7 @@ test "drawEllipse basic" {
 }
 
 test "drawPolygon triangle" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1574,7 +1574,7 @@ test "drawPolygon triangle" {
 }
 
 test "drawPolygon less than 3 points does nothing" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1593,7 +1593,7 @@ test "drawPolygon less than 3 points does nothing" {
 }
 
 test "drawPath basic triangle" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1615,7 +1615,7 @@ test "drawPath basic triangle" {
 }
 
 test "drawPath with bezier curve" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1637,7 +1637,7 @@ test "drawPath with bezier curve" {
 }
 
 test "drawPath empty path does nothing" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1655,7 +1655,7 @@ test "drawPath empty path does nothing" {
 }
 
 test "drawPath without page returns error" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     var path = doc.createPath();
@@ -1667,7 +1667,7 @@ test "drawPath without page returns error" {
 
 test "graphics state used in output" {
     // Test that explicit graphics style produces valid PDF
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1713,7 +1713,7 @@ test "DocumentMetadata hasAnyField with title" {
 }
 
 test "setMetadata stores metadata" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setMetadata(.{
@@ -1727,7 +1727,7 @@ test "setMetadata stores metadata" {
 }
 
 test "metadata written to PDF Info dictionary" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setMetadata(.{
@@ -1758,7 +1758,7 @@ test "metadata written to PDF Info dictionary" {
 }
 
 test "metadata with special characters escaped" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setMetadata(.{
@@ -1775,7 +1775,7 @@ test "metadata with special characters escaped" {
 }
 
 test "no Info dictionary when metadata empty" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Clear default producer
@@ -1802,7 +1802,7 @@ test "no Info dictionary when metadata empty" {
 // ============================================================================
 
 test "outline in PDF output" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1823,7 +1823,7 @@ test "outline in PDF output" {
 }
 
 test "nested outline in PDF output" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1867,7 +1867,7 @@ test "PageLabelStyle pdfCode" {
 }
 
 test "setPageLabel basic" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.setPageLabel(0, .{ .style = .roman_lower });
@@ -1879,7 +1879,7 @@ test "setPageLabel basic" {
 }
 
 test "setPageLabel in PDF output" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     for (0..6) |_| {
@@ -1901,7 +1901,7 @@ test "setPageLabel in PDF output" {
 }
 
 test "setPageLabel with prefix" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1915,7 +1915,7 @@ test "setPageLabel with prefix" {
 }
 
 test "setPageLabel with start number" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1928,7 +1928,7 @@ test "setPageLabel with start number" {
 }
 
 test "no outlines or page labels when not set" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1949,7 +1949,7 @@ test "no outlines or page labels when not set" {
 // ============================================================================
 
 test "TextStyle underline decoration stored in command" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1965,7 +1965,7 @@ test "TextStyle underline decoration stored in command" {
 }
 
 test "TextStyle strikethrough decoration stored in command" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1981,7 +1981,7 @@ test "TextStyle strikethrough decoration stored in command" {
 }
 
 test "text width stored in command for decorations" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -1997,7 +1997,7 @@ test "text width stored in command for decorations" {
 }
 
 test "TextStyle with both decorations" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2019,7 +2019,7 @@ test "TextStyle with both decorations" {
 }
 
 test "TextStyle with color and decoration" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2036,7 +2036,7 @@ test "TextStyle with color and decoration" {
 }
 
 test "decoration not rendered when disabled" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2055,7 +2055,7 @@ test "decoration not rendered when disabled" {
 }
 
 test "embedded font decoration metrics from POST/OS2 tables" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
@@ -2068,7 +2068,7 @@ test "embedded font decoration metrics from POST/OS2 tables" {
 }
 
 test "write() advances cursor_x" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2087,7 +2087,7 @@ test "write() advances cursor_x" {
 }
 
 test "write() wraps to next line" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2103,7 +2103,7 @@ test "write() wraps to next line" {
 }
 
 test "write() with multiple styled chunks" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2128,7 +2128,7 @@ test "write() with multiple styled chunks" {
 }
 
 test "write() returns overflow when region is full" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2154,7 +2154,7 @@ test "Region.newLine resets cursor_x and advances cursor_y" {
 }
 
 test "write() with measure_only is side-effect free" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2180,7 +2180,7 @@ test "write() with measure_only is side-effect free" {
 }
 
 test "write() with wrap=false stays on one line" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2202,7 +2202,7 @@ test "write() with wrap=false stays on one line" {
 // ============================================================================
 
 test "writeStyled basic" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2222,7 +2222,7 @@ test "writeStyled basic" {
 }
 
 test "writeStyled word wrapping" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2243,7 +2243,7 @@ test "writeStyled word wrapping" {
 }
 
 test "writeStyled justified alignment" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2264,7 +2264,7 @@ test "writeStyled justified alignment" {
 }
 
 test "writeStyled optimal line breaking" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2287,7 +2287,7 @@ test "writeStyled optimal line breaking" {
 }
 
 test "writeStyled generates valid PDF" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2312,7 +2312,7 @@ test "writeStyled generates valid PDF" {
 }
 
 test "writeStyled breaks at soft-hyphen when word too wide" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2334,7 +2334,7 @@ test "writeStyled breaks at soft-hyphen when word too wide" {
 }
 
 test "writeStyled soft-hyphen break renders hyphen" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2361,7 +2361,7 @@ test "writeStyled soft-hyphen break renders hyphen" {
 }
 
 test "writeStyled breaks at regular hyphen when break_on_hyphens is true" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2382,7 +2382,7 @@ test "writeStyled breaks at regular hyphen when break_on_hyphens is true" {
 }
 
 test "writeStyled does not break at regular hyphen when break_on_hyphens is false" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2405,7 +2405,7 @@ test "writeStyled does not break at regular hyphen when break_on_hyphens is fals
 }
 
 test "writeStyled character-level breaking for long word without hyphens" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2427,7 +2427,7 @@ test "writeStyled character-level breaking for long word without hyphens" {
 }
 
 test "writeStyled measure_only is side-effect free" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2471,7 +2471,7 @@ test "writeStyled measure_only is side-effect free" {
 // ============================================================================
 
 test "font family loads and resolves variants" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Load Gentium family with all variants
@@ -2504,7 +2504,7 @@ test "font family loads and resolves variants" {
 }
 
 test "font family with missing variant returns error" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Load family with only regular
@@ -2528,7 +2528,7 @@ test "font family with missing variant returns error" {
 }
 
 test "font family text rendering uses correct variant" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Load Gentium family
@@ -2565,13 +2565,11 @@ test "font family text rendering uses correct variant" {
 }
 
 test "loadFontFromMemory loads font from buffer" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Read font file into memory
-    const file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Regular.ttf", .{});
-    defer file.close();
-    const font_data = try file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    const font_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Gentium/Gentium-Regular.ttf", std.testing.allocator, .limited(10 * 1024 * 1024));
     defer std.testing.allocator.free(font_data);
 
     // Load from memory
@@ -2588,18 +2586,14 @@ test "loadFontFromMemory loads font from buffer" {
 }
 
 test "loadFontFamilyFromMemory loads family from buffers" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Read font files into memory
-    const regular_file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Regular.ttf", .{});
-    defer regular_file.close();
-    const regular_data = try regular_file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    const regular_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Gentium/Gentium-Regular.ttf", std.testing.allocator, .limited(10 * 1024 * 1024));
     defer std.testing.allocator.free(regular_data);
 
-    const bold_file = try std.fs.cwd().openFile("test/fonts/Gentium/Gentium-Bold.ttf", .{});
-    defer bold_file.close();
-    const bold_data = try bold_file.readToEndAlloc(std.testing.allocator, 10 * 1024 * 1024);
+    const bold_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Gentium/Gentium-Bold.ttf", std.testing.allocator, .limited(10 * 1024 * 1024));
     defer std.testing.allocator.free(bold_data);
 
     // Load family from memory
@@ -2629,13 +2623,11 @@ test "loadFontFamilyFromMemory loads family from buffers" {
 }
 
 test "loadImageFromMemory loads image from buffer" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Read image file into memory
-    const file = try std.fs.cwd().openFile("test/images/robot.png", .{});
-    defer file.close();
-    const image_data = try file.readToEndAlloc(std.testing.allocator, 5 * 1024 * 1024);
+    const image_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/images/robot.png", std.testing.allocator, .limited(5 * 1024 * 1024));
     defer std.testing.allocator.free(image_data);
 
     // Load from memory
@@ -2651,7 +2643,7 @@ test "loadImageFromMemory loads image from buffer" {
 }
 
 test "loadSvgFromMemory loads SVG from buffer" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // SVG content in memory
@@ -2679,7 +2671,7 @@ test "loadSvgFromMemory loads SVG from buffer" {
 // ============================================================================
 
 test "drawRect with fill opacity" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2699,7 +2691,7 @@ test "drawRect with fill opacity" {
 }
 
 test "drawRect with stroke opacity" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2717,7 +2709,7 @@ test "drawRect with stroke opacity" {
 }
 
 test "drawRect with both fill and stroke opacity" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2737,7 +2729,7 @@ test "drawRect with both fill and stroke opacity" {
 }
 
 test "drawRect fully opaque has no ExtGState" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2754,7 +2746,7 @@ test "drawRect fully opaque has no ExtGState" {
 }
 
 test "drawLine with opacity" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2773,7 +2765,7 @@ test "drawLine with opacity" {
 }
 
 test "drawEllipse with opacity" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2789,7 +2781,7 @@ test "drawEllipse with opacity" {
 }
 
 test "opacity state deduplication" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -2824,7 +2816,7 @@ test "opacity state deduplication" {
 // ============================================================================
 
 test "PDF/A-1b output has required structures" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setConformance(.pdfa_1b);
@@ -2847,7 +2839,7 @@ test "PDF/A-1b output has required structures" {
 }
 
 test "PDF/A-1b rejects transparency" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setConformance(.pdfa_1b);
@@ -2861,7 +2853,7 @@ test "PDF/A-1b rejects transparency" {
 }
 
 test "PDF/A-1b allows fully opaque drawing" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setConformance(.pdfa_1b);
@@ -2881,7 +2873,7 @@ test "PDF/A-1b allows fully opaque drawing" {
 }
 
 test "PDF/A-2b allows transparency" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     doc.setConformance(.pdfa_2b);
@@ -2901,7 +2893,7 @@ test "PDF/A-2b allows transparency" {
 }
 
 test "PDF/A none conformance has no PDF/A structures" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     // Default conformance is .none

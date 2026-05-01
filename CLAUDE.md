@@ -4,7 +4,7 @@ We are going to write a library for creating PDF documents. It is supposed to be
 
 The library is a low level library. It should be stateless.
 
-All code should be written in Zig 0.15. It should be self contained. Users clone the repo and build, nothing more!
+All code should be written in Zig 0.16. It should be self contained. Users clone the repo and build, nothing more!
 
 ## Session start
 

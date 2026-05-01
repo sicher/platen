@@ -42,13 +42,12 @@ See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 const std = @import("std");
 const zapdf = @import("zapdf");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    // Create document
-    var doc = zapdf.Document.init(allocator);
+    // Create document. `init.io` is used for any file I/O the document
+    // performs (loadFont/loadImage/loadSvg). In tests, pass `std.testing.io`.
+    var doc = zapdf.Document.init(allocator, init.io);
     defer doc.deinit();
 
     // Add a page and write text
@@ -60,9 +59,7 @@ pub fn main() !void {
     const pdf_data = try doc.output();
     defer allocator.free(pdf_data);
 
-    const file = try std.fs.cwd().createFile("hello.pdf", .{});
-    defer file.close();
-    try file.writeAll(pdf_data);
+    try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = "hello.pdf", .data = pdf_data });
 }
 ```
 
@@ -488,7 +485,7 @@ doc.setOutline(&outline);
 ### PDF/A Archival Format
 
 ```zig
-var doc = zapdf.Document.init(allocator);
+var doc = zapdf.Document.init(allocator, init.io);
 defer doc.deinit();
 
 // Enable PDF/A-1b conformance (archival format)
@@ -521,7 +518,7 @@ Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotA
 
 | Method | Description |
 |--------|-------------|
-| `Document.init(allocator)` | Create a new PDF document |
+| `Document.init(allocator, io)` | Create a new PDF document. `io` is `std.Io` (use `init.io` from main, or `std.testing.io` in tests) |
 | `deinit()` | Free all document resources |
 | `output() -> []u8` | Generate PDF output as bytes |
 
@@ -761,7 +758,7 @@ font.embedded.setFeature(.liga, false);  // Disable standard ligatures
 
 ## Requirements
 
-- Zig 0.15+
+- Zig 0.16+
 - No external dependencies (zlib bundled)
 
 ## License

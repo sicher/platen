@@ -427,7 +427,10 @@ fn drawTextBox(self: *Document, box: *const TextBox) !void
 
 **Simplest case - dump text into PDF:**
 ```zig
-var doc = try zapdf.Document.init(allocator);
+// `io` is required for any file I/O the document performs
+// (loadFont/loadImage/loadSvg). Pass `init.io` from main, or
+// `std.testing.io` from tests.
+var doc = zapdf.Document.init(allocator, io);
 try doc.setFont(.helvetica, 12);
 try doc.addPage(.a4);
 
@@ -698,7 +701,7 @@ pub const Conformance = enum {
 ### Usage
 
 ```zig
-var doc = Document.init(allocator);
+var doc = Document.init(allocator, io);
 doc.setConformance(.pdfa_1b);  // Enable PDF/A-1b
 
 // For full compliance, use embedded fonts
@@ -788,12 +791,18 @@ _ = try doc.writeStyled(&box, &st, .{});  // all defaults
 _ = try doc.writeStyled(&box, &st, .{ .alignment = .justify });
 ```
 
-## Zig 0.15 Compatibility Notes
+## Zig 0.16 Compatibility Notes
 
-The project targets Zig 0.15 which has significant API changes from earlier versions:
+The project targets Zig 0.16. Key things to remember when extending the code:
 
-- **I/O**: Uses new buffered `File.Reader` and `File.Writer` with explicit buffer parameters
-- **ArrayListUnmanaged**: Allocator passed to each method, not stored
-- **XML**: No `std.xml` - we implement our own simple XML parser if needed
-- **ZIP**: `std.zip` exists but with lower-level API; MXL support pending
+- **`std.Io`-driven file I/O**. There is no implicit "current process" I/O in 0.16. `Document` carries an `io: std.Io` and threads it through `loadFont`, `loadImage`, `loadSvg`. Free functions that touch the filesystem (e.g. `ttf.Font.fromFile`, `Image.fromFile`, `Svg.fromFile`, `EmbeddedFont.fromFile`) take `io` as the first parameter. CLI / perf / integration entry points hold a module-level `app_io` that is initialised from `init.io` (or `std.testing.io` in test builds).
+- **Writer interface**: `std.Io.Writer.fixed(buf)` for fixed-buffer writing; pass `&w` (a `*std.Io.Writer`) — there is no `.writer()` accessor. `w.buffered()` returns the slice written so far, `w.end` is the cursor. For dynamic buffers use `std.Io.Writer.Allocating`.
+- **ArrayList / HashMap empty values**: declare with `.empty` rather than `{}` / `.{}`. The unified `ArrayList` is unmanaged by default; `ArrayListUnmanaged(T)` is now an alias.
+- **Allocator**: `std.heap.GeneralPurposeAllocator` is renamed to `std.heap.DebugAllocator`; initialize with `var gpa: std.heap.DebugAllocator(.{}) = .init;`.
+- **`main` signature**: `pub fn main(init: std.process.Init) !void`. Args via `init.minimal.args.toSlice(arena)`; default GPA via `init.gpa`; `std.Io` via `init.io`.
+- **Time**: `std.time.timestamp` / `milliTimestamp` are gone. `pdf_output.milliTimestamp()` wraps `std.c.clock_gettime(.REALTIME, ...)` for our timing helpers.
+- **Subprocess**: `std.process.Child.run` was replaced by `std.process.run(allocator, io, .{ .argv = ... })`.
+- **Misc renames**: `std.meta.intToEnum` → `std.enums.fromInt`; `std.mem.trimLeft` → `std.mem.trimStart`.
+- **XML**: No `std.xml` - we implement our own simple XML parser if needed.
+- **ZIP**: `std.zip` exists but with lower-level API; MXL support pending.
 

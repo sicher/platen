@@ -42,19 +42,9 @@ pub const Font = struct {
     has_ascii_widths: bool = false,
 
     /// Load a font from file
-    pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !struct { font: Font, data: []const u8 } {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-
-        const stat = try file.stat();
-        const data = try allocator.alloc(u8, stat.size);
+    pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !struct { font: Font, data: []const u8 } {
+        const data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(100 * 1024 * 1024));
         errdefer allocator.free(data);
-
-        const bytes_read = try file.readAll(data);
-        if (bytes_read != stat.size) {
-            allocator.free(data);
-            return Error.InvalidTableData;
-        }
 
         return .{ .font = try parse(data), .data = data };
     }
@@ -625,7 +615,7 @@ fn readU32(data: []const u8, offset: usize) u32 {
 // ============================================================================
 
 test "parse Courier Prime" {
-    const result = Font.fromFile(std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf") catch |err| {
+    const result = Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf") catch |err| {
         std.debug.print("Failed to load font: {}\n", .{err});
         return err;
     };

@@ -26,7 +26,7 @@ pub fn appendBEi32(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocat
 }
 
 test "appendBE16" {
-    var list = std.ArrayListUnmanaged(u8){};
+    var list = std.ArrayListUnmanaged(u8).empty;
     defer list.deinit(std.testing.allocator);
 
     try appendBE16(&list, std.testing.allocator, 0x1234);
@@ -34,7 +34,7 @@ test "appendBE16" {
 }
 
 test "appendBE32" {
-    var list = std.ArrayListUnmanaged(u8){};
+    var list = std.ArrayListUnmanaged(u8).empty;
     defer list.deinit(std.testing.allocator);
 
     try appendBE32(&list, std.testing.allocator, 0x12345678);
@@ -42,7 +42,7 @@ test "appendBE32" {
 }
 
 test "appendBEi16" {
-    var list = std.ArrayListUnmanaged(u8){};
+    var list = std.ArrayListUnmanaged(u8).empty;
     defer list.deinit(std.testing.allocator);
 
     try appendBEi16(&list, std.testing.allocator, -1);

@@ -197,25 +197,27 @@ pub const GradientDef = union(enum) {
 /// PDF Document
 pub const Document = struct {
     allocator: std.mem.Allocator,
+    /// I/O context used for file operations (loadFont, loadImage, loadSvg).
+    io: std.Io,
     pages: std.ArrayListUnmanaged(Page),
     /// Index of current page for content operations (0-based).
     current_page: usize = 0,
     // Track all fonts used across document
-    used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .{},
+    used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .empty,
     // Track all embedded fonts
-    embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .{},
+    embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .empty,
     // Track all embedded font families
-    embedded_font_families: std.ArrayListUnmanaged(*EmbeddedFontFamily) = .{},
+    embedded_font_families: std.ArrayListUnmanaged(*EmbeddedFontFamily) = .empty,
     // Track all loaded images
-    loaded_images: std.ArrayListUnmanaged(*Image) = .{},
+    loaded_images: std.ArrayListUnmanaged(*Image) = .empty,
     // Track all loaded SVGs
-    loaded_svgs: std.ArrayListUnmanaged(*Svg) = .{},
+    loaded_svgs: std.ArrayListUnmanaged(*Svg) = .empty,
     // Track gradients used in document
-    gradients: std.ArrayListUnmanaged(GradientDef) = .{},
+    gradients: std.ArrayListUnmanaged(GradientDef) = .empty,
     // Document outline (table of contents)
     outline: ?outlinemod.Outline = null,
     // Page label ranges
-    page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .{},
+    page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .empty,
     /// Document metadata (title, author, etc.)
     metadata: DocumentMetadata = .{},
     /// Compression level for PDF streams (0-9). Default 1 for speed. Use 6 for smaller files.
@@ -224,10 +226,13 @@ pub const Document = struct {
     conformance: pdfa.Conformance = .none,
 
     /// Create a new PDF document.
-    pub fn init(allocator: std.mem.Allocator) Document {
+    /// `io` is used for file operations such as `loadFont`, `loadImage`, and `loadSvg`.
+    /// In tests, pass `std.testing.io`. In a CLI, use `init.io` from the main entry point.
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) Document {
         return .{
             .allocator = allocator,
-            .pages = .{},
+            .io = io,
+            .pages = .empty,
         };
     }
 
@@ -312,7 +317,7 @@ pub const Document = struct {
     /// Returns a Font that can be used in TextStyle.
     /// Encoding defaults to .identity (Unicode). Pass .win_ansi for legacy 256-char mode.
     pub fn loadFont(self: *Document, path: []const u8, encoding: ?FontEncoding) !Font {
-        const emb = try EmbeddedFont.fromFile(self.allocator, path);
+        const emb = try EmbeddedFont.fromFile(self.io, self.allocator, path);
         emb.encoding = encoding orelse .identity;
         try self.embedded_fonts.append(self.allocator, emb);
         return Font{ .embedded = emb };
@@ -361,28 +366,28 @@ pub const Document = struct {
         const encoding = opts.encoding orelse .identity;
 
         // Load regular (required)
-        const regular = try EmbeddedFont.fromFile(self.allocator, opts.regular);
+        const regular = try EmbeddedFont.fromFile(self.io, self.allocator, opts.regular);
         regular.encoding = encoding;
         try self.embedded_fonts.append(self.allocator, regular);
 
         // Load optional variants
         var bold: ?*EmbeddedFont = null;
         if (opts.bold) |path| {
-            bold = try EmbeddedFont.fromFile(self.allocator, path);
+            bold = try EmbeddedFont.fromFile(self.io, self.allocator, path);
             bold.?.encoding = encoding;
             try self.embedded_fonts.append(self.allocator, bold.?);
         }
 
         var italic: ?*EmbeddedFont = null;
         if (opts.italic) |path| {
-            italic = try EmbeddedFont.fromFile(self.allocator, path);
+            italic = try EmbeddedFont.fromFile(self.io, self.allocator, path);
             italic.?.encoding = encoding;
             try self.embedded_fonts.append(self.allocator, italic.?);
         }
 
         var bold_italic: ?*EmbeddedFont = null;
         if (opts.bold_italic) |path| {
-            bold_italic = try EmbeddedFont.fromFile(self.allocator, path);
+            bold_italic = try EmbeddedFont.fromFile(self.io, self.allocator, path);
             bold_italic.?.encoding = encoding;
             try self.embedded_fonts.append(self.allocator, bold_italic.?);
         }
@@ -471,7 +476,7 @@ pub const Document = struct {
     /// Load an image from file (JPEG or PNG).
     /// Returns a handle that can be used with drawImage().
     pub fn loadImage(self: *Document, path: []const u8) !*Image {
-        const image = try Image.fromFile(self.allocator, path);
+        const image = try Image.fromFile(self.io, self.allocator, path);
         try self.loaded_images.append(self.allocator, image);
         return image;
     }
@@ -552,7 +557,7 @@ pub const Document = struct {
     /// Load an SVG from file.
     /// Returns a handle that can be used with drawSvg().
     pub fn loadSvg(self: *Document, path: []const u8) !*Svg {
-        const s = try Svg.fromFile(self.allocator, path);
+        const s = try Svg.fromFile(self.io, self.allocator, path);
         try self.loaded_svgs.append(self.allocator, s);
         return s;
     }
@@ -1371,9 +1376,9 @@ pub const Document = struct {
         if (region.fill) |fill_color| {
             // Write fill color command
             var color_buf: [64]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&color_buf);
-            fill_color.writeFill(fbs.writer()) catch unreachable;
-            const color_str = fbs.getWritten();
+            var fbs = std.Io.Writer.fixed(&color_buf);
+            fill_color.writeFill(&fbs) catch unreachable;
+            const color_str = fbs.buffered();
             @memcpy(buf[len .. len + color_str.len], color_str);
             len += color_str.len;
 
@@ -1420,9 +1425,9 @@ pub const Document = struct {
 
             // Set stroke color
             var color_buf: [64]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&color_buf);
-            s.color.writeStroke(fbs.writer()) catch unreachable;
-            const color_str = fbs.getWritten();
+            var fbs = std.Io.Writer.fixed(&color_buf);
+            s.color.writeStroke(&fbs) catch unreachable;
+            const color_str = fbs.buffered();
             @memcpy(buf[len .. len + color_str.len], color_str);
             len += color_str.len;
 
@@ -2458,9 +2463,9 @@ pub const Document = struct {
         len += try self.writeOpacityRef(page, style, buf[len..]);
 
         // Path commands (use fixedBufferStream for writer interface)
-        var fbs = std.io.fixedBufferStream(buf[len..]);
-        try p.toPdfContent(page_height, fbs.writer());
-        len += fbs.pos;
+        var fbs = std.Io.Writer.fixed(buf[len..]);
+        try p.toPdfContent(page_height, &fbs);
+        len += fbs.end;
 
         len += finishShapeCommand(buf[len..], style);
         try page.commands.append(self.allocator, .{ .raw = buf[0..len] });
@@ -2659,7 +2664,7 @@ pub const Document = struct {
         const pages_root_id: ObjectId = 2;
 
         // Build list of used standard fonts
-        var font_list = std.ArrayListUnmanaged(StandardFont){};
+        var font_list = std.ArrayListUnmanaged(StandardFont).empty;
         defer font_list.deinit(self.allocator);
         var font_iter = self.used_fonts.keyIterator();
         while (font_iter.next()) |font| {
@@ -2672,7 +2677,7 @@ pub const Document = struct {
         // Reserve IDs for embedded fonts
         // CID fonts need: Type0 + CIDFont + FontDescriptor + FontFile + ToUnicode = 5 objects
         // WinAnsi fonts need: Font + FontDescriptor + FontFile + ToUnicode = 4 objects
-        var emb_font_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        var emb_font_base_ids = std.ArrayListUnmanaged(ObjectId).empty;
         defer emb_font_base_ids.deinit(self.allocator);
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font_base_ids.append(self.allocator, next_id);
@@ -2687,11 +2692,11 @@ pub const Document = struct {
         // Each image needs: XObject stream (1 object)
         // PNG with alpha needs: +1 for SMask stream
         // Images with ICC profile need: +1 for ICC profile stream
-        var image_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        var image_base_ids = std.ArrayListUnmanaged(ObjectId).empty;
         defer image_base_ids.deinit(self.allocator);
-        var image_smask_ids = std.ArrayListUnmanaged(?ObjectId){};
+        var image_smask_ids = std.ArrayListUnmanaged(?ObjectId).empty;
         defer image_smask_ids.deinit(self.allocator);
-        var image_icc_ids = std.ArrayListUnmanaged(?ObjectId){};
+        var image_icc_ids = std.ArrayListUnmanaged(?ObjectId).empty;
         defer image_icc_ids.deinit(self.allocator);
         for (self.loaded_images.items) |image| {
             try image_base_ids.append(self.allocator, next_id);
@@ -2711,7 +2716,7 @@ pub const Document = struct {
         }
 
         // Reserve IDs for SVGs (Form XObjects - 1 object each)
-        var svg_base_ids = std.ArrayListUnmanaged(ObjectId){};
+        var svg_base_ids = std.ArrayListUnmanaged(ObjectId).empty;
         defer svg_base_ids.deinit(self.allocator);
         for (self.loaded_svgs.items) |_| {
             try svg_base_ids.append(self.allocator, next_id);
@@ -2817,7 +2822,9 @@ pub const Document = struct {
         if (self.conformance != .none) {
             // Generate UUIDs for XMP document/instance IDs (simple pseudo-random)
             var uuid_buf: [32]u8 = undefined;
-            const timestamp = @as(u64, @intCast(std.time.milliTimestamp()));
+            var ts: std.c.timespec = undefined;
+            _ = std.c.clock_gettime(.REALTIME, &ts);
+            const timestamp: u64 = @as(u64, @intCast(ts.sec)) *% 1000 +% @as(u64, @intCast(ts.nsec)) / 1_000_000;
             _ = std.fmt.bufPrint(&uuid_buf, "{x:0>16}{x:0>16}", .{ timestamp, timestamp ^ 0xDEADBEEF }) catch unreachable;
             const uuid_str = uuid_buf[0..32];
 
@@ -2886,21 +2893,21 @@ pub const Document = struct {
 
         // Generate font subsets (only include used glyphs)
         // This also populates gid_remap for compact CFF subsetting
-        const subset_start = std.time.milliTimestamp();
+        const subset_start = pdf_output.milliTimestamp();
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font.generateSubset();
         }
-        pdf_output.last_output_timing.subset_ms = std.time.milliTimestamp() - subset_start;
+        pdf_output.last_output_timing.subset_ms = pdf_output.milliTimestamp() - subset_start;
 
         // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
-        const render_start = std.time.milliTimestamp();
+        const render_start = pdf_output.milliTimestamp();
         for (self.pages.items) |*page| {
             try self.renderPageCommands(page);
         }
-        pdf_output.last_output_timing.render_ms = std.time.milliTimestamp() - render_start;
+        pdf_output.last_output_timing.render_ms = pdf_output.milliTimestamp() - render_start;
 
         // Write embedded font objects
-        const font_write_start = std.time.milliTimestamp();
+        const font_write_start = pdf_output.milliTimestamp();
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
             const base_id = emb_font_base_ids.items[i];
 
@@ -3033,7 +3040,7 @@ pub const Document = struct {
                 try self.writeToUnicodeStream(&w, tounicode_id, tounicode_cmap);
             }
         }
-        pdf_output.last_output_timing.font_write_ms = std.time.milliTimestamp() - font_write_start;
+        pdf_output.last_output_timing.font_write_ms = pdf_output.milliTimestamp() - font_write_start;
 
         // Write image XObjects
         for (self.loaded_images.items, 0..) |image, i| {
@@ -3206,7 +3213,7 @@ pub const Document = struct {
         }
 
         // Write each page
-        const page_write_start = std.time.milliTimestamp();
+        const page_write_start = pdf_output.milliTimestamp();
         next_id = first_page_id;
         for (self.pages.items, 0..) |page, page_idx| {
             const pg_id = next_id;
@@ -3243,7 +3250,7 @@ pub const Document = struct {
             defer shading_res.deinit();
             var extgstate_res = Dict.init(self.allocator);
             defer extgstate_res.deinit();
-            var shading_strs = std.ArrayListUnmanaged([]u8){};
+            var shading_strs = std.ArrayListUnmanaged([]u8).empty;
             defer {
                 for (shading_strs.items) |s| self.allocator.free(s);
                 shading_strs.deinit(self.allocator);
@@ -3320,8 +3327,8 @@ pub const Document = struct {
                     for (page.opacity_states.items, 0..) |state, idx| {
                         // Build inline dict: << /Type /ExtGState /ca N /CA N >>
                         var gs_buf: [128]u8 = undefined;
-                        var gs_fbs = std.io.fixedBufferStream(&gs_buf);
-                        const gs_writer = gs_fbs.writer();
+                        var gs_fbs = std.Io.Writer.fixed(&gs_buf);
+                        const gs_writer = &gs_fbs;
                         try gs_writer.writeAll("<< /Type /ExtGState /ca ");
                         var val_buf: [16]u8 = undefined;
                         var len = format.writeF64_3(&val_buf, state.fill_opacity).len;
@@ -3330,7 +3337,7 @@ pub const Document = struct {
                         len = format.writeF64_3(&val_buf, state.stroke_opacity).len;
                         try gs_writer.writeAll(val_buf[0..len]);
                         try gs_writer.writeAll(" >>");
-                        const gs_str = try self.allocator.dupe(u8, gs_fbs.getWritten());
+                        const gs_str = try self.allocator.dupe(u8, gs_fbs.buffered());
                         try shading_strs.append(self.allocator, gs_str); // Reuse cleanup list
                         try extgstate_res.put(extgstateResourceName(idx), Value.literal(gs_str));
                     }
@@ -3346,8 +3353,8 @@ pub const Document = struct {
 
                             // Build shading dict with inline function
                             var shading_buf: [2048]u8 = undefined;
-                            var shading_fbs = std.io.fixedBufferStream(&shading_buf);
-                            const shading_writer = shading_fbs.writer();
+                            var shading_fbs = std.Io.Writer.fixed(&shading_buf);
+                            const shading_writer = &shading_fbs;
 
                             switch (grad_def) {
                                 .linear => |lg| {
@@ -3396,7 +3403,7 @@ pub const Document = struct {
 
                             const shading_name = shadingResourceName(grad_idx);
                             // Dupe string since stack buffer goes out of scope
-                            const shading_str = try self.allocator.dupe(u8, shading_fbs.getWritten());
+                            const shading_str = try self.allocator.dupe(u8, shading_fbs.buffered());
                             try shading_strs.append(self.allocator, shading_str);
                             try shading_res.put(shading_name, Value.literal(shading_str));
                         }
@@ -3496,7 +3503,7 @@ pub const Document = struct {
                 try w.endObject();
             }
         }
-        pdf_output.last_output_timing.page_write_ms = std.time.milliTimestamp() - page_write_start;
+        pdf_output.last_output_timing.page_write_ms = pdf_output.milliTimestamp() - page_write_start;
 
         // Write Info dictionary if metadata is set
         var info_id: ?ObjectId = null;
@@ -3686,13 +3693,13 @@ pub const Document = struct {
         }
 
         // Finish with xref and trailer
-        const finish_start = std.time.milliTimestamp();
+        const finish_start = pdf_output.milliTimestamp();
 
         // Generate document ID for PDF/A (required in trailer)
         var doc_id_buf: [32]u8 = undefined;
         const doc_id: ?[]const u8 = if (self.conformance != .none) blk: {
             // Generate pseudo-random ID based on timestamp and content
-            const timestamp = @as(u64, @intCast(std.time.milliTimestamp()));
+            const timestamp = @as(u64, @intCast(pdf_output.milliTimestamp()));
             const content_hash = @as(u64, @intCast(w.output.items.len)) ^ 0xCAFEBABE;
             _ = std.fmt.bufPrint(&doc_id_buf, "{x:0>16}{x:0>16}", .{ timestamp, content_hash }) catch unreachable;
             break :blk doc_id_buf[0..32];
@@ -3703,7 +3710,7 @@ pub const Document = struct {
             .info_ref = if (info_id) |id| .{ .id = id } else null,
             .id = doc_id,
         });
-        pdf_output.last_output_timing.finish_ms = std.time.milliTimestamp() - finish_start;
+        pdf_output.last_output_timing.finish_ms = pdf_output.milliTimestamp() - finish_start;
         return result;
     }
 
@@ -3745,7 +3752,7 @@ const measureTextStyled = metrics.measureTextStyled;
 // ============================================================================
 
 test "findHyphenBreak finds break at regular hyphen" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -3766,7 +3773,7 @@ test "findHyphenBreak finds break at regular hyphen" {
 }
 
 test "findHyphenBreak returns null for word without hyphens" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -3778,7 +3785,7 @@ test "findHyphenBreak returns null for word without hyphens" {
 }
 
 test "findSoftHyphenBreak finds break at soft hyphen" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -3794,7 +3801,7 @@ test "findSoftHyphenBreak finds break at soft hyphen" {
 }
 
 test "findSoftHyphenBreak returns null for word without soft hyphens" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -3806,7 +3813,7 @@ test "findSoftHyphenBreak returns null for word without soft hyphens" {
 }
 
 test "soft hyphens excluded from text width" {
-    var doc = Document.init(std.testing.allocator);
+    var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});

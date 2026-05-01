@@ -72,7 +72,7 @@ pub const Feature = enum(u32) {
     }
 
     pub fn fromTag(t: u32) ?Feature {
-        return std.meta.intToEnum(Feature, t) catch null;
+        return std.enums.fromInt(Feature, t);
     }
 
     /// Returns true if this feature is enabled by default
@@ -767,59 +767,59 @@ pub const OpenTypeFeatures = struct {
 
     // GSUB data
     gsub_data: ?[]const u8 = null,
-    liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Standard ligatures
-    dlig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Discretionary ligatures
-    clig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Contextual ligatures
-    hlig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Historical ligatures
-    calt_liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .{}, // Calt ligatures (e.g., arrow sequences)
-    single_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (generic)
-    tnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (tabular figures)
-    pnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (proportional figures)
-    zero_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (slashed zero)
-    case_lookups: std.ArrayListUnmanaged(SingleSubst) = .{}, // Type 1 (case-sensitive forms)
-    ss_lookups: [20]std.ArrayListUnmanaged(SingleSubst) = [_]std.ArrayListUnmanaged(SingleSubst){.{}} ** 20, // Stylistic sets 1-20
-    cv_lookups: [99]std.ArrayListUnmanaged(SingleSubst) = [_]std.ArrayListUnmanaged(SingleSubst){.{}} ** 99, // Character variants 1-99
-    chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (calt)
-    dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (dlig)
-    frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .{}, // Type 6 Format 3 (frac)
+    liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .empty, // Standard ligatures
+    dlig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .empty, // Discretionary ligatures
+    clig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .empty, // Contextual ligatures
+    hlig_lookups: std.ArrayListUnmanaged(LigatureSubst) = .empty, // Historical ligatures
+    calt_liga_lookups: std.ArrayListUnmanaged(LigatureSubst) = .empty, // Calt ligatures (e.g., arrow sequences)
+    single_lookups: std.ArrayListUnmanaged(SingleSubst) = .empty, // Type 1 (generic)
+    tnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .empty, // Type 1 (tabular figures)
+    pnum_lookups: std.ArrayListUnmanaged(SingleSubst) = .empty, // Type 1 (proportional figures)
+    zero_lookups: std.ArrayListUnmanaged(SingleSubst) = .empty, // Type 1 (slashed zero)
+    case_lookups: std.ArrayListUnmanaged(SingleSubst) = .empty, // Type 1 (case-sensitive forms)
+    ss_lookups: [20]std.ArrayListUnmanaged(SingleSubst) = @splat(.empty), // Stylistic sets 1-20
+    cv_lookups: [99]std.ArrayListUnmanaged(SingleSubst) = @splat(.empty), // Character variants 1-99
+    chain_context_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .empty, // Type 6 Format 3 (calt)
+    dlig_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .empty, // Type 6 Format 3 (dlig)
+    frac_chain_lookups: std.ArrayListUnmanaged(ChainContextSubstF3) = .empty, // Type 6 Format 3 (frac)
 
     // Chain context rule index: glyph_id -> list of rule indices that can match at that glyph
     // This avoids iterating all 65+ rules for each position - only check rules that could match
-    calt_rule_index: std.AutoHashMapUnmanaged(u16, []const usize) = .{},
-    calt_rule_index_storage: std.ArrayListUnmanaged([]const usize) = .{}, // Storage for index slices
+    calt_rule_index: std.AutoHashMapUnmanaged(u16, []const usize) = .empty,
+    calt_rule_index_storage: std.ArrayListUnmanaged([]const usize) = .empty, // Storage for index slices
 
     // Lookup index map: maps original lookup index -> lookup reference
-    gsub_lookup_map: std.AutoHashMapUnmanaged(u16, GSUBLookupRef) = .{},
+    gsub_lookup_map: std.AutoHashMapUnmanaged(u16, GSUBLookupRef) = .empty,
 
     // GPOS data
     gpos_data: ?[]const u8 = null,
-    kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .{},
-    mark_base_lookups: std.ArrayListUnmanaged(MarkBasePos) = .{}, // Type 4
-    mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .{}, // Type 6
+    kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .empty,
+    mark_base_lookups: std.ArrayListUnmanaged(MarkBasePos) = .empty, // Type 4
+    mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .empty, // Type 6
 
     // Kerning cache: (glyph1 << 16 | glyph2) -> kern value for O(1) lookup
-    kern_cache: std.AutoHashMapUnmanaged(u32, i16) = .{},
+    kern_cache: std.AutoHashMapUnmanaged(u32, i16) = .empty,
 
     // Allocated memory for ligature data
-    ligature_memory: std.ArrayListUnmanaged([]const u16) = .{},
-    ligature_set_memory: std.ArrayListUnmanaged([]const Ligature) = .{},
-    ligature_structs: std.ArrayListUnmanaged(Ligature) = .{},
-    ligature_sets: std.ArrayListUnmanaged(LigatureSet) = .{},
+    ligature_memory: std.ArrayListUnmanaged([]const u16) = .empty,
+    ligature_set_memory: std.ArrayListUnmanaged([]const Ligature) = .empty,
+    ligature_structs: std.ArrayListUnmanaged(Ligature) = .empty,
+    ligature_sets: std.ArrayListUnmanaged(LigatureSet) = .empty,
 
     // Allocated memory for single subst (Format 2 substitutes array)
-    single_subst_memory: std.ArrayListUnmanaged([]const u16) = .{},
+    single_subst_memory: std.ArrayListUnmanaged([]const u16) = .empty,
 
     // Allocated memory for chain context (coverages and records)
-    chain_coverage_memory: std.ArrayListUnmanaged([]const CoverageTable) = .{},
-    chain_record_memory: std.ArrayListUnmanaged([]const SubstLookupRecord) = .{},
+    chain_coverage_memory: std.ArrayListUnmanaged([]const CoverageTable) = .empty,
+    chain_record_memory: std.ArrayListUnmanaged([]const SubstLookupRecord) = .empty,
 
     // Allocated memory for mark records
-    mark_record_memory: std.ArrayListUnmanaged([]const MarkRecord) = .{},
+    mark_record_memory: std.ArrayListUnmanaged([]const MarkRecord) = .empty,
 
     // Scratch buffers for shaping (reused across calls to avoid allocations)
-    scratch_a: std.ArrayListUnmanaged(u16) = .{},
-    scratch_b: std.ArrayListUnmanaged(u16) = .{},
-    scratch_c: std.ArrayListUnmanaged(u16) = .{}, // For calt intermediate results
+    scratch_a: std.ArrayListUnmanaged(u16) = .empty,
+    scratch_b: std.ArrayListUnmanaged(u16) = .empty,
+    scratch_c: std.ArrayListUnmanaged(u16) = .empty, // For calt intermediate results
 
     pub fn init(allocator: std.mem.Allocator) OpenTypeFeatures {
         return .{ .allocator = allocator };
@@ -937,7 +937,7 @@ pub const OpenTypeFeatures = struct {
         if (self.chain_context_lookups.items.len == 0) return;
 
         // Step 1: Build temporary map of glyph -> list of rule indices
-        var temp_map = std.AutoHashMapUnmanaged(u16, std.ArrayListUnmanaged(usize)){};
+        var temp_map: std.AutoHashMapUnmanaged(u16, std.ArrayListUnmanaged(usize)) = .empty;
         defer {
             var iter = temp_map.valueIterator();
             while (iter.next()) |list| {
@@ -957,7 +957,7 @@ pub const OpenTypeFeatures = struct {
                 if (first_coverage.getGlyphAt(i)) |glyph_id| {
                     const gop = try temp_map.getOrPut(self.allocator, glyph_id);
                     if (!gop.found_existing) {
-                        gop.value_ptr.* = .{};
+                        gop.value_ptr.* = .empty;
                     }
                     try gop.value_ptr.append(self.allocator, rule_idx);
                 }
@@ -1362,7 +1362,7 @@ pub const OpenTypeFeatures = struct {
     }
 
     fn findFeatureIndices(self: *OpenTypeFeatures, data: []const u8, script_list_offset: u16, feature_list_offset: u16, target_feature: Feature) ![]u16 {
-        var indices = std.ArrayListUnmanaged(u16){};
+        var indices = std.ArrayListUnmanaged(u16).empty;
         errdefer indices.deinit(self.allocator);
 
         // Find DFLT or latn script
@@ -1944,7 +1944,7 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Pre-allocate result (ligatures can only shrink, never grow)
-        var result = std.ArrayListUnmanaged(u16){};
+        var result = std.ArrayListUnmanaged(u16).empty;
         errdefer result.deinit(self.allocator);
         try result.ensureTotalCapacity(self.allocator, glyphs.len);
 
@@ -1986,7 +1986,7 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Pre-allocate result (ligatures can only shrink, never grow)
-        var result = std.ArrayListUnmanaged(u16){};
+        var result = std.ArrayListUnmanaged(u16).empty;
         errdefer result.deinit(self.allocator);
         try result.ensureTotalCapacity(self.allocator, glyphs.len);
 
@@ -2028,7 +2028,7 @@ pub const OpenTypeFeatures = struct {
         }
 
         // Pre-allocate to avoid incremental growth
-        var result = std.ArrayListUnmanaged(u16){};
+        var result = std.ArrayListUnmanaged(u16).empty;
         errdefer result.deinit(self.allocator);
         try result.ensureTotalCapacity(self.allocator, glyphs.len);
         result.appendSliceAssumeCapacity(glyphs);
@@ -2188,7 +2188,7 @@ pub const OpenTypeFeatures = struct {
 
         // Work with a mutable copy for chain context processing
         // Pre-allocate to avoid incremental growth
-        var result = std.ArrayListUnmanaged(u16){};
+        var result = std.ArrayListUnmanaged(u16).empty;
         errdefer result.deinit(self.allocator);
         try result.ensureTotalCapacity(self.allocator, intermediate.len);
         result.appendSliceAssumeCapacity(intermediate);
@@ -2787,7 +2787,7 @@ test "Parse Charter GPOS kerning" {
     // Charter font has GPOS kerning table
     const ttf = @import("ttf.zig");
 
-    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf") catch |err| {
+    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf") catch |err| {
         std.debug.print("Failed to load font: {}\n", .{err});
         return err;
     };
@@ -2892,7 +2892,7 @@ test "Parse Satoshi GSUB ligatures" {
     // Satoshi font has liga feature with fi, fl, ff, ffi, ffl, ft ligatures
     const ttf = @import("ttf.zig");
 
-    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf") catch |err| {
+    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf") catch |err| {
         std.debug.print("Failed to load font: {}\n", .{err});
         return err;
     };
@@ -2963,7 +2963,7 @@ test "Parse Satoshi GSUB ligatures" {
 test "Parse Inter calt feature (Type 1 and Type 6)" {
     const ttf = @import("ttf.zig");
 
-    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
         std.debug.print("Failed to load Inter font: {}\n", .{err});
         return err;
     };
@@ -3014,7 +3014,7 @@ test "Parse Inter calt feature (Type 1 and Type 6)" {
 test "Parse Inter mark/mkmk features (GPOS Type 4 and 6)" {
     const ttf = @import("ttf.zig");
 
-    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
         std.debug.print("Failed to load Inter font: {}\n", .{err});
         return err;
     };
@@ -3123,7 +3123,7 @@ test "Chain context matching" {
 test "applyCalt with Inter font" {
     const ttf = @import("ttf.zig");
 
-    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
         std.debug.print("Failed to load Inter font: {}\n", .{err});
         return err;
     };
@@ -3176,7 +3176,7 @@ test "applyCalt with Inter font" {
 test "calt should not corrupt regular text" {
     const ttf = @import("ttf.zig");
 
-    const result = ttf.Font.fromFile(std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
+    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
         std.debug.print("Failed to load Inter font: {}\n", .{err});
         return err;
     };
@@ -3196,7 +3196,7 @@ test "calt should not corrupt regular text" {
 
     // Test with "Latin Extended:" - should NOT be corrupted
     const test_str = "Latin Extended:";
-    var glyphs_latin = std.ArrayListUnmanaged(u16){};
+    var glyphs_latin = std.ArrayListUnmanaged(u16).empty;
     defer glyphs_latin.deinit(std.testing.allocator);
 
     for (test_str) |c| {
@@ -3229,7 +3229,7 @@ test "calt should not corrupt regular text" {
 
     // Also test with arrows in the middle: "A -> B"
     const test_str2 = "A -> B Latin";
-    var glyphs_arrow = std.ArrayListUnmanaged(u16){};
+    var glyphs_arrow = std.ArrayListUnmanaged(u16).empty;
     defer glyphs_arrow.deinit(std.testing.allocator);
 
     for (test_str2) |c| {
@@ -3280,12 +3280,7 @@ test "Inter mark positioning for combining diacritics" {
     const ttf = @import("ttf.zig");
 
     // Load Inter font
-    const file = std.fs.cwd().openFile("test/fonts/Inter/Inter-Regular.ttf", .{}) catch {
-        return; // Skip if font not available
-    };
-    defer file.close();
-
-    const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch return;
+    const data = std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(10 * 1024 * 1024)) catch return;
     defer allocator.free(data);
 
     const font = ttf.Font.parse(data) catch return;
@@ -3334,12 +3329,7 @@ test "dlig/clig/hlig separate parsing" {
     const ttf = @import("ttf.zig");
 
     // Load Inter font (has dlig feature)
-    const file = std.fs.cwd().openFile("test/fonts/Inter/Inter-Regular.ttf", .{}) catch {
-        return; // Skip if font not available
-    };
-    defer file.close();
-
-    const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch return;
+    const data = std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(10 * 1024 * 1024)) catch return;
     defer allocator.free(data);
 
     const font = ttf.Font.parse(data) catch return;

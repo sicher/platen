@@ -18,6 +18,18 @@ const EmbeddedFont = embedded.EmbeddedFont;
 const StandardFont = fonts.StandardFont;
 
 // ============================================================================
+// Time
+// ============================================================================
+
+/// Current time in milliseconds since the Unix epoch (libc REALTIME clock).
+/// Replacement for the Zig 0.15 `std.time.milliTimestamp()`.
+pub fn milliTimestamp() i64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.REALTIME, &ts);
+    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
+}
+
+// ============================================================================
 // Resource Naming
 // ============================================================================
 
@@ -111,7 +123,9 @@ const DateTime = struct {
     second: u8,
 
     fn now() DateTime {
-        const epoch_secs: u64 = @intCast(std.time.timestamp());
+        var ts: std.c.timespec = undefined;
+        _ = std.c.clock_gettime(.REALTIME, &ts);
+        const epoch_secs: u64 = @intCast(ts.sec);
         const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
         const day = epoch.getEpochDay();
         const year_day = day.calculateYearDay();

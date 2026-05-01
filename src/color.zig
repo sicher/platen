@@ -528,37 +528,37 @@ test "Color CMYK" {
 
 test "Color writeFill formats correctly" {
     var buf: [64]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    var fbs = std.Io.Writer.fixed(&buf);
+    const writer = &fbs;
 
     // Grayscale
     try Color.black.writeFill(writer);
-    try std.testing.expectEqualStrings("0.000 g\n", fbs.getWritten());
+    try std.testing.expectEqualStrings("0.000 g\n", fbs.buffered());
 
     // RGB
-    fbs.reset();
+    fbs.end = 0;
     try Color.red.writeFill(writer);
-    try std.testing.expectEqualStrings("1.000 0.000 0.000 rg\n", fbs.getWritten());
+    try std.testing.expectEqualStrings("1.000 0.000 0.000 rg\n", fbs.buffered());
 
     // CMYK
-    fbs.reset();
+    fbs.end = 0;
     try Color.cmyk(1, 0, 0, 0).writeFill(writer);
-    try std.testing.expectEqualStrings("1.000 0.000 0.000 0.000 k\n", fbs.getWritten());
+    try std.testing.expectEqualStrings("1.000 0.000 0.000 0.000 k\n", fbs.buffered());
 }
 
 test "Color writeStroke formats correctly" {
     var buf: [64]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    const writer = fbs.writer();
+    var fbs = std.Io.Writer.fixed(&buf);
+    const writer = &fbs;
 
     // Grayscale
     try Color.white.writeStroke(writer);
-    try std.testing.expectEqualStrings("1.000 G\n", fbs.getWritten());
+    try std.testing.expectEqualStrings("1.000 G\n", fbs.buffered());
 
     // RGB
-    fbs.reset();
+    fbs.end = 0;
     try Color.blue.writeStroke(writer);
-    try std.testing.expectEqualStrings("0.000 0.000 1.000 RG\n", fbs.getWritten());
+    try std.testing.expectEqualStrings("0.000 0.000 1.000 RG\n", fbs.buffered());
 }
 
 test "Color equality" {

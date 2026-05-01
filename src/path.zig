@@ -31,7 +31,7 @@ pub const QuadBezier = struct {
 /// Path builder for constructing vector paths.
 pub const Path = struct {
     allocator: std.mem.Allocator,
-    commands: std.ArrayListUnmanaged(Command) = .{},
+    commands: std.ArrayListUnmanaged(Command) = .empty,
     current: Point = .{ .x = 0, .y = 0 },
     start: Point = .{ .x = 0, .y = 0 },
 
@@ -156,9 +156,9 @@ test "path pdf output" {
     try p.closePath();
 
     var buf: [256]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try p.toPdfContent(842, fbs.writer()); // A4 height
+    var fbs = std.Io.Writer.fixed(&buf);
+    try p.toPdfContent(842, &fbs); // A4 height
 
     const expected = "100.00 742.00 m\n200.00 742.00 l\nh\n";
-    try std.testing.expectEqualStrings(expected, fbs.getWritten());
+    try std.testing.expectEqualStrings(expected, fbs.buffered());
 }

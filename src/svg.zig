@@ -327,7 +327,7 @@ pub const SvgElement = union(enum) {
             .ellipse => |e| .{ .ellipse = e },
             .line => |l| .{ .line = l },
             .polyline => |p| blk: {
-                var points = std.ArrayListUnmanaged(Point){};
+                var points = std.ArrayListUnmanaged(Point).empty;
                 try points.appendSlice(allocator, p.points.items);
                 break :blk .{ .polyline = .{
                     .points = points,
@@ -336,7 +336,7 @@ pub const SvgElement = union(enum) {
                 } };
             },
             .polygon => |p| blk: {
-                var points = std.ArrayListUnmanaged(Point){};
+                var points = std.ArrayListUnmanaged(Point).empty;
                 try points.appendSlice(allocator, p.points.items);
                 break :blk .{ .polygon = .{
                     .points = points,
@@ -345,7 +345,7 @@ pub const SvgElement = union(enum) {
                 } };
             },
             .path => |p| blk: {
-                var commands = std.ArrayListUnmanaged(PathCommand){};
+                var commands = std.ArrayListUnmanaged(PathCommand).empty;
                 try commands.appendSlice(allocator, p.commands.items);
                 break :blk .{ .path = .{
                     .commands = commands,
@@ -354,7 +354,7 @@ pub const SvgElement = union(enum) {
                 } };
             },
             .group => |g| blk: {
-                var children = std.ArrayListUnmanaged(SvgElement){};
+                var children = std.ArrayListUnmanaged(SvgElement).empty;
                 for (g.children.items) |child| {
                     try children.append(allocator, try child.clone(allocator));
                 }
@@ -456,19 +456,19 @@ pub const Svg = struct {
     viewbox_width: f64 = 0,
     viewbox_height: f64 = 0,
     elements: std.ArrayListUnmanaged(SvgElement),
-    opacity_states: std.ArrayListUnmanaged(OpacityState) = .{},
-    used_fonts: std.ArrayListUnmanaged(UsedFont) = .{},
-    defs: std.StringHashMapUnmanaged(SvgElement) = .{}, // Elements defined in <defs> by ID
+    opacity_states: std.ArrayListUnmanaged(OpacityState) = .empty,
+    used_fonts: std.ArrayListUnmanaged(UsedFont) = .empty,
+    defs: std.StringHashMapUnmanaged(SvgElement) = .empty, // Elements defined in <defs> by ID
 
     pub fn init(allocator: std.mem.Allocator) Svg {
         return .{
             .allocator = allocator,
             .width = 0,
             .height = 0,
-            .elements = .{},
-            .opacity_states = .{},
-            .used_fonts = .{},
-            .defs = .{},
+            .elements = .empty,
+            .opacity_states = .empty,
+            .used_fonts = .empty,
+            .defs = .empty,
         };
     }
 
@@ -518,11 +518,8 @@ pub const Svg = struct {
     }
 
     /// Load SVG from file
-    pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*Svg {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-
-        const data = try file.readToEndAlloc(allocator, 10 * 1024 * 1024); // 10MB max
+    pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*Svg {
+        const data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024));
         defer allocator.free(data);
 
         return fromMemory(allocator, data);
@@ -544,11 +541,11 @@ pub const Svg = struct {
         var parser = xml.XmlParser.init(data);
 
         // Style and transform stacks for group inheritance
-        var style_stack = std.ArrayListUnmanaged(Style){};
+        var style_stack = std.ArrayListUnmanaged(Style).empty;
         defer style_stack.deinit(self.allocator);
         try style_stack.append(self.allocator, Style.default);
 
-        var transform_stack = std.ArrayListUnmanaged(Transform){};
+        var transform_stack = std.ArrayListUnmanaged(Transform).empty;
         defer transform_stack.deinit(self.allocator);
         try transform_stack.append(self.allocator, Transform.identity);
 
@@ -806,7 +803,7 @@ pub const Svg = struct {
     }
 
     fn parsePolyline(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
-        var polyline = SvgElement{ .polyline = .{ .points = .{} } };
+        var polyline = SvgElement{ .polyline = .{ .points = .empty } };
         var local_transform = Transform.identity;
         var local_style = Style{};
         var id: ?[]const u8 = null;
@@ -830,7 +827,7 @@ pub const Svg = struct {
     }
 
     fn parsePolygon(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
-        var polygon = SvgElement{ .polygon = .{ .points = .{} } };
+        var polygon = SvgElement{ .polygon = .{ .points = .empty } };
         var local_transform = Transform.identity;
         var local_style = Style{};
         var id: ?[]const u8 = null;
@@ -854,7 +851,7 @@ pub const Svg = struct {
     }
 
     fn parsePath(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
-        var path = SvgElement{ .path = .{ .commands = .{} } };
+        var path = SvgElement{ .path = .{ .commands = .empty } };
         var local_transform = Transform.identity;
         var local_style = Style{};
         var id: ?[]const u8 = null;
@@ -1024,7 +1021,7 @@ pub const Svg = struct {
 
     /// Generate PDF content stream for this SVG
     pub fn toPdfContent(self: *Svg, allocator: std.mem.Allocator) ![]u8 {
-        var content = std.ArrayListUnmanaged(u8){};
+        var content = std.ArrayListUnmanaged(u8).empty;
         errdefer content.deinit(allocator);
 
         var writer = ContentWriter{ .buffer = &content, .allocator = allocator };
@@ -2220,7 +2217,7 @@ test "parse transform" {
 
 test "parse path data" {
     const allocator = std.testing.allocator;
-    var commands = std.ArrayListUnmanaged(PathCommand){};
+    var commands = std.ArrayListUnmanaged(PathCommand).empty;
     defer commands.deinit(allocator);
 
     try parsePathData(allocator, "M 0 0 L 10 10 Z", &commands);
@@ -2297,7 +2294,7 @@ test "parse defs and use" {
 test "use-defs.svg element counts" {
     const allocator = std.testing.allocator;
 
-    const svg = try Svg.fromFile(allocator, "test/images/use-defs.svg");
+    const svg = try Svg.fromFile(std.testing.io, allocator, "test/images/use-defs.svg");
     defer {
         svg.deinit();
         allocator.destroy(svg);
@@ -2348,7 +2345,7 @@ test "parse MathJax equation SVG with xlink:href" {
     const allocator = std.testing.allocator;
 
     // Load the equation.svg file which uses xlink:href in <use> elements
-    const svg = try Svg.fromFile(allocator, "test/images/equation.svg");
+    const svg = try Svg.fromFile(std.testing.io, allocator, "test/images/equation.svg");
     defer {
         svg.deinit();
         allocator.destroy(svg);

@@ -17,7 +17,7 @@ pub const Ref = struct {
     id: ObjectId,
     gen: u16 = 0,
 
-    pub fn format(self: Ref, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(self: Ref, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         var buf: [32]u8 = undefined;
         try writer.writeAll(fmt.writeInt(&buf, self.id));
         try writer.writeByte(' ');
@@ -45,7 +45,7 @@ pub const ObjectIdAllocator = struct {
 pub const Name = struct {
     value: []const u8,
 
-    pub fn format(self: Name, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(self: Name, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeByte('/');
         try writer.writeAll(self.value);
     }
@@ -62,7 +62,7 @@ pub const Dict = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator) Dict {
-        return .{ .entries = .{}, .allocator = allocator };
+        return .{ .entries = .empty, .allocator = allocator };
     }
 
     pub fn deinit(self: *Dict) void {
@@ -73,7 +73,7 @@ pub const Dict = struct {
         try self.entries.append(self.allocator, .{ .key = .{ .value = key }, .value = value });
     }
 
-    pub fn format(self: Dict, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(self: Dict, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeAll("<<\n");
         for (self.entries.items) |entry| {
             try entry.key.format(writer);
@@ -91,7 +91,7 @@ pub const Array = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Array {
-        return .{ .items = .{}, .allocator = allocator };
+        return .{ .items = .empty, .allocator = allocator };
     }
 
     pub fn deinit(self: *Array) void {
@@ -102,7 +102,7 @@ pub const Array = struct {
         try self.items.append(self.allocator, value);
     }
 
-    pub fn format(self: Array, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(self: Array, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.writeByte('[');
         for (self.items.items, 0..) |item, i| {
             if (i > 0) try writer.writeByte(' ');
@@ -125,7 +125,7 @@ pub const Value = union(enum) {
     ref_val: Ref,
     literal_val: []const u8, // Raw output (no escaping/wrapping)
 
-    pub fn format(self: Value, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn format(self: Value, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         var buf: [32]u8 = undefined;
         switch (self) {
             .null_val => try writer.writeAll("null"),
@@ -181,23 +181,23 @@ pub const Value = union(enum) {
 
 test "Ref format" {
     var buf: [32]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
     const r = Ref{ .id = 5, .gen = 0 };
-    try r.format(stream.writer());
-    try std.testing.expectEqualStrings("5 0 R", stream.getWritten());
+    try r.format(&w);
+    try std.testing.expectEqualStrings("5 0 R", w.buffered());
 }
 
 test "Name format" {
     var buf: [32]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
     const n = Name{ .value = "Type" };
-    try n.format(stream.writer());
-    try std.testing.expectEqualStrings("/Type", stream.getWritten());
+    try n.format(&w);
+    try std.testing.expectEqualStrings("/Type", w.buffered());
 }
 
 test "Value int format" {
     var buf: [32]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
-    try Value.int(42).format(stream.writer());
-    try std.testing.expectEqualStrings("42", stream.getWritten());
+    var w = std.Io.Writer.fixed(&buf);
+    try Value.int(42).format(&w);
+    try std.testing.expectEqualStrings("42", w.buffered());
 }

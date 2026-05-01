@@ -72,7 +72,7 @@ pub fn buildHmtxForGlyphs(
     num_long_hor_metrics: u16,
     glyph_ids: []const u16,
 ) ![]u8 {
-    var new_hmtx = std.ArrayListUnmanaged(u8){};
+    var new_hmtx = std.ArrayListUnmanaged(u8).empty;
     errdefer new_hmtx.deinit(allocator);
 
     for (glyph_ids) |gid| {
@@ -110,7 +110,7 @@ pub fn buildHmtxForGlyphs(
 
 /// Build minimal cmap for CID mode (just .notdef mapping)
 pub fn buildMinimalCmap(allocator: std.mem.Allocator) ![]u8 {
-    var new_cmap = std.ArrayListUnmanaged(u8){};
+    var new_cmap = std.ArrayListUnmanaged(u8).empty;
     errdefer new_cmap.deinit(allocator);
 
     // cmap header
@@ -146,7 +146,7 @@ pub fn buildMinimalCmap(allocator: std.mem.Allocator) ![]u8 {
 /// This dramatically reduces font size (from ~17KB to ~300 bytes for Gentium fonts).
 /// Required name IDs for PDF: 1 (family), 2 (subfamily), 4 (full name), 6 (PostScript name)
 pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u8) ![]u8 {
-    var new_name = std.ArrayListUnmanaged(u8){};
+    var new_name = std.ArrayListUnmanaged(u8).empty;
     errdefer new_name.deinit(allocator);
 
     // If no original name table, create an empty one
@@ -179,7 +179,7 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
         string_data: []const u8,
     };
 
-    var entries = std.ArrayListUnmanaged(NameEntry){};
+    var entries = std.ArrayListUnmanaged(NameEntry).empty;
     defer entries.deinit(allocator);
 
     var i: usize = 0;
@@ -471,7 +471,7 @@ pub fn expandCompositeGlyphs(
         changed = false;
 
         // Collect current glyphs to check (can't modify while iterating)
-        var glyphs_to_check = std.ArrayListUnmanaged(u16){};
+        var glyphs_to_check = std.ArrayListUnmanaged(u16).empty;
         defer glyphs_to_check.deinit(allocator);
 
         var check_iter = glyph_set.keyIterator();

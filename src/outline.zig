@@ -13,7 +13,7 @@ pub const Destination = layout.Destination;
 /// Build the outline hierarchy, then pass to document with setOutline().
 pub const Outline = struct {
     allocator: std.mem.Allocator,
-    items: std.ArrayListUnmanaged(*OutlineItem) = .{},
+    items: std.ArrayListUnmanaged(*OutlineItem) = .empty,
     last_top_level: ?*OutlineItem = null,
 
     pub fn init(allocator: std.mem.Allocator) Outline {

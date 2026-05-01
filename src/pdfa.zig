@@ -97,10 +97,10 @@ pub const XmpMetadata = struct {
 /// Generate XMP metadata packet for PDF/A conformance.
 /// The returned slice must be freed by the caller.
 pub fn generateXmpMetadata(allocator: std.mem.Allocator, meta: XmpMetadata) ![]u8 {
-    var buf = std.ArrayListUnmanaged(u8){};
-    errdefer buf.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    errdefer aw.deinit();
 
-    const w = buf.writer(allocator);
+    const w = &aw.writer;
 
     // XMP packet header
     try w.writeAll(
@@ -193,7 +193,7 @@ pub fn generateXmpMetadata(allocator: std.mem.Allocator, meta: XmpMetadata) ![]u
         \\<?xpacket end="w"?>
     );
 
-    return buf.toOwnedSlice(allocator);
+    return aw.toOwnedSlice();
 }
 
 // ============================================================================

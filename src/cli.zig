@@ -3,18 +3,23 @@
 const std = @import("std");
 const zapdf = @import("zapdf");
 
-const stdout = std.fs.File.stdout();
+var stdout_buffer: [4096]u8 = undefined;
+var stdout_writer: std.Io.File.Writer = undefined;
+var stdout: *std.Io.Writer = undefined;
+var app_io: std.Io = undefined;
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    app_io = init.io;
+    zapdf.integration_tests.app_io = init.io;
+    stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    stdout = &stdout_writer.interface;
+    defer stdout.flush() catch {};
 
-    const args = std.process.argsAlloc(allocator) catch {
+    const args = init.minimal.args.toSlice(init.arena.allocator()) catch {
         try printUsage();
         return;
     };
-    defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
         try printUsage();
@@ -113,9 +118,7 @@ pub fn main() !void {
 }
 
 fn print(comptime fmt: []const u8, args: anytype) !void {
-    var buf: [4096]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, fmt, args) catch return error.BufferTooSmall;
-    try stdout.writeAll(msg);
+    try stdout.print(fmt, args);
 }
 
 fn printUsage() !void {
@@ -147,7 +150,7 @@ fn printUsage() !void {
 }
 
 fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
-    const result = zapdf.ttf.Font.fromFile(allocator, path) catch |err| {
+    const result = zapdf.ttf.Font.fromFile(app_io, allocator, path) catch |err| {
         try print("Error loading font: {}\n", .{err});
         return;
     };
@@ -205,7 +208,7 @@ fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
 }
 
 fn generateTestPdf(allocator: std.mem.Allocator, path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -213,13 +216,11 @@ fn generateTestPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = path, .data = pdf });
 }
 
 fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -231,13 +232,11 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = path, .data = pdf });
 }
 
 fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load the embedded font
@@ -332,13 +331,11 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
 fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load font with identity encoding (CID mode for full Unicode)
@@ -360,9 +357,7 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 
     // Show stats
     const cff_data = font.embedded.font.getCFFTable();
@@ -385,7 +380,7 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
 }
 
 fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const font = doc.loadFont(font_path, null) catch |err| {
@@ -441,9 +436,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 
     // Show mark/mkmk lookup stats
     if (font.embedded.ot_features) |ot| {
@@ -454,7 +447,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
 }
 
 fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const font = doc.loadFont(font_path, null) catch |err| {
@@ -538,9 +531,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 
     // Show calt lookup stats
     if (font.embedded.ot_features) |ot| {
@@ -551,7 +542,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
 }
 
 fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -634,13 +625,11 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
 fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -730,13 +719,11 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
 fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     try doc.addPage(.{});
@@ -822,13 +809,11 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
 fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Set document metadata
@@ -883,13 +868,11 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
 fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Set PDF/A-1b conformance
@@ -958,9 +941,7 @@ fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
 // Use shared test infrastructure from zapdf module
@@ -975,7 +956,7 @@ const TestResult = struct {
 fn checkAllReferences(allocator: std.mem.Allocator, mode: testing.CompareMode) !void {
     var passed: usize = 0;
     var failed: usize = 0;
-    var results = std.ArrayListUnmanaged(TestResult){};
+    var results = std.ArrayListUnmanaged(TestResult).empty;
     defer results.deinit(allocator);
 
     // Show mode being used
@@ -987,7 +968,7 @@ fn checkAllReferences(allocator: std.mem.Allocator, mode: testing.CompareMode) !
     try print("Comparison mode: {s}\n\n", .{mode_name});
 
     // Create output directory for test results
-    std.fs.cwd().makeDir("test/output") catch |err| {
+    std.Io.Dir.cwd().createDir(app_io, "test/output", .default_dir) catch |err| {
         if (err != error.PathAlreadyExists) return err;
     };
 
@@ -1002,26 +983,28 @@ fn checkAllReferences(allocator: std.mem.Allocator, mode: testing.CompareMode) !
         var actual_path_buf: [256]u8 = undefined;
         const actual_path = std.fmt.bufPrint(&actual_path_buf, "test/output/{s}_actual.pdf", .{tc.name}) catch unreachable;
         {
-            const file = try std.fs.cwd().createFile(actual_path, .{});
-            defer file.close();
-            try file.writeAll(pdf);
+            try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = actual_path, .data = pdf });
         }
 
         // Copy reference PDF to output folder (browsers block cross-directory file:// embeds)
         var expected_path_buf: [256]u8 = undefined;
         const expected_output_path = std.fmt.bufPrint(&expected_path_buf, "test/output/{s}_expected.pdf", .{tc.name}) catch unreachable;
-        std.fs.cwd().copyFile(ref_path, std.fs.cwd(), expected_output_path, .{}) catch {};
+        // Copy reference to expected output (best-effort)
+        if (std.Io.Dir.cwd().readFileAlloc(app_io, ref_path, allocator, .limited(50 * 1024 * 1024))) |ref_data| {
+            defer allocator.free(ref_data);
+            std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = expected_output_path, .data = ref_data }) catch {};
+        } else |_| {}
 
         // Use semantic comparison with options if needed (for SVG Form XObjects)
         var result = if (tc.skip_fonts)
-            testing.compareWithReferenceSemantic(allocator, pdf, ref_path, .{ .skip_fonts = true }) catch |err| {
+            testing.compareWithReferenceSemantic(app_io, allocator, pdf, ref_path, .{ .skip_fonts = true }) catch |err| {
                 try print("FAIL {s}: {any}\n", .{ tc.name, err });
                 failed += 1;
                 try results.append(allocator, .{ .name = tc.name, .passed = false });
                 continue;
             }
         else
-            testing.compareWithReferenceMode(allocator, pdf, ref_path, mode, .{}) catch |err| {
+            testing.compareWithReferenceMode(app_io, allocator, pdf, ref_path, mode, .{}) catch |err| {
                 try print("FAIL {s}: {any}\n", .{ tc.name, err });
                 failed += 1;
                 try results.append(allocator, .{ .name = tc.name, .passed = false });
@@ -1068,7 +1051,7 @@ fn checkAllReferences(allocator: std.mem.Allocator, mode: testing.CompareMode) !
 }
 
 fn generateHtmlReport(allocator: std.mem.Allocator, results: []const TestResult, passed: usize, failed: usize) !void {
-    var html = std.ArrayListUnmanaged(u8){};
+    var html = std.ArrayListUnmanaged(u8).empty;
     defer html.deinit(allocator);
 
     try html.appendSlice(allocator,
@@ -1179,13 +1162,11 @@ fn generateHtmlReport(allocator: std.mem.Allocator, results: []const TestResult,
     try html.appendSlice(allocator, "</body>\n</html>\n");
 
     // Write report
-    const file = try std.fs.cwd().createFile("test/output/report.html", .{});
-    defer file.close();
-    try file.writeAll(html.items);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = "test/output/report.html", .data = html.items });
 }
 
 fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !void {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load a variety of fonts
@@ -1364,7 +1345,5 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     // Write output
     const pdf_data = try doc.output();
     defer allocator.free(pdf_data);
-    const file = try std.fs.cwd().createFile(output_path, .{});
-    defer file.close();
-    try file.writeAll(pdf_data);
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf_data });
 }

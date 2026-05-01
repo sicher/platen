@@ -190,17 +190,17 @@ pub const EmbeddedFont = struct {
 
     // CID mode: track Unicode codepoint → glyph ID mappings
     // Key: Unicode codepoint, Value: original glyph ID from font
-    cid_used_glyphs: std.AutoArrayHashMapUnmanaged(u21, u16) = .{},
-    cid_glyph_widths: std.AutoArrayHashMapUnmanaged(u16, u16) = .{}, // GID → width in 1/1000 em
+    cid_used_glyphs: std.AutoArrayHashMapUnmanaged(u21, u16) = .empty,
+    cid_glyph_widths: std.AutoArrayHashMapUnmanaged(u16, u16) = .empty, // GID → width in 1/1000 em
 
     // Glyph → codepoint mapping for ToUnicode (handles calt contextual variants)
     // Key: glyph ID, Value: Unicode codepoint that produced this glyph
     // Needed because calt can produce different glyphs for the same codepoint in different contexts
-    glyph_to_codepoint: std.AutoArrayHashMapUnmanaged(u16, u21) = .{},
+    glyph_to_codepoint: std.AutoArrayHashMapUnmanaged(u16, u21) = .empty,
 
     // Glyph ID remapping for compact CFF subsets (original GID → new compact GID)
     // Only populated for CFF fonts with subsetting enabled
-    gid_remap: std.AutoArrayHashMapUnmanaged(u16, u16) = .{},
+    gid_remap: std.AutoArrayHashMapUnmanaged(u16, u16) = .empty,
 
     // OpenType feature support
     ot_features: ?*opentype.OpenTypeFeatures = null,
@@ -212,15 +212,15 @@ pub const EmbeddedFont = struct {
 
     // Ligature glyph → original codepoints mapping for ToUnicode CMap
     // Key: ligature glyph ID (original), Value: array of codepoints that form it
-    ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .{},
+    ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .empty,
 
     // Scratch buffers for shaping (reused across calls to avoid allocations)
-    scratch_codepoints: std.ArrayListUnmanaged(u21) = .{},
-    scratch_glyphs: std.ArrayListUnmanaged(u16) = .{},
+    scratch_codepoints: std.ArrayListUnmanaged(u21) = .empty,
+    scratch_glyphs: std.ArrayListUnmanaged(u16) = .empty,
 
     /// Load and parse a TTF font from file
-    pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
-        const result = try ttf.Font.fromFile(allocator, path);
+    pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
+        const result = try ttf.Font.fromFile(io, allocator, path);
         return try fromParsed(allocator, result.font, result.data, true);
     }
 
@@ -699,7 +699,7 @@ pub const EmbeddedFont = struct {
     /// Get glyph sequence for text with ligature substitution applied
     /// Returns allocated slice that caller must free
     pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {
-        var base_glyphs = std.ArrayListUnmanaged(u16){};
+        var base_glyphs = std.ArrayListUnmanaged(u16).empty;
         defer base_glyphs.deinit(self.allocator);
 
         var i: usize = 0;
@@ -939,7 +939,7 @@ pub const EmbeddedFont = struct {
     /// Generate ToUnicode CMap for PDF text extraction/copy-paste
     /// Maps WinAnsi byte values to Unicode codepoints
     pub fn generateToUnicodeCMap(self: *const EmbeddedFont) ![]const u8 {
-        var cmap = std.ArrayListUnmanaged(u8){};
+        var cmap = std.ArrayListUnmanaged(u8).empty;
         errdefer cmap.deinit(self.allocator);
 
         // CMap header
@@ -997,7 +997,7 @@ pub const EmbeddedFont = struct {
     /// Generate ToUnicode CMap for CID mode (2-byte glyph IDs → Unicode)
     /// Includes ligature glyph → component codepoints mappings for proper text extraction
     pub fn generateCIDToUnicodeCMap(self: *const EmbeddedFont) ![]const u8 {
-        var cmap = std.ArrayListUnmanaged(u8){};
+        var cmap = std.ArrayListUnmanaged(u8).empty;
         errdefer cmap.deinit(self.allocator);
 
         // CMap header - note 2-byte codespace for CID
@@ -1107,7 +1107,7 @@ pub const EmbeddedFont = struct {
     /// Generate /W array for CID font (per-glyph widths)
     /// Format: [gid [w1 w2 ...] gid [w1 w2 ...] ...]
     pub fn generateWidthArray(self: *const EmbeddedFont) ![]const u8 {
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf = std.ArrayListUnmanaged(u8).empty;
         errdefer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "[");
@@ -1117,7 +1117,7 @@ pub const EmbeddedFont = struct {
         // Get sorted glyph IDs for consistent output
         // If remapping, we need to collect the NEW glyph IDs
         const GidWidthPair = struct { gid: u16, width: u16 };
-        var gid_width_pairs = std.ArrayListUnmanaged(GidWidthPair){};
+        var gid_width_pairs = std.ArrayListUnmanaged(GidWidthPair).empty;
         defer gid_width_pairs.deinit(self.allocator);
 
         var iter = self.cid_glyph_widths.iterator();
@@ -1269,11 +1269,11 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     const loca_format = head.index_to_loc_format; // 0=short, 1=long
 
     // Build new glyf data
-    var new_glyf = std.ArrayListUnmanaged(u8){};
+    var new_glyf = std.ArrayListUnmanaged(u8).empty;
     defer new_glyf.deinit(allocator);
 
     // Build new loca (offsets into glyf)
-    var new_loca = std.ArrayListUnmanaged(u8){};
+    var new_loca = std.ArrayListUnmanaged(u8).empty;
     defer new_loca.deinit(allocator);
 
     for (glyph_ids) |old_gid| {
@@ -1301,17 +1301,17 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     // Build cmap with both Format 0 (MacRoman) and Format 4 (Windows Unicode BMP)
     // PDF viewers with WinAnsiEncoding use Platform 3, Encoding 1 (Format 4)
-    var new_cmap = std.ArrayListUnmanaged(u8){};
+    var new_cmap = std.ArrayListUnmanaged(u8).empty;
     defer new_cmap.deinit(allocator);
 
     // First, build the Format 4 subtable for Windows Unicode BMP
     // This maps Unicode codepoints to glyph IDs
-    var format4 = std.ArrayListUnmanaged(u8){};
+    var format4 = std.ArrayListUnmanaged(u8).empty;
     defer format4.deinit(allocator);
 
     // Collect Unicode -> new glyph ID mappings for used characters
     const UnicodeMapping = struct { unicode: u16, glyph_id: u16 };
-    var unicode_mappings = std.ArrayListUnmanaged(UnicodeMapping){};
+    var unicode_mappings = std.ArrayListUnmanaged(UnicodeMapping).empty;
     defer unicode_mappings.deinit(allocator);
 
     for (0..256) |i| {
@@ -1468,11 +1468,11 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     const num_glyphs: u16 = max_gid + 1;
 
     // Build new glyf data (sparse - only used glyphs have data)
-    var new_glyf = std.ArrayListUnmanaged(u8){};
+    var new_glyf = std.ArrayListUnmanaged(u8).empty;
     defer new_glyf.deinit(allocator);
 
     // Build new loca (offsets into glyf) - entries for all 0..max_gid
-    var new_loca = std.ArrayListUnmanaged(u8){};
+    var new_loca = std.ArrayListUnmanaged(u8).empty;
     defer new_loca.deinit(allocator);
 
     // Process each glyph from 0 to max_gid
@@ -1500,7 +1500,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     try appendLocaEntry(&new_loca, allocator, final_offset, tables.loca_format);
 
     // Build new hmtx (horizontal metrics) for all glyphs 0..max_gid
-    var new_hmtx = std.ArrayListUnmanaged(u8){};
+    var new_hmtx = std.ArrayListUnmanaged(u8).empty;
     defer new_hmtx.deinit(allocator);
 
     gid = 0;
@@ -1573,7 +1573,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     try expandCompositeGlyphs(allocator, &glyph_set, tables.glyf, tables.loca, tables.loca_format, tables.maxp.num_glyphs);
 
     // Build sorted glyph list (0 first, then ascending order)
-    var glyph_list = std.ArrayListUnmanaged(u16){};
+    var glyph_list = std.ArrayListUnmanaged(u16).empty;
     defer glyph_list.deinit(allocator);
 
     try glyph_list.append(allocator, 0); // .notdef always first
@@ -1597,10 +1597,10 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const num_glyphs: u16 = @intCast(glyph_list.items.len);
 
     // Build compact glyf and loca tables
-    var new_glyf = std.ArrayListUnmanaged(u8){};
+    var new_glyf = std.ArrayListUnmanaged(u8).empty;
     defer new_glyf.deinit(allocator);
 
-    var new_loca = std.ArrayListUnmanaged(u8){};
+    var new_loca = std.ArrayListUnmanaged(u8).empty;
     defer new_loca.deinit(allocator);
 
     // Process glyphs in new order
@@ -1801,7 +1801,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     // Build new CharStrings INDEX - copy ALL charstrings up to num_glyphs (no sparse data)
     // This preserves glyph ID mapping and avoids issues with empty placeholder charstrings
-    var new_charstrings = std.ArrayListUnmanaged(u8){};
+    var new_charstrings = std.ArrayListUnmanaged(u8).empty;
     defer new_charstrings.deinit(allocator);
 
     // Calculate size of original CharStrings data we need (glyphs 0 to num_glyphs-1)
@@ -1905,7 +1905,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     const new_private_offset = new_charstrings_actual_offset + new_charstrings.items.len;
 
     // Build new Top DICT with updated offsets
-    var new_topdict = std.ArrayListUnmanaged(u8){};
+    var new_topdict = std.ArrayListUnmanaged(u8).empty;
     defer new_topdict.deinit(allocator);
 
     // Copy original Top DICT entries except charset, CharStrings, Private
@@ -1917,7 +1917,7 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     });
 
     // Build new Top DICT INDEX
-    var new_topdict_index = std.ArrayListUnmanaged(u8){};
+    var new_topdict_index = std.ArrayListUnmanaged(u8).empty;
     defer new_topdict_index.deinit(allocator);
     try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
@@ -2008,7 +2008,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const cff_data = emb.font.getCFFTable() orelse return error.MissingTable;
 
     // Collect used glyph IDs into sorted list
-    var glyph_list = std.ArrayListUnmanaged(u16){};
+    var glyph_list = std.ArrayListUnmanaged(u16).empty;
     defer glyph_list.deinit(allocator);
 
     try glyph_list.append(allocator, 0); // .notdef always first
@@ -2080,14 +2080,14 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Build compact CharStrings INDEX with desubroutinized glyphs
-    var cs_data_buf = std.ArrayListUnmanaged(u8){};
+    var cs_data_buf = std.ArrayListUnmanaged(u8).empty;
     defer cs_data_buf.deinit(allocator);
 
-    var cs_offsets = std.ArrayListUnmanaged(u32){};
+    var cs_offsets = std.ArrayListUnmanaged(u32).empty;
     defer cs_offsets.deinit(allocator);
 
     // Track desubroutinized charstrings for later cleanup
-    var desubr_charstrings = std.ArrayListUnmanaged([]const u8){};
+    var desubr_charstrings = std.ArrayListUnmanaged([]const u8).empty;
     defer {
         for (desubr_charstrings.items) |cs| allocator.free(cs);
         desubr_charstrings.deinit(allocator);
@@ -2120,7 +2120,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const new_cs_off_size: u8 = if (cs_data_buf.items.len < 256) 1 else if (cs_data_buf.items.len < 65536) 2 else 3;
 
     // Build CharStrings INDEX
-    var new_charstrings = std.ArrayListUnmanaged(u8){};
+    var new_charstrings = std.ArrayListUnmanaged(u8).empty;
     defer new_charstrings.deinit(allocator);
 
     try binary.appendBE16(&new_charstrings, allocator, num_glyphs);
@@ -2133,7 +2133,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     // Build format 0 charset preserving original SIDs for each glyph
     // This is required for macOS/CoreGraphics which uses SIDs for glyph lookup
-    var new_charset = std.ArrayListUnmanaged(u8){};
+    var new_charset = std.ArrayListUnmanaged(u8).empty;
     defer new_charset.deinit(allocator);
 
     // Get original charset offset
@@ -2143,7 +2143,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     ) orelse return error.InvalidCFF;
 
     // Collect all SIDs used in the new charset
-    var charset_sids = std.ArrayListUnmanaged(u16){};
+    var charset_sids = std.ArrayListUnmanaged(u16).empty;
     defer charset_sids.deinit(allocator);
     try charset_sids.append(allocator, 0); // .notdef always has SID 0
     for (glyph_list.items[1..]) |orig_gid| {
@@ -2156,7 +2156,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     defer topdict_sids.deinit(allocator);
 
     // Combine all used SIDs
-    var all_used_sids = std.ArrayListUnmanaged(u16){};
+    var all_used_sids = std.ArrayListUnmanaged(u16).empty;
     defer all_used_sids.deinit(allocator);
     try all_used_sids.appendSlice(allocator, charset_sids.items);
     try all_used_sids.appendSlice(allocator, topdict_sids.items);
@@ -2187,7 +2187,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     const orig_private_size = private_info.size;
     const orig_private_offset = private_info.offset;
 
-    var new_private = std.ArrayListUnmanaged(u8){};
+    var new_private = std.ArrayListUnmanaged(u8).empty;
     defer new_private.deinit(allocator);
 
     // Get Local Subrs size if present
@@ -2220,7 +2220,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     var final_offset: usize = cff.hdr_size + name_index_data.len;
 
     // Estimate Top DICT INDEX size for first pass
-    var new_topdict = std.ArrayListUnmanaged(u8){};
+    var new_topdict = std.ArrayListUnmanaged(u8).empty;
     defer new_topdict.deinit(allocator);
 
     // First pass: build Top DICT with estimated offsets
@@ -2257,7 +2257,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Build Top DICT INDEX
-    var new_topdict_index = std.ArrayListUnmanaged(u8){};
+    var new_topdict_index = std.ArrayListUnmanaged(u8).empty;
     defer new_topdict_index.deinit(allocator);
     try appendCffSingleItemIndex(&new_topdict_index, allocator, new_topdict.items);
 
@@ -2382,7 +2382,7 @@ test "font subsetting" {
     const allocator = std.testing.allocator;
 
     // Load a font
-    const emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    const emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
     defer emb.deinit();
 
     // Mark only a few characters as used
@@ -2413,7 +2413,7 @@ test "font subsetting" {
 test "subset is valid TTF" {
     const allocator = std.testing.allocator;
 
-    const emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    const emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
     defer emb.deinit();
 
     emb.markCharsUsed("ABC123");
@@ -2439,7 +2439,7 @@ test "subset is valid TTF" {
 test "ToUnicode CMap generation" {
     const allocator = std.testing.allocator;
 
-    const emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    const emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
     defer emb.deinit();
 
     // Mark a few characters including ASCII and special WinAnsi chars
@@ -2642,7 +2642,7 @@ test "compact TTF subsetting creates valid font" {
     const allocator = std.testing.allocator;
 
     // Load a TTF font with identity encoding
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.ttf");
     defer emb.deinit();
 
     // Switch to identity encoding for CID mode
@@ -2675,7 +2675,7 @@ test "compact TTF subsetting creates valid font" {
 test "compact TTF glyph ID remapping" {
     const allocator = std.testing.allocator;
 
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.ttf");
     defer emb.deinit();
 
     emb.encoding = .identity;
@@ -2704,7 +2704,7 @@ test "compact TTF smaller than sparse TTF" {
     const allocator = std.testing.allocator;
 
     // Test that compact subsetting produces smaller output than the original
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.ttf");
     defer emb.deinit();
 
     emb.encoding = .identity;
@@ -2806,7 +2806,7 @@ test "CFF subsetting creates valid font" {
     const allocator = std.testing.allocator;
 
     // Load an OTF (CFF) font
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.otf");
     defer emb.deinit();
 
     emb.encoding = .identity;
@@ -2827,7 +2827,7 @@ test "CFF subsetting creates valid font" {
 test "CFF desubroutinization reduces size" {
     const allocator = std.testing.allocator;
 
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.otf");
     defer emb.deinit();
 
     // Get original CFF size
@@ -2850,7 +2850,7 @@ test "CFF desubroutinization reduces size" {
 test "CFF glyph ID remapping works" {
     const allocator = std.testing.allocator;
 
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.otf");
     defer emb.deinit();
 
     emb.encoding = .identity;
@@ -2877,7 +2877,7 @@ test "CFF glyph ID remapping works" {
 test "CID font with TTF renders correctly" {
     const allocator = std.testing.allocator;
 
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.ttf");
     defer emb.deinit();
 
     emb.encoding = .identity;
@@ -2906,7 +2906,7 @@ test "CID font with TTF renders correctly" {
 test "CID font with OTF renders correctly" {
     const allocator = std.testing.allocator;
 
-    var emb = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.otf");
+    var emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.otf");
     defer emb.deinit();
 
     emb.encoding = .identity;
@@ -2930,10 +2930,10 @@ test "mixed font types in same document" {
     const allocator = std.testing.allocator;
 
     // Load both TTF and OTF
-    var ttf_font = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    var ttf_font = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.ttf");
     defer ttf_font.deinit();
 
-    var otf_font = try EmbeddedFont.fromFile(allocator, "test/fonts/Inter/Inter-Bold.otf");
+    var otf_font = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Bold.otf");
     defer otf_font.deinit();
 
     ttf_font.encoding = .identity;
@@ -2961,7 +2961,7 @@ test "mixed font types in same document" {
 }
 
 test "OpenType features initialization" {
-    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    const font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
     defer font.deinit();
 
     // Features should not be initialized yet (lazy)
@@ -2981,7 +2981,7 @@ test "OpenType features initialization" {
 }
 
 test "OpenType kerning applied in text rendering" {
-    var font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
     defer font.deinit();
     font.encoding = .identity;
 
@@ -3006,7 +3006,7 @@ test "OpenType kerning applied in text rendering" {
 }
 
 test "setFeature disables kerning" {
-    const font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
+    const font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf");
     defer font.deinit();
     font.encoding = .identity;
 
@@ -3029,7 +3029,7 @@ test "setFeature disables kerning" {
 }
 
 test "Satoshi ligature codepoint tracking" {
-    var font = try EmbeddedFont.fromFile(std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf");
+    var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Satoshi/Satoshi-Regular.otf");
     defer font.deinit();
     font.encoding = .identity;
 

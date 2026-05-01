@@ -4,9 +4,15 @@
 //! These tests verify the complete PDF generation pipeline.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const zapdf = @import("zapdf.zig");
 const testing = @import("testing.zig");
 const embedded = @import("embedded.zig");
+
+/// I/O context used by all generate*Pdf helpers. In test builds this defaults
+/// to `std.testing.io`. Non-test callers (e.g. the CLI) must set this once
+/// before invoking any generator.
+pub var app_io: std.Io = if (builtin.is_test) std.testing.io else undefined;
 
 /// Helper to write plain text using writeStyled
 fn writeText(doc: *zapdf.Document, region: *zapdf.Region, text: []const u8, style: zapdf.TextStyle, opts: zapdf.ParagraphOptions) !zapdf.WriteResult {
@@ -70,14 +76,14 @@ const test_cases = [_]TestCase{
 // ============================================================================
 
 fn generateMinimalPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
     try doc.addPage(.{});
     return doc.output();
 }
 
 fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", .{ .font = zapdf.Font.helvetica, .size = 24 });
@@ -85,7 +91,7 @@ fn generateHelloWorldPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
     try doc.addPage(.{});
 
@@ -98,7 +104,7 @@ fn generateMultiFontPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
     try doc.addPage(.{});
 
@@ -146,7 +152,7 @@ fn generateAllFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24 };
@@ -164,7 +170,7 @@ fn generateMultiPagePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load font families (use win_ansi to match fpdf2 reference)
@@ -237,7 +243,7 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load fonts and set to CID (Identity-H) mode for full Unicode
@@ -297,7 +303,7 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load all font variants
@@ -611,7 +617,7 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 /// Comprehensive diacritics test using Gentium font
 /// Gentium has extensive mark positioning support for combining diacritics
 fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
@@ -769,7 +775,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Satoshi has liga (fi, fl, ff, ffi, ffl), kern, tnum, pnum
@@ -891,7 +897,7 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Define styles used in this test
@@ -1037,7 +1043,7 @@ fn generateTextFlowPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
@@ -1103,7 +1109,7 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1190,7 +1196,7 @@ fn generateOptimalBreaksPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1242,7 +1248,7 @@ fn generateColoredTextPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1386,7 +1392,7 @@ fn generateShapesPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1419,7 +1425,7 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1458,7 +1464,7 @@ fn generateSvgPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1541,7 +1547,7 @@ fn generatePathsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1629,7 +1635,7 @@ fn generateGradientsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1721,7 +1727,7 @@ fn generateOpacityPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -1780,7 +1786,7 @@ fn generateLandscapePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateColorSwatchesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
@@ -1989,7 +1995,7 @@ test "integration: hello_world PDF" {
 }
 
 fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -2015,7 +2021,7 @@ fn generateSvgTextPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -2037,7 +2043,7 @@ fn generateSvgUseDefsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -2064,7 +2070,7 @@ fn generateSvgEquationPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_24 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24, .bold = true };
@@ -2123,7 +2129,7 @@ fn generateLinksPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_24 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24, .bold = true };
@@ -2193,7 +2199,7 @@ fn generateOutlinesPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_18 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 18, .bold = true };
@@ -2257,7 +2263,7 @@ fn generateTextDecorationsPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_18 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 18, .bold = true };
@@ -2364,7 +2370,7 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_14 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 14, .bold = true };
@@ -2421,7 +2427,7 @@ fn generateAutoHeightPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -2591,7 +2597,7 @@ fn generateStyledTextPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const title_16 = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
@@ -2677,7 +2683,7 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load Charter font (has good kerning data)
@@ -2796,7 +2802,7 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateInsertPagePdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24 };
@@ -2816,7 +2822,7 @@ fn generateInsertPagePdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load main family using the font family API
@@ -2904,7 +2910,7 @@ fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Enable PDF/A-1b conformance
@@ -2950,7 +2956,7 @@ fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Enable PDF/A-2b conformance (allows transparency)
@@ -2997,7 +3003,7 @@ fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load Noto Emoji in different weights
@@ -3070,7 +3076,7 @@ fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
 }
 
 fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Load fonts with different metric profiles
@@ -3407,16 +3413,16 @@ fn runIntegrationTestWithOptions(
     const expected_path = std.fmt.bufPrint(&expected_path_buf, "test/output/{s}_expected.pdf", .{name}) catch unreachable;
 
     // Always save actual output for inspection
-    if (std.fs.cwd().createFile(actual_path, .{})) |file| {
-        defer file.close();
-        file.writeAll(pdf) catch {};
+    std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = actual_path, .data = pdf }) catch {};
+
+    // Copy reference to expected for side-by-side comparison (best-effort)
+    if (std.Io.Dir.cwd().readFileAlloc(app_io, ref_path, allocator, .limited(50 * 1024 * 1024))) |ref_data| {
+        defer allocator.free(ref_data);
+        std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = expected_path, .data = ref_data }) catch {};
     } else |_| {}
 
-    // Copy reference to expected for side-by-side comparison
-    std.fs.cwd().copyFile(ref_path, std.fs.cwd(), expected_path, .{}) catch {};
-
     // Compare against reference
-    var result = try testing.compareWithReferenceSemantic(allocator, pdf, ref_path, .{ .skip_fonts = options.skip_fonts });
+    var result = try testing.compareWithReferenceSemantic(app_io, allocator, pdf, ref_path, .{ .skip_fonts = options.skip_fonts });
     defer result.deinit();
 
     if (!result.equal) {
@@ -3436,7 +3442,7 @@ pub const Case = TestCase;
 
 test "debug: font metrics" {
     const allocator = std.testing.allocator;
-    var doc = zapdf.Document.init(allocator);
+    var doc = zapdf.Document.init(allocator, app_io);
     defer doc.deinit();
 
     // Built-in font

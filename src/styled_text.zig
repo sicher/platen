@@ -126,12 +126,12 @@ pub const MeasureFn = *const fn (text: []const u8, style: TextStyleOptions, ctx:
 /// Mirrors the Path API pattern.
 pub const StyledText = struct {
     allocator: std.mem.Allocator,
-    spans: std.ArrayListUnmanaged(Span) = .{},
+    spans: std.ArrayListUnmanaged(Span) = .empty,
 
     // Preprocessed data for Knuth-Plass (populated by prepare())
-    words: std.ArrayListUnmanaged(StyledWord) = .{},
+    words: std.ArrayListUnmanaged(StyledWord) = .empty,
     /// Storage for break point arrays (freed in deinit).
-    break_point_storage: std.ArrayListUnmanaged([]const BreakPoint) = .{},
+    break_point_storage: std.ArrayListUnmanaged([]const BreakPoint) = .empty,
     prepared: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) StyledText {
@@ -505,7 +505,7 @@ pub const StyledText = struct {
         }
 
         // Backtrack
-        var breaks = std.ArrayListUnmanaged(usize){};
+        var breaks = std.ArrayListUnmanaged(usize).empty;
         errdefer breaks.deinit(self.allocator);
 
         var pos = n;

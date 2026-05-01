@@ -65,11 +65,8 @@ pub const Image = struct {
     }
 
     /// Load image from file, detecting format from header
-    pub fn fromFile(allocator: std.mem.Allocator, path: []const u8) !*Image {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-
-        const data = try file.readToEndAlloc(allocator, 100 * 1024 * 1024); // 100MB max
+    pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*Image {
+        const data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(100 * 1024 * 1024));
         errdefer allocator.free(data);
 
         return fromMemory(allocator, data, true);
@@ -143,7 +140,7 @@ fn parseJpeg(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*
     }
 
     // Collect ICC profile chunks and image dimensions in a single pass
-    var icc_chunks = std.ArrayListUnmanaged(IccChunk){};
+    var icc_chunks = std.ArrayListUnmanaged(IccChunk).empty;
     defer icc_chunks.deinit(allocator);
 
     var i: usize = 2;
@@ -330,12 +327,12 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
     if (filter != 0) return error.UnsupportedPngFilter;
     if (interlace != 0) return error.InterlacedPngNotSupported;
 
-    const color_type = std.meta.intToEnum(PngColorType, color_type_byte) catch {
+    const color_type = std.enums.fromInt(PngColorType, color_type_byte) orelse {
         return error.UnsupportedPngColorType;
     };
 
     // Collect all IDAT chunks
-    var idat_chunks = std.ArrayListUnmanaged([]const u8){};
+    var idat_chunks = std.ArrayListUnmanaged([]const u8).empty;
     defer idat_chunks.deinit(allocator);
 
     var pos: usize = 8; // After signature
@@ -634,7 +631,7 @@ test "unknown format" {
 test "parse JPEG file" {
     const allocator = std.testing.allocator;
 
-    const image = Image.fromFile(allocator, "test/images/madonna_and_child_1939.1.256.jpg") catch |err| {
+    const image = Image.fromFile(std.testing.io, allocator, "test/images/madonna_and_child_1939.1.256.jpg") catch |err| {
         // Skip test if file doesn't exist
         if (err == error.FileNotFound) return;
         return err;
@@ -652,7 +649,7 @@ test "parse JPEG file" {
 test "parse PNG file" {
     const allocator = std.testing.allocator;
 
-    const image = Image.fromFile(allocator, "test/images/robot.png") catch |err| {
+    const image = Image.fromFile(std.testing.io, allocator, "test/images/robot.png") catch |err| {
         // Skip test if file doesn't exist
         if (err == error.FileNotFound) return;
         return err;

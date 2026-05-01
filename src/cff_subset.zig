@@ -106,7 +106,7 @@ pub fn collectTopDictSIDs(
     cff_data: []const u8,
     topdict_index_start: usize,
 ) !std.ArrayListUnmanaged(u16) {
-    var sids = std.ArrayListUnmanaged(u16){};
+    var sids = std.ArrayListUnmanaged(u16).empty;
     errdefer sids.deinit(allocator);
 
     const index = parseCFFIndex(cff_data, topdict_index_start) orelse return sids;
@@ -206,7 +206,7 @@ pub fn buildSubsetStringIndex(
         return .{ .data = &[_]u8{ 0, 0 }, .remap = .{} };
 
     // Collect unique custom SIDs (>= 391) and sort them
-    var custom_sids = std.ArrayListUnmanaged(u16){};
+    var custom_sids = std.ArrayListUnmanaged(u16).empty;
     defer custom_sids.deinit(allocator);
 
     for (used_sids) |sid| {
@@ -238,7 +238,7 @@ pub fn buildSubsetStringIndex(
     }
 
     // Build new String INDEX with only needed strings
-    var string_data = std.ArrayListUnmanaged(u8){};
+    var string_data = std.ArrayListUnmanaged(u8).empty;
     defer string_data.deinit(allocator);
 
     for (custom_sids.items) |old_sid| {
@@ -249,7 +249,7 @@ pub fn buildSubsetStringIndex(
     }
 
     // Build INDEX structure
-    var output = std.ArrayListUnmanaged(u8){};
+    var output = std.ArrayListUnmanaged(u8).empty;
     errdefer output.deinit(allocator);
 
     const new_count: u16 = @intCast(custom_sids.items.len);
@@ -259,7 +259,7 @@ pub fn buildSubsetStringIndex(
     }
 
     // Determine offset size needed
-    var offsets = std.ArrayListUnmanaged(u32){};
+    var offsets = std.ArrayListUnmanaged(u32).empty;
     defer offsets.deinit(allocator);
 
     var current_offset: u32 = 1;
@@ -754,7 +754,7 @@ pub fn desubroutinizeCharString(
     // Prevent infinite recursion
     if (depth > 10) return allocator.dupe(u8, charstring);
 
-    var result = std.ArrayListUnmanaged(u8){};
+    var result = std.ArrayListUnmanaged(u8).empty;
     errdefer result.deinit(allocator);
 
     const gsubr_bias: i32 = if (global_subrs) |gs| getSubrBias(gs.count) else 0;
@@ -959,7 +959,7 @@ test "buildPrivateDictWithoutSubrs" {
         19, // Subrs operator (should be removed)
     };
 
-    var output = std.ArrayListUnmanaged(u8){};
+    var output = std.ArrayListUnmanaged(u8).empty;
     defer output.deinit(allocator);
 
     try buildPrivateDictWithoutSubrs(allocator, &private_dict, &output);

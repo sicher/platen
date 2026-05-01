@@ -186,10 +186,10 @@ test "linear gradient 2 colors" {
     };
 
     var buf: [512]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try writeFunctionDict(&stops, fbs.writer());
+    var fbs = std.Io.Writer.fixed(&buf);
+    try writeFunctionDict(&stops, &fbs);
 
-    const output = fbs.getWritten();
+    const output = fbs.buffered();
     try std.testing.expect(std.mem.indexOf(u8, output, "/FunctionType 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "/C0 [1.000 0.000 0.000]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "/C1 [0.000 0.000 1.000]") != null);
@@ -203,10 +203,10 @@ test "linear gradient 3 colors" {
     };
 
     var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try writeFunctionDict(&stops, fbs.writer());
+    var fbs = std.Io.Writer.fixed(&buf);
+    try writeFunctionDict(&stops, &fbs);
 
-    const output = fbs.getWritten();
+    const output = fbs.buffered();
     try std.testing.expect(std.mem.indexOf(u8, output, "/FunctionType 3") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "/Bounds [0.500]") != null);
 }
