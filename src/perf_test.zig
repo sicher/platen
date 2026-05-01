@@ -43,7 +43,7 @@ const TestConfig = struct {
 };
 
 pub fn main(init: std.process.Init) !void {
-    const allocator = init.gpa;
+    const allocator = std.heap.smp_allocator;
     app_io = init.io;
 
     // Parse args

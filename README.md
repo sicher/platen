@@ -25,14 +25,14 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 
 | Operation | Time |
 |-----------|------|
-| Font loading | 1ms |
+| Font loading | <1ms |
 | Simple text | 2ms |
-| OpenType shaping | 11ms |
-| Unicode/marks | 5ms |
+| OpenType shaping | 12ms |
+| Unicode/marks | 6ms |
 | Text flow | 2ms |
-| Drawing shapes | 14ms |
-| PDF output | 26ms |
-| **Total** | **62ms** (~1600 pages/sec) |
+| Drawing shapes | 13ms |
+| PDF output | 20ms |
+| **Total** | **57ms** (~1750 pages/sec) |
 
 See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 

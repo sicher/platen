@@ -20,30 +20,33 @@ Performance profiling on 2026-01-20 achieved **6x speedup** for OpenType text sh
 
 ## Current Performance Breakdown
 
+Debug build, 100 pages, 3-iteration average (2026-05-01):
+
 ```
 Font loading:      1ms   (0%)
-Simple text:      39ms   (6%)
-OpenType heavy:  213ms  (30%)
-Unicode/marks:   135ms  (19%)
-Text flow:        35ms   (5%)
-PDF output:      279ms  (40%)
+Simple text:      45ms   (5%)
+OpenType heavy:  198ms  (23%)
+Unicode/marks:   128ms  (15%)
+Text flow:        46ms   (5%)
+Drawing shapes:  117ms  (14%)
+PDF output:      312ms  (37%)
 --------------------------
-TOTAL:           704ms
+TOTAL:           849ms
 ```
 
-Note: Slight increase from 660ms baseline due to kerning in text measurement
-(required for correct text positioning in writeStyled API).
+For comparison, ReleaseFast (with `smp_allocator`) on the same workload runs
+the full benchmark in ~57ms — see README.md.
 
 ### PDF Output Breakdown
 
 ```
-Subset generation:   7ms   (3%)
-Page rendering:    153ms  (55%)
-Font writing:       17ms   (6%)
-Page writing:       98ms  (35%)
+Subset generation:   1ms   (0%)
+Page rendering:    166ms  (52%)
+Font writing:        9ms   (3%)
+Page writing:      141ms  (45%)
 Finish (xref):       0ms   (0%)
 --------------------------
-TOTAL:             277ms
+TOTAL:             317ms
 ```
 
 ## Optimizations Implemented
@@ -241,21 +244,27 @@ Per-call timing for 5000 iterations:
 
 ## Remaining Bottlenecks
 
-### 1. PDF Output (277ms, 42% of total)
+### 1. PDF Output (312ms, 37% of total)
 
 Well-optimized. Breakdown:
-- Page rendering: 153ms (55%) - kerning cached, hex optimized
-- Page writing: 98ms (35%) - zlib compression
-- Font writing: 17ms (6%) - font subsetting + embedding
+- Page rendering: 166ms (52%) - kerning cached, hex optimized
+- Page writing: 141ms (45%) - zlib compression
+- Font writing: 9ms (3%) - font subsetting + embedding
 
-### 2. OpenType Shaping (204ms, 31% of total)
+### 2. OpenType Shaping (198ms, 23% of total)
 
 Now well-optimized with chain context rule index and cmap cache. Remaining costs:
 - Ligature application (still O(n) per ligature table)
 - Feature flag checks
 - Non-ASCII cmap binary search
 
-### 3. Simple Text (39ms, 6% of total)
+### 3. Drawing Shapes (117ms, 14% of total)
+
+~1500 vector shapes per page × 20 pages. Float formatting already optimized
+(see "Fast Float Formatting" above). Remaining cost is mostly path command
+emission and graphics state changes.
+
+### 4. Simple Text (45ms, 5% of total)
 
 Uses Charter font with no GSUB. Now fast with ASCII cache - cost is mostly:
 - UTF-8 decode (minimal)
@@ -283,8 +292,8 @@ Interesting observation: **Optimal line breaking (Knuth-Plass) is faster than te
 
 | Operation | Time | Calls | Per-call |
 |-----------|------|-------|----------|
-| Text flow (optimal breaking) | 33ms | 50 paragraphs | 0.66ms |
-| OpenType heavy (shaping) | 204ms | 1250 lines | 0.16ms |
+| Text flow (optimal breaking) | 46ms | 50 paragraphs | 0.92ms |
+| OpenType heavy (shaping) | 198ms | 1250 lines | 0.16ms |
 
 Text flow uses Charter font which has **no GSUB table** - it skips shaping entirely. The line breaking algorithm itself is very efficient.
 
