@@ -154,4 +154,5 @@ test {
     _ = @import("document_test.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");
+    _ = @import("fuzz_tests.zig");
 }

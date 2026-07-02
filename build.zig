@@ -52,6 +52,9 @@ pub fn build(b: *std.Build) void {
     test_mod.linkLibrary(zlib_dep.artifact("z"));
     const lib_tests = b.addTest(.{
         .root_module = test_mod,
+        // Vendored runner working around a Zig 0.16.0 compile error in the
+        // stock runner's fuzz mode; see scripts/test_runner.zig.
+        .test_runner = .{ .path = b.path("scripts/test_runner.zig"), .mode = .server },
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);
