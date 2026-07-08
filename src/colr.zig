@@ -591,6 +591,372 @@ pub const Colr = struct {
 };
 
 // ============================================================================
+// Paint interpreter → PDF content operators
+// ============================================================================
+
+const gradient = @import("gradient.zig");
+
+/// Accumulates the Shading and ExtGState resources referenced by the color
+/// glyphs' CharProcs. These become the Type3 font's /Resources. Dict strings
+/// are owned by this struct's allocator.
+pub const ColorResources = struct {
+    allocator: std.mem.Allocator,
+    shadings: std.ArrayListUnmanaged([]u8) = .empty,
+    ext_gstates: std.ArrayListUnmanaged([]u8) = .empty,
+
+    pub fn init(allocator: std.mem.Allocator) ColorResources {
+        return .{ .allocator = allocator };
+    }
+
+    pub fn deinit(self: *ColorResources) void {
+        for (self.shadings.items) |s| self.allocator.free(s);
+        for (self.ext_gstates.items) |s| self.allocator.free(s);
+        self.shadings.deinit(self.allocator);
+        self.ext_gstates.deinit(self.allocator);
+    }
+
+    /// Register a shading dict body (owned copy taken). Returns 0-based index;
+    /// resource name is "Sh{index+1}".
+    fn addShading(self: *ColorResources, dict: []const u8) !usize {
+        const owned = try self.allocator.dupe(u8, dict);
+        try self.shadings.append(self.allocator, owned);
+        return self.shadings.items.len - 1;
+    }
+
+    /// Register an ExtGState dict body (owned copy taken). Returns 0-based
+    /// index; resource name is "Ga{index+1}".
+    fn addExtGState(self: *ColorResources, dict: []const u8) !usize {
+        const owned = try self.allocator.dupe(u8, dict);
+        try self.ext_gstates.append(self.allocator, owned);
+        return self.ext_gstates.items.len - 1;
+    }
+};
+
+/// Interprets a COLR v1 base glyph and emits PDF drawing operators into `w`,
+/// in glyph space (font units, y-up). The caller wraps the output with the
+/// Type3 CharProc prologue (`wx 0 d0`) and FontMatrix.
+pub const PaintInterp = struct {
+    w: *std.Io.Writer,
+    arena: std.mem.Allocator,
+    colr: Colr,
+    cpal: Cpal,
+    glyf: GlyfContext,
+    res: *ColorResources,
+    /// Foreground color substituted for palette index 0xFFFF.
+    fg: Color = Color.black,
+
+    /// Large cover rectangle (font units) used to fill the current clip for
+    /// solid paints reached outside the fast PaintGlyph→Solid path.
+    const cover_rect = "-32768 -32768 65536 65536 re\n";
+
+    /// Explicit error set for the mutually-recursive paint methods (breaks the
+    /// inferred-error-set dependency loop).
+    const Error = std.Io.Writer.Error || std.mem.Allocator.Error || error{InvalidGradient};
+
+    pub fn render(self: *PaintInterp, base_gid: u16) !void {
+        const root = self.colr.baseGlyphPaint(base_gid) orelse return error.NotAColorGlyph;
+        try self.renderPaint(root, 0);
+    }
+
+    fn renderPaint(self: *PaintInterp, abs: usize, depth: u8) Error!void {
+        if (depth > 64) return;
+        switch (self.colr.paintFormat(abs)) {
+            .colr_layers => {
+                const n = readU8(self.colr.data, abs + 1);
+                const first = readU32(self.colr.data, abs + 2);
+                for (0..n) |i| {
+                    const lp = self.colr.layerPaint(first + @as(u32, @intCast(i))) orelse continue;
+                    try self.renderPaint(lp, depth + 1);
+                }
+            },
+            .solid, .var_solid => {
+                // Fill the current clip region with the solid color.
+                try self.beginSolid(abs);
+                try self.w.writeAll(cover_rect);
+                try self.w.writeAll("f\n");
+                try self.endSolid(abs);
+            },
+            .glyph => {
+                try self.renderGlyphPaint(abs, depth);
+            },
+            .colr_glyph => {
+                const gid = readU16(self.colr.data, abs + 1);
+                const target = self.colr.baseGlyphPaint(gid) orelse return;
+                try self.renderPaint(target, depth + 1);
+            },
+            .linear_gradient => try self.renderGradient(abs, false),
+            .radial_gradient => try self.renderGradient(abs, true),
+            .transform, .var_transform => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const xf_off = abs + readU24(self.colr.data, abs + 4);
+                const m = self.readAffine(xf_off);
+                try self.withTransform(m, abs + paint_off, depth);
+            },
+            .translate, .var_translate => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const dx: f64 = @floatFromInt(readI16(self.colr.data, abs + 4));
+                const dy: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
+                try self.withTransform(Transform.translate(dx, dy), abs + paint_off, depth);
+            },
+            .scale, .var_scale => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const sx = readF2Dot14(self.colr.data, abs + 4);
+                const sy = readF2Dot14(self.colr.data, abs + 6);
+                try self.withTransform(Transform.scale(sx, sy), abs + paint_off, depth);
+            },
+            .scale_around_center, .var_scale_around_center => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const sx = readF2Dot14(self.colr.data, abs + 4);
+                const sy = readF2Dot14(self.colr.data, abs + 6);
+                const cx: f64 = @floatFromInt(readI16(self.colr.data, abs + 8));
+                const cy: f64 = @floatFromInt(readI16(self.colr.data, abs + 10));
+                try self.withTransform(aroundCenter(Transform.scale(sx, sy), cx, cy), abs + paint_off, depth);
+            },
+            .scale_uniform, .var_scale_uniform => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const s = readF2Dot14(self.colr.data, abs + 4);
+                try self.withTransform(Transform.scale(s, s), abs + paint_off, depth);
+            },
+            .scale_uniform_around_center, .var_scale_uniform_around_center => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const s = readF2Dot14(self.colr.data, abs + 4);
+                const cx: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
+                const cy: f64 = @floatFromInt(readI16(self.colr.data, abs + 8));
+                try self.withTransform(aroundCenter(Transform.scale(s, s), cx, cy), abs + paint_off, depth);
+            },
+            .rotate, .var_rotate => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const ang = readF2Dot14(self.colr.data, abs + 4) * std.math.pi; // *180deg → rad
+                try self.withTransform(rotation(ang), abs + paint_off, depth);
+            },
+            .rotate_around_center, .var_rotate_around_center => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const ang = readF2Dot14(self.colr.data, abs + 4) * std.math.pi;
+                const cx: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
+                const cy: f64 = @floatFromInt(readI16(self.colr.data, abs + 8));
+                try self.withTransform(aroundCenter(rotation(ang), cx, cy), abs + paint_off, depth);
+            },
+            .skew, .var_skew => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const xs = readF2Dot14(self.colr.data, abs + 4) * std.math.pi;
+                const ys = readF2Dot14(self.colr.data, abs + 6) * std.math.pi;
+                try self.withTransform(skew(xs, ys), abs + paint_off, depth);
+            },
+            .skew_around_center, .var_skew_around_center => {
+                const paint_off = readU24(self.colr.data, abs + 1);
+                const xs = readF2Dot14(self.colr.data, abs + 4) * std.math.pi;
+                const ys = readF2Dot14(self.colr.data, abs + 6) * std.math.pi;
+                const cx: f64 = @floatFromInt(readI16(self.colr.data, abs + 8));
+                const cy: f64 = @floatFromInt(readI16(self.colr.data, abs + 10));
+                try self.withTransform(aroundCenter(skew(xs, ys), cx, cy), abs + paint_off, depth);
+            },
+            .composite => {
+                // format(u8), sourcePaintOffset(Offset24), compositeMode(u8),
+                // backdropPaintOffset(Offset24).
+                const src_off = abs + readU24(self.colr.data, abs + 1);
+                const mode = readU8(self.colr.data, abs + 4);
+                const back_off = abs + readU24(self.colr.data, abs + 5);
+                // Approximate: paint backdrop, then source with a matching PDF
+                // blend mode where one exists (else Normal over).
+                try self.renderPaint(back_off, depth + 1);
+                if (blendModeName(mode)) |bm| {
+                    const dict = try std.fmt.allocPrint(self.arena, "<< /Type /ExtGState /BM /{s} >>", .{bm});
+                    const idx = try self.res.addExtGState(dict);
+                    try self.w.writeAll("q\n");
+                    try self.w.print("/Ga{d} gs\n", .{idx + 1});
+                    try self.renderPaint(src_off, depth + 1);
+                    try self.w.writeAll("Q\n");
+                } else {
+                    try self.renderPaint(src_off, depth + 1);
+                }
+            },
+            else => {}, // sweep gradient / unknown: skip
+        }
+    }
+
+    /// PaintGlyph: clip to the referenced glyph outline, then paint the child.
+    /// Fast-paths the very common PaintGlyph→Solid as a direct filled outline.
+    fn renderGlyphPaint(self: *PaintInterp, abs: usize, depth: u8) Error!void {
+        const child = abs + readU24(self.colr.data, abs + 1);
+        const gid = readU16(self.colr.data, abs + 4);
+        const child_fmt = self.colr.paintFormat(child);
+
+        if (child_fmt == .solid or child_fmt == .var_solid) {
+            // Fill the outline directly with the solid color.
+            try self.beginSolid(child);
+            try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
+            try self.w.writeAll("f\n");
+            try self.endSolid(child);
+            return;
+        }
+
+        // General case: set clip to the outline, then paint child into it.
+        try self.w.writeAll("q\n");
+        try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
+        try self.w.writeAll("W n\n");
+        try self.renderPaint(child, depth + 1);
+        try self.w.writeAll("Q\n");
+    }
+
+    /// Emit fill-color setup for a PaintSolid, wrapping in an alpha ExtGState if
+    /// the paint's alpha is below 1. Must be paired with endSolid.
+    fn beginSolid(self: *PaintInterp, solid_abs: usize) !void {
+        const pal = readU16(self.colr.data, solid_abs + 1);
+        const alpha = readF2Dot14(self.colr.data, solid_abs + 3);
+        const resolved = self.cpal.color(pal);
+        const c = if (resolved) |r| r.c else self.fg;
+        const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
+        const total_alpha = alpha * entry_alpha;
+
+        if (total_alpha < 0.999) {
+            var buf: [96]u8 = undefined;
+            const dict = std.fmt.bufPrint(&buf, "<< /Type /ExtGState /ca {d:.3} >>", .{total_alpha}) catch unreachable;
+            const idx = self.res.addExtGState(dict) catch 0;
+            try self.w.writeAll("q\n");
+            try self.w.print("/Ga{d} gs\n", .{idx + 1});
+        }
+        try c.writeFill(self.w);
+    }
+
+    fn endSolid(self: *PaintInterp, solid_abs: usize) !void {
+        const alpha = readF2Dot14(self.colr.data, solid_abs + 3);
+        const pal = readU16(self.colr.data, solid_abs + 1);
+        const resolved = self.cpal.color(pal);
+        const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
+        if (alpha * entry_alpha < 0.999) try self.w.writeAll("Q\n");
+    }
+
+    fn withTransform(self: *PaintInterp, m: Transform, child_abs: usize, depth: u8) Error!void {
+        var buf: [160]u8 = undefined;
+        const s = std.fmt.bufPrint(&buf, "q\n{d:.5} {d:.5} {d:.5} {d:.5} {d:.4} {d:.4} cm\n", .{ m.a, m.b, m.c, m.d, m.e, m.f }) catch unreachable;
+        try self.w.writeAll(s);
+        try self.renderPaint(child_abs, depth + 1);
+        try self.w.writeAll("Q\n");
+    }
+
+    fn readAffine(self: *PaintInterp, off: usize) Transform {
+        return .{
+            .a = readFixed(self.colr.data, off),
+            .b = readFixed(self.colr.data, off + 4),
+            .c = readFixed(self.colr.data, off + 8),
+            .d = readFixed(self.colr.data, off + 12),
+            .e = readFixed(self.colr.data, off + 16),
+            .f = readFixed(self.colr.data, off + 20),
+        };
+    }
+
+    /// Render a linear or radial gradient, filling the current clip via `sh`.
+    fn renderGradient(self: *PaintInterp, abs: usize, is_radial: bool) !void {
+        const color_line_abs = abs + readU24(self.colr.data, abs + 1);
+        const stops = try self.readColorLine(color_line_abs);
+        if (stops.len < 2) return;
+
+        var dict: std.Io.Writer.Allocating = .init(self.arena);
+        if (is_radial) {
+            const x0: f64 = @floatFromInt(readI16(self.colr.data, abs + 4));
+            const y0: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
+            const r0: f64 = @floatFromInt(readU16(self.colr.data, abs + 8));
+            const x1: f64 = @floatFromInt(readI16(self.colr.data, abs + 10));
+            const y1: f64 = @floatFromInt(readI16(self.colr.data, abs + 12));
+            const r1: f64 = @floatFromInt(readU16(self.colr.data, abs + 14));
+            try dict.writer.print("<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}] /Extend [true true] /Function ", .{ x0, y0, r0, x1, y1, r1 });
+        } else {
+            // Three-point form → two-point axial gradient. The iso-color lines
+            // are parallel to (p2-p0); the axis runs from p0 to the projection
+            // of p1 onto the perpendicular direction.
+            const p0x: f64 = @floatFromInt(readI16(self.colr.data, abs + 4));
+            const p0y: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
+            const p1x: f64 = @floatFromInt(readI16(self.colr.data, abs + 8));
+            const p1y: f64 = @floatFromInt(readI16(self.colr.data, abs + 10));
+            const p2x: f64 = @floatFromInt(readI16(self.colr.data, abs + 12));
+            const p2y: f64 = @floatFromInt(readI16(self.colr.data, abs + 14));
+            const end = axialEndpoint(p0x, p0y, p1x, p1y, p2x, p2y);
+            try dict.writer.print("<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2}] /Extend [true true] /Function ", .{ p0x, p0y, end.x, end.y });
+        }
+        try gradient.writeFunctionDict(stops, &dict.writer);
+        try dict.writer.writeAll(" >>");
+
+        const idx = try self.res.addShading(dict.writer.buffered());
+        try self.w.print("/Sh{d} sh\n", .{idx + 1});
+    }
+
+    fn readColorLine(self: *PaintInterp, abs: usize) ![]gradient.ColorStop {
+        // ColorLine: uint8 extend; uint16 numStops; ColorStop[numStops].
+        // ColorStop: F2Dot14 stopOffset; uint16 paletteIndex; F2Dot14 alpha.
+        const num = readU16(self.colr.data, abs + 1);
+        if (num == 0) return &.{};
+        const stops = try self.arena.alloc(gradient.ColorStop, num);
+        var i: usize = 0;
+        while (i < num) : (i += 1) {
+            const s = abs + 3 + i * 6;
+            const off = readF2Dot14(self.colr.data, s);
+            const pal = readU16(self.colr.data, s + 2);
+            const resolved = self.cpal.color(pal);
+            const c = if (resolved) |r| r.c else self.fg;
+            stops[i] = .{ .offset = std.math.clamp(off, 0.0, 1.0), .color = c };
+        }
+        // PDF stitching functions need non-decreasing, in-range offsets.
+        std.sort.pdq(gradient.ColorStop, stops, {}, struct {
+            fn lt(_: void, a: gradient.ColorStop, b: gradient.ColorStop) bool {
+                return a.offset < b.offset;
+            }
+        }.lt);
+        return stops;
+    }
+};
+
+fn aroundCenter(m: Transform, cx: f64, cy: f64) Transform {
+    return Transform.translate(cx, cy).concat(m).concat(Transform.translate(-cx, -cy));
+}
+
+fn rotation(rad: f64) Transform {
+    return .{ .a = @cos(rad), .b = @sin(rad), .c = -@sin(rad), .d = @cos(rad) };
+}
+
+fn skew(x_rad: f64, y_rad: f64) Transform {
+    return .{ .a = 1, .b = @tan(y_rad), .c = -@tan(x_rad), .d = 1 };
+}
+
+/// Reduce a COLR 3-point linear gradient to a PDF axial gradient endpoint.
+fn axialEndpoint(p0x: f64, p0y: f64, p1x: f64, p1y: f64, p2x: f64, p2y: f64) struct { x: f64, y: f64 } {
+    // Iso-color direction v = p2 - p0; gradient axis is perpendicular to v.
+    const vx = p2x - p0x;
+    const vy = p2y - p0y;
+    const len = @sqrt(vx * vx + vy * vy);
+    if (len < 1e-6) return .{ .x = p1x, .y = p1y };
+    // Perpendicular unit vector n = perp(v)/|v|.
+    const nx = -vy / len;
+    const ny = vx / len;
+    // Project (p1 - p0) onto n; endpoint = p0 + t*n.
+    const t = (p1x - p0x) * nx + (p1y - p0y) * ny;
+    return .{ .x = p0x + t * nx, .y = p0y + t * ny };
+}
+
+/// Map a COLR CompositeMode to a PDF /BM blend-mode name, or null for modes
+/// with no direct PDF equivalent (fall back to Normal over).
+fn blendModeName(mode: u8) ?[]const u8 {
+    return switch (mode) {
+        // Separable + non-separable blend modes shared with PDF.
+        9 => "Multiply",
+        10 => "Screen",
+        11 => "Overlay",
+        12 => "Darken",
+        13 => "Lighten",
+        14 => "ColorDodge",
+        15 => "ColorBurn",
+        16 => "HardLight",
+        17 => "SoftLight",
+        18 => "Difference",
+        19 => "Exclusion",
+        20 => "Hue",
+        21 => "Saturation",
+        22 => "Color",
+        23 => "Luminosity",
+        else => null, // Porter-Duff modes (0..8): approximate as source-over
+    };
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -652,6 +1018,92 @@ test "COLR v1 paint graph walk (Noto cloud glyph 3950)" {
     try testing.expectEqual(@as(u16, 23930), readU16(colr.data, l1 + 4));
     const l1_child = l1 + readU24(colr.data, l1 + 1);
     try testing.expectEqual(@as(u16, 3420), readU16(colr.data, l1_child + 1));
+}
+
+test "paint interpreter renders cloud glyph as two filled solid layers" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const head = font.head.?;
+
+    const colr = try Colr.parse(font.getTable("COLR".*).?);
+    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
+    const ctx = GlyfContext{
+        .glyf = font.getTable("glyf".*).?,
+        .loca = font.getTable("loca".*).?,
+        .loca_format = head.index_to_loc_format,
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+
+    var res = ColorResources.init(testing.allocator);
+    defer res.deinit();
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var interp = PaintInterp{
+        .w = &aw.writer,
+        .arena = arena_state.allocator(),
+        .colr = colr,
+        .cpal = cpal,
+        .glyf = ctx,
+        .res = &res,
+    };
+    try interp.render(3950);
+    const out = aw.writer.buffered();
+
+    // Two solid layers with the ground-truth palette colors.
+    try testing.expect(std.mem.indexOf(u8, out, "0.894 0.918 0.933 rg") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "0.729 0.804 0.824 rg") != null);
+    // Layer 0's outline (fast PaintGlyph→Solid path fills the outline directly).
+    try testing.expect(std.mem.indexOf(u8, out, "257.00 366.00 m") != null);
+    // Exactly two fills, no gradients/clips for this flat glyph.
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "f\n"));
+    try testing.expectEqual(@as(usize, 0), res.shadings.items.len);
+}
+
+test "paint interpreter emits a shading for a gradient glyph" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const head = font.head.?;
+
+    const colr = try Colr.parse(font.getTable("COLR".*).?);
+    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
+    const ctx = GlyfContext{
+        .glyf = font.getTable("glyf".*).?,
+        .loca = font.getTable("loca".*).?,
+        .loca_format = head.index_to_loc_format,
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var res = ColorResources.init(testing.allocator);
+    defer res.deinit();
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var interp = PaintInterp{
+        .w = &aw.writer,
+        .arena = arena_state.allocator(),
+        .colr = colr,
+        .cpal = cpal,
+        .glyf = ctx,
+        .res = &res,
+    };
+    // gid 3994 = keycap digit '0': PaintGlyph(clip) → PaintLinearGradient.
+    try interp.render(3994);
+    const out = aw.writer.buffered();
+
+    // One axial shading registered, referenced by `sh` inside a clip.
+    try testing.expectEqual(@as(usize, 1), res.shadings.items.len);
+    try testing.expect(std.mem.indexOf(u8, res.shadings.items[0], "/ShadingType 2") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "W n") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
 }
 
 test "glyf outline extraction (Noto cloud layer glyph 23929)" {
