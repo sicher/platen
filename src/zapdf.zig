@@ -155,4 +155,5 @@ test {
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");
     _ = @import("fuzz_tests.zig");
+    _ = @import("colr.zig");
 }
