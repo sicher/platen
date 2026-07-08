@@ -805,6 +805,22 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     try doc.drawEllipse(.{ .x = 50, .y = y, .width = 120, .height = 60 }, .{
         .fill = .{ .color = zapdf.Color.rgb(200, 100, 50), .opacity = 0.7 },
     });
+    y += 90;
+
+    // Text opacity: semi-transparent text over a solid background bar.
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text opacity (100%, 60%, 30%):", label_style);
+    y += 25;
+
+    try doc.drawRect(.{ .x = 50, .y = y - 18, .width = 300, .height = 26 }, .{
+        .fill = .{ .color = zapdf.Color.rgb(255, 210, 0) },
+    });
+    const big = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 20, .bold = true, .color = zapdf.Color.rgb(0, 60, 160) };
+    _ = try doc.writeAt(.{ .x = 55, .y = y }, "Full", big);
+    var faded = big;
+    faded.opacity = 0.6;
+    _ = try doc.writeAt(.{ .x = 130, .y = y }, "60%", faded);
+    faded.opacity = 0.3;
+    _ = try doc.writeAt(.{ .x = 210, .y = y }, "30%", faded);
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

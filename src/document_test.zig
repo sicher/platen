@@ -2811,6 +2811,100 @@ test "opacity state deduplication" {
     try std.testing.expectEqual(@as(usize, 1), count);
 }
 
+test "text with fill opacity emits ExtGState" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 24, .opacity = 0.5 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Semi-transparent", style);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Transparent text needs an ExtGState with a non-stroking alpha (ca).
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/GS1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ca 0.5") != null);
+    // The text object must be wrapped so the alpha is applied then restored.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/GS1 gs") != null);
+}
+
+test "fully opaque text has no ExtGState" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // Default opacity = 1.0
+    const style = TextStyle{ .font = Font.helvetica, .size = 24 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Opaque", style);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, " gs\n") == null);
+}
+
+test "text opacity shares ExtGState with shape opacity" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    try doc.addPage(.{});
+    // A shape and text with the same 0.4 fill alpha should dedup to one GS.
+    try doc.drawRect(.{ .x = 50, .y = 50, .width = 60, .height = 40 }, .{
+        .fill = .{ .color = Color.rgb(255, 0, 0), .opacity = 0.4 },
+    });
+    const style = TextStyle{ .font = Font.helvetica, .size = 18, .opacity = 0.4 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Match", style);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // "/ca 0.4" should appear exactly once in the ExtGState dict (deduplicated).
+    var count: usize = 0;
+    var idx: usize = 0;
+    while (std.mem.indexOf(u8, pdf[idx..], "/ca 0.4")) |pos| {
+        count += 1;
+        idx += pos + 7;
+    }
+    try std.testing.expectEqual(@as(usize, 1), count);
+}
+
+test "embedded-font text opacity emits ExtGState" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    // Disable content-stream compression so the `/GS1 gs` operator is greppable
+    // (embedded-font pages otherwise FlateDecode-compress the content stream).
+    doc.compression_level = 0;
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.otf", null);
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = font, .size = 20, .opacity = 0.6 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Fade", style);
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ExtGState") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ca 0.6") != null);
+    // ExtGState applied around the CID text object.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/GS1 gs") != null);
+}
+
+test "PDF/A-1b rejects transparent text" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    doc.setConformance(.pdfa_1b);
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 24, .opacity = 0.5 };
+    try std.testing.expectError(
+        error.TransparencyNotAllowed,
+        doc.writeAt(.{ .x = 50, .y = 50 }, "No transparency", style),
+    );
+}
+
 // ============================================================================
 // PDF/A Tests
 // ============================================================================

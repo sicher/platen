@@ -40,6 +40,8 @@ pub const TextCommand = struct {
     font: FontRef,
     /// Text color
     text_color: Color,
+    /// Fill (non-stroking) opacity: 1.0 = opaque. Applies to glyphs and decorations.
+    opacity: f64 = 1.0,
     /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
     cached_glyphs: ?[]const u16 = null,
     /// Text width (for decoration drawing)

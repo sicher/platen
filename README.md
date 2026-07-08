@@ -14,6 +14,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 - **Images**: JPEG and PNG embedding (with alpha channel support)
 - **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`
 - **Gradients**: linear and radial
+- **Transparency**: fill/stroke opacity for shapes and fill opacity for text
 - **Document metadata**: title, author, subject, keywords
 - **Links**: internal (TOC navigation) and external (URLs)
 - **PDF/A conformance**: PDF/A-1b and PDF/A-2b archival formats (VeraPDF validated)
@@ -575,8 +576,14 @@ const style = zapdf.TextStyle{
     .italic = false,
     .color = zapdf.Color.navy,
     .decoration = .underline,
+    .opacity = 0.5,                // fill alpha: 0.0 transparent .. 1.0 opaque
 };
 ```
+
+`opacity` (default `1.0`) applies a non-stroking alpha to the glyphs and their
+decorations, using the same transparency mechanism as shapes. Values below `1.0`
+require transparency support and are rejected by PDF/A-1b
+(`error.TransparencyNotAllowed`).
 
 For mixed styles within a paragraph, use `StyledText`:
 

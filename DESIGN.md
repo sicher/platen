@@ -240,6 +240,21 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 | `writeStyled(&region, *StyledText, opts)` | Styled text in region, returns overflow |
 | `write(&region, str, .{ .measure_only = true })` | Measure layout without rendering |
 
+### Text Opacity
+
+`TextStyle.opacity` (0.0–1.0, default 1.0) sets the fill (non-stroking) alpha for
+glyphs and their decorations. Non-opaque text is emitted as a text object wrapped in
+`q /GSn gs BT … ET Q`, where `/GSn` is a per-page ExtGState with `ca N` — the same
+opacity-state registry used by shapes, so identical alphas dedup to one resource.
+The alpha is applied at render time (`renderPageCommands`), which runs before page
+resources are built, so the registered state is picked up automatically. PDF/A-1b
+rejects `opacity < 1.0` with `error.TransparencyNotAllowed` at write time.
+
+```zig
+const style = TextStyle{ .font = Font.helvetica, .size = 24, .opacity = 0.5 };
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Semi-transparent", style);
+```
+
 ### Text Measurement
 
 Use `write()` or `writeStyled()` with `.measure_only = true` to measure text layout without rendering.
@@ -570,6 +585,10 @@ try doc.drawRect(rect, .{
     .stroke = .{ .color = Color.black, .opacity = 0.8 },
 });
 ```
+
+Opacity states are deduplicated per-page: shapes and text that request the same
+`(fill, stroke)` alpha pair share a single `/GSn` ExtGState resource. Text opacity
+(`TextStyle.opacity`) reuses the exact same registry (see Text API).
 
 ### Path API
 

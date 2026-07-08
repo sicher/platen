@@ -82,6 +82,10 @@ pub const TextStyle = struct {
     decoration: TextDecoration = .none,
     /// Extra space between characters in points (0 = normal).
     char_spacing: f64 = 0,
+    /// Fill (non-stroking) opacity for the text: 0.0 = fully transparent,
+    /// 1.0 = fully opaque. Values < 1.0 require transparency support
+    /// (rejected by PDF/A-1b). Applies to glyphs and text decorations.
+    opacity: f64 = 1.0,
 
     /// Get the resolved StandardFont if this is a standard font.
     pub fn standardFont(self: TextStyle) ?StandardFont {

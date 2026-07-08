@@ -833,6 +833,9 @@ pub const Document = struct {
         else
             0;
 
+        // Reject text transparency for conformance levels that disallow it (PDF/A-1b).
+        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
+
         // Store deferred command with word spacing and cached glyphs
         // Convert Y from top-left to PDF coordinates (bottom-left origin)
         try page.commands.append(self.allocator, .{
@@ -845,6 +848,7 @@ pub const Document = struct {
                 .text_data = text_copy,
                 .font = font_ref,
                 .text_color = style.color,
+                .opacity = style.opacity,
                 .cached_glyphs = cached_glyphs,
                 .text_width = text_width,
                 .underline = style.decoration.underline,
@@ -916,6 +920,9 @@ pub const Document = struct {
         // Convert from user coordinates (top-left origin) to PDF coordinates (bottom-left origin)
         const pdf_y = self.currentPageSize().height - pos.y;
 
+        // Reject text transparency for conformance levels that disallow it (PDF/A-1b).
+        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
+
         // Store deferred command
         try page.commands.append(self.allocator, .{
             .text = .{
@@ -927,6 +934,7 @@ pub const Document = struct {
                 .text_data = text_copy,
                 .font = font_ref,
                 .text_color = style.color,
+                .opacity = style.opacity,
                 .cached_glyphs = cached_glyphs,
                 .text_width = text_width,
                 .underline = style.decoration.underline,
@@ -2522,6 +2530,20 @@ pub const Document = struct {
         for (page.commands.items) |cmd| {
             switch (cmd) {
                 .text => |t| {
+                    // Apply fill (non-stroking) opacity via ExtGState if not fully opaque.
+                    // Wrap the whole text object (and its decorations) in q/Q so the
+                    // alpha does not leak into subsequent content.
+                    const opacity_gs: ?usize = if (t.opacity < 1.0)
+                        try page.getOrAddOpacityState(self.allocator, t.opacity, 1.0)
+                    else
+                        null;
+                    if (opacity_gs) |idx| {
+                        try cw.append("q\n");
+                        var gs_buf: [16]u8 = undefined;
+                        const gs_len = graphics.writeExtGStateRef(&gs_buf, idx);
+                        try cw.append(gs_buf[0..gs_len]);
+                    }
+
                     // Begin text block
                     try cw.append("BT\n");
                     // Set text color
@@ -2573,6 +2595,11 @@ pub const Document = struct {
                     // These must be outside the text block (BT/ET)
                     if (t.underline or t.strikethrough) {
                         try self.drawTextDecorations(&cw, &t);
+                    }
+
+                    // Restore graphics state if we applied an opacity ExtGState.
+                    if (opacity_gs != null) {
+                        try cw.append("Q\n");
                     }
                 },
                 .raw => |data| {
