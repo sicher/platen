@@ -1,6 +1,6 @@
 .{
     .name = .zapdf,
-    .version = "0.15.2",
+    .version = "1.0.0",
     .dependencies = .{
         .zlib = .{
             .url = "https://github.com/allyourcodebase/zlib/archive/refs/heads/main.tar.gz",
