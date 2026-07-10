@@ -3004,3 +3004,82 @@ test "PDF/A none conformance has no PDF/A structures" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type /Metadata") == null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/MarkInfo") == null);
 }
+
+const noto_color_emoji_path = "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf";
+
+test "COLR color emoji emits a Type3 color font" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    // Cloud (flat two-color) + grinning face (radial gradient).
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}\u{1F600}", .{ .font = emoji, .size = 48 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Type3 color font with one CharProc per glyph and a 1-based encoding.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CharProcs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Differences [1 /g1 /g2]") != null);
+    // FontMatrix at full precision (Noto Color Emoji upem = 1024 → 1/1024).
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontMatrix [0.0009765625 0 0 0.0009765625 0 0]") != null);
+    // The gradient face contributes a shading to the font's Resources.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ShadingType 3") != null);
+    // Text shows the color glyphs via the Type3 font.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 48.00 Tf") != null);
+}
+
+test "COLR mixed run splits into Type3 (color) and CID (mono) segments" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    // Emoji, space (non-color glyph), emoji → color / mono / color.
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600} \u{2601}", .{ .font = emoji, .size = 40 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Both encodings are selected mid-run: /Tc1 for the color glyphs (as a
+    // Tf operator, not just the resource entry) and /E1 for the mono CID space.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 40.00 Tf") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 40.00 Tf") != null);
+}
+
+test "COLR color fonts are skipped under PDF/A conformance" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.setConformance(.pdfa_2b);
+
+    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 40 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // No Type3 color font; the glyph falls back to the monochrome CID outline.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type3") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1") == null);
+}
+
+test "COLR color font used only for non-color text emits no Type3" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    // Only spaces: the emoji font is used, but no color glyph is present.
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "   ", .{ .font = emoji, .size = 40 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // No (empty, malformed) Type3 font should be emitted.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type3") == null);
+}

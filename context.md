@@ -2,16 +2,67 @@
 
 ## Current Focus
 **v1.0.0 released** - Library is feature complete. Migrated to Zig 0.16.
+**Color emoji (COLR v1) support just landed** - see session below.
 
 ## What's Next
 - Future enhancements (if needed):
-  - Text opacity support (non-stroking alpha for text)
-  - Blend modes (Normal, Multiply, Screen, etc.)
+  - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
-  - Color emoji support (parse COLR/CPAL tables, render as colored paths)
+  - Color emoji follow-ups: >255 distinct color glyphs per font currently fall back
+    to the (often empty) mono outline — split into multiple Type3 fonts if needed;
+    sweep gradient (PaintSweepGradient) is skipped; CBDT/sbix bitmap emoji unsupported.
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
+
+## What We Did (Session 2026-07-08/09 #14 — COLR color emoji)
+- **Wired COLR v1 / CPAL color fonts into PDF output as Type3 color fonts.**
+  Builds on `src/colr.zig` (committed earlier: CPAL/COLR/glyf parsers + `PaintInterp`
+  that renders a glyph's paint graph to PDF operators — solids, axial/radial
+  shadings, clips, transforms, blend-mode ExtGStates).
+- **`src/embedded.zig`**: lazy `colorInfo()` (probes COLR/CPAL/glyf/loca/head),
+  `isColorGlyph(gid)`, `glyphAdvanceFontUnits(gid)`. `ColorInfo` slices point into
+  the font `data` (nothing to free).
+- **`src/document.zig`**:
+  - `ColorFontPlan` (output-scoped, one heap-allocated plan per color font):
+    ordered color gids → 1-based PDF codes, CharProc content, advance widths (font
+    units), page-usage set, a shared `colr.ColorResources` (shadings/ExtGStates).
+  - `buildColorFontPlans()` pre-pass runs at the top of `output()` before object-ID
+    reservation; scans every page's text commands (uses `t.cached_glyphs`).
+    **Skipped entirely when `conformance != .none`** (color glyphs fall back to the
+    mono CID outline under PDF/A).
+  - Reserves 1 font-dict + N CharProc-stream object IDs per plan.
+  - `writeColorFont()` emits the Type3 font: FontMatrix `[1/upem …]` (full precision
+    via allocPrint — **NOT `Value.real`, which only prints 3 decimals**), FontBBox
+    from head, CharProcs/Encoding(Differences)/Widths(font units)/Resources built as
+    literal strings in an arena. CharProc = `wx 0 d0` + paint ops.
+  - `renderColorText()` (content emission) segments a color-font run into maximal
+    same-kind sub-runs: color → `/Tc{n}` Type3 + 1-byte codes, mono → `/E{n}` CID +
+    2-byte gids. Both share the text position; advances agree (Type3 Widths×FontMatrix
+    == CID `/W`). No kerning/marks in mixed runs (emoji don't kern).
+  - Per-page `/Font` resources gain `/Tc{n}` for plans whose `pages` set contains the page.
+- **ToUnicode on the Type3 font**: single-byte CMap mapping each color code →
+  its Unicode codepoint (astral → UTF-16 surrogate pair), via
+  `buildColorFontToUnicode` + a reserved `tounicode_id` per plan. Makes emoji
+  text-extractable/copy-pasteable (`pdftotext` now yields the real emoji, not raw
+  byte codes) and lets the semantic reference comparison see real content.
+- **Tests**:
+  - `src/document_test.zig` (unit): Type3 structure + FontMatrix precision +
+    gradient shading; mixed color/mono segmentation; PDF/A skip; empty-plan guard.
+    Set `doc.compression_level = 0` when asserting on content-stream operators
+    (streams compress once they exceed a small size).
+  - `src/integration_tests.zig` (reference): `color_emoji` case +
+    `generateColorEmojiPdf` + `test "integration: color_emoji PDF"`. **Reference is
+    zapdf-generated** (`test/reference/color_emoji.pdf`) — fpdf2 can't emit COLR, so
+    it's added to `EXCLUDED_TESTS` in `gen_references.py` (like svg_equation/
+    inter_fonts). To regenerate: run tests → copy `test/output/color_emoji_actual.pdf`
+    → `test/reference/color_emoji.pdf`.
+- **CLI**: new `color-test [ttf] [out]` command + `generateColorTestPdf`.
+- **Validated visually**: rendered with pymupdf — cloud, grinning face (radial
+  gradient), party popper, rocket, heart, star, rainbow, etc. all correct in color.
+- All 353 unit tests pass. (Note: `zig build test`'s trailing "failed command" is a
+  **pre-existing** fuzz-phase issue in the vendored runner — reproduces on clean tree;
+  run the test binary directly to see "All 353 tests passed".)
 
 ## What We Did (Session 2026-05-01 #13)
 - **Migrated from Zig 0.15 to 0.16**. All 336 unit tests + 38 integration reference tests pass.

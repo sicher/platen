@@ -9,6 +9,7 @@ const std = @import("std");
 const ttf = @import("ttf.zig");
 const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
+const colr = @import("colr.zig");
 pub const opentype = @import("opentype.zig");
 const format = @import("format.zig");
 const binary = @import("binary.zig");
@@ -217,6 +218,11 @@ pub const EmbeddedFont = struct {
     // Scratch buffers for shaping (reused across calls to avoid allocations)
     scratch_codepoints: std.ArrayListUnmanaged(u21) = .empty,
     scratch_glyphs: std.ArrayListUnmanaged(u16) = .empty,
+
+    // COLR/CPAL color-font support (lazily probed). All slices in ColorInfo
+    // point into `data`, so there is nothing to free.
+    color_info: ?ColorInfo = null,
+    color_checked: bool = false,
 
     /// Load and parse a TTF font from file
     pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
@@ -781,6 +787,51 @@ pub const EmbeddedFont = struct {
             return self.gid_remap.get(orig_gid) orelse 0;
         }
         return orig_gid;
+    }
+
+    /// Parsed COLR/CPAL tables plus the glyf context needed to render color
+    /// glyph outlines. Slices reference the font `data`.
+    pub const ColorInfo = struct {
+        colr: colr.Colr,
+        cpal: colr.Cpal,
+        glyf: colr.GlyfContext,
+    };
+
+    /// Lazily probe and return the font's COLR v1 / CPAL color tables, or null
+    /// if the font is not a (supported) color font.
+    pub fn colorInfo(self: *EmbeddedFont) ?ColorInfo {
+        if (!self.color_checked) {
+            self.color_checked = true;
+            self.color_info = parseColorInfo(self);
+        }
+        return self.color_info;
+    }
+
+    fn parseColorInfo(self: *EmbeddedFont) ?ColorInfo {
+        const colr_data = self.font.getTable("COLR".*) orelse return null;
+        const cpal_data = self.font.getTable("CPAL".*) orelse return null;
+        const glyf_data = self.font.getTable("glyf".*) orelse return null;
+        const loca_data = self.font.getTable("loca".*) orelse return null;
+        const head = self.font.head orelse return null;
+        const c = colr.Colr.parse(colr_data) catch return null;
+        const p = colr.Cpal.parse(cpal_data) catch return null;
+        return .{
+            .colr = c,
+            .cpal = p,
+            .glyf = .{ .glyf = glyf_data, .loca = loca_data, .loca_format = head.index_to_loc_format },
+        };
+    }
+
+    /// True if `gid` is a COLR base glyph (has a color paint graph).
+    pub fn isColorGlyph(self: *EmbeddedFont, gid: u16) bool {
+        const info = self.colorInfo() orelse return false;
+        return info.colr.baseGlyphPaint(gid) != null;
+    }
+
+    /// Glyph advance width in original font units (glyph space), used for
+    /// Type3 color-glyph Widths.
+    pub fn glyphAdvanceFontUnits(self: *const EmbeddedFont, gid: u16) u16 {
+        return self.font.getGlyphWidth(gid) orelse 0;
     }
 
     /// Get width for a glyph ID (CID mode), in 1/1000 em

@@ -175,6 +175,43 @@ endstream
 2. CIDFont (Type0) support for full Unicode text (CJK, emoji, etc.)
 3. OpenType CFF font support (CIDFontType0C)
 4. OpenType GSUB/GPOS (ligatures, kerning, mark positioning)
+5. COLR v1 / CPAL color fonts → PDF Type3 color fonts (color emoji)
+
+### Color Fonts (COLR/CPAL → Type3)
+Color glyphs (e.g. Noto Color Emoji) are rendered as **PDF Type3 color fonts**,
+one per color font used in the document.
+
+- **`src/colr.zig`** parses CPAL (palettes), COLR v1 (base-glyph paint graphs +
+  layer list), and glyf/loca outlines. `PaintInterp` walks a base glyph's paint
+  graph and emits PDF drawing operators in glyph space (font units, y-up):
+  solids (`rg`/`f`), axial/radial gradients (as `/Shading` + `sh`, three-point
+  linear reduced to a two-point axial), glyph-outline clips (`W n`), affine
+  transforms (`cm`), and composite blend modes (`/BM` ExtGState). Alpha < 1 wraps
+  in a `/ca` ExtGState. Sweep gradients and Porter-Duff composites are skipped/
+  approximated. Shadings/ExtGStates accumulate in a shared `ColorResources`.
+- **`src/document.zig`** owns the emission (see `ColorFontPlan`, `buildColorFontPlans`,
+  `writeColorFont`, `renderColorText`):
+  - Pre-pass over page text (before object-ID reservation) collects the color gids
+    each font uses, assigns 1-based single-byte PDF codes (cap 255/font), and renders
+    one CharProc per glyph (`wx 0 d0` + paint ops).
+  - Type3 font dict: `FontMatrix [1/upem …]` (full precision — do **not** use
+    `Value.real`, which truncates to 3 decimals), `FontBBox` from head, `Encoding`
+    Differences `/g1…/gN`, `Widths` in font units, `Resources` with the plan's
+    `/Sh{n}` shadings and `/Ga{n}` ExtGStates.
+  - Content emission segments a run into color (`/Tc{n}` Type3, 1-byte codes) and
+    mono (`/E{n}` CID, 2-byte gids) sub-runs sharing one text position; advances
+    agree because Type3 `Widths`×`FontMatrix` == the CID `/W` value. Kerning/marks
+    are not applied inside a color-containing run.
+  - The Type3 font carries a `/ToUnicode` CMap (single-byte codespace, astral
+    codepoints as UTF-16 surrogate pairs) so emoji are text-extractable/copyable.
+- **Testing**: unit tests in `document_test.zig` (structure, FontMatrix precision,
+  segmentation, PDF/A skip) plus a `color_emoji` reference integration test. fpdf2
+  cannot emit COLR, so its reference (`test/reference/color_emoji.pdf`) is **generated
+  by zapdf** and manually maintained (listed in `EXCLUDED_TESTS` in `gen_references.py`);
+  regenerate by copying `test/output/color_emoji_actual.pdf` after a test run.
+- **Known limits**: >255 distinct color glyphs/font fall back to the (often empty)
+  mono outline; color is disabled entirely under PDF/A (`conformance != .none`);
+  no CBDT/sbix bitmap-emoji support.
 
 ### Memory Management
 Uses `ArrayListUnmanaged` throughout - allocator passed to each operation.

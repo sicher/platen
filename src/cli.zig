@@ -112,6 +112,12 @@ pub fn main(init: std.process.Init) !void {
         const output_path = if (args.len > 2) args[2] else "optical_test.pdf";
         try generateOpticalTestPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "color-test")) {
+        // Test COLR/CPAL color-emoji rendering (Type3 color fonts)
+        const font_path = if (args.len > 2) args[2] else "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf";
+        const output_path = if (args.len > 3) args[3] else "color_test.pdf";
+        try generateColorTestPdf(allocator, font_path, output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else {
         try printUsage();
     }
@@ -144,6 +150,7 @@ fn printUsage() !void {
         \\  opacity-test [out]      Test opacity API (fill/stroke alpha)
         \\  pdfa-test [out]         Test PDF/A-1b conformance output
         \\  optical-test [out]      Test optical alignment of text in boxes
+        \\  color-test [ttf] [out]  Test COLR color-emoji rendering (Type3 color fonts)
         \\
     ;
     try stdout.writeAll(usage);
@@ -327,6 +334,45 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.embedded.bbox[3],
     }) catch "BBox unavailable";
     _ = try doc.writeAt(.{ .x = 50, .y = y }, bbox_info, metrics_style);
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
+}
+
+fn generateColorTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {
+    var doc = zapdf.Document.init(allocator, app_io);
+    defer doc.deinit();
+
+    const emoji = doc.loadFont(font_path, null) catch |err| {
+        try print("Error loading font '{s}': {}\n", .{ font_path, err });
+        return;
+    };
+
+    try doc.addPage(.{});
+
+    const title_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 20, .bold = true };
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "COLR Color Emoji Test", title_style);
+
+    const note_style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
+    _ = try doc.writeAt(.{ .x = 50, .y = 78 }, "Rendered via PDF Type3 color fonts (COLR v1 + CPAL).", note_style);
+
+    // Flat-color and gradient emoji at a few sizes.
+    const rows = [_][]const u8{
+        "\u{2601}\u{1F600}\u{1F389}\u{1F680}\u{2764}\u{2B50}",
+        "\u{1F31F}\u{1F308}\u{1F34E}\u{1F355}\u{1F381}\u{1F3A8}",
+        "\u{1F600}\u{1F601}\u{1F602}\u{1F603}\u{1F604}\u{1F605}",
+    };
+    var y: f64 = 130;
+    for ([_]f64{ 48, 36, 24 }, 0..) |size, i| {
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, rows[i], .{ .font = emoji, .size = size });
+        y += size + 30;
+    }
+
+    // Space-separated emoji: exercises segmented rendering (color glyphs via
+    // the Type3 font, the blank space glyph via the mono CID font).
+    _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "\u{1F600} \u{1F389} \u{1F680} \u{2764} \u{2B50}", .{ .font = emoji, .size = 28 });
 
     const pdf = try doc.output();
     defer allocator.free(pdf);

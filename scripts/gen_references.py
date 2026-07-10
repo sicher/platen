@@ -28,6 +28,7 @@ EXCLUDED_TESTS = {
     "inter_fonts",  # fpdf2 doesn't apply Inter's <=> → ⇔ ligature
     "text_style",   # Uses zapdf's write() API for inline-styled flowing text
     "auto_height",  # zapdf positions text one line_height below padding; fpdf2 differs
+    "color_emoji",  # COLR v1 color font → PDF Type3; fpdf2 cannot emit COLR color fonts
 }
 
 SCRIPT_DIR = Path(__file__).parent
