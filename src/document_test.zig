@@ -3084,6 +3084,48 @@ test "COLR color font used only for non-color text emits no Type3" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type3") == null);
 }
 
+test "COLR fonts with >255 color glyphs split into multiple Type3 subfonts" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+
+    // Collect 300 codepoints with distinct color glyphs from the font's cmap
+    // — enough to overflow the 255 single-byte codes of one Type3 font.
+    var text: std.ArrayListUnmanaged(u8) = .empty;
+    defer text.deinit(std.testing.allocator);
+    var seen: std.AutoHashMapUnmanaged(u16, void) = .empty;
+    defer seen.deinit(std.testing.allocator);
+    var cp: u21 = 0x1F300;
+    while (cp <= 0x1FAFF and seen.count() < 300) : (cp += 1) {
+        const gid = emoji.embedded.font.getGlyphId(cp) orelse continue;
+        if (gid == 0 or !emoji.embedded.isColorGlyph(gid)) continue;
+        if ((try seen.getOrPut(std.testing.allocator, gid)).found_existing) continue;
+        var buf: [4]u8 = undefined;
+        const len = try std.unicode.utf8Encode(cp, &buf);
+        try text.appendSlice(std.testing.allocator, buf[0..len]);
+    }
+    try std.testing.expectEqual(@as(usize, 300), seen.count());
+
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, text.items, .{ .font = emoji, .size = 12 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Two Type3 subfonts: /Tc1 holds the first 255 codes, /Tc1s1 the rest.
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "/Subtype /Type3"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 12.00 Tf") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1s1 12.00 Tf") != null);
+    // The first subfont uses the full single-byte code space.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/LastChar 255") != null);
+    // Each subfont carries its own single-byte ToUnicode CMap (the third
+    // /ToUnicode belongs to the mono CID font's 2-byte CMap).
+    try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, pdf, "/ToUnicode"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<00> <FF>"));
+}
+
 test "COLR v0 font emits a Type3 color font (Bungee Color)" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

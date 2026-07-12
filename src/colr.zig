@@ -707,6 +707,13 @@ pub const PaintInterp = struct {
     res: *ColorResources,
     /// Foreground color substituted for palette index 0xFFFF.
     fg: Color = Color.black,
+    /// Constant alpha inherited from an enclosing composite approximation
+    /// (see renderMasked); multiplied into every solid fill's alpha.
+    alpha_scale: f64 = 1.0,
+    /// Number of enclosing PaintGlyph clips. Unbounded fills (solids,
+    /// gradients) are skipped at depth 0 — with no clip they would cover the
+    /// entire page (COLR ClipBox bounds are not implemented).
+    clip_depth: u8 = 0,
 
     /// Large cover rectangle (font units) used to fill the current clip for
     /// solid paints reached outside the fast PaintGlyph→Solid path.
@@ -740,6 +747,7 @@ pub const PaintInterp = struct {
             },
             .solid, .var_solid => {
                 // Fill the current clip region with the solid color.
+                if (self.clip_depth == 0) return; // unbounded fill: skip
                 try self.beginSolid(abs);
                 try self.w.writeAll(cover_rect);
                 try self.w.writeAll("f\n");
@@ -826,18 +834,36 @@ pub const PaintInterp = struct {
                 const src_off = abs + readU24(self.colr.data, abs + 1);
                 const mode = readU8(self.colr.data, abs + 4);
                 const back_off = abs + readU24(self.colr.data, abs + 5);
-                // Approximate: paint backdrop, then source with a matching PDF
-                // blend mode where one exists (else Normal over).
-                try self.renderPaint(back_off, depth + 1);
-                if (blendModeName(mode)) |bm| {
-                    const dict = try std.fmt.allocPrint(self.arena, "<< /Type /ExtGState /BM /{s} >>", .{bm});
-                    const idx = try self.res.addExtGState(dict);
-                    try self.w.writeAll("q\n");
-                    try self.w.print("/Ga{d} gs\n", .{idx + 1});
-                    try self.renderPaint(src_off, depth + 1);
-                    try self.w.writeAll("Q\n");
-                } else {
-                    try self.renderPaint(src_off, depth + 1);
+                switch (mode) {
+                    0 => {}, // CLEAR: nothing visible
+                    1 => try self.renderPaint(src_off, depth + 1), // SRC
+                    2 => try self.renderPaint(back_off, depth + 1), // DEST
+                    4 => { // DEST_OVER: backdrop composites on top of source
+                        try self.renderPaint(src_off, depth + 1);
+                        try self.renderPaint(back_off, depth + 1);
+                    },
+                    // SRC_IN(5)/SRC_OUT(7): source masked by the backdrop's
+                    // coverage; DEST_IN(6)/DEST_OUT(8) mirror the branches.
+                    5 => try self.renderMasked(src_off, back_off, false, depth),
+                    7 => try self.renderMasked(src_off, back_off, true, depth),
+                    6 => try self.renderMasked(back_off, src_off, false, depth),
+                    8 => try self.renderMasked(back_off, src_off, true, depth),
+                    else => {
+                        // Blend modes (13..27) get a PDF /BM ExtGState; the
+                        // remaining Porter-Duff modes (ATOP/XOR/PLUS)
+                        // approximate as plain source-over.
+                        try self.renderPaint(back_off, depth + 1);
+                        if (blendModeName(mode)) |bm| {
+                            const dict = try std.fmt.allocPrint(self.arena, "<< /Type /ExtGState /BM /{s} >>", .{bm});
+                            const idx = try self.res.addExtGState(dict);
+                            try self.w.writeAll("q\n");
+                            try self.w.print("/Ga{d} gs\n", .{idx + 1});
+                            try self.renderPaint(src_off, depth + 1);
+                            try self.w.writeAll("Q\n");
+                        } else {
+                            try self.renderPaint(src_off, depth + 1);
+                        }
+                    },
                 }
             },
             else => {}, // unknown paint format: skip
@@ -864,8 +890,46 @@ pub const PaintInterp = struct {
         try self.w.writeAll("q\n");
         try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
         try self.w.writeAll("W n\n");
+        self.clip_depth +|= 1;
         try self.renderPaint(child, depth + 1);
+        self.clip_depth -= 1;
         try self.w.writeAll("Q\n");
+    }
+
+    /// Approximate a Porter-Duff IN/OUT composite: render `content` masked by
+    /// `mask`'s coverage. A full-coverage solid mask reduces exactly to the
+    /// content at the mask's alpha (1 - alpha for the OUT modes); any other
+    /// mask shape drops the mask and renders the content as-is.
+    fn renderMasked(self: *PaintInterp, content_off: usize, mask_off: usize, invert: bool, depth: u8) Error!void {
+        var alpha: f64 = 1.0;
+        if (self.solidPaintAlpha(mask_off)) |a| alpha = if (invert) 1.0 - a else a;
+        if (alpha < 0.001) return;
+        if (alpha >= 0.999) return self.renderPaint(content_off, depth + 1);
+
+        // ExtGState /ca covers shading fills; alpha_scale folds the factor
+        // into solid fills (whose own /ca would otherwise replace this one).
+        const dict = try std.fmt.allocPrint(self.arena, "<< /Type /ExtGState /ca {d:.3} >>", .{alpha});
+        const idx = try self.res.addExtGState(dict);
+        try self.w.writeAll("q\n");
+        try self.w.print("/Ga{d} gs\n", .{idx + 1});
+        const saved = self.alpha_scale;
+        self.alpha_scale = saved * alpha;
+        try self.renderPaint(content_off, depth + 1);
+        self.alpha_scale = saved;
+        try self.w.writeAll("Q\n");
+    }
+
+    /// Total constant alpha of a solid paint (palette entry alpha × paint
+    /// alpha), or null if the paint is not a PaintSolid.
+    fn solidPaintAlpha(self: *PaintInterp, off: usize) ?f64 {
+        switch (self.colr.paintFormat(off)) {
+            .solid, .var_solid => {},
+            else => return null,
+        }
+        const palette = readU16(self.colr.data, off + 1);
+        const paint_alpha = readF2Dot14(self.colr.data, off + 3);
+        const entry_alpha: f64 = if (self.cpal.color(palette)) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
+        return paint_alpha * entry_alpha;
     }
 
     /// Emit fill-color setup for a PaintSolid, wrapping in an alpha ExtGState if
@@ -885,7 +949,7 @@ pub const PaintInterp = struct {
         const resolved = self.cpal.color(palette_index);
         const c = if (resolved) |r| r.c else self.fg;
         const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
-        const total_alpha = paint_alpha * entry_alpha;
+        const total_alpha = paint_alpha * entry_alpha * self.alpha_scale;
 
         if (total_alpha < 0.999) {
             var buf: [96]u8 = undefined;
@@ -900,7 +964,7 @@ pub const PaintInterp = struct {
     fn endSolidColor(self: *PaintInterp, palette_index: u16, paint_alpha: f64) !void {
         const resolved = self.cpal.color(palette_index);
         const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
-        if (paint_alpha * entry_alpha < 0.999) try self.w.writeAll("Q\n");
+        if (paint_alpha * entry_alpha * self.alpha_scale < 0.999) try self.w.writeAll("Q\n");
     }
 
     /// Render a COLR v0 base glyph: a flat list of layers, each a glyph outline
@@ -938,6 +1002,7 @@ pub const PaintInterp = struct {
 
     /// Render a linear or radial gradient, filling the current clip via `sh`.
     fn renderGradient(self: *PaintInterp, abs: usize, is_radial: bool) !void {
+        if (self.clip_depth == 0) return; // unbounded fill: skip
         const color_line_abs = abs + readU24(self.colr.data, abs + 1);
         const stops = try self.readColorLine(color_line_abs);
         if (stops.len < 2) return;
@@ -976,6 +1041,7 @@ pub const PaintInterp = struct {
     /// the current clip (from the enclosing PaintGlyph) bounds the visible
     /// part, exactly as for the `sh`-painted gradients.
     fn renderSweep(self: *PaintInterp, abs: usize) !void {
+        if (self.clip_depth == 0) return; // unbounded fill: skip
         // PaintSweepGradient: format(u8), colorLineOffset(Offset24),
         // centerX/centerY(FWORD), startAngle/endAngle(F2Dot14, biased).
         const color_line_abs = abs + readU24(self.colr.data, abs + 1);
@@ -1113,22 +1179,22 @@ fn sampleColorLine(stops: []const gradient.ColorStop, t: f64) Color.Rgbf {
 fn blendModeName(mode: u8) ?[]const u8 {
     return switch (mode) {
         // Separable + non-separable blend modes shared with PDF.
-        9 => "Multiply",
-        10 => "Screen",
-        11 => "Overlay",
-        12 => "Darken",
-        13 => "Lighten",
-        14 => "ColorDodge",
-        15 => "ColorBurn",
-        16 => "HardLight",
-        17 => "SoftLight",
-        18 => "Difference",
-        19 => "Exclusion",
-        20 => "Hue",
-        21 => "Saturation",
-        22 => "Color",
-        23 => "Luminosity",
-        else => null, // Porter-Duff modes (0..8): approximate as source-over
+        13 => "Screen",
+        14 => "Overlay",
+        15 => "Darken",
+        16 => "Lighten",
+        17 => "ColorDodge",
+        18 => "ColorBurn",
+        19 => "HardLight",
+        20 => "SoftLight",
+        21 => "Difference",
+        22 => "Exclusion",
+        23 => "Multiply",
+        24 => "Hue",
+        25 => "Saturation",
+        26 => "Color",
+        27 => "Luminosity",
+        else => null, // Porter-Duff modes (0..12): approximate as source-over
     };
 }
 
@@ -1390,6 +1456,65 @@ test "COLR v1 sweep gradient renders as a wedge fan (SweepTest fixture)" {
     const out3 = aw3.writer.buffered();
     try testing.expectEqual(@as(usize, 37), std.mem.count(u8, out3, "1.000 0.000 0.000 rg"));
     try testing.expectEqual(@as(usize, 43), std.mem.count(u8, out3, "0.000 0.000 1.000 rg"));
+}
+
+test "SRC_IN composite with solid backdrop renders source at backdrop alpha" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const head = font.head.?;
+
+    const colr = try Colr.parse(font.getTable("COLR".*).?);
+    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
+    const ctx = GlyfContext{
+        .glyf = font.getTable("glyf".*).?,
+        .loca = font.getTable("loca".*).?,
+        .loca_format = head.index_to_loc_format,
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var res = ColorResources.init(testing.allocator);
+    defer res.deinit();
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var interp = PaintInterp{
+        .w = &aw.writer,
+        .arena = arena_state.allocator(),
+        .colr = colr,
+        .cpal = cpal,
+        .glyf = ctx,
+        .res = &res,
+    };
+    // gid 2092 (control knobs 🎛): root layers contain unclipped
+    // PaintComposite(SRC_IN, source = artwork layers, backdrop = solid black
+    // alpha 0.7). Must render as the artwork at 0.7 alpha — NOT paint the
+    // backdrop as an unbounded black rectangle over the whole page.
+    try interp.render(2092);
+    const out = aw.writer.buffered();
+
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, out, "-32768 -32768 65536 65536 re"));
+    var found_ca = false;
+    for (res.ext_gstates.items) |gs| {
+        if (std.mem.indexOf(u8, gs, "/ca 0.700") != null) found_ca = true;
+    }
+    try testing.expect(found_ca);
+}
+
+test "blend mode mapping follows the COLR CompositeMode enum" {
+    // Porter-Duff modes (0..12) have no PDF blend-mode equivalent.
+    try testing.expect(blendModeName(3) == null); // SRC_OVER
+    try testing.expect(blendModeName(5) == null); // SRC_IN
+    try testing.expect(blendModeName(9) == null); // SRC_ATOP
+    try testing.expect(blendModeName(12) == null); // PLUS
+    // Blend modes start at SCREEN = 13; MULTIPLY is 23 (after EXCLUSION).
+    try testing.expectEqualStrings("Screen", blendModeName(13).?);
+    try testing.expectEqualStrings("SoftLight", blendModeName(20).?);
+    try testing.expectEqualStrings("Multiply", blendModeName(23).?);
+    try testing.expectEqualStrings("Luminosity", blendModeName(27).?);
+    try testing.expect(blendModeName(28) == null);
 }
 
 test "sweep color-line helpers (extend modes and sampling)" {

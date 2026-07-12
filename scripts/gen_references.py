@@ -32,6 +32,7 @@ EXCLUDED_TESTS = {
     "color_v0",     # COLR v0 layered-solid color font → PDF Type3; fpdf2 can't emit COLR
     "color_v1_gradient",  # COLR v1 gradient color font → PDF Type3; fpdf2 can't emit COLR
     "color_sweep",  # COLR v1 sweep-gradient color font → PDF Type3; fpdf2 can't emit COLR
+    "color_split",  # >255 color glyphs → multiple Type3 subfonts; fpdf2 can't emit COLR
 }
 
 SCRIPT_DIR = Path(__file__).parent

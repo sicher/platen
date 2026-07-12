@@ -8,15 +8,13 @@
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
-  - Color font follow-ups: >255 distinct color glyphs per font currently fall back
-    to the (often empty) mono outline — split into multiple Type3 fonts if needed;
-    CBDT/sbix bitmap emoji and OT-SVG color fonts unsupported.
+  - Color font follow-ups: CBDT/sbix bitmap emoji and OT-SVG color fonts unsupported.
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
 - `zig-out/bin/zpdf` is a stale binary from an old build (build.zig only produces `zapdf` now) — safe to delete.
 
-## What We Did (Session 2026-07-12 #16 — COLR v1 gradient tests + sweep gradients)
+## What We Did (Session 2026-07-12 #16 — COLR: gradient tests, sweep, subfont split, composite fixes)
 - **BungeeSpice COLR v1 gradient tests** (vendored font, non-emoji):
   - `colr.zig` unit test: renders 'A' (gid 2) → 2 axial shadings, ground truth
     from fontTools (3-point (0,0)/(0,900)/(100,0) → axial `/Coords [0 0 0 900]`,
@@ -40,9 +38,29 @@
   'A' 0..360°, 'B' 0..90° pad, 'C' 110..230° pad (the spec's example; locks in the
   absolute sampling domain: 37 pure-red + 43 pure-blue wedges of 120).
 - Tests: sweep unit tests (fixture render + helper edge cases) + `color_sweep`
-  reference integration test. **All 364 tests pass** (was 359).
+  reference integration test.
 - Note: 3°-wedge midpoints are at 1.5°+3k — assertions on sampled colors must use
   those exact t values (e.g. t=43.5/90 → "0.517 0.000 0.483 rg").
+- **>255 color glyphs → multiple Type3 subfonts** (was: fall back to mono).
+  `ColorFontPlan` stores unbounded 1-based ordinals; `slotFor(gid)` → subfont
+  `(ord-1)/255` + code `(ord-1)%255+1`. Names: `/Tc{n}`, `/Tc{n}s1`, …; per-
+  subfont font dict + ToUnicode (CharProcs one contiguous block, shared
+  Resources). `renderColorText` segments runs by subfont. Tests: document_test
+  (300 Noto emoji → /Tc1 + /Tc1s1) + `color_split` reference integration test.
+- **Two composite bugs found & fixed while validating `color_split`** (visible
+  as a giant black rectangle over the page):
+  - `blendModeName` was shifted by 4: per the OT spec (verified against
+    fontTools `CompositeMode`), Porter-Duff is 0..12 and blends are
+    SCREEN=13 … MULTIPLY=23 (after EXCLUSION!), HSL 24..27.
+  - Porter-Duff modes were all approximated as source-over, so Noto's
+    SRC_IN(source=artwork, backdrop=unclipped black solid α=0.7) — used by
+    316 paints (🎛🎟🎫 etc.) — painted the backdrop as a huge black rect.
+    Now: CLEAR/SRC/DEST/DEST_OVER exact by paint order; IN/OUT with a solid
+    mask branch → `renderMasked` (content at mask alpha via `/ca` ExtGState +
+    `alpha_scale` threaded into solid fills); plus a `clip_depth == 0` guard
+    that skips any unbounded solid/gradient/sweep fill (ClipBox unimplemented).
+  - `color_emoji` reference unaffected (byte-identical modulo timestamps).
+- **All 368 tests pass** (was 359 at session start).
 
 ## What We Did (Session 2026-07-08/09 #14 — COLR color emoji)
 - **Wired COLR v1 / CPAL color fonts into PDF output as Type3 color fonts.**

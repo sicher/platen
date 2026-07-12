@@ -196,26 +196,43 @@ pub const GradientDef = union(enum) {
 const ColorFontPlan = struct {
     font_index: usize, // index into self.embedded_fonts
     emb: *EmbeddedFont,
-    gids: std.ArrayListUnmanaged(u16) = .empty, // ordered; PDF code = index + 1
-    code_of: std.AutoHashMapUnmanaged(u16, u16) = .empty, // original gid → PDF code (1-based)
+    gids: std.ArrayListUnmanaged(u16) = .empty, // ordered; ordinal = index + 1
+    code_of: std.AutoHashMapUnmanaged(u16, u16) = .empty, // original gid → ordinal (1-based)
     char_procs: std.ArrayListUnmanaged([]u8) = .empty, // CharProc content per gid
     widths_fu: std.ArrayListUnmanaged(u16) = .empty, // advance width per gid, font units
     pages: std.AutoHashMapUnmanaged(usize, void) = .empty, // page indices that use this font
-    res: colr.ColorResources,
-    dropped: usize = 0, // color glyphs skipped after the 255-code cap (fall back to mono)
-    font_obj_id: ObjectId = 0,
-    tounicode_id: ObjectId = 0,
-    first_charproc_id: ObjectId = 0,
+    res: colr.ColorResources, // shadings/ExtGStates shared by all subfonts
+    font_obj_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one font dict per subfont
+    tounicode_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one CMap per subfont
+    first_charproc_id: ObjectId = 0, // contiguous block, one stream per gid
+
+    /// Subfont index + single-byte PDF code of a color glyph.
+    const Slot = struct { sub: usize, code: u8 };
 
     /// Type3 font resource name number (`/Tc{num}`).
     fn resourceNum(self: ColorFontPlan) usize {
         return self.font_index + 1;
     }
 
-    /// PDF code (1-based) for a color glyph, or null if it has none (not a
-    /// color glyph, or dropped past the cap — caller falls back to the CID font).
-    fn codeFor(self: ColorFontPlan, gid: u16) ?u16 {
-        return self.code_of.get(gid);
+    /// Number of Type3 subfonts needed (255 single-byte codes each).
+    fn subfontCount(self: ColorFontPlan) usize {
+        return (self.gids.items.len + max_color_glyphs - 1) / max_color_glyphs;
+    }
+
+    /// Gid range [lo, hi) of subfont `sub`.
+    fn subfontRange(self: ColorFontPlan, sub: usize) struct { lo: usize, hi: usize } {
+        const lo = sub * max_color_glyphs;
+        return .{ .lo = lo, .hi = @min(self.gids.items.len, lo + max_color_glyphs) };
+    }
+
+    /// Subfont + PDF code for a color glyph, or null if it has none (not a
+    /// color glyph — caller falls back to the CID font).
+    fn slotFor(self: ColorFontPlan, gid: u16) ?Slot {
+        const ord = self.code_of.get(gid) orelse return null;
+        return .{
+            .sub = (ord - 1) / max_color_glyphs,
+            .code = @intCast((ord - 1) % max_color_glyphs + 1),
+        };
     }
 
     fn deinit(self: *ColorFontPlan, allocator: std.mem.Allocator) void {
@@ -226,11 +243,24 @@ const ColorFontPlan = struct {
         self.widths_fu.deinit(allocator);
         self.pages.deinit(allocator);
         self.res.deinit();
+        self.font_obj_ids.deinit(allocator);
+        self.tounicode_ids.deinit(allocator);
     }
 };
 
-/// Max distinct color glyphs per Type3 font (single-byte PDF codes 1..255).
+/// Max distinct color glyphs per Type3 subfont (single-byte PDF codes 1..255).
+/// Fonts using more color glyphs are split across multiple Type3 fonts.
 const max_color_glyphs = 255;
+
+/// Format the /Font resource name of a plan's subfont: `Tc{n}` for the first
+/// (the common case, and the historical name), `Tc{n}s{k}` for overflow
+/// subfonts past the 255-glyph code space.
+fn subfontResName(buf: []u8, plan: *const ColorFontPlan, sub: usize) []const u8 {
+    return if (sub == 0)
+        std.fmt.bufPrint(buf, "Tc{d}", .{plan.resourceNum()}) catch unreachable
+    else
+        std.fmt.bufPrint(buf, "Tc{d}s{d}", .{ plan.resourceNum(), sub }) catch unreachable;
+}
 
 // ============================================================================
 // Document
@@ -2637,22 +2667,19 @@ pub const Document = struct {
         return plan;
     }
 
-    /// Assign a PDF code and render the CharProc for one color glyph, if not
-    /// already present. Glyphs past the single-byte cap are counted as dropped
-    /// and left without a code (caller renders them via the mono CID path).
+    /// Assign an ordinal and render the CharProc for one color glyph, if not
+    /// already present. Ordinals map to (subfont, single-byte code) pairs;
+    /// every 255 glyphs open a new Type3 subfont, so there is no cap.
     fn ensureColorGlyph(self: *Document, plan: *ColorFontPlan, emb: *EmbeddedFont, info: EmbeddedFont.ColorInfo, gid: u16) !void {
         if (plan.code_of.contains(gid)) return;
-        if (plan.gids.items.len >= max_color_glyphs) {
-            plan.dropped += 1;
-            return;
-        }
+        if (plan.gids.items.len >= 0xFFFF) return; // ordinal is u16; unreachable for real fonts
         const content = try renderColorGlyphCharProc(self.allocator, &plan.res, info, emb, gid);
         errdefer self.allocator.free(content);
-        const code: u16 = @intCast(plan.gids.items.len + 1);
+        const ord: u16 = @intCast(plan.gids.items.len + 1);
         try plan.gids.append(self.allocator, gid);
         try plan.char_procs.append(self.allocator, content);
         try plan.widths_fu.append(self.allocator, emb.glyphAdvanceFontUnits(gid));
-        try plan.code_of.put(self.allocator, gid, code);
+        try plan.code_of.put(self.allocator, gid, ord);
     }
 
     /// Build a Type3 CharProc content stream for a single color glyph:
@@ -2689,14 +2716,13 @@ pub const Document = struct {
         return aw.toOwnedSlice();
     }
 
-    /// Emit a COLR color font as a PDF Type3 font: one CharProc stream per
-    /// color glyph plus the font dictionary (Encoding/CharProcs/Widths/
-    /// FontMatrix/Resources). Glyph space is font units, mapped to text space
-    /// by FontMatrix [1/upem ...], matching the CID font's advances.
+    /// Emit a COLR color font as one or more PDF Type3 fonts: one CharProc
+    /// stream per color glyph plus a font dictionary (Encoding/CharProcs/
+    /// Widths/FontMatrix/Resources) per 255-glyph subfont. Glyph space is font
+    /// units, mapped to text space by FontMatrix [1/upem ...], matching the
+    /// CID font's advances.
     fn writeColorFont(self: *Document, w: *Writer, plan: *ColorFontPlan) !void {
-        const n = plan.gids.items.len;
-
-        // 1. CharProc streams.
+        // 1. CharProc streams (one contiguous block covering all subfonts).
         for (plan.char_procs.items, 0..) |content, i| {
             try w.beginObject(plan.first_charproc_id + @as(ObjectId, @intCast(i)));
             var cp_dict = Dict.init(self.allocator);
@@ -2705,8 +2731,8 @@ pub const Document = struct {
             try w.endObject();
         }
 
-        // 2. Font dictionary. Composite entries are built as literal strings in
-        // an arena so their backing memory outlives writeDict.
+        // 2. Font dictionaries. Composite entries are built as literal strings
+        // in an arena so their backing memory outlives writeDict.
         var arena_state = std.heap.ArenaAllocator.init(self.allocator);
         defer arena_state.deinit();
         const arena = arena_state.allocator();
@@ -2718,67 +2744,75 @@ pub const Document = struct {
         const font_matrix = try std.fmt.allocPrint(arena, "[{d:.10} 0 0 {d:.10} 0 0]", .{ inv, inv });
         const font_bbox = try std.fmt.allocPrint(arena, "[{d} {d} {d} {d}]", .{ head.x_min, head.y_min, head.x_max, head.y_max });
 
-        // CharProcs: << /g1 id 0 R ... >>
-        var cp = std.Io.Writer.Allocating.init(arena);
-        try cp.writer.writeAll("<< ");
-        for (0..n) |i| {
-            try cp.writer.print("/g{d} {d} 0 R ", .{ i + 1, plan.first_charproc_id + @as(ObjectId, @intCast(i)) });
-        }
-        try cp.writer.writeAll(">>");
-
-        // Encoding: << /Type /Encoding /Differences [1 /g1 /g2 ... ] >>
-        var enc = std.Io.Writer.Allocating.init(arena);
-        try enc.writer.writeAll("<< /Type /Encoding /Differences [1");
-        for (0..n) |i| {
-            try enc.writer.print(" /g{d}", .{i + 1});
-        }
-        try enc.writer.writeAll("] >>");
-
-        // Widths: [w1 w2 ...] in glyph space (font units).
-        var wd = std.Io.Writer.Allocating.init(arena);
-        try wd.writer.writeByte('[');
-        for (plan.widths_fu.items, 0..) |width, i| {
-            if (i > 0) try wd.writer.writeByte(' ');
-            try wd.writer.print("{d}", .{width});
-        }
-        try wd.writer.writeByte(']');
-
+        // All subfonts share the plan's accumulated shadings/ExtGStates.
         const resources = try buildColorFontResources(arena, plan);
 
-        // ToUnicode CMap so viewers can extract/copy the emoji as their real
-        // codepoints (color glyph codes are otherwise opaque single bytes).
-        const tounicode = try buildColorFontToUnicode(arena, plan);
+        for (0..plan.subfontCount()) |sub| {
+            const range = plan.subfontRange(sub);
+            const count = range.hi - range.lo;
 
-        try w.beginObject(plan.tounicode_id);
-        {
-            var tu_dict = Dict.init(self.allocator);
-            defer tu_dict.deinit();
-            try w.writeStreamCompressed(&tu_dict, tounicode);
+            // CharProcs: << /g1 id 0 R ... >> (codes local to the subfont).
+            var cp = std.Io.Writer.Allocating.init(arena);
+            try cp.writer.writeAll("<< ");
+            for (0..count) |i| {
+                try cp.writer.print("/g{d} {d} 0 R ", .{ i + 1, plan.first_charproc_id + @as(ObjectId, @intCast(range.lo + i)) });
+            }
+            try cp.writer.writeAll(">>");
+
+            // Encoding: << /Type /Encoding /Differences [1 /g1 /g2 ... ] >>
+            var enc = std.Io.Writer.Allocating.init(arena);
+            try enc.writer.writeAll("<< /Type /Encoding /Differences [1");
+            for (0..count) |i| {
+                try enc.writer.print(" /g{d}", .{i + 1});
+            }
+            try enc.writer.writeAll("] >>");
+
+            // Widths: [w1 w2 ...] in glyph space (font units).
+            var wd = std.Io.Writer.Allocating.init(arena);
+            try wd.writer.writeByte('[');
+            for (plan.widths_fu.items[range.lo..range.hi], 0..) |width, i| {
+                if (i > 0) try wd.writer.writeByte(' ');
+                try wd.writer.print("{d}", .{width});
+            }
+            try wd.writer.writeByte(']');
+
+            // ToUnicode CMap so viewers can extract/copy the emoji as their
+            // real codepoints (color glyph codes are otherwise opaque bytes).
+            const tounicode = try buildColorFontToUnicode(arena, plan, range.lo, range.hi);
+            const tounicode_id = plan.tounicode_ids.items[sub];
+
+            try w.beginObject(tounicode_id);
+            {
+                var tu_dict = Dict.init(self.allocator);
+                defer tu_dict.deinit();
+                try w.writeStreamCompressed(&tu_dict, tounicode);
+            }
+            try w.endObject();
+
+            try w.beginObject(plan.font_obj_ids.items[sub]);
+            var font_dict = Dict.init(self.allocator);
+            defer font_dict.deinit();
+            try font_dict.put("Type", Value.name("Font"));
+            try font_dict.put("Subtype", Value.name("Type3"));
+            try font_dict.put("FontBBox", Value.literal(font_bbox));
+            try font_dict.put("FontMatrix", Value.literal(font_matrix));
+            try font_dict.put("CharProcs", Value.literal(cp.writer.buffered()));
+            try font_dict.put("Encoding", Value.literal(enc.writer.buffered()));
+            try font_dict.put("FirstChar", Value.int(1));
+            try font_dict.put("LastChar", Value.int(@intCast(count)));
+            try font_dict.put("Widths", Value.literal(wd.writer.buffered()));
+            try font_dict.put("Resources", Value.literal(resources));
+            try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
+            try w.writeDict(font_dict);
+            try w.endObject();
         }
-        try w.endObject();
-
-        try w.beginObject(plan.font_obj_id);
-        var font_dict = Dict.init(self.allocator);
-        defer font_dict.deinit();
-        try font_dict.put("Type", Value.name("Font"));
-        try font_dict.put("Subtype", Value.name("Type3"));
-        try font_dict.put("FontBBox", Value.literal(font_bbox));
-        try font_dict.put("FontMatrix", Value.literal(font_matrix));
-        try font_dict.put("CharProcs", Value.literal(cp.writer.buffered()));
-        try font_dict.put("Encoding", Value.literal(enc.writer.buffered()));
-        try font_dict.put("FirstChar", Value.int(1));
-        try font_dict.put("LastChar", Value.int(@intCast(n)));
-        try font_dict.put("Widths", Value.literal(wd.writer.buffered()));
-        try font_dict.put("Resources", Value.literal(resources));
-        try font_dict.put("ToUnicode", Value.ref(.{ .id = plan.tounicode_id }));
-        try w.writeDict(font_dict);
-        try w.endObject();
     }
 
-    /// Build a single-byte ToUnicode CMap mapping each color glyph's PDF code
-    /// to the Unicode codepoint it was shaped from (astral codepoints emitted
-    /// as UTF-16 surrogate pairs).
-    fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan) ![]u8 {
+    /// Build a single-byte ToUnicode CMap for one subfont's gid range
+    /// [lo, hi), mapping each color glyph's PDF code to the Unicode codepoint
+    /// it was shaped from (astral codepoints emitted as UTF-16 surrogate
+    /// pairs).
+    fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: usize, hi: usize) ![]u8 {
         var w = std.Io.Writer.Allocating.init(arena);
         try w.writer.writeAll(
             \\/CIDInit /ProcSet findresource begin
@@ -2796,8 +2830,8 @@ pub const Document = struct {
             \\endcodespacerange
             \\
         );
-        try w.writer.print("{d} beginbfchar\n", .{plan.gids.items.len});
-        for (plan.gids.items, 0..) |gid, i| {
+        try w.writer.print("{d} beginbfchar\n", .{hi - lo});
+        for (plan.gids.items[lo..hi], 0..) |gid, i| {
             const code: u8 = @intCast(i + 1);
             const cp = plan.emb.glyph_to_codepoint.get(gid) orelse 0xFFFD;
             if (cp > 0xFFFF) {
@@ -2861,24 +2895,27 @@ pub const Document = struct {
         _ = self;
         if (glyphs.len == 0) return;
         const cid_res = plan.font_index + 1; // /E{n}
-        const tc_res = plan.resourceNum(); // /Tc{n}
         const has_remap = emb.gid_remap.count() > 0;
 
         try cw.print("{d:.2} {d:.2} Td\n", .{ x, y });
 
         var hex_buf: [4]u8 = undefined;
+        var name_buf: [32]u8 = undefined;
         var i: usize = 0;
         while (i < glyphs.len) {
-            const is_color = plan.codeFor(glyphs[i]) != null;
+            // Sub-run key: the Type3 subfont index, or null for mono glyphs.
+            const sub: ?usize = if (plan.slotFor(glyphs[i])) |s| s.sub else null;
             var j = i + 1;
-            while (j < glyphs.len and (plan.codeFor(glyphs[j]) != null) == is_color) : (j += 1) {}
+            while (j < glyphs.len) : (j += 1) {
+                const sub_j: ?usize = if (plan.slotFor(glyphs[j])) |s| s.sub else null;
+                if (!std.meta.eql(sub, sub_j)) break;
+            }
 
-            if (is_color) {
-                try cw.print("/Tc{d} {d:.2} Tf\n", .{ tc_res, font_size });
+            if (sub) |s| {
+                try cw.print("/{s} {d:.2} Tf\n", .{ subfontResName(&name_buf, plan, s), font_size });
                 try cw.append("<");
                 for (glyphs[i..j]) |g| {
-                    const code: u8 = @intCast(plan.codeFor(g).?);
-                    try cw.print("{x:0>2}", .{code});
+                    try cw.print("{x:0>2}", .{plan.slotFor(g).?.code});
                 }
                 try cw.append("> Tj\n");
             } else {
@@ -2933,7 +2970,7 @@ pub const Document = struct {
                                 const plan = self.colorPlanFor(emb) orelse break :blk null;
                                 const glyphs = t.cached_glyphs orelse break :blk null;
                                 for (glyphs) |g| {
-                                    if (plan.codeFor(g) != null) break :blk plan;
+                                    if (plan.slotFor(g) != null) break :blk plan;
                                 }
                                 break :blk null;
                             };
@@ -3113,13 +3150,14 @@ pub const Document = struct {
             }
         }
 
-        // Reserve IDs for COLR Type3 color fonts: 1 font dict + one stream per
-        // CharProc (color glyph) each.
+        // Reserve IDs for COLR Type3 color fonts: per 255-glyph subfont a font
+        // dict + ToUnicode CMap, plus one stream per CharProc (color glyph).
         for (self.color_plans.items) |plan| {
-            plan.font_obj_id = next_id;
-            next_id += 1;
-            plan.tounicode_id = next_id;
-            next_id += 1;
+            for (0..plan.subfontCount()) |_| {
+                try plan.font_obj_ids.append(self.allocator, next_id);
+                try plan.tounicode_ids.append(self.allocator, next_id + 1);
+                next_id += 2;
+            }
             plan.first_charproc_id = next_id;
             next_id += @intCast(plan.gids.items.len);
         }
@@ -3725,13 +3763,17 @@ pub const Document = struct {
                 }
             }
 
-            // Add COLR Type3 color-font resources used on this page.
+            // Add COLR Type3 color-font resources used on this page (all of a
+            // plan's subfonts; unused entries are legal and rare).
             for (self.color_plans.items) |plan| {
                 if (!plan.pages.contains(page_idx)) continue;
-                // Name backed by shading_strs so it outlives writeDict.
-                const res_name = try std.fmt.allocPrint(self.allocator, "Tc{d}", .{plan.resourceNum()});
-                try shading_strs.append(self.allocator, res_name);
-                try font_res.put(res_name, Value.ref(.{ .id = plan.font_obj_id }));
+                for (plan.font_obj_ids.items, 0..) |obj_id, sub| {
+                    var name_buf: [32]u8 = undefined;
+                    // Name backed by shading_strs so it outlives writeDict.
+                    const res_name = try self.allocator.dupe(u8, subfontResName(&name_buf, plan, sub));
+                    try shading_strs.append(self.allocator, res_name);
+                    try font_res.put(res_name, Value.ref(.{ .id = obj_id }));
+                }
                 has_fonts = true;
             }
 
