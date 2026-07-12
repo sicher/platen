@@ -8,9 +8,12 @@
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
-  - Color emoji follow-ups: >255 distinct color glyphs per font currently fall back
+  - Color font follow-ups: >255 distinct color glyphs per font currently fall back
     to the (often empty) mono outline — split into multiple Type3 fonts if needed;
-    sweep gradient (PaintSweepGradient) is skipped; CBDT/sbix bitmap emoji unsupported.
+    sweep gradient (PaintSweepGradient) is skipped; CBDT/sbix bitmap emoji and
+    OT-SVG color fonts unsupported. (A COLR v1 gradient text font,
+    `BungeeSpice-Regular-COLRv1.ttf`, is now vendored and could back a v1 gradient
+    unit test on a non-emoji font.)
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
@@ -57,6 +60,30 @@
     it's added to `EXCLUDED_TESTS` in `gen_references.py` (like svg_equation/
     inter_fonts). To regenerate: run tests → copy `test/output/color_emoji_actual.pdf`
     → `test/reference/color_emoji.pdf`.
+
+## What We Did (Session 2026-07-12 #15 — COLR v0 support)
+- **Added COLR v0 support** (flat layered solid colors) alongside v1. User vendored
+  **Bungee Color** (`test/fonts/Bungee Color/`, SIL OFL 1.1) — a Latin display font
+  with COLR/CPAL v0, plus a v0-SVG variant and a `BungeeSpice-Regular-COLRv1.ttf`.
+- **`src/colr.zig`**:
+  - `Colr` now carries `version` + v0 fields (`base_glyph_records`,
+    `num_base_glyph_records`, `layer_records`, `num_layer_records`); `parse` reads the
+    v0 header for all versions and the v1 list only when `version >= 1`.
+  - `v0BaseGlyph(gid)` (binary search of 6-byte records → `{first,num}`),
+    `v0Layer(index)` (4-byte record → `{gid,palette}`), `isColorGlyph(gid)` (v0 OR v1).
+  - `PaintInterp.render` dispatches: v1 paint graph first, else `renderV0` (fills each
+    layer outline with a solid palette color). Refactored `beginSolid`/`endSolid` to
+    share `beginSolidColor(palette,alpha)`/`endSolidColor` (used by both v1 PaintSolid
+    and v0 layers) — no duplication.
+  - `embedded.zig` `isColorGlyph` delegates to `colr.isColorGlyph`.
+  - **No document.zig changes needed** — the Type3 emission path is version-agnostic
+    (it just calls `interp.render(gid)`).
+- **Tests**: 2 `colr.zig` unit tests (v0 parse + render, ground-truth from fontTools:
+  glyph 'A' = gid 2 → layers (2, palette 0 dark red) + (1062 'A.inline', palette 1
+  salmon)); 1 `document_test.zig` Type3-emission test; 1 `color_v0` reference
+  integration test (`generateColorV0Pdf`, Bungee, zapdf-generated reference).
+  Validated visually (dark-red BUNGEE with salmon inline). All 359 tests pass.
+- Note: FontMatrix for upem 1000 prints as `0.0010000000` (`{d:.10}`), not `0.001`.
 - **CLI**: new `color-test [ttf] [out]` command + `generateColorTestPdf`.
 - **Validated visually**: rendered with pymupdf — cloud, grinning face (radial
   gradient), party popper, rocket, heart, star, rainbow, etc. all correct in color.

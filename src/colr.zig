@@ -1,14 +1,15 @@
-//! COLR v1 / CPAL color font support.
+//! COLR v0/v1 / CPAL color font support.
 //!
-//! Parses the CPAL palette table and the COLR (version 1) color-glyph paint
-//! graph, and extracts `glyf` outlines as PDF path operators. Higher layers
-//! turn a base color glyph into a PDF Type3 CharProc (see the paint interpreter
-//! and Type3 emitter).
+//! Parses the CPAL palette table and the COLR color-glyph data (both the v1
+//! paint graph and the v0 layer records), and extracts `glyf` outlines as PDF
+//! path operators. Higher layers turn a base color glyph into a PDF Type3
+//! CharProc (see the paint interpreter and Type3 emitter).
 //!
-//! Scope: COLR version 1 with glyf (TrueType) outlines. The supported paint
-//! formats are ColrLayers, Solid, Linear/Radial gradients, Glyph (clip),
-//! ColrGlyph, the affine transform family, and Composite. CFF-flavored color
-//! fonts and COLR sweep gradients are not supported.
+//! Scope: COLR v0 (flat solid-color layer records) and COLR v1 with glyf
+//! (TrueType) outlines. The supported v1 paint formats are ColrLayers, Solid,
+//! Linear/Radial gradients, Glyph (clip), ColrGlyph, the affine transform
+//! family, and Composite. CFF-flavored color fonts and COLR sweep gradients
+//! are not supported.
 
 const std = @import("std");
 const format = @import("format.zig");
@@ -518,8 +519,21 @@ pub const Extend = enum(u8) { pad = 0, repeat = 1, reflect = 2, _ };
 
 /// Lazy accessor over a COLR version-1 table. Offsets are absolute within
 /// `data` (the whole COLR table).
+/// A COLR v0 base glyph: a contiguous run of layer records.
+pub const BaseGlyphV0 = struct { first: u32, num: u32 };
+
+/// One COLR v0 layer: an outline glyph filled with a palette color.
+pub const LayerV0 = struct { gid: u16, palette: u16 };
+
 pub const Colr = struct {
     data: []const u8,
+    version: u16,
+    // v0 layer records (present in both v0 and, optionally, v1 fonts).
+    base_glyph_records: usize, // absolute offset, 0 if absent
+    num_base_glyph_records: u16,
+    layer_records: usize, // absolute offset, 0 if absent
+    num_layer_records: u16,
+    // v1 paint graph (0 for v0-only fonts).
     base_glyph_list: usize, // absolute offset, 0 if absent
     layer_list: usize, // absolute offset, 0 if absent
     num_base_records: u32,
@@ -528,30 +542,79 @@ pub const Colr = struct {
     pub fn parse(data: []const u8) !Colr {
         if (data.len < 14) return error.InvalidColr;
         const version = readU16(data, 0);
-        if (version < 1) return error.UnsupportedColrVersion;
-        // v1 fields begin after the v0 header (14 bytes).
-        const base_glyph_list_off = readU32(data, 14);
-        const layer_list_off = readU32(data, 18);
 
+        // v0 header (bytes 2..14): common to all versions.
+        const num_base_glyph_records = readU16(data, 2);
+        const base_glyph_records_off = readU32(data, 4);
+        const layer_records_off = readU32(data, 8);
+        const num_layer_records = readU16(data, 12);
+        const base_glyph_records: usize = if (base_glyph_records_off != 0 and base_glyph_records_off < data.len) base_glyph_records_off else 0;
+        const layer_records: usize = if (layer_records_off != 0 and layer_records_off < data.len) layer_records_off else 0;
+
+        // v1 fields begin after the v0 header (14 bytes).
         var base_glyph_list: usize = 0;
         var num_base_records: u32 = 0;
-        if (base_glyph_list_off != 0 and base_glyph_list_off < data.len) {
-            base_glyph_list = base_glyph_list_off;
-            num_base_records = readU32(data, base_glyph_list);
-        }
         var layer_list: usize = 0;
         var num_layers: u32 = 0;
-        if (layer_list_off != 0 and layer_list_off < data.len) {
-            layer_list = layer_list_off;
-            num_layers = readU32(data, layer_list);
+        if (version >= 1) {
+            if (data.len < 22) return error.InvalidColr;
+            const base_glyph_list_off = readU32(data, 14);
+            const layer_list_off = readU32(data, 18);
+            if (base_glyph_list_off != 0 and base_glyph_list_off < data.len) {
+                base_glyph_list = base_glyph_list_off;
+                num_base_records = readU32(data, base_glyph_list);
+            }
+            if (layer_list_off != 0 and layer_list_off < data.len) {
+                layer_list = layer_list_off;
+                num_layers = readU32(data, layer_list);
+            }
         }
         return .{
             .data = data,
+            .version = version,
+            .base_glyph_records = base_glyph_records,
+            .num_base_glyph_records = num_base_glyph_records,
+            .layer_records = layer_records,
+            .num_layer_records = num_layer_records,
             .base_glyph_list = base_glyph_list,
             .layer_list = layer_list,
             .num_base_records = num_base_records,
             .num_layers = num_layers,
         };
+    }
+
+    /// True if `gid` has color layers in either the v1 paint graph or the v0
+    /// layer records.
+    pub fn isColorGlyph(self: Colr, gid: u16) bool {
+        return self.baseGlyphPaint(gid) != null or self.v0BaseGlyph(gid) != null;
+    }
+
+    /// The COLR v0 layer run for `gid`, or null. Records are 6 bytes
+    /// (glyphID, firstLayerIndex, numLayers) sorted by glyphID (binary search).
+    pub fn v0BaseGlyph(self: Colr, gid: u16) ?BaseGlyphV0 {
+        if (self.base_glyph_records == 0 or self.num_base_glyph_records == 0) return null;
+        var lo: u32 = 0;
+        var hi: u32 = self.num_base_glyph_records;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            const rec = self.base_glyph_records + mid * 6;
+            const rec_gid = readU16(self.data, rec);
+            if (rec_gid == gid) {
+                return .{ .first = readU16(self.data, rec + 2), .num = readU16(self.data, rec + 4) };
+            } else if (rec_gid < gid) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return null;
+    }
+
+    /// A COLR v0 layer record (4 bytes: glyphID, paletteIndex).
+    pub fn v0Layer(self: Colr, index: u32) ?LayerV0 {
+        if (self.layer_records == 0 or index >= self.num_layer_records) return null;
+        const rec = self.layer_records + index * 4;
+        return .{ .gid = readU16(self.data, rec), .palette = readU16(self.data, rec + 2) };
     }
 
     /// Absolute offset of the root Paint for a base glyph, or null if the glyph
@@ -654,8 +717,14 @@ pub const PaintInterp = struct {
     const Error = std.Io.Writer.Error || std.mem.Allocator.Error || error{InvalidGradient};
 
     pub fn render(self: *PaintInterp, base_gid: u16) !void {
-        const root = self.colr.baseGlyphPaint(base_gid) orelse return error.NotAColorGlyph;
-        try self.renderPaint(root, 0);
+        // Prefer the v1 paint graph; fall back to v0 layer records.
+        if (self.colr.baseGlyphPaint(base_gid)) |root| {
+            try self.renderPaint(root, 0);
+        } else if (self.colr.v0BaseGlyph(base_gid)) |rec| {
+            try self.renderV0(rec);
+        } else {
+            return error.NotAColorGlyph;
+        }
     }
 
     fn renderPaint(self: *PaintInterp, abs: usize, depth: u8) Error!void {
@@ -801,12 +870,21 @@ pub const PaintInterp = struct {
     /// Emit fill-color setup for a PaintSolid, wrapping in an alpha ExtGState if
     /// the paint's alpha is below 1. Must be paired with endSolid.
     fn beginSolid(self: *PaintInterp, solid_abs: usize) !void {
-        const pal = readU16(self.colr.data, solid_abs + 1);
-        const alpha = readF2Dot14(self.colr.data, solid_abs + 3);
-        const resolved = self.cpal.color(pal);
+        try self.beginSolidColor(readU16(self.colr.data, solid_abs + 1), readF2Dot14(self.colr.data, solid_abs + 3));
+    }
+
+    fn endSolid(self: *PaintInterp, solid_abs: usize) !void {
+        try self.endSolidColor(readU16(self.colr.data, solid_abs + 1), readF2Dot14(self.colr.data, solid_abs + 3));
+    }
+
+    /// Set the fill color for `palette_index` scaled by `paint_alpha` (1.0 for
+    /// COLR v0 layers, which have no per-layer alpha), wrapping in an alpha
+    /// ExtGState when the combined alpha is below 1. Pair with endSolidColor.
+    fn beginSolidColor(self: *PaintInterp, palette_index: u16, paint_alpha: f64) !void {
+        const resolved = self.cpal.color(palette_index);
         const c = if (resolved) |r| r.c else self.fg;
         const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
-        const total_alpha = alpha * entry_alpha;
+        const total_alpha = paint_alpha * entry_alpha;
 
         if (total_alpha < 0.999) {
             var buf: [96]u8 = undefined;
@@ -818,12 +896,24 @@ pub const PaintInterp = struct {
         try c.writeFill(self.w);
     }
 
-    fn endSolid(self: *PaintInterp, solid_abs: usize) !void {
-        const alpha = readF2Dot14(self.colr.data, solid_abs + 3);
-        const pal = readU16(self.colr.data, solid_abs + 1);
-        const resolved = self.cpal.color(pal);
+    fn endSolidColor(self: *PaintInterp, palette_index: u16, paint_alpha: f64) !void {
+        const resolved = self.cpal.color(palette_index);
         const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
-        if (alpha * entry_alpha < 0.999) try self.w.writeAll("Q\n");
+        if (paint_alpha * entry_alpha < 0.999) try self.w.writeAll("Q\n");
+    }
+
+    /// Render a COLR v0 base glyph: a flat list of layers, each a glyph outline
+    /// filled with a solid palette color (painted back-to-front).
+    fn renderV0(self: *PaintInterp, rec: BaseGlyphV0) Error!void {
+        var i: u32 = rec.first;
+        const end = rec.first + rec.num;
+        while (i < end) : (i += 1) {
+            const layer = self.colr.v0Layer(i) orelse continue;
+            try self.beginSolidColor(layer.palette, 1.0);
+            try writeGlyphOutline(self.w, self.arena, self.glyf, layer.gid, Transform.identity);
+            try self.w.writeAll("f\n");
+            try self.endSolidColor(layer.palette, 1.0);
+        }
     }
 
     fn withTransform(self: *PaintInterp, m: Transform, child_abs: usize, depth: u8) Error!void {
@@ -1135,4 +1225,73 @@ test "glyf outline extraction (Noto cloud layer glyph 23929)" {
     try testing.expect(std.mem.endsWith(u8, out, "h\n"));
     // Contains cubic segments (quads converted to cubics).
     try testing.expect(std.mem.indexOf(u8, out, " c\n") != null);
+}
+
+const bungee_v0_path = "test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf";
+
+test "COLR v0 parse and layer records (Bungee Color)" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, bungee_v0_path) catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const colr_data = font.getTable("COLR".*) orelse return error.SkipZigTest;
+
+    const colr = try Colr.parse(colr_data);
+    try testing.expectEqual(@as(u16, 0), colr.version);
+    try testing.expect(colr.base_glyph_list == 0); // no v1 paint graph
+    try testing.expect(colr.num_base_glyph_records > 0);
+
+    // 'A' (gid 2) has two layers: the fill outline (palette 0) and the inline
+    // detail glyph 'A.inline' (gid 1062, palette 1).
+    const rec = colr.v0BaseGlyph(2) orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(@as(u32, 2), rec.num);
+    const l0 = colr.v0Layer(rec.first).?;
+    const l1 = colr.v0Layer(rec.first + 1).?;
+    try testing.expectEqual(@as(u16, 2), l0.gid);
+    try testing.expectEqual(@as(u16, 0), l0.palette);
+    try testing.expectEqual(@as(u16, 1062), l1.gid);
+    try testing.expectEqual(@as(u16, 1), l1.palette);
+
+    try testing.expect(colr.isColorGlyph(2));
+}
+
+test "COLR v0 paint interpreter fills layers with palette colors (Bungee)" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, bungee_v0_path) catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const head = font.head.?;
+
+    const colr = try Colr.parse(font.getTable("COLR".*).?);
+    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
+    const ctx = GlyfContext{
+        .glyf = font.getTable("glyf".*).?,
+        .loca = font.getTable("loca".*).?,
+        .loca_format = head.index_to_loc_format,
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var res = ColorResources.init(testing.allocator);
+    defer res.deinit();
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var interp = PaintInterp{
+        .w = &aw.writer,
+        .arena = arena_state.allocator(),
+        .colr = colr,
+        .cpal = cpal,
+        .glyf = ctx,
+        .res = &res,
+    };
+    try interp.render(2); // 'A'
+    const out = aw.writer.buffered();
+
+    // Two solid layers: palette 0 = (201,9,0) dark red, palette 1 = (255,149,128) salmon.
+    try testing.expect(std.mem.indexOf(u8, out, "0.788 0.035 0.000 rg") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "1.000 0.584 0.502 rg") != null);
+    // Exactly two fills, no gradients (v0 is flat solid layers only).
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "f\n"));
+    try testing.expectEqual(@as(usize, 0), res.shadings.items.len);
 }

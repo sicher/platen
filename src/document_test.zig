@@ -3083,3 +3083,27 @@ test "COLR color font used only for non-color text emits no Type3" {
     // No (empty, malformed) Type3 font should be emitted.
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Type3") == null);
 }
+
+test "COLR v0 font emits a Type3 color font (Bungee Color)" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Type3 color font emitted; letters shown through it.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/CharProcs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 72.00 Tf") != null);
+    // FontMatrix at full precision (Bungee upem = 1000 → 1/1000).
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontMatrix [0.0010000000 0 0 0.0010000000 0 0]") != null);
+    // v0 is flat solid layers: a CharProc fills 'A' dark red (palette 0).
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "0.788 0.035 0.000 rg") != null);
+    // Text extraction recovers the letters via ToUnicode.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ToUnicode") != null);
+}

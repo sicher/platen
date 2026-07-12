@@ -822,10 +822,10 @@ pub const EmbeddedFont = struct {
         };
     }
 
-    /// True if `gid` is a COLR base glyph (has a color paint graph).
+    /// True if `gid` is a COLR base glyph (v1 paint graph or v0 layer records).
     pub fn isColorGlyph(self: *EmbeddedFont, gid: u16) bool {
         const info = self.colorInfo() orelse return false;
-        return info.colr.baseGlyphPaint(gid) != null;
+        return info.colr.isColorGlyph(gid);
     }
 
     /// Glyph advance width in original font units (glyph space), used for
