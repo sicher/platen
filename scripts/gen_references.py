@@ -30,6 +30,8 @@ EXCLUDED_TESTS = {
     "auto_height",  # zapdf positions text one line_height below padding; fpdf2 differs
     "color_emoji",  # COLR v1 color font → PDF Type3; fpdf2 cannot emit COLR color fonts
     "color_v0",     # COLR v0 layered-solid color font → PDF Type3; fpdf2 can't emit COLR
+    "color_v1_gradient",  # COLR v1 gradient color font → PDF Type3; fpdf2 can't emit COLR
+    "color_sweep",  # COLR v1 sweep-gradient color font → PDF Type3; fpdf2 can't emit COLR
 }
 
 SCRIPT_DIR = Path(__file__).parent

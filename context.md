@@ -2,7 +2,7 @@
 
 ## Current Focus
 **v1.0.0 released** - Library is feature complete. Migrated to Zig 0.16.
-**Color emoji (COLR v1) support just landed** - see session below.
+**COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
 - Future enhancements (if needed):
@@ -10,13 +10,39 @@
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - Color font follow-ups: >255 distinct color glyphs per font currently fall back
     to the (often empty) mono outline — split into multiple Type3 fonts if needed;
-    sweep gradient (PaintSweepGradient) is skipped; CBDT/sbix bitmap emoji and
-    OT-SVG color fonts unsupported. (A COLR v1 gradient text font,
-    `BungeeSpice-Regular-COLRv1.ttf`, is now vendored and could back a v1 gradient
-    unit test on a non-emoji font.)
+    CBDT/sbix bitmap emoji and OT-SVG color fonts unsupported.
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
+- `zig-out/bin/zpdf` is a stale binary from an old build (build.zig only produces `zapdf` now) — safe to delete.
+
+## What We Did (Session 2026-07-12 #16 — COLR v1 gradient tests + sweep gradients)
+- **BungeeSpice COLR v1 gradient tests** (vendored font, non-emoji):
+  - `colr.zig` unit test: renders 'A' (gid 2) → 2 axial shadings, ground truth
+    from fontTools (3-point (0,0)/(0,900)/(100,0) → axial `/Coords [0 0 0 900]`,
+    gold↔dark-red stops), clips, no solid fills.
+  - `color_v1_gradient` reference integration test (`generateColorV1GradientPdf`,
+    zapdf-generated reference, excluded in `gen_references.py`). Verified visually.
+- **PaintSweepGradient support** (`renderSweep` in `colr.zig`) — PDF has no conic
+  shading, so: 120-wedge flat-colored triangle fan in the glyph clip.
+  - **Spec essentials** (verified against the OT COLR spec): angles are biased
+    F2Dot14 (`degrees = (value+1)×180`), CCW from +x axis; the sampling domain
+    is the **absolute [0°,360°)** (NOT relative to startAngle — first version had
+    this bug); `t = (θ−start)/(end−start)` (signed span handles start>end
+    inversion), then extend pad/repeat/reflect (`sweepExtendT`), then piecewise
+    lerp of the color line (`sampleColorLine`). Stop alpha ignored (same as
+    linear/radial path).
+  - AA seam fixes: wedges overlap the previous by 0.3°; apex pushed 4 font units
+    past the center (kills the white pinhole where 120 apexes converge).
+    Validated at 600 dpi with pymupdf.
+- **SweepTest fixture font** (`test/fonts/sweep/SweepTest.ttf`, rebuild with
+  `scripts/gen_sweep_font.py` via .venv fontTools): squares with red→blue sweeps —
+  'A' 0..360°, 'B' 0..90° pad, 'C' 110..230° pad (the spec's example; locks in the
+  absolute sampling domain: 37 pure-red + 43 pure-blue wedges of 120).
+- Tests: sweep unit tests (fixture render + helper edge cases) + `color_sweep`
+  reference integration test. **All 364 tests pass** (was 359).
+- Note: 3°-wedge midpoints are at 1.5°+3k — assertions on sampled colors must use
+  those exact t values (e.g. t=43.5/90 → "0.517 0.000 0.483 rg").
 
 ## What We Did (Session 2026-07-08/09 #14 — COLR color emoji)
 - **Wired COLR v1 / CPAL color fonts into PDF output as Type3 color fonts.**

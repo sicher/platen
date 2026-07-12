@@ -7,9 +7,9 @@
 //!
 //! Scope: COLR v0 (flat solid-color layer records) and COLR v1 with glyf
 //! (TrueType) outlines. The supported v1 paint formats are ColrLayers, Solid,
-//! Linear/Radial gradients, Glyph (clip), ColrGlyph, the affine transform
-//! family, and Composite. CFF-flavored color fonts and COLR sweep gradients
-//! are not supported.
+//! Linear/Radial/Sweep gradients (sweep approximated as a wedge fan — PDF has
+//! no conic shading), Glyph (clip), ColrGlyph, the affine transform family,
+//! and Composite. CFF-flavored color fonts are not supported.
 
 const std = @import("std");
 const format = @import("format.zig");
@@ -755,6 +755,7 @@ pub const PaintInterp = struct {
             },
             .linear_gradient => try self.renderGradient(abs, false),
             .radial_gradient => try self.renderGradient(abs, true),
+            .sweep_gradient, .var_sweep_gradient => try self.renderSweep(abs),
             .transform, .var_transform => {
                 const paint_off = readU24(self.colr.data, abs + 1);
                 const xf_off = abs + readU24(self.colr.data, abs + 4);
@@ -839,7 +840,7 @@ pub const PaintInterp = struct {
                     try self.renderPaint(src_off, depth + 1);
                 }
             },
-            else => {}, // sweep gradient / unknown: skip
+            else => {}, // unknown paint format: skip
         }
     }
 
@@ -970,6 +971,55 @@ pub const PaintInterp = struct {
         try self.w.print("/Sh{d} sh\n", .{idx + 1});
     }
 
+    /// Render a sweep (conic) gradient. PDF has no conic shading type, so
+    /// approximate it with a fan of flat-colored wedges around the center;
+    /// the current clip (from the enclosing PaintGlyph) bounds the visible
+    /// part, exactly as for the `sh`-painted gradients.
+    fn renderSweep(self: *PaintInterp, abs: usize) !void {
+        // PaintSweepGradient: format(u8), colorLineOffset(Offset24),
+        // centerX/centerY(FWORD), startAngle/endAngle(F2Dot14, biased).
+        const color_line_abs = abs + readU24(self.colr.data, abs + 1);
+        const extend: Extend = @enumFromInt(readU8(self.colr.data, color_line_abs));
+        const stops = try self.readColorLine(color_line_abs);
+        if (stops.len < 2) return;
+
+        const cx: f64 = @floatFromInt(readI16(self.colr.data, abs + 4));
+        const cy: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
+        // Angles are biased F2Dot14: degrees = (value + 1) × 180,
+        // counter-clockwise from the positive x-axis.
+        const start = (readF2Dot14(self.colr.data, abs + 8) + 1.0) * 180.0;
+        const end = (readF2Dot14(self.colr.data, abs + 10) + 1.0) * 180.0;
+        // Signed span: start > end inverts the color line (per spec). The
+        // extend mode handles positions outside [0, 1].
+        const span = end - start;
+        if (@abs(span) < 1e-9) return;
+
+        // The spec samples rays over the absolute angular domain [0°, 360°):
+        // 120 wedges (3° each), each filled with the color line sampled at
+        // its midpoint angle. Each wedge starts slightly inside its
+        // predecessor so anti-aliasing of abutting fills leaves no seams.
+        const wedges = 120;
+        const overlap = 0.3; // degrees
+        const radius = 65536.0; // covers any glyph bbox (matches cover_rect)
+        const back = 4.0; // apex pushed past the center: no pinhole where the fan converges
+        for (0..wedges) |i| {
+            const a0 = 360.0 * @as(f64, @floatFromInt(i)) / wedges;
+            const a1 = 360.0 * @as(f64, @floatFromInt(i + 1)) / wedges;
+            const mid = (a0 + a1) / 2.0;
+            const t = sweepExtendT((mid - start) / span, extend);
+            const c = sampleColorLine(stops, t);
+            try self.w.print("{d:.3} {d:.3} {d:.3} rg\n", .{ c.r, c.g, c.b });
+            try self.w.print("{d:.2} {d:.2} m {d:.2} {d:.2} l {d:.2} {d:.2} l h f\n", .{
+                cx - back * @cos(std.math.degreesToRadians(mid)),
+                cy - back * @sin(std.math.degreesToRadians(mid)),
+                cx + radius * @cos(std.math.degreesToRadians(a0 - overlap)),
+                cy + radius * @sin(std.math.degreesToRadians(a0 - overlap)),
+                cx + radius * @cos(std.math.degreesToRadians(a1)),
+                cy + radius * @sin(std.math.degreesToRadians(a1)),
+            });
+        }
+    }
+
     fn readColorLine(self: *PaintInterp, abs: usize) ![]gradient.ColorStop {
         // ColorLine: uint8 extend; uint16 numStops; ColorStop[numStops].
         // ColorStop: F2Dot14 stopOffset; uint16 paletteIndex; F2Dot14 alpha.
@@ -1020,6 +1070,42 @@ fn axialEndpoint(p0x: f64, p0y: f64, p1x: f64, p1y: f64, p2x: f64, p2y: f64) str
     // Project (p1 - p0) onto n; endpoint = p0 + t*n.
     const t = (p1x - p0x) * nx + (p1y - p0y) * ny;
     return .{ .x = p0x + t * nx, .y = p0y + t * ny };
+}
+
+/// Map a sweep-gradient interpolation position through a color-line extend
+/// mode into [0, 1].
+fn sweepExtendT(t: f64, extend: Extend) f64 {
+    return switch (extend) {
+        .repeat => t - @floor(t),
+        .reflect => blk: {
+            const m = @mod(t, 2.0);
+            break :blk if (m <= 1.0) m else 2.0 - m;
+        },
+        else => std.math.clamp(t, 0.0, 1.0), // pad (and unknown)
+    };
+}
+
+/// Piecewise-linear evaluation of a sorted color line at t ∈ [0, 1].
+fn sampleColorLine(stops: []const gradient.ColorStop, t: f64) Color.Rgbf {
+    if (t <= stops[0].offset) return stops[0].color.toRgbf();
+    const last = stops[stops.len - 1];
+    if (t >= last.offset) return last.color.toRgbf();
+    for (0..stops.len - 1) |i| {
+        const b = stops[i + 1];
+        if (t <= b.offset) {
+            const a = stops[i];
+            const seg = b.offset - a.offset;
+            const u = if (seg < 1e-9) 1.0 else (t - a.offset) / seg;
+            const ca = a.color.toRgbf();
+            const cb = b.color.toRgbf();
+            return .{
+                .r = ca.r + (cb.r - ca.r) * u,
+                .g = ca.g + (cb.g - ca.g) * u,
+                .b = ca.b + (cb.b - ca.b) * u,
+            };
+        }
+    }
+    return last.color.toRgbf();
 }
 
 /// Map a COLR CompositeMode to a PDF /BM blend-mode name, or null for modes
@@ -1229,6 +1315,104 @@ test "glyf outline extraction (Noto cloud layer glyph 23929)" {
 
 const bungee_v0_path = "test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf";
 
+test "COLR v1 sweep gradient renders as a wedge fan (SweepTest fixture)" {
+    // Fixture built by scripts/gen_sweep_font.py: 'A' (gid 1) is a square
+    // with a full-circle sweep 0°..360°, red → blue, pad extend; 'B' (gid 2)
+    // sweeps only 0°..90° (angles outside the range pad to the end colors);
+    // 'C' (gid 3) sweeps 110°..230° (the spec's example arc).
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/sweep/SweepTest.ttf") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const head = font.head.?;
+
+    const colr = try Colr.parse(font.getTable("COLR".*).?);
+    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
+    const ctx = GlyfContext{
+        .glyf = font.getTable("glyf".*).?,
+        .loca = font.getTable("loca".*).?,
+        .loca_format = head.index_to_loc_format,
+    };
+
+    // PaintGlyph → PaintSweepGradient.
+    const root = colr.baseGlyphPaint(1) orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(PaintFormat.glyph, colr.paintFormat(root));
+    try testing.expectEqual(PaintFormat.sweep_gradient, colr.paintFormat(root + readU24(colr.data, root + 1)));
+
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var res = ColorResources.init(testing.allocator);
+    defer res.deinit();
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var interp = PaintInterp{
+        .w = &aw.writer,
+        .arena = arena_state.allocator(),
+        .colr = colr,
+        .cpal = cpal,
+        .glyf = ctx,
+        .res = &res,
+    };
+    try interp.render(1); // 'A': full-circle sweep
+    const out = aw.writer.buffered();
+
+    // A fan of 120 flat-colored wedges inside the glyph clip; no shadings.
+    try testing.expectEqual(@as(usize, 0), res.shadings.items.len);
+    try testing.expect(std.mem.indexOf(u8, out, "W n") != null);
+    try testing.expectEqual(@as(usize, 120), std.mem.count(u8, out, " rg\n"));
+    // First wedge midpoint t = 1.5/360: nearly pure red; last: nearly pure blue.
+    try testing.expect(std.mem.indexOf(u8, out, "0.996 0.000 0.004 rg") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "0.004 0.000 0.996 rg") != null);
+    // 120 closed, filled wedge triangles.
+    try testing.expectEqual(@as(usize, 120), std.mem.count(u8, out, "h f\n"));
+
+    // 'B': 0°..90° span with pad extend — wedges beyond 90° clamp to pure
+    // blue, so blue is by far the most common wedge color (90 of 120).
+    var aw2: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw2.deinit();
+    interp.w = &aw2.writer;
+    try interp.render(2);
+    const out2 = aw2.writer.buffered();
+    try testing.expectEqual(@as(usize, 90), std.mem.count(u8, out2, "0.000 0.000 1.000 rg"));
+    // Near the sweep midpoint (wedge 42°..45°, midpoint t = 43.5/90): the
+    // color is about half red, half blue.
+    try testing.expect(std.mem.indexOf(u8, out2, "0.517 0.000 0.483 rg") != null);
+
+    // 'C': 110°..230° span, pad — per spec the sampling domain is the
+    // absolute [0°, 360°): angles below 110° pad to the offset-0 color
+    // (red, 37 wedge midpoints) and angles above 230° to the offset-1
+    // color (blue, 43 wedge midpoints).
+    var aw3: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw3.deinit();
+    interp.w = &aw3.writer;
+    try interp.render(3);
+    const out3 = aw3.writer.buffered();
+    try testing.expectEqual(@as(usize, 37), std.mem.count(u8, out3, "1.000 0.000 0.000 rg"));
+    try testing.expectEqual(@as(usize, 43), std.mem.count(u8, out3, "0.000 0.000 1.000 rg"));
+}
+
+test "sweep color-line helpers (extend modes and sampling)" {
+    // Extend modes.
+    try testing.expectApproxEqAbs(@as(f64, 1.0), sweepExtendT(2.3, .pad), 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 0.0), sweepExtendT(-0.5, .pad), 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 0.3), sweepExtendT(2.3, .repeat), 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 0.5), sweepExtendT(-0.5, .repeat), 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 0.7), sweepExtendT(1.3, .reflect), 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 0.5), sweepExtendT(-0.5, .reflect), 1e-12);
+
+    // Sampling clamps outside the stop range and lerps within segments.
+    const stops = [_]gradient.ColorStop{
+        .{ .offset = 0.25, .color = Color.rgb(255, 0, 0) },
+        .{ .offset = 0.75, .color = Color.rgb(0, 0, 255) },
+    };
+    try testing.expectApproxEqAbs(@as(f64, 1.0), sampleColorLine(&stops, 0.0).r, 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 1.0), sampleColorLine(&stops, 1.0).b, 1e-12);
+    const mid = sampleColorLine(&stops, 0.5);
+    try testing.expectApproxEqAbs(@as(f64, 0.5), mid.r, 1e-12);
+    try testing.expectApproxEqAbs(@as(f64, 0.5), mid.b, 1e-12);
+}
+
 test "COLR v0 parse and layer records (Bungee Color)" {
     const ttf = @import("ttf.zig");
     const loaded = ttf.Font.fromFile(testing.io, testing.allocator, bungee_v0_path) catch return error.SkipZigTest;
@@ -1253,6 +1437,65 @@ test "COLR v0 parse and layer records (Bungee Color)" {
     try testing.expectEqual(@as(u16, 1), l1.palette);
 
     try testing.expect(colr.isColorGlyph(2));
+}
+
+test "COLR v1 linear gradients on a non-emoji font (Bungee Spice)" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+    const head = font.head.?;
+
+    const colr = try Colr.parse(font.getTable("COLR".*).?);
+    try testing.expectEqual(@as(u16, 1), colr.version);
+    try testing.expect(colr.base_glyph_list != 0);
+    try testing.expect(colr.isColorGlyph(2));
+
+    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
+    const ctx = GlyfContext{
+        .glyf = font.getTable("glyf".*).?,
+        .loca = font.getTable("loca".*).?,
+        .loca_format = head.index_to_loc_format,
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    var res = ColorResources.init(testing.allocator);
+    defer res.deinit();
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+
+    var interp = PaintInterp{
+        .w = &aw.writer,
+        .arena = arena_state.allocator(),
+        .colr = colr,
+        .cpal = cpal,
+        .glyf = ctx,
+        .res = &res,
+    };
+    // 'A' (gid 2): PaintColrLayers → 2× PaintGlyph(clip) → PaintLinearGradient.
+    try interp.render(2);
+    const out = aw.writer.buffered();
+
+    // Ground truth from fontTools: both layers share the gradient geometry
+    // p0=(0,0), p1=(0,900), p2=(100,0); the 3-point form reduces to the axial
+    // endpoint (0,900). Layer 0 runs gold→dark red, layer 1 (A.inline) the
+    // reverse. Palette: 0 = (201,9,0), 1 = (255,215,0).
+    try testing.expectEqual(@as(usize, 2), res.shadings.items.len);
+    const sh0 = res.shadings.items[0];
+    const sh1 = res.shadings.items[1];
+    try testing.expect(std.mem.indexOf(u8, sh0, "/ShadingType 2") != null);
+    try testing.expect(std.mem.indexOf(u8, sh0, "/Coords [0.00 0.00 0.00 900.00]") != null);
+    try testing.expect(std.mem.indexOf(u8, sh0, "/C0 [1.000 0.843 0.000]") != null);
+    try testing.expect(std.mem.indexOf(u8, sh0, "/C1 [0.788 0.035 0.000]") != null);
+    try testing.expect(std.mem.indexOf(u8, sh1, "/C0 [0.788 0.035 0.000]") != null);
+    try testing.expect(std.mem.indexOf(u8, sh1, "/C1 [1.000 0.843 0.000]") != null);
+
+    // Each layer clips to its glyph outline and paints via `sh`; no solid fills.
+    try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "W n"));
+    try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "/Sh2 sh") != null);
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, out, "f\n"));
 }
 
 test "COLR v0 paint interpreter fills layers with palette colors (Bungee)" {
