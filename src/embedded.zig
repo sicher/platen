@@ -10,6 +10,7 @@ const ttf = @import("ttf.zig");
 const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
 const colr = @import("colr.zig");
+const bitmap_glyphs = @import("bitmap_glyphs.zig");
 pub const opentype = @import("opentype.zig");
 const format = @import("format.zig");
 const binary = @import("binary.zig");
@@ -223,6 +224,11 @@ pub const EmbeddedFont = struct {
     // point into `data`, so there is nothing to free.
     color_info: ?ColorInfo = null,
     color_checked: bool = false,
+
+    // CBDT/sbix bitmap color-glyph support (lazily probed; null when the
+    // font also has COLR, which takes priority). Slices point into `data`.
+    bitmap_info: ?bitmap_glyphs.BitmapInfo = null,
+    bitmap_checked: bool = false,
 
     /// Load and parse a TTF font from file
     pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
@@ -826,6 +832,39 @@ pub const EmbeddedFont = struct {
     pub fn isColorGlyph(self: *EmbeddedFont, gid: u16) bool {
         const info = self.colorInfo() orelse return false;
         return info.colr.isColorGlyph(gid);
+    }
+
+    /// Lazily probe and return the font's CBDT/CBLC or sbix bitmap strike, or
+    /// null if the font has none (or has COLR, which takes priority as it is
+    /// vector data).
+    pub fn bitmapInfo(self: *EmbeddedFont) ?bitmap_glyphs.BitmapInfo {
+        if (!self.bitmap_checked) {
+            self.bitmap_checked = true;
+            self.bitmap_info = parseBitmapInfo(self);
+        }
+        return self.bitmap_info;
+    }
+
+    fn parseBitmapInfo(self: *EmbeddedFont) ?bitmap_glyphs.BitmapInfo {
+        if (self.colorInfo() != null) return null;
+        if (self.font.getTable("CBLC".*)) |cblc| {
+            if (self.font.getTable("CBDT".*)) |cbdt_data| {
+                const parsed = bitmap_glyphs.Cbdt.parse(cblc, cbdt_data) catch return null;
+                return .{ .cbdt = parsed };
+            }
+        }
+        if (self.font.getTable("sbix".*)) |sbix_data| {
+            const num_glyphs = if (self.font.maxp) |m| m.num_glyphs else return null;
+            const parsed = bitmap_glyphs.Sbix.parse(sbix_data, num_glyphs) catch return null;
+            return .{ .sbix = parsed };
+        }
+        return null;
+    }
+
+    /// True if `gid` has a PNG bitmap in the font's chosen strike.
+    pub fn isBitmapGlyph(self: *EmbeddedFont, gid: u16) bool {
+        const info = self.bitmapInfo() orelse return false;
+        return info.isBitmapGlyph(gid);
     }
 
     /// Glyph advance width in original font units (glyph space), used for

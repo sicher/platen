@@ -3126,6 +3126,50 @@ test "COLR fonts with >255 color glyphs split into multiple Type3 subfonts" {
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<00> <FF>"));
 }
 
+test "sbix bitmap font emits a Type3 font with image CharProcs" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const sbix = doc.loadFont("test/fonts/bitmap/SbixTest.ttf", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = sbix, .size = 72 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Type3 font whose CharProcs place PNG image XObjects.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 72.00 Tf") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/XObject << /Im1") != null);
+    // 64px strike at upem 1000 → 15.625 units/px: 64px image = 1000 units.
+    // 'A' sits at the origin; 'B' is offset by (8, -8) px = (125, -125).
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1000.00 0 0 1000.00 0.00 0.00 cm\n/Im1 Do") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1000.00 0 0 1000.00 125.00 -125.00 cm\n/Im2 Do") != null);
+    // 'B' has an alpha half → its image carries an SMask.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/SMask") != null);
+}
+
+test "CBDT bitmap font emits a Type3 font with image CharProcs" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const cbdt = doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = cbdt, .size = 72 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 72.00 Tf") != null);
+    // 'A': bearing (0, 64) → bottom at baseline; 'B': bearing (4, 60) →
+    // left 62.50, bottom -62.50 (in font units at 15.625 units/px).
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1000.00 0 0 1000.00 0.00 0.00 cm\n/Im1 Do") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1000.00 0 0 1000.00 62.50 -62.50 cm\n/Im2 Do") != null);
+}
+
 test "COLR v0 font emits a Type3 color font (Bungee Color)" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

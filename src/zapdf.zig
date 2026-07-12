@@ -156,4 +156,5 @@ test {
     _ = @import("outline.zig");
     _ = @import("fuzz_tests.zig");
     _ = @import("colr.zig");
+    _ = @import("bitmap_glyphs.zig");
 }

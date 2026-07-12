@@ -202,9 +202,14 @@ const ColorFontPlan = struct {
     widths_fu: std.ArrayListUnmanaged(u16) = .empty, // advance width per gid, font units
     pages: std.AutoHashMapUnmanaged(usize, void) = .empty, // page indices that use this font
     res: colr.ColorResources, // shadings/ExtGStates shared by all subfonts
+    /// Decoded PNG strikes for bitmap (CBDT/sbix) glyphs, one per image
+    /// CharProc; referenced as /Im{i+1} from the shared Resources.
+    images: std.ArrayListUnmanaged(*Image) = .empty,
     font_obj_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one font dict per subfont
     tounicode_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one CMap per subfont
     first_charproc_id: ObjectId = 0, // contiguous block, one stream per gid
+    image_obj_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one per image
+    image_smask_ids: std.ArrayListUnmanaged(?ObjectId) = .empty, // per image, if it has alpha
 
     /// Subfont index + single-byte PDF code of a color glyph.
     const Slot = struct { sub: usize, code: u8 };
@@ -243,8 +248,15 @@ const ColorFontPlan = struct {
         self.widths_fu.deinit(allocator);
         self.pages.deinit(allocator);
         self.res.deinit();
+        for (self.images.items) |img| {
+            img.deinit();
+            allocator.destroy(img);
+        }
+        self.images.deinit(allocator);
         self.font_obj_ids.deinit(allocator);
         self.tounicode_ids.deinit(allocator);
+        self.image_obj_ids.deinit(allocator);
+        self.image_smask_ids.deinit(allocator);
     }
 };
 
@@ -2638,16 +2650,19 @@ pub const Document = struct {
                     .embedded => |e| e,
                     else => continue,
                 };
-                const info = emb.colorInfo() orelse continue;
+                // COLR (vector) takes priority; else CBDT/sbix PNG strikes.
+                const has_vector = emb.colorInfo() != null;
+                if (!has_vector and emb.bitmapInfo() == null) continue;
                 const glyphs = t.cached_glyphs orelse continue; // identity fonts always cache
                 // Create the plan lazily on the first color glyph, so a color
                 // font used only for non-color text (e.g. spaces) never produces
                 // an empty (malformed) Type3 font.
                 var plan: ?*ColorFontPlan = null;
                 for (glyphs) |gid| {
-                    if (!emb.isColorGlyph(gid)) continue;
+                    const is_color = if (has_vector) emb.isColorGlyph(gid) else emb.isBitmapGlyph(gid);
+                    if (!is_color) continue;
                     if (plan == null) plan = try self.colorPlanForOrCreate(emb);
-                    try self.ensureColorGlyph(plan.?, emb, info, gid);
+                    try self.ensureColorGlyph(plan.?, emb, gid);
                 }
                 if (plan) |p| try p.pages.put(self.allocator, page_idx, {});
             }
@@ -2670,10 +2685,13 @@ pub const Document = struct {
     /// Assign an ordinal and render the CharProc for one color glyph, if not
     /// already present. Ordinals map to (subfont, single-byte code) pairs;
     /// every 255 glyphs open a new Type3 subfont, so there is no cap.
-    fn ensureColorGlyph(self: *Document, plan: *ColorFontPlan, emb: *EmbeddedFont, info: EmbeddedFont.ColorInfo, gid: u16) !void {
+    fn ensureColorGlyph(self: *Document, plan: *ColorFontPlan, emb: *EmbeddedFont, gid: u16) !void {
         if (plan.code_of.contains(gid)) return;
         if (plan.gids.items.len >= 0xFFFF) return; // ordinal is u16; unreachable for real fonts
-        const content = try renderColorGlyphCharProc(self.allocator, &plan.res, info, emb, gid);
+        const content = if (emb.colorInfo()) |info|
+            try renderColorGlyphCharProc(self.allocator, &plan.res, info, emb, gid)
+        else
+            try self.renderBitmapGlyphCharProc(plan, emb, gid);
         errdefer self.allocator.free(content);
         const ord: u16 = @intCast(plan.gids.items.len + 1);
         try plan.gids.append(self.allocator, gid);
@@ -2716,6 +2734,76 @@ pub const Document = struct {
         return aw.toOwnedSlice();
     }
 
+    /// Build a Type3 CharProc for a bitmap (CBDT/sbix) color glyph: decode
+    /// the PNG strike into a plan image and emit `wx 0 d0` plus a `cm`/`Do`
+    /// placing /Im{k} in glyph space (strike pixels scaled to font units).
+    fn renderBitmapGlyphCharProc(self: *Document, plan: *ColorFontPlan, emb: *EmbeddedFont, gid: u16) ![]u8 {
+        const info = emb.bitmapInfo() orelse return error.NotAColorGlyph;
+        const bg = info.glyphBitmap(gid) orelse return error.NotAColorGlyph;
+
+        // The image borrows the PNG slice (font data outlives the plan) and
+        // owns only its decoded/recompressed buffers.
+        const img = try Image.fromMemory(self.allocator, bg.png, false);
+        {
+            errdefer {
+                img.deinit();
+                self.allocator.destroy(img);
+            }
+            try plan.images.append(self.allocator, img);
+        }
+
+        const upem: f64 = @floatFromInt(emb.font.head.?.units_per_em);
+        const scale = upem / @as(f64, @floatFromInt(info.ppem()));
+        const wx = emb.glyphAdvanceFontUnits(gid);
+        return std.fmt.allocPrint(
+            self.allocator,
+            "{d} 0 d0\nq\n{d:.2} 0 0 {d:.2} {d:.2} {d:.2} cm\n/Im{d} Do\nQ\n",
+            .{
+                wx,
+                @as(f64, @floatFromInt(bg.width_px)) * scale,
+                @as(f64, @floatFromInt(bg.height_px)) * scale,
+                bg.bearing_x * scale,
+                bg.bottom_y * scale,
+                plan.images.items.len, // 1-based /Im index of the image just added
+            },
+        );
+    }
+
+    /// Write one Type3 color-glyph image XObject (a PNG strike) and its
+    /// SMask, mirroring the page-image PNG path (no ICC profiles here).
+    fn writePlanImage(self: *Document, w: *Writer, image: *Image, img_id: ObjectId, smask_id: ?ObjectId) !void {
+        if (smask_id) |sid| {
+            try w.beginObject(sid);
+            var smask_dict = Dict.init(self.allocator);
+            defer smask_dict.deinit();
+            try smask_dict.put("Type", Value.name("XObject"));
+            try smask_dict.put("Subtype", Value.name("Image"));
+            try smask_dict.put("Width", Value.int(@intCast(image.width)));
+            try smask_dict.put("Height", Value.int(@intCast(image.height)));
+            try smask_dict.put("ColorSpace", Value.name("DeviceGray"));
+            try smask_dict.put("BitsPerComponent", Value.int(8));
+            try smask_dict.put("Filter", Value.name("FlateDecode")); // alpha is pre-compressed
+            try w.writeStream(&smask_dict, image.alpha_data.?);
+            try w.endObject();
+        }
+
+        try w.beginObject(img_id);
+        var img_dict = Dict.init(self.allocator);
+        defer img_dict.deinit();
+        try img_dict.put("Type", Value.name("XObject"));
+        try img_dict.put("Subtype", Value.name("Image"));
+        try img_dict.put("Width", Value.int(@intCast(image.width)));
+        try img_dict.put("Height", Value.int(@intCast(image.height)));
+        try img_dict.put("ColorSpace", Value.name(image.color_space.pdfName()));
+        try img_dict.put("BitsPerComponent", Value.int(image.bits_per_component));
+        try img_dict.put("Filter", Value.name("FlateDecode")); // PNG pixels are re-compressed
+        if (smask_id) |sid| {
+            try img_dict.put("SMask", Value.ref(.{ .id = sid }));
+        }
+        try w.writeStream(&img_dict, image.data);
+        try w.endObject();
+    }
+
     /// Emit a COLR color font as one or more PDF Type3 fonts: one CharProc
     /// stream per color glyph plus a font dictionary (Encoding/CharProcs/
     /// Widths/FontMatrix/Resources) per 255-glyph subfont. Glyph space is font
@@ -2729,6 +2817,11 @@ pub const Document = struct {
             defer cp_dict.deinit();
             try w.writeStreamCompressed(&cp_dict, content);
             try w.endObject();
+        }
+
+        // 1b. Image XObjects for bitmap (CBDT/sbix) glyphs.
+        for (plan.images.items, 0..) |img, i| {
+            try self.writePlanImage(w, img, plan.image_obj_ids.items[i], plan.image_smask_ids.items[i]);
         }
 
         // 2. Font dictionaries. Composite entries are built as literal strings
@@ -2854,10 +2947,17 @@ pub const Document = struct {
     }
 
     /// Build the Type3 font's /Resources literal from the plan's accumulated
-    /// shadings (/Sh{n}) and ExtGStates (/Ga{n}).
+    /// shadings (/Sh{n}), ExtGStates (/Ga{n}) and bitmap images (/Im{n}).
     fn buildColorFontResources(arena: std.mem.Allocator, plan: *ColorFontPlan) ![]u8 {
         var r = std.Io.Writer.Allocating.init(arena);
         try r.writer.writeAll("<<");
+        if (plan.images.items.len > 0) {
+            try r.writer.writeAll(" /XObject <<");
+            for (plan.image_obj_ids.items, 0..) |id, i| {
+                try r.writer.print(" /Im{d} {d} 0 R", .{ i + 1, id });
+            }
+            try r.writer.writeAll(" >>");
+        }
         if (plan.res.shadings.items.len > 0) {
             try r.writer.writeAll(" /Shading <<");
             for (plan.res.shadings.items, 0..) |body, i| {
@@ -3151,7 +3251,8 @@ pub const Document = struct {
         }
 
         // Reserve IDs for COLR Type3 color fonts: per 255-glyph subfont a font
-        // dict + ToUnicode CMap, plus one stream per CharProc (color glyph).
+        // dict + ToUnicode CMap, one stream per CharProc (color glyph), and
+        // for bitmap glyphs an image XObject (+ SMask when it has alpha).
         for (self.color_plans.items) |plan| {
             for (0..plan.subfontCount()) |_| {
                 try plan.font_obj_ids.append(self.allocator, next_id);
@@ -3160,6 +3261,16 @@ pub const Document = struct {
             }
             plan.first_charproc_id = next_id;
             next_id += @intCast(plan.gids.items.len);
+            for (plan.images.items) |img| {
+                try plan.image_obj_ids.append(self.allocator, next_id);
+                next_id += 1;
+                if (img.alpha_data != null) {
+                    try plan.image_smask_ids.append(self.allocator, next_id);
+                    next_id += 1;
+                } else {
+                    try plan.image_smask_ids.append(self.allocator, null);
+                }
+            }
         }
 
         // Reserve IDs for images

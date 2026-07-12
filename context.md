@@ -8,7 +8,9 @@
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
-  - Color font follow-ups: CBDT/sbix bitmap emoji and OT-SVG color fonts unsupported.
+  - Color font follow-ups: OT-SVG color fonts unsupported; bitmap emoji not yet
+    validated against a real-world font (fixtures only — Noto CBDT is ~10MB,
+    not vendored).
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
@@ -60,7 +62,24 @@
     `alpha_scale` threaded into solid fills); plus a `clip_depth == 0` guard
     that skips any unbounded solid/gradient/sweep fill (ClipBox unimplemented).
   - `color_emoji` reference unaffected (byte-identical modulo timestamps).
-- **All 368 tests pass** (was 359 at session start).
+- **Bitmap emoji (CBDT/CBLC + sbix) support**:
+  - `src/bitmap_glyphs.zig`: parses sbix (largest strike, 'png '/'dupe'
+    records, originOffset) and CBDT/CBLC (index formats 1–5, image formats
+    17/18/19) → `BitmapGlyph{png, bearing_x, bottom_y, w, h}` (slices into
+    font data). `BitmapInfo` union fronts both.
+  - `embedded.zig`: lazy `bitmapInfo()` (null when COLR present — vector wins),
+    `isBitmapGlyph`.
+  - `document.zig`: `renderBitmapGlyphCharProc` — PNG → `Image.fromMemory`
+    (borrowed slice) → plan.images; CharProc = `wx 0 d0 q W 0 0 H x y cm
+    /Im{k} Do Q` in font units (scale upem/ppem); image XObjects (+SMask for
+    alpha) written per plan (`writePlanImage`), `/XObject` in Type3 Resources.
+  - Fixtures: `test/fonts/bitmap/{SbixTest,CbdtTest}.ttf` from
+    `scripts/gen_bitmap_fonts.py` (PIL PNGs: quadrant square for orientation,
+    alpha half for SMask; CBDT built via TTX import). Unit tests
+    (bitmap_glyphs.zig registered in zapdf.zig test block), document tests
+    (exact `cm` placement values), `color_bitmap` reference integration test.
+    Validated visually (orientation, alpha, offsets all correct).
+- **All 374 tests pass** (was 359 at session start).
 
 ## What We Did (Session 2026-07-08/09 #14 — COLR color emoji)
 - **Wired COLR v1 / CPAL color fonts into PDF output as Type3 color fonts.**
