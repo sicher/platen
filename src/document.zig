@@ -2788,10 +2788,13 @@ pub const Document = struct {
             s.deinit();
             self.allocator.destroy(s);
         }
-        if (s.hasTransparency() or s.hasText()) return error.NotAColorGlyph;
 
         const ops = try s.toPdfContent(self.allocator);
         defer self.allocator.free(ops);
+        // Transparency/text usage is only known after rendering (the ops
+        // would reference /GS{n} or font resources that the Type3 font's
+        // shared Resources dict does not carry).
+        if (s.hasTransparency() or s.hasText()) return error.NotAColorGlyph;
 
         const wx = emb.glyphAdvanceFontUnits(gid);
         return std.fmt.allocPrint(self.allocator, "{d} 0 d0\n{s}", .{ wx, ops });

@@ -397,6 +397,10 @@ test "sbix parse and glyph extraction (SbixTest fixture)" {
 
     // .notdef (gid 0) has no bitmap.
     try testing.expect(sbix.glyphBitmap(0) == null);
+
+    // 'C' (gid 3): a 'dupe' record that resolves to A's bitmap.
+    const c = sbix.glyphBitmap(3).?;
+    try testing.expectEqualSlices(u8, a.pixels.png, c.pixels.png);
 }
 
 test "CBDT/CBLC parse and glyph extraction (CbdtTest fixture)" {
@@ -453,6 +457,165 @@ test "EBDT/EBLC 1-bit pixel glyph extraction (Cozette OTB)" {
     try testing.expectEqualSlices(u8, &.{
         0x00, 0x00, 0x38, 0x44, 0x44, 0x44, 0x7C, 0x44, 0x44, 0x44, 0x00, 0x00, 0x00,
     }, rows);
+}
+
+/// Test helper: builds CBLC/CBDT byte blobs for parser tests without
+/// needing fixture fonts.
+const TableBuilder = struct {
+    bytes: std.ArrayListUnmanaged(u8) = .empty,
+
+    fn u8v(self: *TableBuilder, v: u8) *TableBuilder {
+        self.bytes.append(testing.allocator, v) catch unreachable;
+        return self;
+    }
+    fn u16v(self: *TableBuilder, v: u16) *TableBuilder {
+        self.bytes.appendSlice(testing.allocator, &@as([2]u8, @bitCast(std.mem.nativeToBig(u16, v)))) catch unreachable;
+        return self;
+    }
+    fn u32v(self: *TableBuilder, v: u32) *TableBuilder {
+        self.bytes.appendSlice(testing.allocator, &@as([4]u8, @bitCast(std.mem.nativeToBig(u32, v)))) catch unreachable;
+        return self;
+    }
+    fn raw(self: *TableBuilder, data: []const u8) *TableBuilder {
+        self.bytes.appendSlice(testing.allocator, data) catch unreachable;
+        return self;
+    }
+    fn deinit(self: *TableBuilder) void {
+        self.bytes.deinit(testing.allocator);
+    }
+
+    /// CBLC/EBLC with one strike whose IndexSubTableArray (one entry:
+    /// [first, last] → subtable at array+8) is followed by `subtable`.
+    fn cblc(self: *TableBuilder, first: u16, last: u16, ppem: u8, bit_depth: u8, subtable: []const u8) []const u8 {
+        _ = self.u16v(3).u16v(0).u32v(1); // header: version 3.0, numSizes 1
+        _ = self.u32v(56).u32v(0).u32v(1).u32v(0); // record: arrayOff 56, size, numSubtables 1, colorRef
+        for (0..28) |_| _ = self.u8v(0); // sbit line metrics (2 × 12) + start/end glyph (ignored by parser)
+        _ = self.u8v(ppem).u8v(ppem).u8v(bit_depth).u8v(0); // ppemX/Y, bitDepth, flags
+        _ = self.u16v(first).u16v(last).u32v(8); // array entry → subtable at array+8
+        _ = self.raw(subtable);
+        return self.bytes.items;
+    }
+};
+
+/// A minimal but valid-headered PNG blob (only the 24-byte prefix is read).
+fn fakePng(comptime w: u32, comptime h: u32) [24]u8 {
+    var png = [_]u8{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R' } ++ [_]u8{0} ** 8;
+    std.mem.writeInt(u32, png[16..20], w, .big);
+    std.mem.writeInt(u32, png[20..24], h, .big);
+    return png;
+}
+
+test "CBDT index format 3 (u16 offsets) with image format 17" {
+    const png = fakePng(2, 3);
+    // CBDT: two format-17 records (small metrics + u32 len + PNG).
+    var cbdt_b = TableBuilder{};
+    defer cbdt_b.deinit();
+    _ = cbdt_b.u8v(3).u8v(2).u8v(1).u8v(3).u8v(2).u32v(png.len).raw(&png); // gid 1: h3 w2 bx1 by3 adv2
+    const rec_len: u16 = @intCast(cbdt_b.bytes.items.len);
+    _ = cbdt_b.u8v(3).u8v(2).u8v(0).u8v(1).u8v(2).u32v(png.len).raw(&png); // gid 2: by 1
+    const cbdt_data = cbdt_b.bytes.items;
+
+    // Index subtable: format 3, image format 17, offsets [0, rec, 2*rec].
+    var sub = TableBuilder{};
+    defer sub.deinit();
+    _ = sub.u16v(3).u16v(17).u32v(0).u16v(0).u16v(rec_len).u16v(rec_len * 2);
+
+    var cblc_b = TableBuilder{};
+    defer cblc_b.deinit();
+    const parsed = try Cbdt.parse(cblc_b.cblc(1, 2, 64, 32, sub.bytes.items), cbdt_data);
+
+    const g1 = parsed.glyphBitmap(1).?;
+    try testing.expectEqual(@as(u32, 2), g1.width_px);
+    try testing.expectEqual(@as(u32, 3), g1.height_px);
+    try testing.expectApproxEqAbs(@as(f64, 1), g1.bearing_x, 1e-9);
+    try testing.expectApproxEqAbs(@as(f64, 0), g1.bottom_y, 1e-9); // by 3 - h 3
+    const g2 = parsed.glyphBitmap(2).?;
+    try testing.expectApproxEqAbs(@as(f64, -2), g2.bottom_y, 1e-9); // by 1 - h 3
+    try testing.expect(parsed.glyphBitmap(3) == null);
+}
+
+test "CBDT index format 4 (sparse pairs) with image format 17" {
+    const png = fakePng(4, 4);
+    var cbdt_b = TableBuilder{};
+    defer cbdt_b.deinit();
+    _ = cbdt_b.u8v(4).u8v(4).u8v(0).u8v(4).u8v(4).u32v(png.len).raw(&png);
+    const rec_len: u16 = @intCast(cbdt_b.bytes.items.len);
+    _ = cbdt_b.u8v(4).u8v(4).u8v(0).u8v(4).u8v(4).u32v(png.len).raw(&png);
+    const cbdt_data = cbdt_b.bytes.items;
+
+    // Format 4: numGlyphs, (gid, offset) pairs + sentinel pair.
+    var sub = TableBuilder{};
+    defer sub.deinit();
+    _ = sub.u16v(4).u16v(17).u32v(0).u32v(2);
+    _ = sub.u16v(5).u16v(0).u16v(9).u16v(rec_len).u16v(0).u16v(rec_len * 2);
+
+    var cblc_b = TableBuilder{};
+    defer cblc_b.deinit();
+    const parsed = try Cbdt.parse(cblc_b.cblc(5, 9, 64, 32, sub.bytes.items), cbdt_data);
+
+    try testing.expect(parsed.glyphBitmap(5) != null);
+    try testing.expect(parsed.glyphBitmap(9) != null);
+    try testing.expect(parsed.glyphBitmap(7) == null); // in range but not in the pair list
+}
+
+test "CBDT index format 5 (constant size) with image format 19" {
+    const png = fakePng(8, 8);
+    // Image format 19: u32 dataLen + PNG only; metrics come from the index.
+    var cbdt_b = TableBuilder{};
+    defer cbdt_b.deinit();
+    _ = cbdt_b.u32v(png.len).raw(&png);
+    const image_size: u32 = @intCast(cbdt_b.bytes.items.len);
+    _ = cbdt_b.u32v(png.len).raw(&png);
+    const cbdt_data = cbdt_b.bytes.items;
+
+    // Format 5: imageSize, BigGlyphMetrics (h8 w8 bx0 by8 ...), numGlyphs, gids.
+    var sub = TableBuilder{};
+    defer sub.deinit();
+    _ = sub.u16v(5).u16v(19).u32v(0).u32v(image_size);
+    _ = sub.u8v(8).u8v(8).u8v(0).u8v(8).u8v(8).u8v(0).u8v(0).u8v(8); // big metrics
+    _ = sub.u32v(2).u16v(3).u16v(7); // two glyphs: gids 3 and 7
+
+    var cblc_b = TableBuilder{};
+    defer cblc_b.deinit();
+    const parsed = try Cbdt.parse(cblc_b.cblc(3, 7, 32, 32, sub.bytes.items), cbdt_data);
+
+    const g7 = parsed.glyphBitmap(7).?;
+    try testing.expectEqual(@as(u32, 8), g7.width_px);
+    try testing.expectApproxEqAbs(@as(f64, 0), g7.bottom_y, 1e-9); // by 8 - h 8
+    try testing.expect(parsed.glyphBitmap(5) == null); // in range, not in gid list
+}
+
+test "EBDT image formats 6 and 7 (big metrics, byte/bit-aligned mono)" {
+    // Glyph 1: format 6, 3x2 byte-aligned rows; glyph 2: format 7, 3x2
+    // bit-aligned (6 bits → 1 byte).
+    var ebdt_b = TableBuilder{};
+    defer ebdt_b.deinit();
+    _ = ebdt_b.u8v(2).u8v(3).u8v(0).u8v(2).u8v(3).u8v(0).u8v(0).u8v(2); // big metrics h2 w3
+    _ = ebdt_b.u8v(0b1010_0000).u8v(0b0100_0000); // rows: 101 / 010
+    const rec1_len: u32 = @intCast(ebdt_b.bytes.items.len);
+    _ = ebdt_b.u8v(2).u8v(3).u8v(0).u8v(2).u8v(3).u8v(0).u8v(0).u8v(2);
+    _ = ebdt_b.u8v(0b1010_1000); // 101 010 packed continuously
+    const ebdt_data = ebdt_b.bytes.items;
+
+    // Two subtables would need two array entries; use one glyph per test
+    // via two parses instead.
+    inline for (.{ .{ 6, 0, rec1_len }, .{ 7, rec1_len, @as(u32, @intCast(ebdt_data.len)) } }, 0..) |case, i| {
+        var sub = TableBuilder{};
+        defer sub.deinit();
+        _ = sub.u16v(1).u16v(case[0]).u32v(0).u32v(case[1]).u32v(case[2]);
+        var cblc_b = TableBuilder{};
+        defer cblc_b.deinit();
+        const parsed = try Cbdt.parse(cblc_b.cblc(1, 1, 16, 1, sub.bytes.items), ebdt_data);
+        const g = parsed.glyphBitmap(1).?;
+        try testing.expectEqual(@as(u32, 3), g.width_px);
+        try testing.expectEqual(@as(u32, 2), g.height_px);
+        const mono = g.pixels.mono;
+        try testing.expectEqual(i == 1, mono.bit_aligned);
+        // Both decode to the same byte-aligned rows.
+        const rows = try packMonoRows(testing.allocator, mono, 3, 2);
+        defer testing.allocator.free(rows);
+        try testing.expectEqualSlices(u8, &.{ 0b1010_0000, 0b0100_0000 }, rows);
+    }
 }
 
 test "pngDimensions rejects non-PNG data" {

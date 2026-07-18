@@ -79,3 +79,24 @@ test "SVG table doc lookup (Bungee Color SVG)" {
     // Gid outside every record has no document.
     try testing.expect(table.docForGlyph(0xFFFF) == null);
 }
+
+test "SVG table fallback cases (SvgTest fixture)" {
+    // Fixture built by scripts/gen_svg_font.py: gid 1 = supported doc,
+    // gid 2 = doc with fill-opacity, gid 3 = gzipped doc, gids 4-5 = one
+    // multi-glyph document.
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/svg/SvgTest.ttf") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+
+    const table = try SvgTable.parse(font.getTable("SVG ".*).?);
+    // Supported and opacity docs are returned (opacity is judged later by
+    // the SVG renderer, not here).
+    try testing.expect(table.docForGlyph(1) != null);
+    try testing.expect(table.docForGlyph(2) != null);
+    // Gzip-compressed documents are unsupported.
+    try testing.expect(table.docForGlyph(3) == null);
+    // Multi-glyph-range documents are unsupported (both covered gids).
+    try testing.expect(table.docForGlyph(4) == null);
+    try testing.expect(table.docForGlyph(5) == null);
+}

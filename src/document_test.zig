@@ -3220,6 +3220,48 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "0.784 0.000 0.000 rg") != null);
 }
 
+test "unsupported SVG glyphs fall back to the mono outline" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+
+    // SvgTest fixture: A supported; B (transparency), C (gzip), D/E
+    // (multi-glyph doc) must all fall back to their real outlines.
+    const svgf = doc.loadFont("test/fonts/svg/SvgTest.ttf", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDE", .{ .font = svgf, .size = 24 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Exactly one Type3 CharProc (A); the run switches between the Type3
+    // and the CID outline font mid-text.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Differences [1 /g1] >>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 24.00 Tf") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/E1 24.00 Tf") != null);
+}
+
+test "color font used on multiple pages gets per-page /Tc resources" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+
+    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 24 });
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600}", .{ .font = emoji, .size = 24 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // One shared Type3 font (2 CharProcs), referenced from both pages'
+    // /Font resources plus used via Tf on both pages: ≥4 /Tc1 mentions.
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, pdf, "/Subtype /Type3"));
+    try std.testing.expect(std.mem.count(u8, pdf, "/Tc1") >= 4);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Differences [1 /g1 /g2] >>") != null);
+}
+
 test "Type3 color fonts never assign single-byte code 32 (word-spacing hazard)" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

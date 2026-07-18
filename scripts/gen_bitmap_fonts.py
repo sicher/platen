@@ -55,11 +55,11 @@ def png_b():
     return buf.getvalue()
 
 
-def base_font():
+def base_font(extra_glyphs=()):
     fb = FontBuilder(UPEM, isTTF=True)
-    glyph_order = [".notdef", "A", "B"]
+    glyph_order = [".notdef", "A", "B", *extra_glyphs]
     fb.setupGlyphOrder(glyph_order)
-    fb.setupCharacterMap({ord("A"): "A", ord("B"): "B"})
+    fb.setupCharacterMap({ord(g): g for g in glyph_order if len(g) == 1})
     pen = TTGlyphPen(None)  # empty outlines; bitmaps carry the artwork
     fb.setupGlyf({name: pen.glyph() for name in glyph_order})
     fb.setupHorizontalMetrics({name: (1000, 0) for name in glyph_order})
@@ -70,7 +70,9 @@ def base_font():
 
 
 def build_sbix(png_by_name):
-    fb = base_font()
+
+
+    fb = base_font(extra_glyphs=("C",))
     fb.setupNameTable({"familyName": "SbixTest", "styleName": "Regular"})
     sbix = newTable("sbix")
     sbix.version = 1
@@ -86,6 +88,11 @@ def build_sbix(png_by_name):
     strike.glyphs["B"] = Glyph(
         glyphName="B", graphicType="png ", originOffsetX=8, originOffsetY=-8,
         imageData=png_by_name["B"],
+    )
+    # C (gid 3): a 'dupe' record referencing A (gid 1).
+    strike.glyphs["C"] = Glyph(
+        glyphName="C", graphicType="dupe", originOffsetX=0, originOffsetY=0,
+        referenceGlyphName="A",
     )
     sbix.strikes = {PPEM: strike}
     fb.font["sbix"] = sbix
