@@ -5,12 +5,47 @@
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
-- **All color-font formats now supported**: COLR v0/v1, OT-SVG, CBDT/sbix
-  color bitmaps, EBDT/EBLC pixel fonts.
+- **Audit backlog (from the 2026-07-19 codebase pass)**, remaining items in
+  priority order:
+  1. Extract the ~700-line color-font subsystem from document.zig into
+     src/color_fonts.zig (free fns taking *Document; ~7 call sites).
+  2. Decompose the ~1120-line Document.output() into per-phase helpers
+     (reserve IDs / catalog+PDFA / fonts / images / SVGs / pages / xref) —
+     verify byte-identical output vs references.
+  3. Fuzz the new parsers (colr, bitmap_glyphs, svg_table) with mutated
+     fixture bytes in fuzz_tests.zig.
+  4. Perf touches: writeStreamCompressed early-out for tiny streams;
+     binary-search in svg_table.docForGlyph / CBDT subtable lookup;
+     add a color-font page to perf_test.zig.
+  5. Optional: colr.zig test-fixture helper (interp setup repeats in ~6 tests).
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+
+## What We Did (Session 2026-07-19 #18 — codebase audit + fixes)
+- **Audit pass** (refactoring / test gaps / latent bugs / perf) — one review
+  agent + inline verification. Findings ranked and largely worked off:
+- **Bug fixed: Type3 code 32 / word spacing** (commit 4b7b722): PDF Tw adds
+  advance to every single-byte code 32 → the 32nd color glyph mis-spaced.
+  Codes now skip 32 (254/subfont, Encoding restart "33 /g33", zero Widths
+  placeholder). Renders pixel-identical; pixel_font/color_split refs
+  refreshed. Also alpha_scale defer in renderMasked.
+- **Bug fixed: SVG transparency check was dead** (215ad52): opacity states
+  only populate during toPdfContent — check moved after rendering (was
+  letting /GS refs leak into CharProcs).
+- **Coverage added** (215ad52): byte-blob tests (TableBuilder) for CBDT
+  index formats 3/4/5 + image formats 6/7/19; sbix 'dupe' (fixture glyph C);
+  SvgTest fixture (scripts/gen_svg_font.py) for gzip/multi-glyph/transparency
+  fallbacks (note: fontTools gunzips docList on load — pass gzip as raw
+  bytes, verify magic in raw file); multi-page /Tc resources test.
+- **Consolidation** (70f7aff): BE readers → binary.zig (colr re-exports;
+  ttf/opentype keep unchecked ones deliberately); writeF64_2/3 → comptime
+  writeF64N; zlib.compress → delegate; walkFrom/walkAllOff → SegEmitter
+  (trailing close-quad was dead code; new all-off-curve test).
+- Audit notes: kerning/cmap already cached (O(1)); simgrep clone clusters in
+  cli/tests deemed acceptable; pdfa.zig XMP repetition intentional.
+- **All 390 tests pass** (381 at session start).
 
 ## What We Did (Session 2026-07-18 #17 — real CBDT, indexed PNG, pixel fonts)
 - **Vendored a real bitmap font**: `NotoColorEmoji-CBDT-subset.ttf` (27KB) —
