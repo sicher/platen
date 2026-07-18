@@ -3220,6 +3220,41 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "0.784 0.000 0.000 rg") != null);
 }
 
+test "Type3 color fonts never assign single-byte code 32 (word-spacing hazard)" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+
+    const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    // >31 distinct glyphs so the code space must skip 32: PDF applies word
+    // spacing (Tw) to every single-byte code 32, which would silently add
+    // extra advance to whichever glyph got that code.
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "abcdefghijklmnopqrstuvwxyz0123456789", .{ .font = cozette, .size = 13 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // The Encoding restarts at 33 after /g31, and no glyph is named /g32.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/g31 33 /g33") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/g32") == null);
+    // Widths carries a zero placeholder for the unassigned code 32, keeping
+    // the array contiguous from FirstChar 1 to LastChar.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FirstChar 1") != null);
+    // No color Tj hex string contains byte 0x20 (code 32): scan the shown
+    // strings of the Type3 run.
+    var it = std.mem.splitSequence(u8, pdf, "> Tj");
+    while (it.next()) |chunk| {
+        const open = std.mem.lastIndexOfScalar(u8, chunk, '<') orelse continue;
+        const hex = chunk[open + 1 ..];
+        if (hex.len % 2 != 0) continue; // not a single-byte-code string
+        var i: usize = 0;
+        while (i + 2 <= hex.len) : (i += 2) {
+            try std.testing.expect(!std.mem.eql(u8, hex[i .. i + 2], "20"));
+        }
+    }
+}
+
 test "COLR v0 font emits a Type3 color font (Bungee Color)" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

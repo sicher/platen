@@ -914,8 +914,8 @@ pub const PaintInterp = struct {
         try self.w.print("/Ga{d} gs\n", .{idx + 1});
         const saved = self.alpha_scale;
         self.alpha_scale = saved * alpha;
+        defer self.alpha_scale = saved; // restore even on error
         try self.renderPaint(content_off, depth + 1);
-        self.alpha_scale = saved;
         try self.w.writeAll("Q\n");
     }
 

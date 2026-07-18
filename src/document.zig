@@ -220,7 +220,7 @@ const ColorFontPlan = struct {
         return self.font_index + 1;
     }
 
-    /// Number of Type3 subfonts needed (255 single-byte codes each).
+    /// Number of Type3 subfonts needed (254 single-byte codes each).
     fn subfontCount(self: ColorFontPlan) usize {
         return (self.gids.items.len + max_color_glyphs - 1) / max_color_glyphs;
     }
@@ -231,13 +231,21 @@ const ColorFontPlan = struct {
         return .{ .lo = lo, .hi = @min(self.gids.items.len, lo + max_color_glyphs) };
     }
 
+    /// Single-byte PDF code of the glyph at 0-based index `idx` within its
+    /// subfont. Code 32 is never assigned: PDF word spacing (Tw) adds extra
+    /// advance to every single-byte code 32, which would silently mis-space
+    /// the 32nd color glyph whenever word spacing is active.
+    fn localCode(idx: usize) u8 {
+        return @intCast(if (idx < 31) idx + 1 else idx + 2);
+    }
+
     /// Subfont + PDF code for a color glyph, or null if it has none (not a
     /// color glyph — caller falls back to the CID font).
     fn slotFor(self: ColorFontPlan, gid: u16) ?Slot {
         const ord = self.code_of.get(gid) orelse return null;
         return .{
             .sub = (ord - 1) / max_color_glyphs,
-            .code = @intCast((ord - 1) % max_color_glyphs + 1),
+            .code = localCode((ord - 1) % max_color_glyphs),
         };
     }
 
@@ -272,9 +280,10 @@ const PlanImage = union(enum) {
     mask: struct { width: u32, height: u32, rows: []u8 },
 };
 
-/// Max distinct color glyphs per Type3 subfont (single-byte PDF codes 1..255).
-/// Fonts using more color glyphs are split across multiple Type3 fonts.
-const max_color_glyphs = 255;
+/// Max distinct color glyphs per Type3 subfont: single-byte PDF codes
+/// 1..255 minus code 32 (see ColorFontPlan.localCode). Fonts using more
+/// color glyphs are split across multiple Type3 fonts.
+const max_color_glyphs = 254;
 
 /// Format the /Font resource name of a plan's subfont: `Tc{n}` for the first
 /// (the common case, and the historical name), `Tc{n}s{k}` for overflow
@@ -2942,29 +2951,48 @@ pub const Document = struct {
         for (0..plan.subfontCount()) |sub| {
             const range = plan.subfontRange(sub);
             const count = range.hi - range.lo;
+            const last_code = ColorFontPlan.localCode(count - 1);
 
-            // CharProcs: << /g1 id 0 R ... >> (codes local to the subfont).
+            // CharProcs: << /g1 id 0 R ... >> (codes local to the subfont;
+            // code 32 is never assigned, see ColorFontPlan.localCode).
             var cp = std.Io.Writer.Allocating.init(arena);
             try cp.writer.writeAll("<< ");
             for (0..count) |i| {
-                try cp.writer.print("/g{d} {d} 0 R ", .{ i + 1, plan.first_charproc_id + @as(ObjectId, @intCast(range.lo + i)) });
+                try cp.writer.print("/g{d} {d} 0 R ", .{ ColorFontPlan.localCode(i), plan.first_charproc_id + @as(ObjectId, @intCast(range.lo + i)) });
             }
             try cp.writer.writeAll(">>");
 
-            // Encoding: << /Type /Encoding /Differences [1 /g1 /g2 ... ] >>
+            // Encoding: << /Type /Encoding /Differences [1 /g1 ... /g31 33
+            // /g33 ... ] >> (a restart marker jumps over unassigned code 32).
             var enc = std.Io.Writer.Allocating.init(arena);
             try enc.writer.writeAll("<< /Type /Encoding /Differences [1");
+            var prev_code: u8 = 0;
             for (0..count) |i| {
-                try enc.writer.print(" /g{d}", .{i + 1});
+                const code = ColorFontPlan.localCode(i);
+                if (i > 0 and code != prev_code + 1) {
+                    try enc.writer.print(" {d}", .{code});
+                }
+                try enc.writer.print(" /g{d}", .{code});
+                prev_code = code;
             }
             try enc.writer.writeAll("] >>");
 
-            // Widths: [w1 w2 ...] in glyph space (font units).
+            // Widths: [w1 w2 ...] in glyph space (font units), contiguous
+            // from FirstChar; the unassigned code 32 gets a zero entry.
             var wd = std.Io.Writer.Allocating.init(arena);
             try wd.writer.writeByte('[');
-            for (plan.widths_fu.items[range.lo..range.hi], 0..) |width, i| {
-                if (i > 0) try wd.writer.writeByte(' ');
-                try wd.writer.print("{d}", .{width});
+            {
+                var i: usize = 0;
+                var code: usize = 1; // wider than u8: code 255 + 1 must not overflow
+                while (code <= last_code) : (code += 1) {
+                    if (code > 1) try wd.writer.writeByte(' ');
+                    if (code == 32) {
+                        try wd.writer.writeByte('0');
+                        continue;
+                    }
+                    try wd.writer.print("{d}", .{plan.widths_fu.items[range.lo + i]});
+                    i += 1;
+                }
             }
             try wd.writer.writeByte(']');
 
@@ -2991,7 +3019,7 @@ pub const Document = struct {
             try font_dict.put("CharProcs", Value.literal(cp.writer.buffered()));
             try font_dict.put("Encoding", Value.literal(enc.writer.buffered()));
             try font_dict.put("FirstChar", Value.int(1));
-            try font_dict.put("LastChar", Value.int(@intCast(count)));
+            try font_dict.put("LastChar", Value.int(last_code));
             try font_dict.put("Widths", Value.literal(wd.writer.buffered()));
             try font_dict.put("Resources", Value.literal(resources));
             try font_dict.put("ToUnicode", Value.ref(.{ .id = tounicode_id }));
@@ -3024,7 +3052,7 @@ pub const Document = struct {
         );
         try w.writer.print("{d} beginbfchar\n", .{hi - lo});
         for (plan.gids.items[lo..hi], 0..) |gid, i| {
-            const code: u8 = @intCast(i + 1);
+            const code = ColorFontPlan.localCode(i);
             const cp = plan.emb.glyph_to_codepoint.get(gid) orelse 0xFFFD;
             if (cp > 0xFFFF) {
                 const adjusted = cp - 0x10000;
