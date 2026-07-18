@@ -3283,6 +3283,10 @@ fn generateColorBitmapPdf(allocator: std.mem.Allocator) ![]u8 {
     // with a semi-transparent half (SMask check) at a nonzero offset.
     const sbix = try doc.loadFont("test/fonts/bitmap/SbixTest.ttf", null);
     const cbdt = try doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", null);
+    // Real-world CBDT: Google's Noto Color Emoji CBDT build subset to 12
+    // emoji (fontTools.subset; 109ppem strike, index format 1, image
+    // format 17, no glyf table at all).
+    const noto = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-CBDT-subset.ttf", null);
 
     const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
     inter.embedded.setFeature(.kern, false);
@@ -3301,6 +3305,11 @@ fn generateColorBitmapPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "CBDT (A: quadrants at origin, B: teal bearing 4,60 px):", .{ .font = inter, .size = 11 });
     y += 90;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "AB", .{ .font = cbdt, .size = 72 });
+    y += 60;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Noto Color Emoji (real CBDT subset):", .{ .font = inter, .size = 11 });
+    y += 60;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "\u{2601}\u{2764}\u{2B50}\u{1F308}\u{1F355}\u{1F389}\u{1F39B}\u{1F422}\u{1F44D}\u{1F600}\u{1F680}\u{1F984}", .{ .font = noto, .size = 32 });
 
     return doc.output();
 }

@@ -331,9 +331,11 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
         return error.UnsupportedPngColorType;
     };
 
-    // Collect all IDAT chunks
+    // Collect all IDAT chunks (plus PLTE/tRNS for indexed color)
     var idat_chunks = std.ArrayListUnmanaged([]const u8).empty;
     defer idat_chunks.deinit(allocator);
+    var plte: ?[]const u8 = null;
+    var trns: ?[]const u8 = null;
 
     var pos: usize = 8; // After signature
     while (pos + 12 <= data.len) {
@@ -344,6 +346,10 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
 
         if (ctype == PngChunk.IDAT) {
             try idat_chunks.append(allocator, data[pos + 8 .. pos + 8 + len]);
+        } else if (ctype == PngChunk.PLTE) {
+            plte = data[pos + 8 .. pos + 8 + len];
+        } else if (ctype == PngChunk.tRNS) {
+            trns = data[pos + 8 .. pos + 8 + len];
         } else if (ctype == PngChunk.IEND) {
             break;
         }
@@ -414,8 +420,10 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
         rgb_data = separated.rgb;
         alpha_data = separated.alpha;
     } else if (color_type == .indexed) {
-        // TODO: Expand indexed color using palette
-        return error.IndexedPngNotYetSupported;
+        const palette = plte orelse return error.MissingPngPalette;
+        const expanded = try expandIndexedPng(allocator, unfiltered, width, height, bit_depth, palette, trns);
+        rgb_data = expanded.rgb;
+        alpha_data = expanded.alpha;
     } else {
         // RGB or grayscale without alpha - use data directly
         rgb_data = try allocator.dupe(u8, unfiltered);
@@ -447,7 +455,8 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
         .width = width,
         .height = height,
         .color_space = output_color_space,
-        .bits_per_component = bit_depth,
+        // Indexed data is expanded to 8-bit RGB regardless of index depth.
+        .bits_per_component = if (color_type == .indexed) 8 else bit_depth,
         .format = .png,
         .data = compressed_rgb,
         .alpha_data = compressed_alpha,
@@ -455,6 +464,59 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
         .owns_data = true, // We created the compressed data
     };
     return image;
+}
+
+/// Expand unfiltered indexed-color scanlines (palette indices at 1/2/4/8
+/// bits) into 8-bit RGB, plus an alpha channel when tRNS marks any palette
+/// entry as translucent. Entries beyond the tRNS array are opaque.
+fn expandIndexedPng(
+    allocator: std.mem.Allocator,
+    unfiltered: []const u8,
+    width: u32,
+    height: u32,
+    bit_depth: u8,
+    palette: []const u8,
+    trns: ?[]const u8,
+) !struct { rgb: []u8, alpha: ?[]u8 } {
+    if (bit_depth != 1 and bit_depth != 2 and bit_depth != 4 and bit_depth != 8) {
+        return error.UnsupportedPngBitDepth;
+    }
+    const scanline_width = calculateScanlineWidth(width, .indexed, bit_depth);
+
+    const rgb = try allocator.alloc(u8, @as(usize, width) * height * 3);
+    errdefer allocator.free(rgb);
+    var alpha: ?[]u8 = if (trns != null) try allocator.alloc(u8, @as(usize, width) * height) else null;
+    errdefer if (alpha) |a| allocator.free(a);
+
+    var any_translucent = false;
+    for (0..height) |y| {
+        const row = unfiltered[y * scanline_width ..];
+        for (0..width) |x| {
+            const bit_pos = x * bit_depth;
+            const byte = row[bit_pos / 8];
+            const shift: u3 = @intCast(8 - bit_depth - (bit_pos % 8));
+            const mask: u8 = @intCast((@as(u16, 1) << @intCast(bit_depth)) - 1);
+            const idx: usize = (byte >> shift) & mask;
+
+            const out = (y * width + x) * 3;
+            if (idx * 3 + 2 >= palette.len) return error.InvalidPngPaletteIndex;
+            rgb[out] = palette[idx * 3];
+            rgb[out + 1] = palette[idx * 3 + 1];
+            rgb[out + 2] = palette[idx * 3 + 2];
+            if (alpha) |a| {
+                const av: u8 = if (idx < trns.?.len) trns.?[idx] else 255;
+                a[y * width + x] = av;
+                if (av != 255) any_translucent = true;
+            }
+        }
+    }
+
+    // A tRNS chunk whose entries are all opaque needs no SMask.
+    if (alpha != null and !any_translucent) {
+        allocator.free(alpha.?);
+        alpha = null;
+    }
+    return .{ .rgb = rgb, .alpha = alpha };
 }
 
 fn calculateScanlineWidth(width: u32, color_type: PngColorType, bit_depth: u8) usize {
@@ -663,6 +725,43 @@ test "parse PNG file" {
     try std.testing.expectEqual(ImageFormat.png, image.format);
     // PNG with alpha should have alpha_data
     try std.testing.expect(image.alpha_data != null);
+}
+
+test "parse indexed PNG with tRNS (2-bit palette)" {
+    const allocator = std.testing.allocator;
+
+    // Hand-built 4x2 indexed PNG, bit depth 2. Palette: red, green, blue;
+    // tRNS marks blue as alpha 128. Pixels: (0,1,2,0) / (2,1,0,2).
+    const png = [_]u8{
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x02, 0x03, 0x00, 0x00, 0x00, 0x02, 0xC6, 0x95,
+        0xF0, 0x00, 0x00, 0x00, 0x09, 0x50, 0x4C, 0x54, 0x45, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00,
+        0x00, 0xFF, 0x2D, 0x4A, 0xCD, 0x8A, 0x00, 0x00, 0x00, 0x03, 0x74, 0x52, 0x4E, 0x53, 0xFF, 0xFF,
+        0x80, 0x3A, 0x72, 0x8E, 0x61, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63,
+        0x90, 0x60, 0x98, 0x04, 0x00, 0x00, 0xDE, 0x00, 0xAB, 0x1A, 0xFC, 0x37, 0x77, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    };
+
+    const image = try Image.fromMemory(allocator, &png, false);
+    defer allocator.destroy(image);
+    defer image.deinit();
+
+    try std.testing.expectEqual(@as(u32, 4), image.width);
+    try std.testing.expectEqual(@as(u32, 2), image.height);
+    try std.testing.expectEqual(ColorSpace.device_rgb, image.color_space);
+    try std.testing.expectEqual(@as(u8, 8), image.bits_per_component); // expanded from 2-bit indices
+
+    const zlib = @import("zlib.zig");
+    const rgb = try zlib.decompress(allocator, image.data, 24);
+    defer allocator.free(rgb);
+    try std.testing.expectEqualSlices(u8, &.{
+        255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 0, 0, // red green blue red
+        0, 0, 255, 0, 255, 0, 255, 0, 0, 0, 0, 255, // blue green red blue
+    }, rgb);
+
+    const alpha = try zlib.decompress(allocator, image.alpha_data.?, 8);
+    defer allocator.free(alpha);
+    try std.testing.expectEqualSlices(u8, &.{ 255, 255, 128, 255, 128, 255, 255, 128 }, alpha);
 }
 
 test "Paeth predictor" {

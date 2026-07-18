@@ -71,14 +71,21 @@ const SubsetTables = struct {
     hmtx: []const u8,
     loca_format: i16,
 
-    fn init(font: *const ttf.Font) !SubsetTables {
+    fn init(emb: *const EmbeddedFont) !SubsetTables {
+        const font = &emb.font;
         const head = font.head orelse return error.MissingTable;
+        // Bitmap-only fonts get a synthesized all-empty loca and an empty
+        // glyf (see EmbeddedFont.synthetic_loca).
+        const glyf = font.getTable("glyf".*) orelse
+            (if (emb.synthetic_loca != null) &[_]u8{} else return error.MissingTable);
+        const loca = font.getTable("loca".*) orelse
+            (emb.synthetic_loca orelse return error.MissingTable);
         return .{
             .head = head,
             .hhea = font.hhea orelse return error.MissingTable,
             .maxp = font.maxp orelse return error.MissingTable,
-            .glyf = font.getTable("glyf".*) orelse return error.MissingTable,
-            .loca = font.getTable("loca".*) orelse return error.MissingTable,
+            .glyf = glyf,
+            .loca = loca,
             .hmtx = font.getTable("hmtx".*) orelse return error.MissingTable,
             .loca_format = head.index_to_loc_format,
         };
@@ -230,6 +237,12 @@ pub const EmbeddedFont = struct {
     bitmap_info: ?bitmap_glyphs.BitmapInfo = null,
     bitmap_checked: bool = false,
 
+    /// All-zero loca synthesized for bitmap-only fonts (e.g. Noto Color
+    /// Emoji CBDT), which carry no glyf/loca at all: the CID companion font
+    /// is then subset with every outline empty (glyphs render via the Type3
+    /// bitmap path instead).
+    synthetic_loca: ?[]u8 = null,
+
     /// Load and parse a TTF font from file
     pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !*EmbeddedFont {
         const result = try ttf.Font.fromFile(io, allocator, path);
@@ -336,11 +349,27 @@ pub const EmbeddedFont = struct {
         // Allocate and copy name (may be UTF-16, need to decode)
         const name = try allocator.dupe(u8, decodeFontName(ps_name));
 
+        // Bitmap-only fonts have no outlines; synthesize an all-empty loca
+        // (paired with a zero-length glyf in SubsetTables) so the CID
+        // companion font can still be subset and embedded.
+        var synthetic_loca: ?[]u8 = null;
+        if (font.getTable("glyf".*) == null and
+            (font.getTable("CBLC".*) != null or font.getTable("sbix".*) != null))
+        {
+            if (font.maxp) |maxp| {
+                const entry_size: usize = if (head.index_to_loc_format == 0) 2 else 4;
+                synthetic_loca = try allocator.alloc(u8, (@as(usize, maxp.num_glyphs) + 1) * entry_size);
+                @memset(synthetic_loca.?, 0);
+            }
+        }
+        errdefer if (synthetic_loca) |sl| allocator.free(sl);
+
         const embedded = try allocator.create(EmbeddedFont);
         embedded.* = .{
             .name = name,
             .data = data,
             .font = font,
+            .synthetic_loca = synthetic_loca,
             .widths = widths,
             .allocator = allocator,
             .owns_data = owns_data,
@@ -386,6 +415,7 @@ pub const EmbeddedFont = struct {
         // Free scratch buffers
         self.scratch_codepoints.deinit(self.allocator);
         self.scratch_glyphs.deinit(self.allocator);
+        if (self.synthetic_loca) |sl| self.allocator.free(sl);
         self.allocator.destroy(self);
     }
 
@@ -1525,7 +1555,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 /// This creates a sparse font with entries for all glyphs 0..max_gid
 fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]const u8 {
     const font = &emb.font;
-    const tables = try SubsetTables.init(font);
+    const tables = try SubsetTables.init(emb);
 
     // Collect used glyph IDs from CID mode
     var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
@@ -1637,7 +1667,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
 /// and remaps glyph IDs for maximum size reduction
 fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]const u8 {
     const font = &emb.font;
-    const tables = try SubsetTables.init(font);
+    const tables = try SubsetTables.init(emb);
 
     // Collect used glyph IDs
     // Use cid_glyph_widths instead of cid_used_glyphs because calt substitutions
