@@ -11,10 +11,10 @@
 //! outlines).
 
 const std = @import("std");
-const colr = @import("colr.zig");
+const binary = @import("binary.zig");
 
-const readU16 = colr.readU16;
-const readU32 = colr.readU32;
+const readU16 = binary.readU16;
+const readU32 = binary.readU32;
 
 pub const SvgTable = struct {
     data: []const u8,

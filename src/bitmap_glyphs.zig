@@ -11,12 +11,12 @@
 //! allocated.
 
 const std = @import("std");
-const colr = @import("colr.zig");
+const binary = @import("binary.zig");
 
-const readU8 = colr.readU8;
-const readU16 = colr.readU16;
-const readI16 = colr.readI16;
-const readU32 = colr.readU32;
+const readU8 = binary.readU8;
+const readU16 = binary.readU16;
+const readI16 = binary.readI16;
+const readU32 = binary.readU32;
 
 fn readI8(data: []const u8, off: usize) i8 {
     return @bitCast(readU8(data, off));

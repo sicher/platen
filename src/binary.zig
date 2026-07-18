@@ -1,9 +1,51 @@
 //! Binary serialization helpers for big-endian data (TrueType/OpenType).
 //!
-//! Provides convenience functions for appending big-endian integers to buffers,
-//! reducing verbosity of std.mem.toBytes(std.mem.nativeToBig(...)) pattern.
+//! Provides convenience functions for appending big-endian integers to
+//! buffers, plus bounds-checked big-endian readers (returning 0 on
+//! overflow) shared by the color-font table parsers. Note that ttf.zig /
+//! opentype.zig keep their own unchecked readers by design: those run in
+//! hot per-glyph paths on already-validated tables.
 
 const std = @import("std");
+
+// ============================================================================
+// Bounds-checked big-endian readers
+// ============================================================================
+
+pub fn readU8(data: []const u8, off: usize) u8 {
+    if (off >= data.len) return 0;
+    return data[off];
+}
+
+pub fn readU16(data: []const u8, off: usize) u16 {
+    if (off + 2 > data.len) return 0;
+    return std.mem.readInt(u16, data[off..][0..2], .big);
+}
+
+pub fn readI16(data: []const u8, off: usize) i16 {
+    if (off + 2 > data.len) return 0;
+    return std.mem.readInt(i16, data[off..][0..2], .big);
+}
+
+pub fn readU24(data: []const u8, off: usize) u32 {
+    if (off + 3 > data.len) return 0;
+    return (@as(u32, data[off]) << 16) | (@as(u32, data[off + 1]) << 8) | data[off + 2];
+}
+
+pub fn readU32(data: []const u8, off: usize) u32 {
+    if (off + 4 > data.len) return 0;
+    return std.mem.readInt(u32, data[off..][0..4], .big);
+}
+
+/// Read an F2Dot14 fixed-point value as an f64.
+pub fn readF2Dot14(data: []const u8, off: usize) f64 {
+    return @as(f64, @floatFromInt(readI16(data, off))) / 16384.0;
+}
+
+/// Read a Fixed (16.16) value as an f64.
+pub fn readFixed(data: []const u8, off: usize) f64 {
+    return @as(f64, @floatFromInt(@as(i32, @bitCast(readU32(data, off))))) / 65536.0;
+}
 
 /// Append a big-endian u16 to an array list.
 pub fn appendBE16(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, value: u16) !void {

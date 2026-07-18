@@ -14,27 +14,10 @@ pub const Error = error{
     OutOfMemory,
 };
 
-/// Compress data using zlib (deflate with zlib header/checksum)
-/// Returns compressed data owned by the allocator
+/// Compress data using zlib (deflate with zlib header/checksum) at the
+/// default compression level. Returns compressed data owned by the allocator.
 pub fn compress(allocator: std.mem.Allocator, input: []const u8) Error![]u8 {
-    if (input.len == 0) {
-        return allocator.dupe(u8, &[_]u8{}) catch return Error.OutOfMemory;
-    }
-
-    // Estimate compressed size (worst case is slightly larger than input)
-    const bound = c.compressBound(@intCast(input.len));
-    const output = allocator.alloc(u8, bound) catch return Error.OutOfMemory;
-    errdefer allocator.free(output);
-
-    var dest_len: c.uLongf = bound;
-    const result = c.compress(output.ptr, &dest_len, input.ptr, input.len);
-
-    if (result != c.Z_OK) {
-        return Error.CompressionFailed;
-    }
-
-    // Shrink to actual size
-    return allocator.realloc(output, dest_len) catch return Error.OutOfMemory;
+    return compressLevel(allocator, input, c.Z_DEFAULT_COMPRESSION);
 }
 
 /// Compress data with specified compression level (0-9)

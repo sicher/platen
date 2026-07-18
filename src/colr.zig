@@ -18,44 +18,17 @@ const color = @import("color.zig");
 pub const Color = color.Color;
 
 // ============================================================================
-// Big-endian readers (bounds-checked, returning 0 on overflow)
+// Big-endian readers (bounds-checked; shared via binary.zig)
 // ============================================================================
 
-pub fn readU8(data: []const u8, off: usize) u8 {
-    if (off >= data.len) return 0;
-    return data[off];
-}
-
-pub fn readU16(data: []const u8, off: usize) u16 {
-    if (off + 2 > data.len) return 0;
-    return std.mem.readInt(u16, data[off..][0..2], .big);
-}
-
-pub fn readI16(data: []const u8, off: usize) i16 {
-    if (off + 2 > data.len) return 0;
-    return std.mem.readInt(i16, data[off..][0..2], .big);
-}
-
-pub fn readU24(data: []const u8, off: usize) u32 {
-    if (off + 3 > data.len) return 0;
-    return (@as(u32, data[off]) << 16) | (@as(u32, data[off + 1]) << 8) | data[off + 2];
-}
-
-pub fn readU32(data: []const u8, off: usize) u32 {
-    if (off + 4 > data.len) return 0;
-    return std.mem.readInt(u32, data[off..][0..4], .big);
-}
-
-/// Read an F2Dot14 fixed-point value (used by COLR transforms and composite
-/// glyph component scales) as an f64.
-pub fn readF2Dot14(data: []const u8, off: usize) f64 {
-    return @as(f64, @floatFromInt(readI16(data, off))) / 16384.0;
-}
-
-/// Read a Fixed (16.16) value as an f64. Used by COLR variable/transform fields.
-pub fn readFixed(data: []const u8, off: usize) f64 {
-    return @as(f64, @floatFromInt(@as(i32, @bitCast(readU32(data, off))))) / 65536.0;
-}
+const binary = @import("binary.zig");
+pub const readU8 = binary.readU8;
+pub const readU16 = binary.readU16;
+pub const readI16 = binary.readI16;
+pub const readU24 = binary.readU24;
+pub const readU32 = binary.readU32;
+pub const readF2Dot14 = binary.readF2Dot14;
+pub const readFixed = binary.readFixed;
 
 // ============================================================================
 // CPAL — color palette table
@@ -381,64 +354,52 @@ fn writeContour(w: *std.Io.Writer, pts: []const Pt) !void {
     try w.writeAll("h\n");
 }
 
-/// Walk a contour that has at least one on-curve point, starting at `si`.
-fn walkFrom(w: *std.Io.Writer, pts: []const Pt, si: usize, start: Pt) !void {
-    var cur = start;
-    var pending_off: ?Pt = null;
-    var step: usize = 1;
-    while (step <= pts.len) : (step += 1) {
-        const idx = (si + step) % pts.len;
-        const p = if (step == pts.len) start else pts[idx];
+/// Shared TrueType-contour segment emitter: feed points in order; an
+/// on-curve point emits a line (or resolves a pending control point into a
+/// quadratic), consecutive off-curve points get an implied on-curve
+/// midpoint. Closing a contour is just feeding its (on-curve) start point.
+const SegEmitter = struct {
+    w: *std.Io.Writer,
+    cur: Pt,
+    pending_off: ?Pt = null,
+
+    fn feed(self: *SegEmitter, p: Pt) !void {
         if (p.on) {
-            if (pending_off) |q| {
-                try quadTo(w, cur, q, p);
-                pending_off = null;
+            if (self.pending_off) |q| {
+                try quadTo(self.w, self.cur, q, p);
+                self.pending_off = null;
             } else {
-                try lineTo(w, p);
+                try lineTo(self.w, p);
             }
-            cur = p;
+            self.cur = p;
         } else {
-            if (pending_off) |q| {
+            if (self.pending_off) |q| {
                 const mid = Pt{ .x = (q.x + p.x) / 2, .y = (q.y + p.y) / 2, .on = true };
-                try quadTo(w, cur, q, mid);
-                cur = mid;
+                try quadTo(self.w, self.cur, q, mid);
+                self.cur = mid;
             }
-            pending_off = p;
+            self.pending_off = p;
         }
     }
-    // If a control point is still pending at the end, close with a quad to start.
-    if (pending_off) |q| {
-        try quadTo(w, cur, q, start);
+};
+
+/// Walk a contour that has at least one on-curve point, starting at `si`.
+fn walkFrom(w: *std.Io.Writer, pts: []const Pt, si: usize, start: Pt) !void {
+    var e = SegEmitter{ .w = w, .cur = start };
+    var step: usize = 1;
+    while (step < pts.len) : (step += 1) {
+        try e.feed(pts[(si + step) % pts.len]);
     }
+    try e.feed(start); // close: resolves a pending control into the final quad
 }
 
 /// Walk a contour that is entirely off-curve, with a synthesized start point.
 fn walkAllOff(w: *std.Io.Writer, pts: []const Pt, start: Pt) !void {
-    var cur = start;
-    var pending_off: ?Pt = null;
-    var step: usize = 0;
-    while (step <= pts.len) : (step += 1) {
-        const p = if (step == pts.len) start else pts[step % pts.len];
-        if (p.on) {
-            if (pending_off) |q| {
-                try quadTo(w, cur, q, p);
-                pending_off = null;
-            } else {
-                try lineTo(w, p);
-            }
-            cur = p;
-        } else {
-            if (pending_off) |q| {
-                const mid = Pt{ .x = (q.x + p.x) / 2, .y = (q.y + p.y) / 2, .on = true };
-                try quadTo(w, cur, q, mid);
-                cur = mid;
-            }
-            pending_off = p;
-        }
+    var e = SegEmitter{ .w = w, .cur = start };
+    for (pts) |p| {
+        try e.feed(p);
     }
-    if (pending_off) |q| {
-        try quadTo(w, cur, q, start);
-    }
+    try e.feed(start); // close: resolves a pending control into the final quad
 }
 
 fn moveTo(w: *std.Io.Writer, p: Pt) !void {
@@ -1346,6 +1307,30 @@ test "paint interpreter emits a shading for a gradient glyph" {
     try testing.expect(std.mem.indexOf(u8, res.shadings.items[0], "/ShadingType 2") != null);
     try testing.expect(std.mem.indexOf(u8, out, "W n") != null);
     try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
+}
+
+test "all-off-curve contour walks as four smooth quadratic segments" {
+    // A TrueType "circle": four off-curve points and no on-curve ones. The
+    // start point is synthesized midway between the last and first points.
+    const pts = [_]Pt{
+        .{ .x = 100, .y = 0, .on = false },
+        .{ .x = 0, .y = 100, .on = false },
+        .{ .x = -100, .y = 0, .on = false },
+        .{ .x = 0, .y = -100, .on = false },
+    };
+    const start = Pt{ .x = 50, .y = -50, .on = true }; // mid(last, first)
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    try walkAllOff(&aw.writer, &pts, start);
+    const out = aw.writer.buffered();
+
+    // Four quadratic segments (as cubics), no straight lines.
+    try testing.expectEqual(@as(usize, 4), std.mem.count(u8, out, " c\n"));
+    try testing.expectEqual(@as(usize, 0), std.mem.count(u8, out, " l\n"));
+    // Segment midpoints land halfway between adjacent control points.
+    try testing.expect(std.mem.indexOf(u8, out, "50.00 50.00 c") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "-50.00 50.00 c") != null);
 }
 
 test "glyf outline extraction (Noto cloud layer glyph 23929)" {

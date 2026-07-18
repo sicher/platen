@@ -53,6 +53,21 @@ inline fn writeUnsignedInt(buf: []u8, i: usize, value: u64) usize {
 /// Returns the slice of buf that was written.
 /// ~14x faster than std.fmt.bufPrint("{d:.2}", .{val}).
 pub fn writeF64_2(buf: []u8, val: f64) []u8 {
+    return writeF64N(buf, val, 2);
+}
+
+/// Write f64 with 3 decimal places to buffer.
+/// Returns the slice of buf that was written.
+pub fn writeF64_3(buf: []u8, val: f64) []u8 {
+    return writeF64N(buf, val, 3);
+}
+
+/// Shared implementation: fixed `decimals` (2 or 3) fractional digits, all
+/// branching resolved at comptime so the hot wrappers stay fully inlined.
+fn writeF64N(buf: []u8, val: f64, comptime decimals: u2) []u8 {
+    const scale: f64 = if (decimals == 2) 100.0 else 1000.0;
+    const max_frac: u64 = if (decimals == 2) 99 else 999;
+
     var v = val;
     var i: usize = 0;
 
@@ -63,12 +78,10 @@ pub fn writeF64_2(buf: []u8, val: f64) []u8 {
         v = -v;
     }
 
-    // Round to 2 decimal places
-    v = @round(v * 100.0) / 100.0;
-
-    // Split into integer and fractional parts
+    // Round, then split into integer and fractional parts
+    v = @round(v * scale) / scale;
     const int_part: u64 = @intFromFloat(v);
-    const frac_part: u64 = @intFromFloat((v - @as(f64, @floatFromInt(int_part))) * 100.0 + 0.5);
+    const frac_part: u64 = @intFromFloat((v - @as(f64, @floatFromInt(int_part))) * scale + 0.5);
 
     // Write integer part
     if (int_part == 0) {
@@ -78,48 +91,14 @@ pub fn writeF64_2(buf: []u8, val: f64) []u8 {
         i = writeUnsignedInt(buf, i, int_part);
     }
 
-    // Decimal point and fractional part (always 2 digits)
+    // Decimal point and fixed-width fractional digits
     buf[i] = '.';
     i += 1;
-    const frac_digits = digit_pairs[@min(frac_part, 99)];
-    buf[i] = frac_digits[0];
-    i += 1;
-    buf[i] = frac_digits[1];
-    i += 1;
-
-    return buf[0..i];
-}
-
-/// Write f64 with 3 decimal places to buffer.
-/// Returns the slice of buf that was written.
-pub fn writeF64_3(buf: []u8, val: f64) []u8 {
-    var v = val;
-    var i: usize = 0;
-
-    if (v < 0) {
-        buf[i] = '-';
+    const f = @min(frac_part, max_frac);
+    if (decimals == 3) {
+        buf[i] = @intCast(f / 100 + '0');
         i += 1;
-        v = -v;
     }
-
-    v = @round(v * 1000.0) / 1000.0;
-    const int_part: u64 = @intFromFloat(v);
-    const frac_part: u64 = @intFromFloat((v - @as(f64, @floatFromInt(int_part))) * 1000.0 + 0.5);
-
-    // Write integer part
-    if (int_part == 0) {
-        buf[i] = '0';
-        i += 1;
-    } else {
-        i = writeUnsignedInt(buf, i, int_part);
-    }
-
-    // Decimal point and 3 fractional digits
-    buf[i] = '.';
-    i += 1;
-    const f = @min(frac_part, 999);
-    buf[i] = @intCast(f / 100 + '0');
-    i += 1;
     const pair = digit_pairs[f % 100];
     buf[i] = pair[0];
     i += 1;
