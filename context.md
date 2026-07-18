@@ -5,13 +5,12 @@
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
-- OT-SVG color font support — `BungeeColor-Regular-SVG.ttf` is already
-  vendored as a test font, and `svg.zig` already renders SVG → PDF ops, so
-  the work is parsing the SVG table (glyph-range docs, possibly gzipped) and
-  routing through the Type3 CharProc path.
+- **All color-font formats now supported**: COLR v0/v1, OT-SVG, CBDT/sbix
+  color bitmaps, EBDT/EBLC pixel fonts.
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
+  - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
 
 ## What We Did (Session 2026-07-18 #17 — real CBDT, indexed PNG, pixel fonts)
 - **Vendored a real bitmap font**: `NotoColorEmoji-CBDT-subset.ttf` (27KB) —
@@ -45,6 +44,21 @@
     `1024 0 0.00 -472.62 1102.77 1575.38 d1`), `pixel_font` reference
     integration test. Validated visually (crisp pixels, colorization works).
 - **All 378 tests pass** (was 374).
+- **OT-SVG color font support**:
+  - `src/svg_table.zig`: 'SVG ' table parser (doc list → per-glyph document;
+    gzipped or multi-glyph-range docs → null → mono-outline fallback).
+  - `embedded.zig`: lazy `svgInfo()`/`isSvgGlyph`; source priority per font is
+    **COLR > SVG > bitmap**.
+  - `document.zig`: `renderSvgGlyphCharProc` — doc → `svg.Svg.fromMemory` →
+    `toPdfContent` → `d0` CharProc. Key insight: OT-SVG docs declare no
+    size/viewBox, so svg.zig's flip is exactly `1 0 0 -1 0 0` (y-down glyph
+    space → y-up). Docs with transparency/text → `error.NotAColorGlyph`,
+    which `ensureColorGlyph` now catches to leave the glyph un-coded (mono
+    outline fallback) instead of aborting output.
+  - Tests: svg_table unit test, document test (flip matrix + both Bungee
+    fills), `color_svg` reference integration test mirroring `color_v0` —
+    the SVG and COLRv0 builds render **98.7% pixel-identical** (rest = title
+    text). **All 381 tests pass.**
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).

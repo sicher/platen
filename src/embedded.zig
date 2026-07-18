@@ -11,6 +11,7 @@ const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
 const colr = @import("colr.zig");
 const bitmap_glyphs = @import("bitmap_glyphs.zig");
+const svg_table = @import("svg_table.zig");
 pub const opentype = @import("opentype.zig");
 const format = @import("format.zig");
 const binary = @import("binary.zig");
@@ -236,6 +237,11 @@ pub const EmbeddedFont = struct {
     // font also has COLR, which takes priority). Slices point into `data`.
     bitmap_info: ?bitmap_glyphs.BitmapInfo = null,
     bitmap_checked: bool = false,
+
+    // OT-SVG color-glyph support (lazily probed; null when the font also
+    // has COLR, which takes priority). The table slice points into `data`.
+    svg_info: ?svg_table.SvgTable = null,
+    svg_checked: bool = false,
 
     /// All-zero loca synthesized for bitmap-only fonts (e.g. Noto Color
     /// Emoji CBDT), which carry no glyf/loca at all: the CID companion font
@@ -876,8 +882,31 @@ pub const EmbeddedFont = struct {
         return self.bitmap_info;
     }
 
+    /// Lazily probe and return the font's OT 'SVG ' table, or null if the
+    /// font has none (or has COLR, which takes priority).
+    pub fn svgInfo(self: *EmbeddedFont) ?svg_table.SvgTable {
+        if (!self.svg_checked) {
+            self.svg_checked = true;
+            self.svg_info = parseSvgInfo(self);
+        }
+        return self.svg_info;
+    }
+
+    fn parseSvgInfo(self: *EmbeddedFont) ?svg_table.SvgTable {
+        if (self.colorInfo() != null) return null;
+        const data = self.font.getTable("SVG ".*) orelse return null;
+        return svg_table.SvgTable.parse(data) catch null;
+    }
+
+    /// True if `gid` has a (supported) SVG document in the 'SVG ' table.
+    pub fn isSvgGlyph(self: *EmbeddedFont, gid: u16) bool {
+        const info = self.svgInfo() orelse return false;
+        return info.docForGlyph(gid) != null;
+    }
+
     fn parseBitmapInfo(self: *EmbeddedFont) ?bitmap_glyphs.BitmapInfo {
         if (self.colorInfo() != null) return null;
+        if (self.svgInfo() != null) return null;
         if (self.font.getTable("CBLC".*)) |cblc| {
             if (self.font.getTable("CBDT".*)) |cbdt_data| {
                 const parsed = bitmap_glyphs.Cbdt.parse(cblc, cbdt_data) catch return null;

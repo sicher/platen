@@ -3170,6 +3170,30 @@ test "CBDT bitmap font emits a Type3 font with image CharProcs" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "1000.00 0 0 1000.00 62.50 -62.50 cm\n/Im2 Do") != null);
 }
 
+test "OT-SVG font emits a Type3 color font (Bungee Color SVG)" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+
+    const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-SVG.ttf", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Type3 font whose CharProcs carry the SVG paths as PDF ops.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 72.00 Tf") != null);
+    // The y-down SVG glyph space is mirrored about the baseline.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1 0 0 -1 0 0.00 cm") != null);
+    // Bungee's two solid layers: dark red #c90900 and salmon #ff9580.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "0.788 0.035 0.000 rg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1.000 0.584 0.502 rg") != null);
+    // Text extraction recovers the letters via ToUnicode.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ToUnicode") != null);
+}
+
 test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

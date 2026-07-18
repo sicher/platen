@@ -2662,16 +2662,23 @@ pub const Document = struct {
                     .embedded => |e| e,
                     else => continue,
                 };
-                // COLR (vector) takes priority; else CBDT/sbix PNG strikes.
-                const has_vector = emb.colorInfo() != null;
-                if (!has_vector and emb.bitmapInfo() == null) continue;
+                // Source priority: COLR paint graphs, then OT-SVG documents,
+                // then CBDT/sbix PNG strikes / EBDT pixel strikes.
+                const has_colr = emb.colorInfo() != null;
+                const has_svg = !has_colr and emb.svgInfo() != null;
+                if (!has_colr and !has_svg and emb.bitmapInfo() == null) continue;
                 const glyphs = t.cached_glyphs orelse continue; // identity fonts always cache
                 // Create the plan lazily on the first color glyph, so a color
                 // font used only for non-color text (e.g. spaces) never produces
                 // an empty (malformed) Type3 font.
                 var plan: ?*ColorFontPlan = null;
                 for (glyphs) |gid| {
-                    const is_color = if (has_vector) emb.isColorGlyph(gid) else emb.isBitmapGlyph(gid);
+                    const is_color = if (has_colr)
+                        emb.isColorGlyph(gid)
+                    else if (has_svg)
+                        emb.isSvgGlyph(gid)
+                    else
+                        emb.isBitmapGlyph(gid);
                     if (!is_color) continue;
                     if (plan == null) plan = try self.colorPlanForOrCreate(emb);
                     try self.ensureColorGlyph(plan.?, emb, gid);
@@ -2700,10 +2707,21 @@ pub const Document = struct {
     fn ensureColorGlyph(self: *Document, plan: *ColorFontPlan, emb: *EmbeddedFont, gid: u16) !void {
         if (plan.code_of.contains(gid)) return;
         if (plan.gids.items.len >= 0xFFFF) return; // ordinal is u16; unreachable for real fonts
-        const content = if (emb.colorInfo()) |info|
-            try renderColorGlyphCharProc(self.allocator, &plan.res, info, emb, gid)
-        else
-            try self.renderBitmapGlyphCharProc(plan, emb, gid);
+        const content = blk: {
+            if (emb.colorInfo()) |info|
+                break :blk try renderColorGlyphCharProc(self.allocator, &plan.res, info, emb, gid);
+            const render = if (emb.svgInfo() != null)
+                self.renderSvgGlyphCharProc(emb, gid)
+            else
+                self.renderBitmapGlyphCharProc(plan, emb, gid);
+            break :blk render catch |err| switch (err) {
+                // Unsupported glyph (e.g. an SVG doc using features svg.zig
+                // can't render): leave it un-coded so it falls back to the
+                // monochrome CID outline.
+                error.NotAColorGlyph => return,
+                else => return err,
+            };
+        };
         errdefer self.allocator.free(content);
         const ord: u16 = @intCast(plan.gids.items.len + 1);
         try plan.gids.append(self.allocator, gid);
@@ -2744,6 +2762,30 @@ pub const Document = struct {
         interp.render(gid) catch {};
 
         return aw.toOwnedSlice();
+    }
+
+    /// Build a Type3 CharProc for an OT-SVG glyph: parse the glyph's SVG
+    /// document and emit `wx 0 d0` plus its PDF drawing ops. The document
+    /// declares no size/viewBox, so svg.zig's output flip is `1 0 0 -1 0 0`
+    /// — exactly the OT-SVG y-down → glyph-space y-up mirror. Documents
+    /// using features the renderer can't express in a shared-resource Type3
+    /// font (transparency, text) fall back to the mono outline.
+    fn renderSvgGlyphCharProc(self: *Document, emb: *EmbeddedFont, gid: u16) ![]u8 {
+        const table = emb.svgInfo() orelse return error.NotAColorGlyph;
+        const doc = table.docForGlyph(gid) orelse return error.NotAColorGlyph;
+
+        const s = svg.Svg.fromMemory(self.allocator, doc) catch return error.NotAColorGlyph;
+        defer {
+            s.deinit();
+            self.allocator.destroy(s);
+        }
+        if (s.hasTransparency() or s.hasText()) return error.NotAColorGlyph;
+
+        const ops = try s.toPdfContent(self.allocator);
+        defer self.allocator.free(ops);
+
+        const wx = emb.glyphAdvanceFontUnits(gid);
+        return std.fmt.allocPrint(self.allocator, "{d} 0 d0\n{s}", .{ wx, ops });
     }
 
     /// Build a Type3 CharProc for a bitmap glyph: decode the strike into a
