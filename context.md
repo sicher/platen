@@ -5,12 +5,46 @@
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
+- OT-SVG color font support — `BungeeColor-Regular-SVG.ttf` is already
+  vendored as a test font, and `svg.zig` already renders SVG → PDF ops, so
+  the work is parsing the SVG table (glyph-range docs, possibly gzipped) and
+  routing through the Type3 CharProc path.
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
-  - Color font follow-ups: OT-SVG color fonts unsupported; bitmap emoji not yet
-    validated against a real-world font (fixtures only — Noto CBDT is ~10MB,
-    not vendored).
+
+## What We Did (Session 2026-07-18 #17 — real CBDT, indexed PNG, pixel fonts)
+- **Vendored a real bitmap font**: `NotoColorEmoji-CBDT-subset.ttf` (27KB) —
+  Google's Noto CBDT build cut to 12 emoji with `fontTools.subset`
+  (`--unicodes=U+2601,U+2764,U+2B50,U+1F308,U+1F355,U+1F389,U+1F39B,U+1F422,
+  U+1F44D,U+1F600,U+1F680,U+1F984 --name-IDs='*'`). Added to `color_bitmap`
+  integration test; all 12 render + extract. (Researched: no small real color
+  bitmap fonts exist — they're all multi-MB emoji sets; subsetting is what
+  harfbuzz/fontTools test suites do too.)
+- **Indexed PNG support in images.zig** (Noto CBDT strikes are palette PNGs):
+  PLTE + tRNS → 8-bit RGB + SMask alpha, index depths 1/2/4/8
+  (`expandIndexedPng`); unit test with a hand-built 2-bit palette PNG.
+- **Glyf-less fonts load now**: `EmbeddedFont.synthetic_loca` (all-zero) +
+  empty glyf in `SubsetTables` when the font has only bitmap tables.
+- **Pixel font (OTB / EBDT+EBLC 1-bit) support** — user-requested:
+  - `bitmap_glyphs.zig`: `BitmapGlyph.pixels` is now a union (png | mono);
+    `Cbdt` (same parser handles EBLC — identical layout) gained `bit_depth`;
+    mono image formats 1/2 (small metrics, byte/bit-aligned), 5 (index
+    metrics, bit-aligned), 6/7 (big metrics); composite formats 8/9 skipped.
+    `packMonoRows` repacks bit-aligned rows to byte-aligned for PDF.
+  - `embedded.zig`: EBDT probed only when glyf is missing **or zero-length**
+    (Cozette OTB has a 0-byte glyf; outline+strike CJK fonts keep outlines).
+  - `document.zig`: `PlanImage` union (color `*Image` | mask rows); pixel
+    glyphs emit `d1` CharProcs + 1-bit ImageMask (`/Decode [1 0]`, EBDT bit
+    1 = ink) → **painted in the current text color** (d1 contract holds:
+    ImageMask makes no color marks).
+  - Vendored **Cozette OTB** (MIT, 182KB, 13ppem strike, upem 2048,
+    zero-length glyf, hmtx-driven advances). Ground truth for 'A' (gid 66,
+    7x13, bearing (0,10), bit-aligned format 2/5) from fontTools.
+  - Tests: parser + packMonoRows unit tests, document test (exact d1 metrics
+    `1024 0 0.00 -472.62 1102.77 1575.38 d1`), `pixel_font` reference
+    integration test. Validated visually (crisp pixels, colorization works).
+- **All 378 tests pass** (was 374).
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).

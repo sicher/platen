@@ -354,7 +354,8 @@ pub const EmbeddedFont = struct {
         // companion font can still be subset and embedded.
         var synthetic_loca: ?[]u8 = null;
         if (font.getTable("glyf".*) == null and
-            (font.getTable("CBLC".*) != null or font.getTable("sbix".*) != null))
+            (font.getTable("CBLC".*) != null or font.getTable("sbix".*) != null or
+                font.getTable("EBLC".*) != null))
         {
             if (font.maxp) |maxp| {
                 const entry_size: usize = if (head.index_to_loc_format == 0) 2 else 4;
@@ -887,6 +888,19 @@ pub const EmbeddedFont = struct {
             const num_glyphs = if (self.font.maxp) |m| m.num_glyphs else return null;
             const parsed = bitmap_glyphs.Sbix.parse(sbix_data, num_glyphs) catch return null;
             return .{ .sbix = parsed };
+        }
+        // EBDT/EBLC monochrome strikes (OTB pixel fonts) — but only when the
+        // font has no real outlines; classic outline+strike CJK fonts keep
+        // rendering their (scalable) outlines instead.
+        const glyf = self.font.getTable("glyf".*);
+        if (glyf == null or glyf.?.len == 0) {
+            if (self.font.getTable("EBLC".*)) |eblc| {
+                if (self.font.getTable("EBDT".*)) |ebdt_data| {
+                    const parsed = bitmap_glyphs.Cbdt.parse(eblc, ebdt_data) catch return null;
+                    if (parsed.bit_depth != 1) return null; // grayscale unsupported
+                    return .{ .cbdt = parsed };
+                }
+            }
         }
         return null;
     }

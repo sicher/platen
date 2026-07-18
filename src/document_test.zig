@@ -3170,6 +3170,32 @@ test "CBDT bitmap font emits a Type3 font with image CharProcs" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "1000.00 0 0 1000.00 62.50 -62.50 cm\n/Im2 Do") != null);
 }
 
+test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+
+    const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", null) catch return error.SkipZigTest;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "A", .{ .font = cozette, .size = 13, .color = zapdf.Color.rgb(200, 0, 0) });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Type3 font whose CharProc places a 1-bit stencil mask via d1 — the
+    // glyph is painted with the current text color.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Type3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 13.00 Tf") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/ImageMask true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Decode [1 0]") != null);
+    // 'A': 7x13 px at upem 2048 / 13 ppem → 157.54 units/px. Advance 1024
+    // (hmtx); bbox bottom 3 px below baseline (-472.62), top at 1575.38.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1024 0 0.00 -472.62 1102.77 1575.38 d1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Im1 Do") != null);
+    // Text color applies to the mask.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "0.784 0.000 0.000 rg") != null);
+}
+
 test "COLR v0 font emits a Type3 color font (Bungee Color)" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

@@ -17,6 +17,7 @@ pub const layout = @import("layout.zig");
 pub const Writer = @import("writer.zig").Writer;
 pub const zlib = @import("zlib.zig");
 pub const images = @import("images.zig");
+const bitmap_glyphs = @import("bitmap_glyphs.zig");
 pub const svg = @import("svg.zig");
 pub const pathmod = @import("path.zig");
 pub const gradient = @import("gradient.zig");
@@ -202,9 +203,9 @@ const ColorFontPlan = struct {
     widths_fu: std.ArrayListUnmanaged(u16) = .empty, // advance width per gid, font units
     pages: std.AutoHashMapUnmanaged(usize, void) = .empty, // page indices that use this font
     res: colr.ColorResources, // shadings/ExtGStates shared by all subfonts
-    /// Decoded PNG strikes for bitmap (CBDT/sbix) glyphs, one per image
-    /// CharProc; referenced as /Im{i+1} from the shared Resources.
-    images: std.ArrayListUnmanaged(*Image) = .empty,
+    /// Bitmap-glyph images, one per image CharProc; referenced as /Im{i+1}
+    /// from the shared Resources.
+    images: std.ArrayListUnmanaged(PlanImage) = .empty,
     font_obj_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one font dict per subfont
     tounicode_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one CMap per subfont
     first_charproc_id: ObjectId = 0, // contiguous block, one stream per gid
@@ -248,16 +249,27 @@ const ColorFontPlan = struct {
         self.widths_fu.deinit(allocator);
         self.pages.deinit(allocator);
         self.res.deinit();
-        for (self.images.items) |img| {
-            img.deinit();
-            allocator.destroy(img);
-        }
+        for (self.images.items) |img| switch (img) {
+            .color => |c| {
+                c.deinit();
+                allocator.destroy(c);
+            },
+            .mask => |m| allocator.free(m.rows),
+        };
         self.images.deinit(allocator);
         self.font_obj_ids.deinit(allocator);
         self.tounicode_ids.deinit(allocator);
         self.image_obj_ids.deinit(allocator);
         self.image_smask_ids.deinit(allocator);
     }
+};
+
+/// One bitmap-glyph image of a color-font plan: either a decoded PNG strike
+/// (CBDT/sbix color glyph) or a 1-bit stencil mask (EBDT pixel glyph;
+/// byte-aligned rows, painted in the text color via /ImageMask).
+const PlanImage = union(enum) {
+    color: *Image,
+    mask: struct { width: u32, height: u32, rows: []u8 },
 };
 
 /// Max distinct color glyphs per Type3 subfont (single-byte PDF codes 1..255).
@@ -2734,44 +2746,89 @@ pub const Document = struct {
         return aw.toOwnedSlice();
     }
 
-    /// Build a Type3 CharProc for a bitmap (CBDT/sbix) color glyph: decode
-    /// the PNG strike into a plan image and emit `wx 0 d0` plus a `cm`/`Do`
-    /// placing /Im{k} in glyph space (strike pixels scaled to font units).
+    /// Build a Type3 CharProc for a bitmap glyph: decode the strike into a
+    /// plan image and emit the glyph metrics plus a `cm`/`Do` placing
+    /// /Im{k} in glyph space (strike pixels scaled to font units). Color
+    /// strikes (PNG) use `d0`; monochrome pixel glyphs use `d1` + ImageMask
+    /// so they are painted with the current text color.
     fn renderBitmapGlyphCharProc(self: *Document, plan: *ColorFontPlan, emb: *EmbeddedFont, gid: u16) ![]u8 {
         const info = emb.bitmapInfo() orelse return error.NotAColorGlyph;
         const bg = info.glyphBitmap(gid) orelse return error.NotAColorGlyph;
 
-        // The image borrows the PNG slice (font data outlives the plan) and
-        // owns only its decoded/recompressed buffers.
-        const img = try Image.fromMemory(self.allocator, bg.png, false);
-        {
-            errdefer {
-                img.deinit();
-                self.allocator.destroy(img);
-            }
-            try plan.images.append(self.allocator, img);
+        switch (bg.pixels) {
+            .png => |png| {
+                // The image borrows the PNG slice (font data outlives the
+                // plan) and owns only its decoded/recompressed buffers.
+                const img = try Image.fromMemory(self.allocator, png, false);
+                {
+                    errdefer {
+                        img.deinit();
+                        self.allocator.destroy(img);
+                    }
+                    try plan.images.append(self.allocator, .{ .color = img });
+                }
+            },
+            .mono => |mono| {
+                const rows = try bitmap_glyphs.packMonoRows(self.allocator, mono, bg.width_px, bg.height_px);
+                {
+                    errdefer self.allocator.free(rows);
+                    try plan.images.append(self.allocator, .{ .mask = .{
+                        .width = bg.width_px,
+                        .height = bg.height_px,
+                        .rows = rows,
+                    } });
+                }
+            },
         }
 
         const upem: f64 = @floatFromInt(emb.font.head.?.units_per_em);
         const scale = upem / @as(f64, @floatFromInt(info.ppem()));
         const wx = emb.glyphAdvanceFontUnits(gid);
-        return std.fmt.allocPrint(
-            self.allocator,
-            "{d} 0 d0\nq\n{d:.2} 0 0 {d:.2} {d:.2} {d:.2} cm\n/Im{d} Do\nQ\n",
-            .{
-                wx,
-                @as(f64, @floatFromInt(bg.width_px)) * scale,
-                @as(f64, @floatFromInt(bg.height_px)) * scale,
-                bg.bearing_x * scale,
-                bg.bottom_y * scale,
-                plan.images.items.len, // 1-based /Im index of the image just added
-            },
-        );
+        const w_fu = @as(f64, @floatFromInt(bg.width_px)) * scale;
+        const h_fu = @as(f64, @floatFromInt(bg.height_px)) * scale;
+        const x_fu = bg.bearing_x * scale;
+        const y_fu = bg.bottom_y * scale;
+        const im_index = plan.images.items.len; // 1-based /Im index of the image just added
+
+        return switch (bg.pixels) {
+            .png => std.fmt.allocPrint(
+                self.allocator,
+                "{d} 0 d0\nq\n{d:.2} 0 0 {d:.2} {d:.2} {d:.2} cm\n/Im{d} Do\nQ\n",
+                .{ wx, w_fu, h_fu, x_fu, y_fu, im_index },
+            ),
+            .mono => std.fmt.allocPrint(
+                self.allocator,
+                "{d} 0 {d:.2} {d:.2} {d:.2} {d:.2} d1\nq\n{d:.2} 0 0 {d:.2} {d:.2} {d:.2} cm\n/Im{d} Do\nQ\n",
+                .{ wx, x_fu, y_fu, x_fu + w_fu, y_fu + h_fu, w_fu, h_fu, x_fu, y_fu, im_index },
+            ),
+        };
     }
 
-    /// Write one Type3 color-glyph image XObject (a PNG strike) and its
-    /// SMask, mirroring the page-image PNG path (no ICC profiles here).
-    fn writePlanImage(self: *Document, w: *Writer, image: *Image, img_id: ObjectId, smask_id: ?ObjectId) !void {
+    /// Write one Type3 bitmap-glyph image XObject: a PNG strike (+ SMask,
+    /// mirroring the page-image PNG path; no ICC profiles here) or a 1-bit
+    /// stencil mask for pixel glyphs.
+    fn writePlanImage(self: *Document, w: *Writer, plan_image: PlanImage, img_id: ObjectId, smask_id: ?ObjectId) !void {
+        const image = switch (plan_image) {
+            .color => |c| c,
+            .mask => |m| {
+                try w.beginObject(img_id);
+                var mask_dict = Dict.init(self.allocator);
+                defer mask_dict.deinit();
+                try mask_dict.put("Type", Value.name("XObject"));
+                try mask_dict.put("Subtype", Value.name("Image"));
+                try mask_dict.put("Width", Value.int(@intCast(m.width)));
+                try mask_dict.put("Height", Value.int(@intCast(m.height)));
+                try mask_dict.put("ImageMask", Value.literal("true"));
+                try mask_dict.put("BitsPerComponent", Value.int(1));
+                // EBDT bit 1 = ink; ImageMask paints where the decoded
+                // sample is 0, so invert.
+                try mask_dict.put("Decode", Value.literal("[1 0]"));
+                try w.writeStreamCompressed(&mask_dict, m.rows);
+                try w.endObject();
+                return;
+            },
+        };
+
         if (smask_id) |sid| {
             try w.beginObject(sid);
             var smask_dict = Dict.init(self.allocator);
@@ -3264,7 +3321,11 @@ pub const Document = struct {
             for (plan.images.items) |img| {
                 try plan.image_obj_ids.append(self.allocator, next_id);
                 next_id += 1;
-                if (img.alpha_data != null) {
+                const has_smask = switch (img) {
+                    .color => |c| c.alpha_data != null,
+                    .mask => false,
+                };
+                if (has_smask) {
                     try plan.image_smask_ids.append(self.allocator, next_id);
                     next_id += 1;
                 } else {

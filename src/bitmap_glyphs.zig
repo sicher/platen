@@ -1,10 +1,14 @@
-//! CBDT/CBLC and sbix bitmap color-glyph support.
+//! CBDT/CBLC, EBDT/EBLC and sbix bitmap-glyph support.
 //!
-//! Extracts the embedded PNG strike for individual glyphs so higher layers
-//! can embed them as PDF image XObjects referenced from Type3 CharProcs.
-//! Only PNG payloads are supported (CBDT image formats 17/18/19, sbix
-//! 'png ' records); the largest strike is used and scaled to the em. All
-//! slices reference the font data — nothing is allocated.
+//! Extracts the embedded bitmap strike for individual glyphs so higher
+//! layers can embed them as PDF image XObjects referenced from Type3
+//! CharProcs. Two payload kinds are supported: PNG color bitmaps (CBDT
+//! image formats 17/18/19, sbix 'png ' records) and 1-bit monochrome pixel
+//! glyphs (EBDT image formats 1/2/5/6/7 — classic OTB pixel fonts, emitted
+//! as PDF ImageMasks so they take the text color). EBLC shares CBLC's
+//! layout, so one parser handles both. The largest strike is used and
+//! scaled to the em. All slices reference the font data — nothing is
+//! allocated.
 
 const std = @import("std");
 const colr = @import("colr.zig");
@@ -18,16 +22,49 @@ fn readI8(data: []const u8, off: usize) i8 {
     return @bitCast(readU8(data, off));
 }
 
-/// A glyph's bitmap: PNG bytes plus placement in strike pixels.
+/// A glyph's bitmap: pixel payload plus placement in strike pixels.
 pub const BitmapGlyph = struct {
-    png: []const u8,
+    pixels: Pixels,
     /// Left edge of the bitmap relative to the glyph origin, pixels.
     bearing_x: f64,
     /// Bottom edge of the bitmap relative to the baseline, pixels.
     bottom_y: f64,
     width_px: u32,
     height_px: u32,
+
+    pub const Pixels = union(enum) {
+        /// A PNG file (color strikes).
+        png: []const u8,
+        /// 1-bit pixels, MSB first, bit 1 = ink. `bit_aligned` rows run
+        /// continuously with no padding; otherwise each row starts on a
+        /// byte boundary.
+        mono: Mono,
+    };
+
+    pub const Mono = struct { data: []const u8, bit_aligned: bool };
 };
+
+/// Repack a 1-bit mono bitmap into byte-aligned rows (each row padded to a
+/// byte boundary, MSB first) as PDF image data expects. Returns a newly
+/// allocated buffer of (width+7)/8 × height bytes.
+pub fn packMonoRows(allocator: std.mem.Allocator, mono: BitmapGlyph.Mono, width: u32, height: u32) ![]u8 {
+    const row_bytes = (width + 7) / 8;
+    const out = try allocator.alloc(u8, @as(usize, row_bytes) * height);
+    if (!mono.bit_aligned) {
+        @memcpy(out, mono.data[0..out.len]);
+        return out;
+    }
+    @memset(out, 0);
+    var bit_index: usize = 0;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const bit = (mono.data[bit_index / 8] >> @intCast(7 - bit_index % 8)) & 1;
+            bit_index += 1;
+            if (bit != 0) out[y * row_bytes + x / 8] |= @as(u8, 0x80) >> @intCast(x % 8);
+        }
+    }
+    return out;
+}
 
 /// Width/height from a PNG's IHDR header, or null if not a PNG.
 pub fn pngDimensions(png: []const u8) ?struct { w: u32, h: u32 } {
@@ -89,7 +126,7 @@ pub const Sbix = struct {
             const png = self.data[o0 + 8 .. o1];
             const dims = pngDimensions(png) orelse return null;
             return .{
-                .png = png,
+                .pixels = .{ .png = png },
                 .bearing_x = @floatFromInt(readI16(self.data, o0)),
                 .bottom_y = @floatFromInt(readI16(self.data, o0 + 2)),
                 .width_px = dims.w,
@@ -101,16 +138,20 @@ pub const Sbix = struct {
 };
 
 // ============================================================================
-// CBDT / CBLC
+// CBDT / CBLC (and EBDT / EBLC, which share the same layout)
 // ============================================================================
 
-/// Parsed CBDT+CBLC pair, positioned on the largest-ppem strike.
+/// Parsed CBDT+CBLC (or EBDT+EBLC) pair, positioned on the largest-ppem
+/// strike.
 pub const Cbdt = struct {
     cblc: []const u8,
     cbdt: []const u8,
     index_array_off: usize,
     num_subtables: u32,
     strike_ppem: u16,
+    /// Bits per pixel of the strike: 32 for color (PNG payloads), 1 for
+    /// monochrome pixel fonts. Grayscale depths (2/4/8) are unsupported.
+    bit_depth: u8,
 
     const BigMetrics = struct { height: u8, width: u8, bearing_x: i8, bearing_y: i8 };
 
@@ -137,6 +178,7 @@ pub const Cbdt = struct {
             .index_array_off = readU32(cblc, rec),
             .num_subtables = readU32(cblc, rec + 8),
             .strike_ppem = best_ppem,
+            .bit_depth = readU8(cblc, rec + 46),
         };
     }
 
@@ -214,8 +256,27 @@ pub const Cbdt = struct {
         }
         if (glyph_end > self.cbdt.len or glyph_end <= glyph_off) return null;
 
-        // CBDT glyph record; PNG data length is explicit in each format.
+        // Glyph record. PNG data length is explicit in the color formats;
+        // the monochrome formats (1-bit only) derive it from the metrics.
         switch (image_format) {
+            1, 2 => { // SmallGlyphMetrics (5 bytes) + rows (1: byte-, 2: bit-aligned)
+                if (self.bit_depth != 1) return null;
+                const m_height = readU8(self.cbdt, glyph_off);
+                const m_width = readU8(self.cbdt, glyph_off + 1);
+                const bearing_x = readI8(self.cbdt, glyph_off + 2);
+                const bearing_y = readI8(self.cbdt, glyph_off + 3);
+                return self.monoAt(glyph_off + 5, glyph_end, bearing_x, bearing_y, m_width, m_height, image_format == 2);
+            },
+            5 => { // bit-aligned rows only; metrics come from the index subtable
+                if (self.bit_depth != 1) return null;
+                const m = index_metrics orelse return null;
+                return self.monoAt(glyph_off, glyph_end, m.bearing_x, m.bearing_y, m.width, m.height, true);
+            },
+            6, 7 => { // BigGlyphMetrics (8 bytes) + rows (6: byte-, 7: bit-aligned)
+                if (self.bit_depth != 1) return null;
+                const m = readBigMetrics(self.cbdt, glyph_off);
+                return self.monoAt(glyph_off + 8, glyph_end, m.bearing_x, m.bearing_y, m.width, m.height, image_format == 7);
+            },
             17 => { // SmallGlyphMetrics (5 bytes) + u32 dataLen + PNG
                 const m_height = readU8(self.cbdt, glyph_off);
                 const m_width = readU8(self.cbdt, glyph_off + 1);
@@ -231,8 +292,23 @@ pub const Cbdt = struct {
                 const m = index_metrics orelse return null;
                 return self.pngAt(glyph_off, m.bearing_x, m.bearing_y, m.width, m.height);
             },
-            else => return null,
+            else => return null, // incl. 8/9 (composite glyphs): unsupported
         }
+    }
+
+    fn monoAt(self: Cbdt, off: usize, end: usize, bearing_x: i8, bearing_y: i8, width: u8, height: u8, bit_aligned: bool) ?BitmapGlyph {
+        if (width == 0 or height == 0) return null;
+        const w: usize = width;
+        const h: usize = height;
+        const len = if (bit_aligned) (w * h + 7) / 8 else h * ((w + 7) / 8);
+        if (off + len > end or off + len > self.cbdt.len) return null;
+        return .{
+            .pixels = .{ .mono = .{ .data = self.cbdt[off .. off + len], .bit_aligned = bit_aligned } },
+            .bearing_x = @floatFromInt(bearing_x),
+            .bottom_y = @as(f64, @floatFromInt(bearing_y)) - @as(f64, @floatFromInt(height)),
+            .width_px = width,
+            .height_px = height,
+        };
     }
 
     fn readBigMetrics(data: []const u8, off: usize) BigMetrics {
@@ -251,7 +327,7 @@ pub const Cbdt = struct {
         const png = self.cbdt[off + 4 .. off + 4 + len];
         if (pngDimensions(png) == null) return null;
         return .{
-            .png = png,
+            .pixels = .{ .png = png },
             .bearing_x = @floatFromInt(bearing_x),
             // bearingY is the top edge above the baseline; convert to bottom.
             .bottom_y = @as(f64, @floatFromInt(bearing_y)) - @as(f64, @floatFromInt(height)),
@@ -312,7 +388,7 @@ test "sbix parse and glyph extraction (SbixTest fixture)" {
     try testing.expectEqual(@as(u32, 64), a.height_px);
     try testing.expectApproxEqAbs(@as(f64, 0), a.bearing_x, 1e-9);
     try testing.expectApproxEqAbs(@as(f64, 0), a.bottom_y, 1e-9);
-    try testing.expect(std.mem.startsWith(u8, a.png, "\x89PNG"));
+    try testing.expect(std.mem.startsWith(u8, a.pixels.png, "\x89PNG"));
 
     // 'B' (gid 2): origin offset (8, -8).
     const b = sbix.glyphBitmap(2).?;
@@ -338,7 +414,7 @@ test "CBDT/CBLC parse and glyph extraction (CbdtTest fixture)" {
     try testing.expectEqual(@as(u32, 64), a.height_px);
     try testing.expectApproxEqAbs(@as(f64, 0), a.bearing_x, 1e-9);
     try testing.expectApproxEqAbs(@as(f64, 0), a.bottom_y, 1e-9);
-    try testing.expect(std.mem.startsWith(u8, a.png, "\x89PNG"));
+    try testing.expect(std.mem.startsWith(u8, a.pixels.png, "\x89PNG"));
 
     // 'B' (gid 2): bearingX 4, bearingY 60 → bottom edge at -4 px.
     const b = cbdt.glyphBitmap(2).?;
@@ -347,6 +423,36 @@ test "CBDT/CBLC parse and glyph extraction (CbdtTest fixture)" {
 
     try testing.expect(cbdt.glyphBitmap(0) == null);
     try testing.expect(cbdt.glyphBitmap(99) == null);
+}
+
+test "EBDT/EBLC 1-bit pixel glyph extraction (Cozette OTB)" {
+    const ttf = @import("ttf.zig");
+    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Cozette/cozette.otb") catch return error.SkipZigTest;
+    defer testing.allocator.free(loaded.data);
+    var font = loaded.font;
+
+    const ebdt = try Cbdt.parse(font.getTable("EBLC".*).?, font.getTable("EBDT".*).?);
+    try testing.expectEqual(@as(u16, 13), ebdt.strike_ppem);
+    try testing.expectEqual(@as(u8, 1), ebdt.bit_depth);
+
+    // 'A' (gid 66): 7x13 bitmap via index format 2 / image format 5
+    // (bit-aligned, shared metrics). Ground truth from fontTools:
+    // bearing (0, 10) → bottom edge 3 px below the baseline.
+    const a = ebdt.glyphBitmap(66).?;
+    try testing.expectEqual(@as(u32, 7), a.width_px);
+    try testing.expectEqual(@as(u32, 13), a.height_px);
+    try testing.expectApproxEqAbs(@as(f64, 0), a.bearing_x, 1e-9);
+    try testing.expectApproxEqAbs(@as(f64, -3), a.bottom_y, 1e-9);
+    const mono = a.pixels.mono;
+    try testing.expect(mono.bit_aligned);
+    try testing.expectEqualSlices(u8, &.{ 0x00, 0x00, 0xE2, 0x24, 0x48, 0x9F, 0x22, 0x44, 0x88, 0x00, 0x00, 0x00 }, mono.data);
+
+    // Repacked byte-aligned rows draw the expected 'A' shape.
+    const rows = try packMonoRows(testing.allocator, mono, a.width_px, a.height_px);
+    defer testing.allocator.free(rows);
+    try testing.expectEqualSlices(u8, &.{
+        0x00, 0x00, 0x38, 0x44, 0x44, 0x44, 0x7C, 0x44, 0x44, 0x44, 0x00, 0x00, 0x00,
+    }, rows);
 }
 
 test "pngDimensions rejects non-PNG data" {
