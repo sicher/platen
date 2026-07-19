@@ -1703,8 +1703,8 @@ const NumberIterator = struct {
         // Skip whitespace and commas
         while (self.pos < self.data.len and
             (self.data[self.pos] == ' ' or self.data[self.pos] == ',' or
-            self.data[self.pos] == '\t' or self.data[self.pos] == '\n' or
-            self.data[self.pos] == '\r'))
+                self.data[self.pos] == '\t' or self.data[self.pos] == '\n' or
+                self.data[self.pos] == '\r'))
         {
             self.pos += 1;
         }
@@ -2135,9 +2135,10 @@ fn parsePathData(
                 cur_x = abs_x;
                 cur_y = abs_y;
             },
-            'Z' => {
-                // Handled above when command is detected
-            },
+            // 'Z' is handled at letter detection and takes no parameters, so
+            // characters that land here after a close-path are invalid and
+            // fall through to the unknown-command skip (a dedicated no-op arm
+            // would leave `pos` unadvanced and loop forever).
             else => {
                 // Unknown command, skip to next letter
                 while (pos < str.len and !((str[pos] >= 'A' and str[pos] <= 'Z') or (str[pos] >= 'a' and str[pos] <= 'z'))) {
@@ -2226,6 +2227,20 @@ test "parse path data" {
     try std.testing.expectEqual(PathCommand{ .move_to = .{ .x = 0, .y = 0 } }, commands.items[0]);
     try std.testing.expectEqual(PathCommand{ .line_to = .{ .x = 10, .y = 10 } }, commands.items[1]);
     try std.testing.expectEqual(PathCommand.close_path, commands.items[2]);
+}
+
+test "parse path data with garbage after close-path terminates" {
+    // Regression: a non-letter after Z/z left the cursor unadvanced and
+    // looped forever.
+    const allocator = std.testing.allocator;
+    var commands = std.ArrayListUnmanaged(PathCommand).empty;
+    defer commands.deinit(allocator);
+
+    try parsePathData(allocator, "M 0 0 z 5 7 L 1 2", &commands);
+
+    try std.testing.expectEqual(@as(usize, 3), commands.items.len);
+    try std.testing.expectEqual(PathCommand.close_path, commands.items[1]);
+    try std.testing.expectEqual(PathCommand{ .line_to = .{ .x = 1, .y = 2 } }, commands.items[2]);
 }
 
 test "generate PDF content" {

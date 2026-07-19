@@ -204,6 +204,9 @@ pub const XmlParser = struct {
                 while (self.pos < self.data.len and self.data[self.pos] != quote) {
                     self.pos += 1;
                 }
+                // Unterminated quote: stop at end of data instead of
+                // stepping past it below.
+                if (self.pos >= self.data.len) break;
             }
 
             self.pos += 1;
@@ -360,4 +363,13 @@ test "attribute with special characters" {
     const d = attrs.next().?;
     try std.testing.expectEqualStrings("d", d.name);
     try std.testing.expectEqualStrings("M 0 0 L 10 10", d.value);
+}
+
+test "unterminated quote in attributes does not read past the data" {
+    // Regression: the attribute scanner stepped one past the end after an
+    // unterminated quoted value, slicing data[start .. len + 1].
+    var parser = XmlParser.init("<rect width=\"10");
+    const elem = parser.nextElement().?;
+    try std.testing.expectEqualStrings("rect", elem.tag);
+    try std.testing.expect(parser.nextElement() == null);
 }

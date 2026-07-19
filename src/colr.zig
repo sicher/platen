@@ -504,13 +504,15 @@ pub const Colr = struct {
         if (data.len < 14) return error.InvalidColr;
         const version = readU16(data, 0);
 
-        // v0 header (bytes 2..14): common to all versions.
-        const num_base_glyph_records = readU16(data, 2);
+        // v0 header (bytes 2..14): common to all versions. Record counts are
+        // clamped to what fits in the table so malformed counts cannot drive
+        // lookups (and their offset arithmetic) past the data.
         const base_glyph_records_off = readU32(data, 4);
         const layer_records_off = readU32(data, 8);
-        const num_layer_records = readU16(data, 12);
         const base_glyph_records: usize = if (base_glyph_records_off != 0 and base_glyph_records_off < data.len) base_glyph_records_off else 0;
         const layer_records: usize = if (layer_records_off != 0 and layer_records_off < data.len) layer_records_off else 0;
+        const num_base_glyph_records: u16 = @intCast(@min(readU16(data, 2), (data.len - base_glyph_records) / 6));
+        const num_layer_records: u16 = @intCast(@min(readU16(data, 12), (data.len - layer_records) / 4));
 
         // v1 fields begin after the v0 header (14 bytes).
         var base_glyph_list: usize = 0;
@@ -523,11 +525,11 @@ pub const Colr = struct {
             const layer_list_off = readU32(data, 18);
             if (base_glyph_list_off != 0 and base_glyph_list_off < data.len) {
                 base_glyph_list = base_glyph_list_off;
-                num_base_records = readU32(data, base_glyph_list);
+                num_base_records = @intCast(@min(readU32(data, base_glyph_list), ((data.len - base_glyph_list) -| 4) / 6));
             }
             if (layer_list_off != 0 and layer_list_off < data.len) {
                 layer_list = layer_list_off;
-                num_layers = readU32(data, layer_list);
+                num_layers = @intCast(@min(readU32(data, layer_list), ((data.len - layer_list) -| 4) / 4));
             }
         }
         return .{
@@ -554,8 +556,8 @@ pub const Colr = struct {
     /// (glyphID, firstLayerIndex, numLayers) sorted by glyphID (binary search).
     pub fn v0BaseGlyph(self: Colr, gid: u16) ?BaseGlyphV0 {
         if (self.base_glyph_records == 0 or self.num_base_glyph_records == 0) return null;
-        var lo: u32 = 0;
-        var hi: u32 = self.num_base_glyph_records;
+        var lo: usize = 0;
+        var hi: usize = self.num_base_glyph_records;
         while (lo < hi) {
             const mid = lo + (hi - lo) / 2;
             const rec = self.base_glyph_records + mid * 6;
@@ -583,8 +585,8 @@ pub const Colr = struct {
     pub fn baseGlyphPaint(self: Colr, gid: u16) ?usize {
         if (self.base_glyph_list == 0 or self.num_base_records == 0) return null;
         const records = self.base_glyph_list + 4; // after numBaseGlyphPaintRecords
-        var lo: u32 = 0;
-        var hi: u32 = self.num_base_records;
+        var lo: usize = 0;
+        var hi: usize = self.num_base_records;
         while (lo < hi) {
             const mid = lo + (hi - lo) / 2;
             const rec = records + mid * 6;
@@ -604,7 +606,7 @@ pub const Colr = struct {
     /// Absolute offset of the Paint for a LayerList entry.
     pub fn layerPaint(self: Colr, index: u32) ?usize {
         if (self.layer_list == 0 or index >= self.num_layers) return null;
-        const paint_off = readU32(self.data, self.layer_list + 4 + index * 4);
+        const paint_off = readU32(self.data, self.layer_list + 4 + @as(usize, index) * 4);
         return self.layer_list + paint_off;
     }
 
@@ -675,6 +677,13 @@ pub const PaintInterp = struct {
     /// gradients) are skipped at depth 0 — with no clip they would cover the
     /// entire page (COLR ClipBox bounds are not implemented).
     clip_depth: u8 = 0,
+    /// Remaining paint visits for the current render() call. The depth limit
+    /// alone does not bound work: a malformed graph whose layers point back
+    /// at ColrLayers/ColrGlyph nodes expands combinatorially within it.
+    ops_budget: usize = max_paint_ops,
+
+    /// Far beyond any real glyph's paint count (typically dozens).
+    const max_paint_ops = 65536;
 
     /// Large cover rectangle (font units) used to fill the current clip for
     /// solid paints reached outside the fast PaintGlyph→Solid path.
@@ -685,6 +694,7 @@ pub const PaintInterp = struct {
     const Error = std.Io.Writer.Error || std.mem.Allocator.Error || error{InvalidGradient};
 
     pub fn render(self: *PaintInterp, base_gid: u16) !void {
+        self.ops_budget = max_paint_ops;
         // Prefer the v1 paint graph; fall back to v0 layer records.
         if (self.colr.baseGlyphPaint(base_gid)) |root| {
             try self.renderPaint(root, 0);
@@ -697,6 +707,8 @@ pub const PaintInterp = struct {
 
     fn renderPaint(self: *PaintInterp, abs: usize, depth: u8) Error!void {
         if (depth > 64) return;
+        if (self.ops_budget == 0) return;
+        self.ops_budget -= 1;
         switch (self.colr.paintFormat(abs)) {
             .colr_layers => {
                 const n = readU8(self.colr.data, abs + 1);
@@ -934,6 +946,8 @@ pub const PaintInterp = struct {
         var i: u32 = rec.first;
         const end = rec.first + rec.num;
         while (i < end) : (i += 1) {
+            if (self.ops_budget == 0) return;
+            self.ops_budget -= 1;
             const layer = self.colr.v0Layer(i) orelse continue;
             try self.beginSolidColor(layer.palette, 1.0);
             try writeGlyphOutline(self.w, self.arena, self.glyf, layer.gid, Transform.identity);

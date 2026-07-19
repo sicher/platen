@@ -90,7 +90,8 @@ pub const Sbix = struct {
     pub fn parse(data: []const u8, num_glyphs: u16) !Sbix {
         // Header: u16 version, u16 flags, u32 numStrikes, u32 strikeOffset[].
         if (data.len < 12) return error.InvalidSbix;
-        const num_strikes = readU32(data, 4);
+        // Clamped: the strike offset array must fit in the table.
+        const num_strikes = @min(readU32(data, 4), (data.len - 8) / 4);
         var best_off: usize = 0;
         var best_ppem: u16 = 0;
         for (0..num_strikes) |i| {
@@ -172,11 +173,18 @@ pub const Cbdt = struct {
             }
         }
         const rec = best orelse return error.InvalidCblc;
+        const index_array_off = readU32(cblc, rec);
+        // Clamp the subtable count to what fits in the table: a malformed
+        // count must not drive glyph lookups into a multi-billion-entry scan.
+        const num_subtables = @min(
+            readU32(cblc, rec + 8),
+            (cblc.len -| index_array_off) / 8,
+        );
         return .{
             .cblc = cblc,
             .cbdt = cbdt,
-            .index_array_off = readU32(cblc, rec),
-            .num_subtables = readU32(cblc, rec + 8),
+            .index_array_off = index_array_off,
+            .num_subtables = @intCast(num_subtables),
             .strike_ppem = best_ppem,
             .bit_depth = readU8(cblc, rec + 46),
         };
@@ -229,7 +237,8 @@ pub const Cbdt = struct {
                 glyph_end = image_data_off + o1;
             },
             4 => { // sparse (glyphID, offset) pairs + sentinel pair
-                const num = readU32(self.cblc, sub + 8);
+                // Clamped: pairs beyond the table cannot match anyway.
+                const num = @min(readU32(self.cblc, sub + 8), (self.cblc.len -| (sub + 12)) / 4);
                 var i: usize = 0;
                 while (i < num) : (i += 1) {
                     const pair = sub + 12 + i * 4;
@@ -243,7 +252,8 @@ pub const Cbdt = struct {
             5 => { // constant imageSize + shared metrics + sorted glyph id array
                 const image_size = readU32(self.cblc, sub + 8);
                 index_metrics = readBigMetrics(self.cblc, sub + 12);
-                const num = readU32(self.cblc, sub + 20);
+                // Clamped: ids beyond the table cannot match anyway.
+                const num = @min(readU32(self.cblc, sub + 20), (self.cblc.len -| (sub + 24)) / 2);
                 var i: usize = 0;
                 while (i < num) : (i += 1) {
                     if (readU16(self.cblc, sub + 24 + i * 2) == gid) break;
