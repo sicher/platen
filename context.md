@@ -5,14 +5,14 @@
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
-- **Audit backlog: only the optional item left:**
-  - colr.zig test-fixture helper (interp setup repeats in ~6 tests).
+- **Audit backlog fully worked off** (items 1-5 done across sessions #19-#21).
+- Future enhancements only (see below).
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
 
-## What We Did (Session 2026-07-20 #21 — perf touches, backlog item 4)
+## What We Did (Session 2026-07-20 #21 — perf touches + fixture, backlog 4-5)
 - **Backlog 4 done** (0dd0e5f): writeStreamCompressed skips zlib below 64
   bytes (CLI outputs stay byte-identical — tiny streams never compressed in
   practice); binary search in svg_table.docForGlyph + Cbdt.glyphBitmap
@@ -21,6 +21,11 @@
   in PDF output timing).
 - Verified: 400 tests, check-refs 46/46, 11 CLI PDFs byte-identical,
   `zig build perf -Doptimize=ReleaseFast` runs the new section (~3ms/10pg).
+- **Backlog 5 done** (5297817): colr.zig InterpFixture dedupes the 6-way
+  repeated interp-test setup (font load + COLR/CPAL/glyf parse + arena/
+  resources/writer); interp() built after placement (self-referential
+  pointers). −107 net lines. Remaining simgrep clone (glyf X/Y coordinate
+  readers) is deliberate format-parallel code.
 
 ## What We Did (Session 2026-07-19/20 #20 — fuzz color-font parsers, 4 bugs fixed)
 - **Backlog 3 done** (734bc9a): 4 new `--fuzz` targets in fuzz_tests.zig
