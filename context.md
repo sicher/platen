@@ -7,16 +7,32 @@
 ## What's Next
 - **Audit backlog (from the 2026-07-19 codebase pass)**, remaining items in
   priority order:
-  1. Fuzz the new parsers (colr, bitmap_glyphs, svg_table) with mutated
-     fixture bytes in fuzz_tests.zig.
-  2. Perf touches: writeStreamCompressed early-out for tiny streams;
+  1. Perf touches: writeStreamCompressed early-out for tiny streams;
      binary-search in svg_table.docForGlyph / CBDT subtable lookup;
      add a color-font page to perf_test.zig.
-  3. Optional: colr.zig test-fixture helper (interp setup repeats in ~6 tests).
+  2. Optional: colr.zig test-fixture helper (interp setup repeats in ~6 tests).
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+
+## What We Did (Session 2026-07-19/20 #20 — fuzz color-font parsers, 4 bugs fixed)
+- **Backlog 3 done** (734bc9a): 4 new `--fuzz` targets in fuzz_tests.zig
+  (COLR/CPAL + PaintInterp.render, CBDT/EBDT via one target, sbix, OT-SVG;
+  corpus seeds = real tables extracted via ttf.Font.getTable, framed for
+  Smith) + 4 deterministic mutation tests (seeded bit flips/stomps/
+  truncations of fixture tables) that run on every `zig build test`.
+- **Bugs the mutation tests found (all hostile-font DoS/crash class):**
+  colr.zig u32 overflow in baseGlyphPaint binary search (counts now clamped
+  to table size at parse; usize index math; + per-render ops_budget 65536 —
+  depth limit alone allowed combinatorial ColrLayers/ColrGlyph blowup);
+  bitmap_glyphs.zig unclamped CBLC subtable/format-4/5/sbix strike counts
+  (multi-billion-iteration scans); xml.zig OOB slice after unterminated
+  attribute quote; svg.zig infinite loop on non-letter after Z in path data
+  (the 'Z' switch arm never advanced pos). Regression tests for xml/svg.
+- Verified: 400 tests pass, CLI outputs byte-identical, check-refs 46/46,
+  10-min coverage-guided `--fuzz` run clean (only known infra teardown
+  panics "failed to open coverage file" after SIGINT — not our code).
 
 ## What We Did (Session 2026-07-19 #19 — refactors: color_fonts.zig, output() phases)
 - **Backlog 1 done** (b88edb7): color-font subsystem → src/color_fonts.zig
