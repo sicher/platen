@@ -318,6 +318,31 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - `gradients` - Linear and radial gradients
 - `landscape` - Page sizes and orientations (A4, Letter, landscape, custom)
 
+### Fuzzing (fuzz_tests.zig)
+
+Two layers, both seeded with real tables/files from test fixtures:
+- **Coverage-guided targets** (`zig build test --fuzz`): TTF, PNG/JPEG, SVG,
+  COLR/CPAL + paint interpreter, CBDT/CBLC (also covers EBDT/EBLC), sbix,
+  OT-SVG table, and a Smith-driven Document API sequence. Under a plain
+  `zig build test` each target runs once per corpus seed as a smoke test.
+  Note: interrupting `--fuzz` can print infra panics from Zig's fuzzer
+  teardown ("failed to open coverage file"); these are not findings.
+- **Deterministic mutation tests**: seeded bit flips/byte stomps/truncations
+  of the fixture tables run on every `zig build test`, so parser-robustness
+  regressions fail CI-style rather than only under `--fuzz`.
+
+Hardening invariants the fuzzers enforce (added after real findings):
+- Color-font table parsers (colr, bitmap_glyphs, svg_table) use the
+  bounds-checked readers in binary.zig and **clamp every record count at
+  parse time** to what physically fits in the table — a malformed count
+  must never drive a lookup loop or its offset arithmetic.
+- `colr.PaintInterp` bounds work per render with `ops_budget` (65536 paint
+  visits) in addition to the recursion depth cap: depth alone lets cyclic
+  ColrLayers/ColrGlyph graphs expand combinatorially.
+- Any parser loop over hostile input must provably advance its cursor
+  (regression tests: xml.zig unterminated attribute quote, svg.zig
+  path-data garbage after Z).
+
 ## Text API
 
 Naming convention: `write*` for text, `draw*` for graphics (future).
