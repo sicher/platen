@@ -5,16 +5,22 @@
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
-- **Audit backlog (from the 2026-07-19 codebase pass)**, remaining items in
-  priority order:
-  1. Perf touches: writeStreamCompressed early-out for tiny streams;
-     binary-search in svg_table.docForGlyph / CBDT subtable lookup;
-     add a color-font page to perf_test.zig.
-  2. Optional: colr.zig test-fixture helper (interp setup repeats in ~6 tests).
+- **Audit backlog: only the optional item left:**
+  - colr.zig test-fixture helper (interp setup repeats in ~6 tests).
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+
+## What We Did (Session 2026-07-20 #21 — perf touches, backlog item 4)
+- **Backlog 4 done** (0dd0e5f): writeStreamCompressed skips zlib below 64
+  bytes (CLI outputs stay byte-identical — tiny streams never compressed in
+  practice); binary search in svg_table.docForGlyph + Cbdt.glyphBitmap
+  subtable scan (spec-sorted); svg_table entry count clamped like the rest;
+  perf_test.zig "Color emoji" section (COLR v1 layout; emission cost shows
+  in PDF output timing).
+- Verified: 400 tests, check-refs 46/46, 11 CLI PDFs byte-identical,
+  `zig build perf -Doptimize=ReleaseFast` runs the new section (~3ms/10pg).
 
 ## What We Did (Session 2026-07-19/20 #20 — fuzz color-font parsers, 4 bugs fixed)
 - **Backlog 3 done** (734bc9a): 4 new `--fuzz` targets in fuzz_tests.zig
