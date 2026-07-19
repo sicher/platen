@@ -1179,6 +1179,66 @@ fn blendModeName(mode: u8) ?[]const u8 {
 
 const testing = std.testing;
 
+/// Interpreter-test fixture: loads a color font, parses its COLR/CPAL/glyf
+/// tables, and owns the arena, resources, and output buffer a PaintInterp
+/// needs. Returns error.SkipZigTest when the font (or a table) is missing.
+const InterpFixture = struct {
+    data: []const u8,
+    colr: Colr,
+    cpal: Cpal,
+    glyf: GlyfContext,
+    arena_state: std.heap.ArenaAllocator,
+    res: ColorResources,
+    aw: std.Io.Writer.Allocating,
+
+    fn init(path: []const u8) !InterpFixture {
+        const ttf = @import("ttf.zig");
+        const loaded = ttf.Font.fromFile(testing.io, testing.allocator, path) catch return error.SkipZigTest;
+        errdefer testing.allocator.free(loaded.data);
+        const font = loaded.font;
+        const head = font.head orelse return error.SkipZigTest;
+        return .{
+            .data = loaded.data,
+            .colr = try Colr.parse(font.getTable("COLR".*) orelse return error.SkipZigTest),
+            .cpal = try Cpal.parse(font.getTable("CPAL".*) orelse return error.SkipZigTest),
+            .glyf = .{
+                .glyf = font.getTable("glyf".*) orelse return error.SkipZigTest,
+                .loca = font.getTable("loca".*) orelse return error.SkipZigTest,
+                .loca_format = head.index_to_loc_format,
+            },
+            .arena_state = std.heap.ArenaAllocator.init(testing.allocator),
+            .res = ColorResources.init(testing.allocator),
+            .aw = .init(testing.allocator),
+        };
+    }
+
+    fn deinit(self: *InterpFixture) void {
+        self.aw.deinit();
+        self.res.deinit();
+        self.arena_state.deinit();
+        testing.allocator.free(self.data);
+    }
+
+    /// A PaintInterp wired to this fixture's tables and output buffer. Build
+    /// it only once the fixture sits in its final location (`var fx = ...`),
+    /// since it points into the fixture.
+    fn interp(self: *InterpFixture) PaintInterp {
+        return .{
+            .w = &self.aw.writer,
+            .arena = self.arena_state.allocator(),
+            .colr = self.colr,
+            .cpal = self.cpal,
+            .glyf = self.glyf,
+            .res = &self.res,
+        };
+    }
+
+    /// Everything rendered into the fixture's output buffer so far.
+    fn output(self: *InterpFixture) []const u8 {
+        return self.aw.writer.buffered();
+    }
+};
+
 test "CPAL parse and palette lookup (Noto Color Emoji)" {
     const ttf = @import("ttf.zig");
     const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
@@ -1238,39 +1298,12 @@ test "COLR v1 paint graph walk (Noto cloud glyph 3950)" {
 }
 
 test "paint interpreter renders cloud glyph as two filled solid layers" {
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
 
-    const colr = try Colr.parse(font.getTable("COLR".*).?);
-    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
-
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-
-    var res = ColorResources.init(testing.allocator);
-    defer res.deinit();
-
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    var interp = PaintInterp{
-        .w = &aw.writer,
-        .arena = arena_state.allocator(),
-        .colr = colr,
-        .cpal = cpal,
-        .glyf = ctx,
-        .res = &res,
-    };
+    var interp = fx.interp();
     try interp.render(3950);
-    const out = aw.writer.buffered();
+    const out = fx.output();
 
     // Two solid layers with the ground-truth palette colors.
     try testing.expect(std.mem.indexOf(u8, out, "0.894 0.918 0.933 rg") != null);
@@ -1279,46 +1312,21 @@ test "paint interpreter renders cloud glyph as two filled solid layers" {
     try testing.expect(std.mem.indexOf(u8, out, "257.00 366.00 m") != null);
     // Exactly two fills, no gradients/clips for this flat glyph.
     try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "f\n"));
-    try testing.expectEqual(@as(usize, 0), res.shadings.items.len);
+    try testing.expectEqual(@as(usize, 0), fx.res.shadings.items.len);
 }
 
 test "paint interpreter emits a shading for a gradient glyph" {
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
 
-    const colr = try Colr.parse(font.getTable("COLR".*).?);
-    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
-
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-    var res = ColorResources.init(testing.allocator);
-    defer res.deinit();
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    var interp = PaintInterp{
-        .w = &aw.writer,
-        .arena = arena_state.allocator(),
-        .colr = colr,
-        .cpal = cpal,
-        .glyf = ctx,
-        .res = &res,
-    };
+    var interp = fx.interp();
     // gid 3994 = keycap digit '0': PaintGlyph(clip) → PaintLinearGradient.
     try interp.render(3994);
-    const out = aw.writer.buffered();
+    const out = fx.output();
 
     // One axial shading registered, referenced by `sh` inside a clip.
-    try testing.expectEqual(@as(usize, 1), res.shadings.items.len);
-    try testing.expect(std.mem.indexOf(u8, res.shadings.items[0], "/ShadingType 2") != null);
+    try testing.expectEqual(@as(usize, 1), fx.res.shadings.items.len);
+    try testing.expect(std.mem.indexOf(u8, fx.res.shadings.items[0], "/ShadingType 2") != null);
     try testing.expect(std.mem.indexOf(u8, out, "W n") != null);
     try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
 }
@@ -1348,26 +1356,11 @@ test "all-off-curve contour walks as four smooth quadratic segments" {
 }
 
 test "glyf outline extraction (Noto cloud layer glyph 23929)" {
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
 
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    try writeGlyphOutline(&aw.writer, arena, ctx, 23929, Transform.identity);
-    const out = aw.writer.buffered();
+    try writeGlyphOutline(&fx.aw.writer, fx.arena_state.allocator(), fx.glyf, 23929, Transform.identity);
+    const out = fx.output();
 
     // Ground truth: single contour starting on-curve at (257, 366).
     try testing.expect(std.mem.indexOf(u8, out, "257.00 366.00 m") != null);
@@ -1385,45 +1378,20 @@ test "COLR v1 sweep gradient renders as a wedge fan (SweepTest fixture)" {
     // with a full-circle sweep 0°..360°, red → blue, pad extend; 'B' (gid 2)
     // sweeps only 0°..90° (angles outside the range pad to the end colors);
     // 'C' (gid 3) sweeps 110°..230° (the spec's example arc).
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/sweep/SweepTest.ttf") catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
-
-    const colr = try Colr.parse(font.getTable("COLR".*).?);
-    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
+    var fx = try InterpFixture.init("test/fonts/sweep/SweepTest.ttf");
+    defer fx.deinit();
 
     // PaintGlyph → PaintSweepGradient.
-    const root = colr.baseGlyphPaint(1) orelse return error.TestUnexpectedResult;
-    try testing.expectEqual(PaintFormat.glyph, colr.paintFormat(root));
-    try testing.expectEqual(PaintFormat.sweep_gradient, colr.paintFormat(root + readU24(colr.data, root + 1)));
+    const root = fx.colr.baseGlyphPaint(1) orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(PaintFormat.glyph, fx.colr.paintFormat(root));
+    try testing.expectEqual(PaintFormat.sweep_gradient, fx.colr.paintFormat(root + readU24(fx.colr.data, root + 1)));
 
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-    var res = ColorResources.init(testing.allocator);
-    defer res.deinit();
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    var interp = PaintInterp{
-        .w = &aw.writer,
-        .arena = arena_state.allocator(),
-        .colr = colr,
-        .cpal = cpal,
-        .glyf = ctx,
-        .res = &res,
-    };
+    var interp = fx.interp();
     try interp.render(1); // 'A': full-circle sweep
-    const out = aw.writer.buffered();
+    const out = fx.output();
 
     // A fan of 120 flat-colored wedges inside the glyph clip; no shadings.
-    try testing.expectEqual(@as(usize, 0), res.shadings.items.len);
+    try testing.expectEqual(@as(usize, 0), fx.res.shadings.items.len);
     try testing.expect(std.mem.indexOf(u8, out, "W n") != null);
     try testing.expectEqual(@as(usize, 120), std.mem.count(u8, out, " rg\n"));
     // First wedge midpoint t = 1.5/360: nearly pure red; last: nearly pure blue.
@@ -1458,45 +1426,20 @@ test "COLR v1 sweep gradient renders as a wedge fan (SweepTest fixture)" {
 }
 
 test "SRC_IN composite with solid backdrop renders source at backdrop alpha" {
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf") catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
 
-    const colr = try Colr.parse(font.getTable("COLR".*).?);
-    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
-
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-    var res = ColorResources.init(testing.allocator);
-    defer res.deinit();
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    var interp = PaintInterp{
-        .w = &aw.writer,
-        .arena = arena_state.allocator(),
-        .colr = colr,
-        .cpal = cpal,
-        .glyf = ctx,
-        .res = &res,
-    };
+    var interp = fx.interp();
     // gid 2092 (control knobs 🎛): root layers contain unclipped
     // PaintComposite(SRC_IN, source = artwork layers, backdrop = solid black
     // alpha 0.7). Must render as the artwork at 0.7 alpha — NOT paint the
     // backdrop as an unbounded black rectangle over the whole page.
     try interp.render(2092);
-    const out = aw.writer.buffered();
+    const out = fx.output();
 
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, out, "-32768 -32768 65536 65536 re"));
     var found_ca = false;
-    for (res.ext_gstates.items) |gs| {
+    for (fx.res.ext_gstates.items) |gs| {
         if (std.mem.indexOf(u8, gs, "/ca 0.700") != null) found_ca = true;
     }
     try testing.expect(found_ca);
@@ -1564,50 +1507,25 @@ test "COLR v0 parse and layer records (Bungee Color)" {
 }
 
 test "COLR v1 linear gradients on a non-emoji font (Bungee Spice)" {
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, "test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf") catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
+    var fx = try InterpFixture.init("test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf");
+    defer fx.deinit();
 
-    const colr = try Colr.parse(font.getTable("COLR".*).?);
-    try testing.expectEqual(@as(u16, 1), colr.version);
-    try testing.expect(colr.base_glyph_list != 0);
-    try testing.expect(colr.isColorGlyph(2));
+    try testing.expectEqual(@as(u16, 1), fx.colr.version);
+    try testing.expect(fx.colr.base_glyph_list != 0);
+    try testing.expect(fx.colr.isColorGlyph(2));
 
-    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
-
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-    var res = ColorResources.init(testing.allocator);
-    defer res.deinit();
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    var interp = PaintInterp{
-        .w = &aw.writer,
-        .arena = arena_state.allocator(),
-        .colr = colr,
-        .cpal = cpal,
-        .glyf = ctx,
-        .res = &res,
-    };
+    var interp = fx.interp();
     // 'A' (gid 2): PaintColrLayers → 2× PaintGlyph(clip) → PaintLinearGradient.
     try interp.render(2);
-    const out = aw.writer.buffered();
+    const out = fx.output();
 
     // Ground truth from fontTools: both layers share the gradient geometry
     // p0=(0,0), p1=(0,900), p2=(100,0); the 3-point form reduces to the axial
     // endpoint (0,900). Layer 0 runs gold→dark red, layer 1 (A.inline) the
     // reverse. Palette: 0 = (201,9,0), 1 = (255,215,0).
-    try testing.expectEqual(@as(usize, 2), res.shadings.items.len);
-    const sh0 = res.shadings.items[0];
-    const sh1 = res.shadings.items[1];
+    try testing.expectEqual(@as(usize, 2), fx.res.shadings.items.len);
+    const sh0 = fx.res.shadings.items[0];
+    const sh1 = fx.res.shadings.items[1];
     try testing.expect(std.mem.indexOf(u8, sh0, "/ShadingType 2") != null);
     try testing.expect(std.mem.indexOf(u8, sh0, "/Coords [0.00 0.00 0.00 900.00]") != null);
     try testing.expect(std.mem.indexOf(u8, sh0, "/C0 [1.000 0.843 0.000]") != null);
@@ -1623,42 +1541,17 @@ test "COLR v1 linear gradients on a non-emoji font (Bungee Spice)" {
 }
 
 test "COLR v0 paint interpreter fills layers with palette colors (Bungee)" {
-    const ttf = @import("ttf.zig");
-    const loaded = ttf.Font.fromFile(testing.io, testing.allocator, bungee_v0_path) catch return error.SkipZigTest;
-    defer testing.allocator.free(loaded.data);
-    var font = loaded.font;
-    const head = font.head.?;
+    var fx = try InterpFixture.init(bungee_v0_path);
+    defer fx.deinit();
 
-    const colr = try Colr.parse(font.getTable("COLR".*).?);
-    const cpal = try Cpal.parse(font.getTable("CPAL".*).?);
-    const ctx = GlyfContext{
-        .glyf = font.getTable("glyf".*).?,
-        .loca = font.getTable("loca".*).?,
-        .loca_format = head.index_to_loc_format,
-    };
-
-    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena_state.deinit();
-    var res = ColorResources.init(testing.allocator);
-    defer res.deinit();
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-
-    var interp = PaintInterp{
-        .w = &aw.writer,
-        .arena = arena_state.allocator(),
-        .colr = colr,
-        .cpal = cpal,
-        .glyf = ctx,
-        .res = &res,
-    };
+    var interp = fx.interp();
     try interp.render(2); // 'A'
-    const out = aw.writer.buffered();
+    const out = fx.output();
 
     // Two solid layers: palette 0 = (201,9,0) dark red, palette 1 = (255,149,128) salmon.
     try testing.expect(std.mem.indexOf(u8, out, "0.788 0.035 0.000 rg") != null);
     try testing.expect(std.mem.indexOf(u8, out, "1.000 0.584 0.502 rg") != null);
     // Exactly two fills, no gradients (v0 is flat solid layers only).
     try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "f\n"));
-    try testing.expectEqual(@as(usize, 0), res.shadings.items.len);
+    try testing.expectEqual(@as(usize, 0), fx.res.shadings.items.len);
 }
