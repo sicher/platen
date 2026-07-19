@@ -2531,7 +2531,6 @@ pub const Document = struct {
         try page.commands.append(self.allocator, .{ .raw = raw_copy });
     }
 
-
     /// Render deferred commands to page content bytes
     /// Called after subsetting so glyph IDs are properly remapped
     pub fn renderPageCommands(self: *Document, page: *Page) !void {
@@ -2716,33 +2715,79 @@ pub const Document = struct {
         try color_fonts.buildColorFontPlans(self);
         defer color_fonts.clearColorPlans(self);
 
-        // Reserve object IDs:
-        // 1: Catalog
-        // 2: Pages root
-        // 3+: Standard fonts (one per used font)
-        // Then: Embedded fonts (4-5 objects each)
-        // Then: Pages (2 objects each: page dict + content stream)
-        const catalog_id: ObjectId = 1;
-        const pages_root_id: ObjectId = 2;
+        var ids = try self.reserveObjectIds();
+        defer ids.deinit(self.allocator);
 
-        // Build list of used standard fonts
-        var font_list = std.ArrayListUnmanaged(StandardFont).empty;
-        defer font_list.deinit(self.allocator);
-        var font_iter = self.used_fonts.keyIterator();
-        while (font_iter.next()) |font| {
-            try font_list.append(self.allocator, font.*);
+        try w.writeHeader();
+        try self.writeCatalog(&w, &ids);
+        try self.writePagesRoot(&w, &ids);
+        try self.writePdfaObjects(&w, &ids);
+        try self.writeStandardFonts(&w, &ids);
+        try self.subsetFontsAndRenderPages();
+        try self.writeEmbeddedFonts(&w, &ids);
+
+        // Write COLR Type3 color-font objects (font dict + CharProc streams)
+        for (self.color_plans.items) |plan| {
+            try color_fonts.writeColorFont(self, &w, plan);
         }
 
-        const first_std_font_id: ObjectId = 3;
-        var next_id: ObjectId = first_std_font_id + @as(ObjectId, @intCast(font_list.items.len));
+        try self.writeImages(&w, &ids);
+        try self.writeSvgs(&w, &ids);
+        const next_id = try self.writePages(&w, &ids);
+        const info_id = try self.writeInfoDict(&w, next_id);
+        try self.writeOutlines(&w, &ids);
+        try self.writePageLabels(&w, &ids);
+        return self.finishDocument(&w, &ids, info_id);
+    }
+
+    /// Object IDs reserved for one `output()` run, in emission order.
+    /// Fixed slots: 1 = catalog, 2 = pages root, 3+ = standard fonts.
+    const OutputIds = struct {
+        catalog_id: ObjectId = 1,
+        pages_root_id: ObjectId = 2,
+        first_std_font_id: ObjectId = 3,
+        font_list: std.ArrayListUnmanaged(StandardFont) = .empty, // used standard fonts
+        emb_font_base_ids: std.ArrayListUnmanaged(ObjectId) = .empty,
+        image_base_ids: std.ArrayListUnmanaged(ObjectId) = .empty,
+        image_smask_ids: std.ArrayListUnmanaged(?ObjectId) = .empty,
+        image_icc_ids: std.ArrayListUnmanaged(?ObjectId) = .empty,
+        svg_base_ids: std.ArrayListUnmanaged(ObjectId) = .empty,
+        outlines_root_id: ?ObjectId = null,
+        page_labels_id: ?ObjectId = null,
+        pdfa_metadata_id: ?ObjectId = null,
+        pdfa_output_intent_id: ?ObjectId = null,
+        pdfa_icc_profile_id: ?ObjectId = null,
+        first_page_id: ObjectId = 0,
+
+        fn deinit(self: *OutputIds, allocator: std.mem.Allocator) void {
+            self.font_list.deinit(allocator);
+            self.emb_font_base_ids.deinit(allocator);
+            self.image_base_ids.deinit(allocator);
+            self.image_smask_ids.deinit(allocator);
+            self.image_icc_ids.deinit(allocator);
+            self.svg_base_ids.deinit(allocator);
+        }
+    };
+
+    /// Reserve object IDs for everything the document will emit. Also assigns
+    /// outline item IDs and color-font plan IDs in place. Must run after
+    /// buildColorFontPlans.
+    fn reserveObjectIds(self: *Document) !OutputIds {
+        var ids: OutputIds = .{};
+        errdefer ids.deinit(self.allocator);
+
+        // Build list of used standard fonts
+        var font_iter = self.used_fonts.keyIterator();
+        while (font_iter.next()) |font| {
+            try ids.font_list.append(self.allocator, font.*);
+        }
+        var next_id: ObjectId = ids.first_std_font_id + @as(ObjectId, @intCast(ids.font_list.items.len));
 
         // Reserve IDs for embedded fonts
         // CID fonts need: Type0 + CIDFont + FontDescriptor + FontFile + ToUnicode = 5 objects
         // WinAnsi fonts need: Font + FontDescriptor + FontFile + ToUnicode = 4 objects
-        var emb_font_base_ids = std.ArrayListUnmanaged(ObjectId).empty;
-        defer emb_font_base_ids.deinit(self.allocator);
         for (self.embedded_fonts.items) |emb_font| {
-            try emb_font_base_ids.append(self.allocator, next_id);
+            try ids.emb_font_base_ids.append(self.allocator, next_id);
             if (emb_font.encoding == .identity) {
                 next_id += 5; // CID font objects
             } else {
@@ -2757,42 +2802,33 @@ pub const Document = struct {
         // Each image needs: XObject stream (1 object)
         // PNG with alpha needs: +1 for SMask stream
         // Images with ICC profile need: +1 for ICC profile stream
-        var image_base_ids = std.ArrayListUnmanaged(ObjectId).empty;
-        defer image_base_ids.deinit(self.allocator);
-        var image_smask_ids = std.ArrayListUnmanaged(?ObjectId).empty;
-        defer image_smask_ids.deinit(self.allocator);
-        var image_icc_ids = std.ArrayListUnmanaged(?ObjectId).empty;
-        defer image_icc_ids.deinit(self.allocator);
         for (self.loaded_images.items) |image| {
-            try image_base_ids.append(self.allocator, next_id);
+            try ids.image_base_ids.append(self.allocator, next_id);
             next_id += 1;
             if (image.alpha_data != null) {
-                try image_smask_ids.append(self.allocator, next_id);
+                try ids.image_smask_ids.append(self.allocator, next_id);
                 next_id += 1;
             } else {
-                try image_smask_ids.append(self.allocator, null);
+                try ids.image_smask_ids.append(self.allocator, null);
             }
             if (image.icc_profile != null) {
-                try image_icc_ids.append(self.allocator, next_id);
+                try ids.image_icc_ids.append(self.allocator, next_id);
                 next_id += 1;
             } else {
-                try image_icc_ids.append(self.allocator, null);
+                try ids.image_icc_ids.append(self.allocator, null);
             }
         }
 
         // Reserve IDs for SVGs (Form XObjects - 1 object each)
-        var svg_base_ids = std.ArrayListUnmanaged(ObjectId).empty;
-        defer svg_base_ids.deinit(self.allocator);
         for (self.loaded_svgs.items) |_| {
-            try svg_base_ids.append(self.allocator, next_id);
+            try ids.svg_base_ids.append(self.allocator, next_id);
             next_id += 1;
         }
 
         // Reserve IDs for outlines (1 root + N items)
-        var outlines_root_id: ?ObjectId = null;
         if (self.outline) |*o| {
             if (o.items.items.len > 0) {
-                outlines_root_id = next_id;
+                ids.outlines_root_id = next_id;
                 next_id += 1; // root object
                 // Assign object IDs to each outline item
                 for (o.items.items) |item| {
@@ -2803,32 +2839,29 @@ pub const Document = struct {
         }
 
         // Reserve ID for page labels (1 object with number tree)
-        var page_labels_id: ?ObjectId = null;
         if (self.page_labels.items.len > 0) {
-            page_labels_id = next_id;
+            ids.page_labels_id = next_id;
             next_id += 1;
         }
 
         // Reserve IDs for PDF/A structures (XMP metadata, OutputIntent, ICC profile)
-        var pdfa_metadata_id: ?ObjectId = null;
-        var pdfa_output_intent_id: ?ObjectId = null;
-        var pdfa_icc_profile_id: ?ObjectId = null;
         if (self.conformance != .none) {
-            pdfa_metadata_id = next_id;
+            ids.pdfa_metadata_id = next_id;
             next_id += 1;
-            pdfa_output_intent_id = next_id;
+            ids.pdfa_output_intent_id = next_id;
             next_id += 1;
-            pdfa_icc_profile_id = next_id;
+            ids.pdfa_icc_profile_id = next_id;
             next_id += 1;
         }
 
-        const first_page_id = next_id;
+        ids.first_page_id = next_id;
+        return ids;
+    }
 
-        // Write header
-        try w.writeHeader();
-
-        // Write catalog
-        try w.beginObject(catalog_id);
+    /// Write the document catalog (object 1) with outline/page-label/PDF-A
+    /// references.
+    fn writeCatalog(self: *Document, w: *Writer, ids: *const OutputIds) !void {
+        try w.beginObject(ids.catalog_id);
         var catalog_dict = Dict.init(self.allocator);
         defer catalog_dict.deinit();
         // PDF/A sub-structures (declared here to stay in scope until writeDict)
@@ -2838,18 +2871,18 @@ pub const Document = struct {
         defer mark_info.deinit();
 
         try catalog_dict.put("Type", Value.name("Catalog"));
-        try catalog_dict.put("Pages", Value.ref(.{ .id = pages_root_id }));
-        if (outlines_root_id) |id| {
+        try catalog_dict.put("Pages", Value.ref(.{ .id = ids.pages_root_id }));
+        if (ids.outlines_root_id) |id| {
             try catalog_dict.put("Outlines", Value.ref(.{ .id = id }));
         }
-        if (page_labels_id) |id| {
+        if (ids.page_labels_id) |id| {
             try catalog_dict.put("PageLabels", Value.ref(.{ .id = id }));
         }
         // PDF/A entries
-        if (pdfa_metadata_id) |id| {
+        if (ids.pdfa_metadata_id) |id| {
             try catalog_dict.put("Metadata", Value.ref(.{ .id = id }));
         }
-        if (pdfa_output_intent_id) |id| {
+        if (ids.pdfa_output_intent_id) |id| {
             // OutputIntents is an array
             try output_intents.append(Value.ref(.{ .id = id }));
             try catalog_dict.put("OutputIntents", .{ .array_val = &output_intents });
@@ -2861,9 +2894,11 @@ pub const Document = struct {
         }
         try w.writeDict(catalog_dict);
         try w.endObject();
+    }
 
-        // Write pages root
-        try w.beginObject(pages_root_id);
+    /// Write the pages root (object 2) with the Kids array.
+    fn writePagesRoot(self: *Document, w: *Writer, ids: *const OutputIds) !void {
+        try w.beginObject(ids.pages_root_id);
         var pages_dict = Dict.init(self.allocator);
         defer pages_dict.deinit();
         try pages_dict.put("Type", Value.name("Pages"));
@@ -2872,7 +2907,7 @@ pub const Document = struct {
         // Build Kids array (accounting for annotations per page)
         var kids = Array.init(self.allocator);
         defer kids.deinit();
-        var page_id = first_page_id;
+        var page_id = ids.first_page_id;
         for (self.pages.items) |page| {
             try kids.append(Value.ref(.{ .id = page_id }));
             // Each page uses: page dict + content stream + annotation objects
@@ -2882,8 +2917,11 @@ pub const Document = struct {
 
         try w.writeDict(pages_dict);
         try w.endObject();
+    }
 
-        // Write PDF/A objects (XMP metadata, OutputIntent, ICC profile)
+    /// Write PDF/A objects (XMP metadata, ICC profile, OutputIntent).
+    /// No-op unless a conformance level is set.
+    fn writePdfaObjects(self: *Document, w: *Writer, ids: *const OutputIds) !void {
         if (self.conformance != .none) {
             // Generate UUIDs for XMP document/instance IDs (simple pseudo-random)
             var uuid_buf: [32]u8 = undefined;
@@ -2913,7 +2951,7 @@ pub const Document = struct {
             });
             defer self.allocator.free(xmp_data);
 
-            try w.beginObject(pdfa_metadata_id.?);
+            try w.beginObject(ids.pdfa_metadata_id.?);
             var xmp_dict = Dict.init(self.allocator);
             defer xmp_dict.deinit();
             try xmp_dict.put("Type", Value.name("Metadata"));
@@ -2923,7 +2961,7 @@ pub const Document = struct {
             try w.endObject();
 
             // 2. ICC Profile stream
-            try w.beginObject(pdfa_icc_profile_id.?);
+            try w.beginObject(ids.pdfa_icc_profile_id.?);
             var icc_dict = Dict.init(self.allocator);
             defer icc_dict.deinit();
             try icc_dict.put("N", Value.int(3)); // RGB = 3 components
@@ -2931,21 +2969,23 @@ pub const Document = struct {
             try w.endObject();
 
             // 3. OutputIntent dictionary
-            try w.beginObject(pdfa_output_intent_id.?);
+            try w.beginObject(ids.pdfa_output_intent_id.?);
             var intent_dict = Dict.init(self.allocator);
             defer intent_dict.deinit();
             try intent_dict.put("Type", Value.name("OutputIntent"));
             try intent_dict.put("S", Value.name("GTS_PDFA1"));
             try intent_dict.put("OutputConditionIdentifier", Value.string("sRGB IEC61966-2.1"));
             try intent_dict.put("RegistryName", Value.string("http://www.color.org"));
-            try intent_dict.put("DestOutputProfile", Value.ref(.{ .id = pdfa_icc_profile_id.? }));
+            try intent_dict.put("DestOutputProfile", Value.ref(.{ .id = ids.pdfa_icc_profile_id.? }));
             try w.writeDict(intent_dict);
             try w.endObject();
         }
+    }
 
-        // Write standard font dictionaries
-        for (font_list.items, 0..) |font, idx| {
-            const font_id = first_std_font_id + @as(ObjectId, @intCast(idx));
+    /// Write Type1 dictionaries for the used standard fonts.
+    fn writeStandardFonts(self: *Document, w: *Writer, ids: *const OutputIds) !void {
+        for (ids.font_list.items, 0..) |font, idx| {
+            const font_id = ids.first_std_font_id + @as(ObjectId, @intCast(idx));
             try w.beginObject(font_id);
             var font_dict = Dict.init(self.allocator);
             defer font_dict.deinit();
@@ -2955,9 +2995,12 @@ pub const Document = struct {
             try w.writeDict(font_dict);
             try w.endObject();
         }
+    }
 
-        // Generate font subsets (only include used glyphs)
-        // This also populates gid_remap for compact CFF subsetting
+    /// Generate font subsets (populating gid_remap), then render each page's
+    /// deferred commands to content bytes (after subsetting so glyph IDs are
+    /// properly remapped).
+    fn subsetFontsAndRenderPages(self: *Document) !void {
         const subset_start = pdf_output.milliTimestamp();
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font.generateSubset();
@@ -2970,11 +3013,15 @@ pub const Document = struct {
             try self.renderPageCommands(page);
         }
         pdf_output.last_output_timing.render_ms = pdf_output.milliTimestamp() - render_start;
+    }
 
-        // Write embedded font objects
+    /// Write embedded font objects: CID fonts (Type0 + CIDFont + descriptor +
+    /// font file + ToUnicode) or WinAnsi fonts (Font + descriptor + font file +
+    /// ToUnicode).
+    fn writeEmbeddedFonts(self: *Document, w: *Writer, ids: *const OutputIds) !void {
         const font_write_start = pdf_output.milliTimestamp();
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
-            const base_id = emb_font_base_ids.items[i];
+            const base_id = ids.emb_font_base_ids.items[i];
 
             if (emb_font.encoding == .identity) {
                 // CID font: Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode (5 objects)
@@ -3050,13 +3097,13 @@ pub const Document = struct {
                 try w.endObject();
 
                 // 3. FontDescriptor
-                try self.writeFontDescriptor(&w, emb_font, descriptor_id, fontfile_id, is_cff);
+                try self.writeFontDescriptor(w, emb_font, descriptor_id, fontfile_id, is_cff);
 
                 // 4. FontFile stream (FontFile2 for TTF, FontFile3 for CFF)
-                try self.writeFontFileStream(&w, emb_font, fontfile_id, is_cff, true);
+                try self.writeFontFileStream(w, emb_font, fontfile_id, is_cff, true);
 
                 // 5. ToUnicode CMap stream
-                try self.writeToUnicodeStream(&w, tounicode_id, tounicode_cmap);
+                try self.writeToUnicodeStream(w, tounicode_id, tounicode_cmap);
             } else {
                 // WinAnsi font: Font, FontDescriptor, FontFile2, ToUnicode (4 objects)
                 const font_dict_id = base_id;
@@ -3096,27 +3143,24 @@ pub const Document = struct {
 
                 // 2. FontDescriptor
                 const is_cff_wa = emb_font.font.isCFF();
-                try self.writeFontDescriptor(&w, emb_font, descriptor_id, fontfile_id, is_cff_wa);
+                try self.writeFontDescriptor(w, emb_font, descriptor_id, fontfile_id, is_cff_wa);
 
                 // 3. FontFile stream
-                try self.writeFontFileStream(&w, emb_font, fontfile_id, is_cff_wa, false);
+                try self.writeFontFileStream(w, emb_font, fontfile_id, is_cff_wa, false);
 
                 // 4. ToUnicode CMap stream
-                try self.writeToUnicodeStream(&w, tounicode_id, tounicode_cmap);
+                try self.writeToUnicodeStream(w, tounicode_id, tounicode_cmap);
             }
         }
         pdf_output.last_output_timing.font_write_ms = pdf_output.milliTimestamp() - font_write_start;
+    }
 
-        // Write COLR Type3 color-font objects (font dict + CharProc streams)
-        for (self.color_plans.items) |plan| {
-            try color_fonts.writeColorFont(self, &w, plan);
-        }
-
-        // Write image XObjects
+    /// Write image XObjects (+ SMask / ICC profile streams where present).
+    fn writeImages(self: *Document, w: *Writer, ids: *const OutputIds) !void {
         for (self.loaded_images.items, 0..) |image, i| {
-            const img_id = image_base_ids.items[i];
-            const smask_id = image_smask_ids.items[i];
-            const icc_id = image_icc_ids.items[i];
+            const img_id = ids.image_base_ids.items[i];
+            const smask_id = ids.image_smask_ids.items[i];
+            const icc_id = ids.image_icc_ids.items[i];
 
             // Write ICC profile stream if present
             if (icc_id) |iid| {
@@ -3189,10 +3233,12 @@ pub const Document = struct {
             }
             try w.endObject();
         }
+    }
 
-        // Write SVG Form XObjects
+    /// Write SVG Form XObjects with their ExtGState/Font resources.
+    fn writeSvgs(self: *Document, w: *Writer, ids: *const OutputIds) !void {
         for (self.loaded_svgs.items, 0..) |s, i| {
-            const svg_id = svg_base_ids.items[i];
+            const svg_id = ids.svg_base_ids.items[i];
 
             // Generate PDF content stream from SVG
             const svg_content = try s.toPdfContent(self.allocator);
@@ -3254,7 +3300,7 @@ pub const Document = struct {
                 if (has_text) {
                     // Static font names for Form XObject resources (F1-F16)
                     const svg_font_names = [_][]const u8{
-                        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8",
+                        "F1", "F2",  "F3",  "F4",  "F5",  "F6",  "F7",  "F8",
                         "F9", "F10", "F11", "F12", "F13", "F14", "F15", "F16",
                     };
 
@@ -3281,10 +3327,13 @@ pub const Document = struct {
             }
             try w.endObject();
         }
+    }
 
-        // Write each page
+    /// Write every page: page dict (with resources), content stream, and
+    /// annotation objects. Returns the next free object ID.
+    fn writePages(self: *Document, w: *Writer, ids: *const OutputIds) !ObjectId {
         const page_write_start = pdf_output.milliTimestamp();
-        next_id = first_page_id;
+        var next_id = ids.first_page_id;
         for (self.pages.items, 0..) |page, page_idx| {
             const pg_id = next_id;
             const content_id = next_id + 1;
@@ -3297,7 +3346,7 @@ pub const Document = struct {
             var page_dict = Dict.init(self.allocator);
             defer page_dict.deinit();
             try page_dict.put("Type", Value.name("Page"));
-            try page_dict.put("Parent", Value.ref(.{ .id = pages_root_id }));
+            try page_dict.put("Parent", Value.ref(.{ .id = ids.pages_root_id }));
 
             // MediaBox (use page's own size)
             var media_box = Array.init(self.allocator);
@@ -3331,9 +3380,9 @@ pub const Document = struct {
             var has_xobjects = false;
 
             // Add standard font resources
-            for (font_list.items, 0..) |font, idx| {
+            for (ids.font_list.items, 0..) |font, idx| {
                 if (page.used_fonts.contains(font)) {
-                    const font_obj_id = first_std_font_id + @as(ObjectId, @intCast(idx));
+                    const font_obj_id = ids.first_std_font_id + @as(ObjectId, @intCast(idx));
                     try font_res.put(fontResourceName(font), Value.ref(.{ .id = font_obj_id }));
                     has_fonts = true;
                 }
@@ -3345,7 +3394,7 @@ pub const Document = struct {
                 for (self.embedded_fonts.items, 0..) |doc_font, idx| {
                     if (doc_font == emb_font) {
                         // Use pre-calculated base ID for this font
-                        const font_obj_id = emb_font_base_ids.items[idx];
+                        const font_obj_id = ids.emb_font_base_ids.items[idx];
                         const res_name = embeddedFontResourceName(idx);
                         try font_res.put(res_name, Value.ref(.{ .id = font_obj_id }));
                         has_fonts = true;
@@ -3373,7 +3422,7 @@ pub const Document = struct {
                 // Find index of this image
                 for (self.loaded_images.items, 0..) |doc_img, idx| {
                     if (doc_img == img) {
-                        const img_obj_id = image_base_ids.items[idx];
+                        const img_obj_id = ids.image_base_ids.items[idx];
                         try xobject_res.put(imageResourceName(idx), Value.ref(.{ .id = img_obj_id }));
                         has_xobjects = true;
                         break;
@@ -3386,7 +3435,7 @@ pub const Document = struct {
                 // Find index of this SVG
                 for (self.loaded_svgs.items, 0..) |doc_svg, idx| {
                     if (doc_svg == s) {
-                        const svg_obj_id = svg_base_ids.items[idx];
+                        const svg_obj_id = ids.svg_base_ids.items[idx];
                         try xobject_res.put(svgResourceName(idx), Value.ref(.{ .id = svg_obj_id }));
                         has_xobjects = true;
                         break;
@@ -3561,7 +3610,7 @@ pub const Document = struct {
                     .internal => |a| {
                         // /Dest [page_ref /XYZ left top zoom]
                         // Get the page object ID for the destination
-                        var dest_page_id = first_page_id;
+                        var dest_page_id = ids.first_page_id;
                         for (self.pages.items[0..a.dest.page_index]) |p| {
                             dest_page_id += 2 + @as(ObjectId, @intCast(p.annotations.items.len));
                         }
@@ -3587,58 +3636,63 @@ pub const Document = struct {
             }
         }
         pdf_output.last_output_timing.page_write_ms = pdf_output.milliTimestamp() - page_write_start;
+        return next_id;
+    }
 
-        // Write Info dictionary if metadata is set
-        var info_id: ?ObjectId = null;
-        if (self.metadata.hasAnyField()) {
-            info_id = next_id;
-            next_id += 1;
+    /// Write the Info dictionary if any metadata is set, consuming `next_id`.
+    /// Returns its object ID, or null when there is no metadata.
+    fn writeInfoDict(self: *Document, w: *Writer, next_id: ObjectId) !?ObjectId {
+        if (!self.metadata.hasAnyField()) return null;
+        const info_id = next_id;
 
-            try w.beginObject(info_id.?);
-            var info_dict = Dict.init(self.allocator);
-            defer info_dict.deinit();
+        try w.beginObject(info_id);
+        var info_dict = Dict.init(self.allocator);
+        defer info_dict.deinit();
 
-            if (self.metadata.title) |title| {
-                try info_dict.put("Title", Value.string(title));
-            }
-            if (self.metadata.author) |author| {
-                try info_dict.put("Author", Value.string(author));
-            }
-            if (self.metadata.subject) |subject| {
-                try info_dict.put("Subject", Value.string(subject));
-            }
-            if (self.metadata.keywords) |keywords| {
-                try info_dict.put("Keywords", Value.string(keywords));
-            }
-            if (self.metadata.creator) |creator| {
-                try info_dict.put("Creator", Value.string(creator));
-            }
-            if (self.metadata.producer) |producer| {
-                try info_dict.put("Producer", Value.string(producer));
-            }
-
-            // Auto-generate dates if not explicitly set
-            var date_buf: [24]u8 = undefined; // "D:YYYYMMDDHHmmSS+00'00'"
-            const date_str = if (self.metadata.creation_date) |date|
-                date
-            else
-                formatPdfDate(&date_buf);
-
-            try info_dict.put("CreationDate", Value.string(date_str));
-
-            const mod_date_str = if (self.metadata.mod_date) |date|
-                date
-            else
-                date_str; // Same as creation date if not set
-
-            try info_dict.put("ModDate", Value.string(mod_date_str));
-
-            try w.writeDict(info_dict);
-            try w.endObject();
+        if (self.metadata.title) |title| {
+            try info_dict.put("Title", Value.string(title));
+        }
+        if (self.metadata.author) |author| {
+            try info_dict.put("Author", Value.string(author));
+        }
+        if (self.metadata.subject) |subject| {
+            try info_dict.put("Subject", Value.string(subject));
+        }
+        if (self.metadata.keywords) |keywords| {
+            try info_dict.put("Keywords", Value.string(keywords));
+        }
+        if (self.metadata.creator) |creator| {
+            try info_dict.put("Creator", Value.string(creator));
+        }
+        if (self.metadata.producer) |producer| {
+            try info_dict.put("Producer", Value.string(producer));
         }
 
-        // Write outlines if present
-        if (outlines_root_id) |root_id| {
+        // Auto-generate dates if not explicitly set
+        var date_buf: [24]u8 = undefined; // "D:YYYYMMDDHHmmSS+00'00'"
+        const date_str = if (self.metadata.creation_date) |date|
+            date
+        else
+            formatPdfDate(&date_buf);
+
+        try info_dict.put("CreationDate", Value.string(date_str));
+
+        const mod_date_str = if (self.metadata.mod_date) |date|
+            date
+        else
+            date_str; // Same as creation date if not set
+
+        try info_dict.put("ModDate", Value.string(mod_date_str));
+
+        try w.writeDict(info_dict);
+        try w.endObject();
+        return info_id;
+    }
+
+    /// Write the outlines root and one dictionary per outline item.
+    /// No-op when no outline was set.
+    fn writeOutlines(self: *Document, w: *Writer, ids: *const OutputIds) !void {
+        if (ids.outlines_root_id) |root_id| {
             const o = &self.outline.?;
 
             // Find first and last top-level outline items
@@ -3711,7 +3765,7 @@ pub const Document = struct {
                 var dest_array = Array.init(self.allocator);
                 defer dest_array.deinit();
                 // Get the page object ID for the destination
-                var dest_page_id = first_page_id;
+                var dest_page_id = ids.first_page_id;
                 for (self.pages.items[0..item.dest.page_index]) |p| {
                     dest_page_id += 2 + @as(ObjectId, @intCast(p.annotations.items.len));
                 }
@@ -3727,9 +3781,11 @@ pub const Document = struct {
                 try w.endObject();
             }
         }
+    }
 
-        // Write page labels if present
-        if (page_labels_id) |labels_id| {
+    /// Write the page-labels number tree. No-op when no labels were set.
+    fn writePageLabels(self: *Document, w: *Writer, ids: *const OutputIds) !void {
+        if (ids.page_labels_id) |labels_id| {
             try w.beginObject(labels_id);
             var labels_dict = Dict.init(self.allocator);
             defer labels_dict.deinit();
@@ -3774,8 +3830,10 @@ pub const Document = struct {
             try w.writeDict(labels_dict);
             try w.endObject();
         }
+    }
 
-        // Finish with xref and trailer
+    /// Write the xref table and trailer; returns the finished PDF bytes.
+    fn finishDocument(self: *Document, w: *Writer, ids: *const OutputIds, info_id: ?ObjectId) ![]u8 {
         const finish_start = pdf_output.milliTimestamp();
 
         // Generate document ID for PDF/A (required in trailer)
@@ -3789,7 +3847,7 @@ pub const Document = struct {
         } else null;
 
         const result = try w.finish(.{
-            .catalog_ref = .{ .id = catalog_id },
+            .catalog_ref = .{ .id = ids.catalog_id },
             .info_ref = if (info_id) |id| .{ .id = id } else null,
             .id = doc_id,
         });

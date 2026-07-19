@@ -7,21 +7,32 @@
 ## What's Next
 - **Audit backlog (from the 2026-07-19 codebase pass)**, remaining items in
   priority order:
-  1. Extract the ~700-line color-font subsystem from document.zig into
-     src/color_fonts.zig (free fns taking *Document; ~7 call sites).
-  2. Decompose the ~1120-line Document.output() into per-phase helpers
-     (reserve IDs / catalog+PDFA / fonts / images / SVGs / pages / xref) —
-     verify byte-identical output vs references.
-  3. Fuzz the new parsers (colr, bitmap_glyphs, svg_table) with mutated
+  1. Fuzz the new parsers (colr, bitmap_glyphs, svg_table) with mutated
      fixture bytes in fuzz_tests.zig.
-  4. Perf touches: writeStreamCompressed early-out for tiny streams;
+  2. Perf touches: writeStreamCompressed early-out for tiny streams;
      binary-search in svg_table.docForGlyph / CBDT subtable lookup;
      add a color-font page to perf_test.zig.
-  5. Optional: colr.zig test-fixture helper (interp setup repeats in ~6 tests).
+  3. Optional: colr.zig test-fixture helper (interp setup repeats in ~6 tests).
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+
+## What We Did (Session 2026-07-19 #19 — refactors: color_fonts.zig, output() phases)
+- **Backlog 1 done** (b88edb7): color-font subsystem → src/color_fonts.zig
+  (ColorFontPlan + 13 fns as free fns taking *Document; reserveIds moved too;
+  renderColorText lost unused self; getEmbeddedFontIndex now pub).
+- **Backlog 2 done**: Document.output() 1090 → 35 lines. New `OutputIds`
+  struct (all reserved IDs + deinit) + per-phase methods: reserveObjectIds,
+  writeCatalog, writePagesRoot, writePdfaObjects, writeStandardFonts,
+  subsetFontsAndRenderPages, writeEmbeddedFonts, writeImages, writeSvgs,
+  writePages (returns next free id), writeInfoDict, writeOutlines,
+  writePageLabels, finishDocument.
+- **Byte-identical verified**: 11 CLI-generated PDFs before/after refactor,
+  compared with timestamp fields normalized (scratchpad normpdf.py); all 390
+  tests + check-refs 46/46 pass.
+- Note: `zig build test` prints a spurious "failed command ... --listen=-"
+  stderr line even on success (exit 0; pre-existing, custom runner fuzz probe).
 
 ## What We Did (Session 2026-07-19 #18 — codebase audit + fixes)
 - **Audit pass** (refactoring / test gaps / latent bugs / perf) — one review
