@@ -193,13 +193,22 @@ pub const Cbdt = struct {
     pub fn glyphBitmap(self: Cbdt, gid: u16) ?BitmapGlyph {
         // IndexSubTableArray: u16 firstGlyphIndex, u16 lastGlyphIndex,
         // u32 additionalOffsetToIndexSubtable (from the array start).
-        for (0..self.num_subtables) |i| {
-            const entry = self.index_array_off + i * 8;
+        // Entries are sorted by firstGlyphIndex per spec (binary search).
+        var lo: usize = 0;
+        var hi: usize = self.num_subtables;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            const entry = self.index_array_off + mid * 8;
             const first = readU16(self.cblc, entry);
             const last = readU16(self.cblc, entry + 2);
-            if (gid < first or gid > last) continue;
-            const sub = self.index_array_off + readU32(self.cblc, entry + 4);
-            return self.lookupInSubtable(sub, first, gid);
+            if (gid < first) {
+                hi = mid;
+            } else if (gid > last) {
+                lo = mid + 1;
+            } else {
+                const sub = self.index_array_off + readU32(self.cblc, entry + 4);
+                return self.lookupInSubtable(sub, first, gid);
+            }
         }
         return null;
     }

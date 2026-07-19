@@ -88,9 +88,19 @@ pub const Writer = struct {
         try self.output.appendSlice(self.allocator, "\nendstream\n");
     }
 
+    /// Streams below this size skip the compression attempt entirely: zlib's
+    /// fixed overhead (~6 bytes plus block framing) means tiny streams
+    /// almost never shrink, and emoji/pixel fonts emit hundreds of tiny
+    /// CharProc streams per document.
+    const min_compress_len = 64;
+
     /// Write a compressed stream object using FlateDecode (zlib)
     /// Compresses the data and adds appropriate Filter entry to dict
     pub fn writeStreamCompressed(self: *Writer, dict: *Dict, data: []const u8) !void {
+        if (data.len < min_compress_len) {
+            return self.writeStream(dict, data);
+        }
+
         // Compress the data using configured level (default 1 for speed)
         const compressed = try zlib.compressLevel(self.allocator, data, self.compression_level);
         defer self.allocator.free(compressed);
@@ -105,11 +115,7 @@ pub const Writer = struct {
             try self.output.appendSlice(self.allocator, "\nendstream\n");
         } else {
             // Fall back to uncompressed if compression doesn't help
-            try dict.put("Length", Value.int(@intCast(data.len)));
-            try self.writeDict(dict.*);
-            try self.output.appendSlice(self.allocator, "stream\n");
-            try self.output.appendSlice(self.allocator, data);
-            try self.output.appendSlice(self.allocator, "\nendstream\n");
+            try self.writeStream(dict, data);
         }
     }
 

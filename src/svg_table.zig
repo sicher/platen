@@ -27,28 +27,38 @@ pub const SvgTable = struct {
         const doc_list_off = readU32(data, 2);
         if (doc_list_off + 2 > data.len) return error.InvalidSvgTable;
         // SVGDocumentList: u16 numEntries, then SVGDocumentRecord[numEntries].
-        const num_entries = readU16(data, doc_list_off);
+        // Clamped to what fits in the table (see DESIGN.md hardening rules).
+        const num_entries: u16 = @intCast(@min(readU16(data, doc_list_off), (data.len - doc_list_off - 2) / 12));
         return .{ .data = data, .doc_list_off = doc_list_off, .num_entries = num_entries };
     }
 
     /// The uncompressed SVG document covering exactly `gid`, or null (no
-    /// record, gzipped, or a multi-glyph document).
+    /// record, gzipped, or a multi-glyph document). Records are sorted by
+    /// startGlyphID per spec (binary search).
     pub fn docForGlyph(self: SvgTable, gid: u16) ?[]const u8 {
-        for (0..self.num_entries) |i| {
-            // SVGDocumentRecord: u16 startGlyphID, u16 endGlyphID,
-            // Offset32 svgDocOffset, u32 svgDocLength (offsets relative to
-            // the SVGDocumentList).
-            const rec = self.doc_list_off + 2 + i * 12;
+        // SVGDocumentRecord: u16 startGlyphID, u16 endGlyphID,
+        // Offset32 svgDocOffset, u32 svgDocLength (offsets relative to
+        // the SVGDocumentList).
+        var lo: usize = 0;
+        var hi: usize = self.num_entries;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            const rec = self.doc_list_off + 2 + mid * 12;
             const start = readU16(self.data, rec);
             const end = readU16(self.data, rec + 2);
-            if (gid < start or gid > end) continue;
-            if (start != end) return null; // multi-glyph documents unsupported
-            const off = self.doc_list_off + readU32(self.data, rec + 4);
-            const len = readU32(self.data, rec + 8);
-            if (len < 2 or off + len > self.data.len) return null;
-            const doc = self.data[off .. off + len];
-            if (doc[0] == 0x1F and doc[1] == 0x8B) return null; // gzip unsupported
-            return doc;
+            if (gid < start) {
+                hi = mid;
+            } else if (gid > end) {
+                lo = mid + 1;
+            } else {
+                if (start != end) return null; // multi-glyph documents unsupported
+                const off = self.doc_list_off + readU32(self.data, rec + 4);
+                const len = readU32(self.data, rec + 8);
+                if (len < 2 or off + len > self.data.len) return null;
+                const doc = self.data[off .. off + len];
+                if (doc[0] == 0x1F and doc[1] == 0x8B) return null; // gzip unsupported
+                return doc;
+            }
         }
         return null;
     }

@@ -55,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("\n=== ZAPDF Performance Test ===\n", .{});
     std.debug.print("Pages: {d}, Iterations: {d}\n\n", .{ config.pages, config.iterations });
 
-    var total_times = [_]i64{0} ** 7;
+    var total_times = [_]i64{0} ** 8;
     var pdf_bytes: ?[]u8 = null;
     defer if (pdf_bytes) |b| allocator.free(b);
 
@@ -71,7 +71,8 @@ pub fn main(init: std.process.Init) !void {
         total_times[3] += result.unicode_ms;
         total_times[4] += result.text_flow_ms;
         total_times[5] += result.drawing_ms;
-        total_times[6] += result.output_ms;
+        total_times[6] += result.color_font_ms;
+        total_times[7] += result.output_ms;
 
         // Keep last PDF for output
         if (pdf_bytes) |b| allocator.free(b);
@@ -94,9 +95,10 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("  Unicode/marks:   {d}ms\n", .{@divTrunc(total_times[3], n)});
     std.debug.print("  Text flow:       {d}ms\n", .{@divTrunc(total_times[4], n)});
     std.debug.print("  Drawing shapes:  {d}ms\n", .{@divTrunc(total_times[5], n)});
-    std.debug.print("  PDF output:      {d}ms\n", .{@divTrunc(total_times[6], n)});
+    std.debug.print("  Color emoji:     {d}ms\n", .{@divTrunc(total_times[6], n)});
+    std.debug.print("  PDF output:      {d}ms\n", .{@divTrunc(total_times[7], n)});
     std.debug.print("  ---\n", .{});
-    std.debug.print("  TOTAL:           {d}ms\n", .{@divTrunc(total_times[0] + total_times[1] + total_times[2] + total_times[3] + total_times[4] + total_times[5] + total_times[6], n)});
+    std.debug.print("  TOTAL:           {d}ms\n", .{@divTrunc(total_times[0] + total_times[1] + total_times[2] + total_times[3] + total_times[4] + total_times[5] + total_times[6] + total_times[7], n)});
 
     if (pdf_bytes) |data| {
         std.debug.print("  PDF size:        {d} KB\n", .{data.len / 1024});
@@ -214,6 +216,7 @@ const TestResult = struct {
     unicode_ms: i64,
     text_flow_ms: i64,
     drawing_ms: i64,
+    color_font_ms: i64,
     output_ms: i64,
     total_ms: i64,
     pdf_data: []u8,
@@ -488,7 +491,34 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
         result.drawing_ms = t.endPrint(config.quiet);
     }
 
-    // 7. PDF output generation
+    // 7. Color font test (COLR v1 emoji → Type3 color fonts). Layout/shaping
+    // cost lands here; CharProc rendering and Type3 emission land in the
+    // output step's timing.
+    {
+        const t = Timer.begin("Color emoji");
+        const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", null);
+        const emoji_rows = [_][]const u8{
+            "\u{2601}\u{1F600}\u{1F389}\u{1F680}\u{2764}\u{2B50}",
+            "\u{1F31F}\u{1F308}\u{1F34E}\u{1F355}\u{1F381}\u{1F3A8}",
+            "\u{1F600}\u{1F601}\u{1F602}\u{1F603}\u{1F604}\u{1F605}",
+        };
+        for (0..pages_per_section) |_| {
+            try doc.addPage(.{});
+            var y: f64 = 60;
+            // 30 lines of emoji per page; mixed with spaces so runs split
+            // between the Type3 color font and the mono CID font.
+            for (0..10) |_| {
+                for (emoji_rows) |row| {
+                    _ = try doc.writeAt(.{ .x = 50, .y = y }, row, .{ .font = emoji, .size = 20 });
+                    y += 24;
+                }
+            }
+            _ = try doc.writeAt(.{ .x = 50, .y = y }, "\u{1F600} \u{1F389} \u{1F680} \u{2764} \u{2B50}", .{ .font = emoji, .size = 20 });
+        }
+        result.color_font_ms = t.endPrint(config.quiet);
+    }
+
+    // 8. PDF output generation
     {
         const t = Timer.begin("PDF output");
         result.pdf_data = try doc.output();
