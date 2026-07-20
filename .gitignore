@@ -9,6 +9,7 @@ zig-pkg/
 # Tools build artifacts
 tools/*/zig-out/
 tools/*/.zig-cache/
+tools/bun/
 test/output/
 .venv/
 

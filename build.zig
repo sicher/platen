@@ -75,6 +75,28 @@ pub fn build(b: *std.Build) void {
     const perf_step = b.step("perf", "Run performance tests (use -Doptimize=ReleaseFast)");
     perf_step.dependOn(&run_perf.step);
 
+    // Invoice throughput benchmark (SlothPDF comparison)
+    // Run with: zig build bench-invoice -Doptimize=ReleaseFast -- [args]
+    const invoice_bench_exe = b.addExecutable(.{
+        .name = "platen-bench-invoice",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/invoice_bench.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "platen", .module = platen_mod },
+            },
+        }),
+    });
+
+    const run_invoice_bench = b.addRunArtifact(invoice_bench_exe);
+    if (b.args) |args| {
+        run_invoice_bench.addArgs(args);
+    }
+
+    const invoice_bench_step = b.step("bench-invoice", "Run invoice throughput benchmark (use -Doptimize=ReleaseFast)");
+    invoice_bench_step.dependOn(&run_invoice_bench.step);
+
     // Documentation (using zigmarkdoc via shell script)
     const docs_cmd = b.addSystemCommand(&.{ "scripts/gen_docs.sh" });
     const docs_step = b.step("docs", "Generate API documentation (Markdown)");
