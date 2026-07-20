@@ -23,7 +23,7 @@
 - `gradient.zig` - Linear/radial gradient support
 - `color.zig` - Color types (grayscale, RGB, CMYK)
 - `layout.zig` - Layout types (Point, TextBox, Margins, Padding)
-- `zlib.zig` - FlateDecode compression via C zlib
+- `zlib.zig` - FlateDecode compression via std.compress.flate (zlib container)
 - `pdfa.zig` - PDF/A conformance (validation, XMP metadata, ICC profile)
 - `cli.zig` - Command line tool
 
@@ -171,7 +171,7 @@ endstream
 - Format: single-byte codespace, bfchar entries
 
 **Implemented features:**
-1. FlateDecode compression for all streams (via bundled C zlib)
+1. FlateDecode compression for all streams (via std.compress.flate)
 2. CIDFont (Type0) support for full Unicode text (CJK, emoji, etc.)
 3. OpenType CFF font support (CIDFontType0C)
 4. OpenType GSUB/GPOS (ligatures, kerning, mark positioning)

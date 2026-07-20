@@ -15,6 +15,25 @@
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
 
+## What We Did (Session 2026-07-20 #22b — drop C zlib for std.compress.flate)
+- **Zero dependencies now**: src/zlib.zig rewritten on std.compress.flate
+  (zlib container, levels 1-9 mapped to flate.Compress.Options); zlib dep
+  removed from build.zig + build.zig.zon. Verified with a fresh
+  --global-cache-dir: builds with no network fetch.
+- writer.zig: compression_level == 0 now explicitly skips compression.
+  Before, it only worked because C zlib level 0 emitted stored blocks larger
+  than the input, tripping the "only use if smaller" guard (tests rely on
+  level 0 for searchable content streams).
+- **Perf cost (accepted; user expects std flate to improve in next Zig
+  release):** PDF output 24→33ms per 110-page bench, total 66→74ms
+  (~1500 pages/sec), output 592→621 KB. std's huffman-only fast mode is
+  unusable (its finish() isn't pub — upstream oversight).
+- README refreshed: color-fonts feature bullet added (was missing entirely),
+  "no dependencies" claims now true, perf table updated (110 pages, 74ms).
+  PERFORMANCE.md cross-reference updated. Stale test_czlib/test_flate
+  binaries deleted, .gitignore entries removed.
+- Verified: 400/400 tests, check-refs 46/46.
+
 ## What We Did (Session 2026-07-20 #22 — rename zapdf → platen)
 - **Library renamed to platen** (letterpress plate; picked for no name
   collisions — zapdf clashed with Zig's zap framework and the zpdf extractor;

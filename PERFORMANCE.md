@@ -35,7 +35,9 @@ TOTAL:           849ms
 ```
 
 For comparison, ReleaseFast (with `smp_allocator`) on the same workload runs
-the full benchmark in ~57ms — see README.md.
+the full benchmark in ~74ms — see README.md. (Compression moved from C zlib
+to `std.compress.flate`, which currently costs ~9ms more in the output phase;
+historical sections below that mention zlib predate that switch.)
 
 ### PDF Output Breakdown
 

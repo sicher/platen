@@ -15,9 +15,6 @@ test/output/
 # Python cache
 __pycache__/
 
-# Test binaries
-test_czlib
-test_flate
 
 # macOS
 .DS_Store

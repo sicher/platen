@@ -97,7 +97,7 @@ pub const Writer = struct {
     /// Write a compressed stream object using FlateDecode (zlib)
     /// Compresses the data and adds appropriate Filter entry to dict
     pub fn writeStreamCompressed(self: *Writer, dict: *Dict, data: []const u8) !void {
-        if (data.len < min_compress_len) {
+        if (data.len < min_compress_len or self.compression_level == 0) {
             return self.writeStream(dict, data);
         }
 

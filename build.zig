@@ -4,19 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // zlib dependency (built from source, no system dependency)
-    const zlib_dep = b.dependency("zlib", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     // Library module
     const platen_mod = b.createModule(.{
         .root_source_file = b.path("src/platen.zig"),
         .target = target,
         .optimize = optimize,
     });
-    platen_mod.linkLibrary(zlib_dep.artifact("z"));
 
     // CLI executable
     const exe = b.addExecutable(.{
@@ -49,7 +42,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_mod.linkLibrary(zlib_dep.artifact("z"));
     const lib_tests = b.addTest(.{
         .root_module = test_mod,
         // Vendored runner working around a Zig 0.16.0 compile error in the

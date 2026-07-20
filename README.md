@@ -1,6 +1,6 @@
 # platen
 
-A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, images, vector graphics, and PDF/A archival output. No external C dependencies.
+A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, color emoji fonts, images, vector graphics, and PDF/A archival output. Pure Zig — no dependencies at all.
 
 ## Features
 
@@ -8,6 +8,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 - **TrueType/OpenType font embedding** with automatic subsetting
 - **Full Unicode support** via CID fonts (CJK, emoji, etc.)
 - **OpenType features**: ligatures, kerning, mark positioning, stylistic sets, character variants, and more
+- **Color fonts**: COLR v0/v1 (layered, gradients, sweep gradients), sbix/CBDT/EBDT bitmap strikes, and OT-SVG — full color emoji support
 - **Text flow**: word wrapping, justified text, Knuth-Plass optimal line breaking
 - **Graphics**: lines, rectangles, circles, ellipses, polygons
 - **Path API**: moveTo, lineTo, curveTo, quadTo for custom shapes
@@ -22,7 +23,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 
 ## Performance
 
-100-page benchmark on Apple Silicon (release build). Each section is 20 pages: simple text, OpenType shaping (ligatures/kerning), Unicode with diacritics, justified text flow, and vector graphics (~1500 shapes/page).
+110-page benchmark on Apple Silicon (release build). Five 20-page sections — simple text, OpenType shaping (ligatures/kerning), Unicode with diacritics, justified text flow, vector graphics (~1500 shapes/page) — plus 10 pages of color emoji.
 
 | Operation | Time |
 |-----------|------|
@@ -32,8 +33,9 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 | Unicode/marks | 6ms |
 | Text flow | 2ms |
 | Drawing shapes | 13ms |
-| PDF output | 20ms |
-| **Total** | **57ms** (~1750 pages/sec) |
+| Color emoji | 4ms |
+| PDF output | 33ms |
+| **Total** | **74ms** (~1500 pages/sec) |
 
 See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 
@@ -766,7 +768,7 @@ font.embedded.setFeature(.liga, false);  // Disable standard ligatures
 ## Requirements
 
 - Zig 0.16+
-- No external dependencies (zlib bundled)
+- No dependencies — compression uses `std.compress.flate`
 
 ## License
 
