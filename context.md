@@ -15,6 +15,18 @@
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
 
+## What We Did (Session 2026-07-20 #22c — logo, release sync)
+- Codeberg repo renamed by user: https://codeberg.org/sicher/platen
+  (remote URL updated; main + tags pushed).
+- Logo added: platen.svg in repo root, embedded at top of README
+  (480px, centered). Wordmark converted to outlines (first export had
+  live Archivo text that wouldn't render for others).
+- **v1.0.0 tag re-pointed twice** (fine — no dependents yet): first to
+  the rename commit, finally to 470fe2c so the release tarball has the
+  platen name, zero deps, and the logo.
+- Still pending (optional): rename local dir ~/Documents/projects/zapdf
+  → platen; then update .claude/settings.local.json paths + remote checkout.
+
 ## What We Did (Session 2026-07-20 #22b — drop C zlib for std.compress.flate)
 - **Zero dependencies now**: src/zlib.zig rewritten on std.compress.flate
   (zlib container, levels 1-9 mapped to flate.Compress.Options); zlib dep
