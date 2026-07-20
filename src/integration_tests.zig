@@ -1112,6 +1112,13 @@ fn generateJustifyPdf(allocator: std.mem.Allocator) ![]u8 {
 
     region = platen.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
     _ = try doc.writeLine(&region, compare_text, body_11, .{ .alignment = .justify, .break_on_hyphens = false, .valign = .top_leading });
+    y = region.y + region.cursor_y + 12;
+
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Comparison - Right Aligned:", header_11);
+    y += 14.4;
+
+    region = platen.Region{ .x = 50, .y = y, .width = 300, .height = 100 };
+    _ = try doc.writeLine(&region, compare_text, body_11, .{ .alignment = .right, .break_on_hyphens = false, .valign = .top_leading });
 
     return doc.output();
 }

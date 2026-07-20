@@ -106,9 +106,6 @@ pub const OutputTiming = struct {
     finish_ms: i64 = 0,
 };
 
-/// Last output timing (for performance debugging).
-pub var last_output_timing: OutputTiming = .{};
-
 // ============================================================================
 // Helper Functions
 // ============================================================================

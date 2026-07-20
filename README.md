@@ -25,7 +25,11 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 
 ## Performance
 
-110-page benchmark on Apple Silicon (release build). Five 20-page sections — simple text, OpenType shaping (ligatures/kerning), Unicode with diacritics, justified text flow, vector graphics (~1500 shapes/page) — plus 10 pages of color emoji.
+Two benchmarks on Apple Silicon (release build), measuring different workloads: one large document, and many small documents.
+
+### One large document
+
+110 pages in five 20-page sections — simple text, OpenType shaping (ligatures/kerning), Unicode with diacritics, justified text flow, vector graphics (~1500 shapes/page) — plus 10 pages of color emoji. [See the generated document](examples/benchmark_110pages.pdf) (621 KB). Run it with `zig build perf -Doptimize=ReleaseFast`.
 
 | Operation | Time |
 |-----------|------|
@@ -38,6 +42,22 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 | Color emoji | 4ms |
 | PDF output | 33ms |
 | **Total** | **74ms** (~1500 pages/sec) |
+
+Setting `doc.compress_threads = 8` compresses streams (page contents, font subsets) on worker threads during `output()`: PDF output drops to 19ms and the total to ~59ms on the same hardware, with byte-identical output. Requires a thread-safe allocator.
+
+### Many small documents (invoice throughput)
+
+1000 unique single-page A4 invoices, generated one complete PDF at a time (single-threaded): 3-10 line items each, embedded Inter regular + bold with full OpenType shaping, the platen wordmark as vector SVG, per-document font subsetting. [See a generated sample](examples/benchmark_invoice.pdf). Run it with `zig build bench-invoice -Doptimize=ReleaseFast`.
+
+| Mode | Latency | Throughput |
+|------|---------|------------|
+| Uncompressed, 1 thread | 0.50ms | ~2000 PDFs/sec |
+| Uncompressed, 8 threads | 0.11ms | ~9100 PDFs/sec |
+| Compressed (level 1), 1 thread | 0.94ms | ~1060 PDFs/sec |
+
+Every document pays the full stateless cost: fonts are re-parsed, shaped, and subset per PDF, and the SVG is re-parsed per PDF — there is no cross-document caching.
+
+Because documents share no state, they can be rendered concurrently without locking — one `Document` per thread scales close to linearly across cores (`--threads=N` in the benchmark). A single `Document` is not thread-safe; keep each document on one thread.
 
 See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 
@@ -75,13 +95,13 @@ Add platen as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .platen = .{
-        .url = "https://codeberg.org/sicher/platen/archive/v1.0.0.tar.gz",
+        .url = "https://codeberg.org/sicher/platen/archive/main.tar.gz",
         .hash = "...",
     },
 },
 ```
 
-To use the latest development version, replace `v1.0.0` with `main`.
+Versioned release tags will return with 1.0.0; until then, track `main`.
 
 Then in your `build.zig`:
 

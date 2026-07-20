@@ -76,6 +76,11 @@ pub const Font = union(enum) {
 pub const TextStyle = struct {
     font: Font,
     size: f64,
+    /// Bold/italic resolve a variant: standard fonts map to the bold/italic
+    /// member of the base-14, font families resolve the loaded variant (error
+    /// FontVariantNotLoaded if missing). A single `.embedded` font has no
+    /// variants - writing with bold/italic set errors instead of silently
+    /// rendering regular.
     bold: bool = false,
     italic: bool = false,
     color: Color = Color.black,

@@ -1008,6 +1008,15 @@ def gen_justify():
     pdf.set_font("Helvetica", "", size=11)
     pdf.set_xy(50, y)
     pdf.multi_cell(w=300, h=11 * 1.2, text=compare_text, align="J")
+    y = pdf.get_y() + 12
+
+    pdf.set_font("Helvetica", "B", size=11)
+    pdf.text(50, y, "Comparison - Right Aligned:")
+    y += 14.4
+
+    pdf.set_font("Helvetica", "", size=11)
+    pdf.set_xy(50, y)
+    pdf.multi_cell(w=300, h=11 * 1.2, text=compare_text, align="R")
 
     pdf.output(OUTPUT_DIR / "justify.pdf")
     print("  justify.pdf")

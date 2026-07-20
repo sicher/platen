@@ -30,6 +30,11 @@ pub const Writer = struct {
     allocator: std.mem.Allocator,
     /// Compression level for FlateDecode streams (0-9, default 1 for speed)
     compression_level: i32 = 1,
+    /// Optional map of already-compressed stream data, keyed by
+    /// @intFromPtr(data.ptr) of the raw stream. writeStreamCompressed uses a
+    /// hit instead of compressing inline; entries must be produced with the
+    /// same compression_level so output stays byte-identical.
+    precompressed: ?*const std.AutoHashMapUnmanaged(usize, []const u8) = null,
 
     pub fn init(allocator: std.mem.Allocator) Writer {
         return .{
@@ -92,7 +97,7 @@ pub const Writer = struct {
     /// fixed overhead (~6 bytes plus block framing) means tiny streams
     /// almost never shrink, and emoji/pixel fonts emit hundreds of tiny
     /// CharProc streams per document.
-    const min_compress_len = 64;
+    pub const min_compress_len = 64;
 
     /// Write a compressed stream object using FlateDecode (zlib)
     /// Compresses the data and adds appropriate Filter entry to dict
@@ -101,10 +106,23 @@ pub const Writer = struct {
             return self.writeStream(dict, data);
         }
 
+        // Use a precompressed result if one was prepared (parallel
+        // compression); falls through to inline compression on miss
+        if (self.precompressed) |map| {
+            if (map.get(@intFromPtr(data.ptr))) |pre| {
+                return self.writeStreamPicking(dict, data, pre);
+            }
+        }
+
         // Compress the data using configured level (default 1 for speed)
         const compressed = try zlib.compressLevel(self.allocator, data, self.compression_level);
         defer self.allocator.free(compressed);
 
+        return self.writeStreamPicking(dict, data, compressed);
+    }
+
+    /// Emit the compressed variant if it is smaller, the raw stream otherwise.
+    fn writeStreamPicking(self: *Writer, dict: *Dict, data: []const u8, compressed: []const u8) !void {
         // Only use compression if it actually saves space
         if (compressed.len < data.len) {
             try dict.put("Filter", Value.name("FlateDecode"));

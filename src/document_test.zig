@@ -3320,3 +3320,189 @@ test "COLR v0 font emits a Type3 color font (Bungee Color)" {
     // Text extraction recovers the letters via ToUnicode.
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/ToUnicode") != null);
 }
+
+test "parallel stream compression produces byte-identical output" {
+    // smp_allocator: compress_threads > 1 requires a thread-safe allocator
+    const allocator = std.heap.smp_allocator;
+
+    const makePdf = struct {
+        fn call(alloc: std.mem.Allocator, threads: u32) ![]u8 {
+            var doc = Document.init(alloc, std.testing.io);
+            defer doc.deinit();
+            doc.compress_threads = threads;
+
+            const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+            const style = TextStyle{ .font = font, .size = 11 };
+            for (0..3) |_| {
+                try doc.addPage(.{});
+                var y: f64 = 40;
+                for (0..30) |_| {
+                    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Parallel compression must not change the output bytes.", style);
+                    y += 14;
+                }
+            }
+            return doc.output();
+        }
+    }.call;
+
+    const single = try makePdf(allocator, 1);
+    defer allocator.free(single);
+    const threaded = try makePdf(allocator, 4);
+    defer allocator.free(threaded);
+
+    try std.testing.expectEqualSlices(u8, single, threaded);
+}
+
+
+test "measureStyled matches embedded font advances" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const style = TextStyle{ .font = font, .size = 10 };
+    const text = "$13200.00 Wavelength";
+
+    // Must reflect the embedded font's own advances, not the Helvetica
+    // fallback that measureStyled used before (~7% off for Inter).
+    const emb = style.embeddedFont().?;
+    try std.testing.expectApproxEqAbs(
+        emb.measureTextWidth(text, 10),
+        doc.measureStyled(text, style).width,
+        0.001,
+    );
+    try std.testing.expectApproxEqAbs(@as(f64, 12.0), doc.measureStyled(text, style).height, 0.001);
+}
+
+test "measurement is independent of render order" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const style = TextStyle{ .font = font, .size = 10 };
+    // Kern-heavy pairs, so missing GPOS data changes the measured width.
+    const text = "AVATAR Wavelength To Ty. Justified copy.";
+
+    const before_render = doc.measureStyled(text, style).width;
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, text, style);
+    const after_render = doc.measureStyled(text, style).width;
+
+    // Lazy GPOS parsing must not make the first measurement disagree with
+    // later ones - justification/alignment depend on a stable width.
+    try std.testing.expectApproxEqAbs(before_render, after_render, 0.0001);
+}
+
+test "caller-owned Image and Svg can be shared across documents" {
+    const allocator = std.testing.allocator;
+    const images_mod = @import("images.zig");
+    const svg_mod = @import("svg.zig");
+
+    const png_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/images/robot.png", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(png_data);
+
+    // Decode once, draw into two documents; deinit of neither document may
+    // destroy the caller-owned assets (double-free is caught by the testing
+    // allocator).
+    const image = try images_mod.Image.fromMemory(allocator, png_data, false);
+    defer {
+        image.deinit();
+        allocator.destroy(image);
+    }
+    const svg = try svg_mod.Svg.fromMemory(allocator,
+        \\<svg width="40" height="40"><rect x="0" y="0" width="40" height="40" fill="blue"/></svg>
+    );
+    defer {
+        svg.deinit();
+        allocator.destroy(svg);
+    }
+
+    for (0..2) |_| {
+        var doc = Document.init(allocator, std.testing.io);
+        defer doc.deinit();
+        try doc.addPage(.{});
+        try doc.drawImage(image, .{ .x = 50, .y = 50, .width = 100, .height = 0 });
+        try doc.drawSvg(svg, .{ .x = 50, .y = 200, .width = 40, .height = 40 });
+        const pdf = try doc.output();
+        defer allocator.free(pdf);
+        try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subtype /Image") != null);
+    }
+}
+
+test "setFeature applies to fonts loaded after the call" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    // Order used to matter: setFeature only touched already-loaded fonts.
+    try doc.setFeature(.liga, false);
+    try doc.setFeature(.kern, false);
+    try doc.setFeature(.kern, true); // later call wins
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const emb = font.embedded;
+    try std.testing.expect(!emb.feature_flags.isEnabled(.liga));
+    try std.testing.expect(emb.feature_flags.isEnabled(.kern));
+
+    // And still applies to fonts loaded before a later call
+    try doc.setFeature(.calt, false);
+    try std.testing.expect(!emb.feature_flags.isEnabled(.calt));
+}
+
+test "bold on single embedded font errors instead of silently rendering regular" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+
+    // Regular works
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "ok", .{ .font = font, .size = 12 });
+    // Bold/italic on a variant-less font is an error, matching the family
+    // behavior for a missing variant
+    try std.testing.expectError(error.FontVariantNotLoaded, doc.writeAt(.{ .x = 50, .y = 70 }, "nope", .{ .font = font, .size = 12, .bold = true }));
+    try std.testing.expectError(error.FontVariantNotLoaded, doc.writeAt(.{ .x = 50, .y = 90 }, "nope", .{ .font = font, .size = 12, .italic = true }));
+}
+
+test "embedded-font measurement includes char_spacing" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    const font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const plain = TextStyle{ .font = font, .size = 12 };
+    const spaced = TextStyle{ .font = font, .size = 12, .char_spacing = 2.0 };
+    const text = "Hello spacing"; // 13 glyphs -> 12 gaps
+
+    const w_plain = doc.measureStyled(text, plain).width;
+    const w_spaced = doc.measureStyled(text, spaced).width;
+    try std.testing.expectApproxEqAbs(w_plain + 12 * 2.0, w_spaced, 0.001);
+}
+
+test "measurement applies GSUB ligatures like rendering" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+
+    // Satoshi has real liga ligatures (fi, fl, ft) active by default
+    const font = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", .identity);
+    const emb = font.embedded;
+    const text = "fit float finish"; // fi/fl/ft ligatures
+
+    // Ground truth: shape exactly as the renderer does and sum the final
+    // glyph advances + kerning
+    const glyphs = try emb.markUnicodeCharsUsed(text, null);
+    defer emb.allocator.free(glyphs);
+    const em: i32 = @intCast(emb.font.head.?.units_per_em);
+    var total: i32 = 0;
+    var prev: u16 = 0;
+    for (glyphs, 0..) |gid, i| {
+        total += @divTrunc(@as(i32, @intCast(emb.font.getGlyphWidth(gid) orelse 0)) * 1000, em);
+        if (i > 0) total += @divTrunc(@as(i32, emb.getKerning(prev, gid)) * 1000, em);
+        prev = gid;
+    }
+    const expected = @as(f64, @floatFromInt(total)) * 12.0 / 1000.0;
+
+    const measured = emb.measureTextWidth(text, 12);
+    try std.testing.expectApproxEqAbs(expected, measured, 0.001);
+
+    // And strictly narrower than the unshaped sum of individual letters,
+    // since the ligature glyphs replace multiple letters
+    try std.testing.expect(glyphs.len < text.len);
+}

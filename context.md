@@ -1,19 +1,50 @@
 # platen Context
 
 ## Current Focus
-**Renamed zapdf → platen** (session #22). Library is feature complete (v1.0.0), Zig 0.16.
+**Pre-1.0 hardening.** User removed the v1.0.0 tag on Codeberg (2026-07-20);
+it goes back when TODO.md is in good shape. Zig 0.16, zero dependencies.
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
-- **User actions pending for rename:** rename repo on Codeberg (sicher/zapdf →
-  sicher/platen; old URL auto-redirects), optionally rename the local project
-  directory (~/Documents/projects/zapdf → platen). In-repo URLs already point
-  at sicher/platen. Absolute paths in .claude/settings.local.json still say
-  /projects/zapdf on purpose — update them if/when the directory is renamed.
-- Future enhancements (if needed):
-  - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
-  - Additional PDF/A levels (2a, 3a for tagged PDF)
-  - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+- Work through **TODO.md** (road to 1.0.0). Correctness traps are DONE;
+  next: API consistency items, then the breaking design decisions
+  (writeAt anchor/Rect, writeLine naming), then transforms & clipping.
+- Rename fully complete: Codeberg repo renamed, local dir renamed to
+  ~/Documents/projects/platen, .claude/settings.local.json paths updated.
+
+## What We Did (Session 2026-07-20 #23/#24 — benchmarks, perf, pre-1.0 hardening)
+- **Invoice benchmark** (`zig build bench-invoice`, src/invoice_bench.zig):
+  1000 unique A4 invoices, Inter family + platen.svg wordmark, mirrors the
+  SlothPDF benchmark (their 17k/sec claim reproduced at ~10k/sec on this
+  M1 Pro, but they skip shaping/subsetting and their images silently drop
+  after the first render). examples/benchmark_invoice.pdf +
+  benchmark_110pages.pdf linked from README.
+- **Perf: 1,039 -> ~1,950 PDFs/sec single-thread** (uncompressed invoice):
+  featureIndex linear scan -> comptime-sorted binary search + range scans
+  (was 33% of runtime!), len-first ss/cv checks, direct-mapped kern cache
+  (4096 slots) replacing AutoHashMap.
+- **Concurrency**: last_output_timing global -> Document field (was a data
+  race); --threads=N in invoice bench: 9,087 PDFs/sec at 8 threads.
+  Parallel stream compression in output() via doc.compress_threads
+  (page contents + font subsets on a worker pool, byte-identical output,
+  110-page PDF output 34 -> 19ms).
+- **Bug fixes**: measureStyled returned Helvetica metrics for embedded fonts
+  (7% off); lazy GPOS parse made pre-render measurements miss kerning
+  (visible as one differing Tw on page 60 of the 110-page bench); SVG root
+  width="100%" parsed as 100pt instead of falling back to viewBox.
+- **Correctness traps (TODO.md) all fixed**: asset ownership bits enable
+  cross-document Image/Svg sharing (no more double-free); bold/italic on a
+  single .embedded font errors (FontVariantNotLoaded); setFeature records
+  overrides and applies to later loads; measurement now runs the same GSUB
+  pipeline as rendering (ligatures) and includes char_spacing. writeAt now
+  shapes once (writeTextStyled returns the shaped width) - correct
+  measurement landed perf-neutral.
+- Right-aligned block added to the justify integration test (platen +
+  fpdf2 reference regenerated).
+- Image streams compress at @max(6, compression_level) again (level-1
+  experiment grew the images test PDF 1.6%).
+- **v1.0.0 tag removed by user**; version rolled to 0.9.0, README installs
+  from main, TODO.md is the road-to-1.0 list. 409 tests pass.
 
 ## What We Did (Session 2026-07-20 #22c — logo, release sync)
 - Codeberg repo renamed by user: https://codeberg.org/sicher/platen
@@ -24,8 +55,8 @@
 - **v1.0.0 tag re-pointed twice** (fine — no dependents yet): first to
   the rename commit, finally to 470fe2c so the release tarball has the
   platen name, zero deps, and the logo.
-- Still pending (optional): rename local dir ~/Documents/projects/zapdf
-  → platen; then update .claude/settings.local.json paths + remote checkout.
+- Local dir renamed to ~/Documents/projects/platen (session #23);
+  settings.local.json absolute paths updated, 400/400 tests pass from new path.
 
 ## What We Did (Session 2026-07-20 #22b — drop C zlib for std.compress.flate)
 - **Zero dependencies now**: src/zlib.zig rewritten on std.compress.flate

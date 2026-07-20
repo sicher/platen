@@ -141,12 +141,12 @@ pub fn measureText(text: []const u8, style: FontStyle) TextMetrics {
 pub fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
     switch (style.font) {
         .embedded => |emb| {
-            return emb.measureTextWidth(str, style.size);
+            return emb.measureTextWidthSpaced(str, style.size, style.char_spacing);
         },
         .embedded_family => |fam| {
             // Resolve to correct variant, fall back to regular on error
             const emb = fam.resolve(style.bold, style.italic) catch fam.regular;
-            return emb.measureTextWidth(str, style.size);
+            return emb.measureTextWidthSpaced(str, style.size, style.char_spacing);
         },
         .family, .symbol, .zapf_dingbats => {
             const std_font = style.standardFont() orelse return 0;

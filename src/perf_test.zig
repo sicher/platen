@@ -6,6 +6,7 @@
 //! Options:
 //!   --pages=N       Number of pages to generate (default: 100)
 //!   --iterations=N  Number of test iterations (default: 3)
+//!   --threads=N     Worker threads for stream compression in output() (default: 1)
 //!   --output=PATH   Write final PDF to file (optional)
 //!   --quiet         Only show summary
 
@@ -38,6 +39,7 @@ const Timer = struct {
 const TestConfig = struct {
     pages: u32 = 100,
     iterations: u32 = 3,
+    threads: u32 = 1,
     output_path: ?[]const u8 = null,
     quiet: bool = false,
 };
@@ -228,6 +230,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
+    doc.compress_threads = config.threads;
 
     // 1. Font loading test (use separate doc to avoid polluting main doc with unused fonts)
     {
@@ -526,7 +529,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
 
         // Print output timing breakdown
         if (!config.quiet) {
-            const ot = platen.pdf_output.last_output_timing;
+            const ot = doc.last_output_timing;
             std.debug.print("    - Subset generation: {d}ms\n", .{ot.subset_ms});
             std.debug.print("    - Page rendering:    {d}ms\n", .{ot.render_ms});
             std.debug.print("    - Font writing:      {d}ms\n", .{ot.font_write_ms});
@@ -550,6 +553,8 @@ fn parseArgs(args_obj: std.process.Args) !TestConfig {
             config.pages = try std.fmt.parseInt(u32, arg[8..], 10);
         } else if (std.mem.startsWith(u8, arg, "--iterations=")) {
             config.iterations = try std.fmt.parseInt(u32, arg[13..], 10);
+        } else if (std.mem.startsWith(u8, arg, "--threads=")) {
+            config.threads = try std.fmt.parseInt(u32, arg["--threads=".len..], 10);
         } else if (std.mem.startsWith(u8, arg, "--output=")) {
             config.output_path = arg[9..];
         } else if (std.mem.eql(u8, arg, "--quiet")) {

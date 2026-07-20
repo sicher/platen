@@ -633,9 +633,16 @@ pub const Svg = struct {
         var attrs = elem.attributes();
         while (attrs.next()) |attr| {
             if (std.mem.eql(u8, attr.name, "width")) {
-                self.width = parseLengthValue(attr.value);
+                // Percentage lengths on the root element are relative to a
+                // viewport we don't have; leave 0 so the viewBox fallback
+                // below supplies the intrinsic size (matches resvg behavior).
+                if (std.mem.indexOfScalar(u8, attr.value, '%') == null) {
+                    self.width = parseLengthValue(attr.value);
+                }
             } else if (std.mem.eql(u8, attr.name, "height")) {
-                self.height = parseLengthValue(attr.value);
+                if (std.mem.indexOfScalar(u8, attr.value, '%') == null) {
+                    self.height = parseLengthValue(attr.value);
+                }
             } else if (std.mem.eql(u8, attr.name, "viewBox")) {
                 var iter = NumberIterator.init(attr.value);
                 self.viewbox_x = iter.next() orelse 0;
@@ -2265,6 +2272,26 @@ test "generate PDF content" {
     try std.testing.expect(std.mem.indexOf(u8, content, "1 0 0 -1 0 100") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "re") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "f") != null);
+}
+
+test "percentage root dimensions fall back to viewBox" {
+    const allocator = std.testing.allocator;
+
+    const svg_data =
+        \\<svg width="100%" height="100%" viewBox="0 0 865 182">
+        \\  <rect x="10" y="10" width="30" height="20" fill="blue" />
+        \\</svg>
+    ;
+
+    const svg = try Svg.fromMemory(allocator, svg_data);
+    defer {
+        svg.deinit();
+        allocator.destroy(svg);
+    }
+
+    // "100%" must not parse as 100 points; intrinsic size comes from viewBox
+    try std.testing.expectEqual(@as(f64, 865), svg.width);
+    try std.testing.expectEqual(@as(f64, 182), svg.height);
 }
 
 test "parse defs and use" {

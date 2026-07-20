@@ -1,0 +1,127 @@
+# TODO — road to 1.0.0
+
+The v1.0.0 tag has been removed; it goes back when this list is in good
+shape. Items come from the 2026-07-20 API review and performance sessions.
+
+## Correctness traps (fix before 1.0.0) — ALL DONE (session #24)
+
+- [x] **Cross-document asset sharing double-frees.** `Image.fromMemory` is
+  public and `drawImage`/`drawSvg` auto-register foreign assets, but
+  `Document.deinit` unconditionally destroys everything registered. Sharing
+  one decoded asset across documents (the natural high-throughput pattern)
+  crashes on the second deinit. Fix: per-asset `owned` flag on registration,
+  or reject foreign assets explicitly. This is also the prerequisite for the
+  shared pre-parsed asset API below.
+- [x] **`.bold = true` on a single `.embedded` font silently renders
+  regular.** `resolveEmbeddedFont` honors bold/italic only for
+  `.embedded_family` (missing variant errors with `FontVariantNotLoaded`);
+  for `.embedded` the flags are ignored with no signal. Error, or document
+  "families only" on `TextStyle.bold`/`.italic`.
+- [x] **`Document.setFeature` only affects fonts loaded before the call.**
+  Reads as document-wide policy but loops over currently loaded fonts. Store
+  overrides and apply to future loads, or rename/document as
+  "set on all currently loaded fonts".
+- [x] **Embedded-font measurement ignores `char_spacing`** (standard fonts
+  include it). Needs shaped glyph count, not byte count.
+- [x] **Measurement ignores GSUB ligatures** while rendering applies them, so
+  ligature-bearing strings measure slightly wide. Same family as the
+  kerning-order bug fixed in session #23. Fixing shifts layout for every
+  ligature-bearing string — regenerate fpdf2 references.
+
+## API consistency
+
+- [ ] **Unify `FromMemory` lifetime contracts.** `loadFontFromMemory` and
+  `loadImageFromMemory` borrow (caller keeps bytes alive);
+  `loadSvgFromMemory` fully copies but doesn't say so. Pick one story,
+  document all three.
+- [ ] **`loadFont(path, encoding: ?FontEncoding)`:** `null` means
+  `.identity`, so the optional just creates two spellings of the default
+  (tests use both). Make it non-optional with a documented default.
+- [ ] **Document anchoring conventions prominently:** text `y` = baseline,
+  shapes/images `rect.y` = top edge. Correct, but only stated in a code
+  comment inside `writeAt`.
+- [ ] **`compression_level: i32`** silently maps out-of-range values to
+  level 1. Tighten the domain (enum or clamp with documentation).
+
+## Ergonomics / design decisions (breaking — decide before 1.0.0)
+
+- [ ] **`writeLine` wraps into multiple lines** despite the name (doc says
+  "block-based"). Consider `writeBlock`/`writeAligned`, or lead the docs
+  with "wraps".
+- [ ] **Rework `writeAt`** in one pass (re-measuring for the returned Rect
+  is already fixed - writeAt now computes width from its own shaped run):
+  point-anchored alignment
+  (`anchor: left/center/right` — today right-aligning needs measure +
+  subtract, shaping twice; see `writeRight` in `src/invoice_bench.zig`),
+  make the Rect honest (uses `y - size`
+  "approximate ascender" while exact `FontMetrics` exists).
+- [ ] **`Color.rgb(0-255)` vs `rgbf(0-1)` vs `greyscale(0-1)`** — mixed
+  scales; fine but easy to trip on. At minimum cross-reference in doc
+  comments.
+
+## Hygiene
+
+- [ ] **Stop exporting test infrastructure:** `platen.testing` and
+  `platen.integration_tests` ship in the root namespace. Use a separate
+  test-root file for the build's test step.
+- [ ] **De-`pub` internal machinery on Document:** `renderPageCommands`
+  (internal phase of `output()`, used by one test) and `styledTextMeasure`
+  (`*anyopaque` callback).
+
+## Missing features — worth doing before 1.0.0
+
+- [ ] **Transforms & rotation.** No way to rotate or transform content — no
+  `cm` exposure, no graphics-state save/restore, no page `/Rotate`. Blocks
+  watermarks, rotated labels, vertical captions. A small transform API
+  (save/restore + translate/rotate/scale, applying to draw* and text) rounds
+  out the 2D API and shapes how the graphics API should look — better
+  decided before 1.0 than bolted on after.
+- [ ] **Clipping paths.** Path API exists but there is no public clip
+  (`W n`); the only use is internal to gradient fills. Natural companion to
+  the transform work above — one "graphics state" feature.
+- [ ] **Honest Unicode limitations note.** README says "Full Unicode
+  support"; codepoint coverage via CID is real, but: RTL scripts render in
+  wrong visual order (no bidi, no `init`/`medi`/`fina` joining — the Noto
+  Sans Arabic font in test/fonts is referenced by nothing), and CJK text
+  won't wrap in flowed text (line breaking is space-based). Either scope the
+  claim in README or add a Limitations section. The features themselves are
+  post-1.0 (below).
+- [ ] **Decide the encryption stance.** No RC4/AES support at all. API-wise
+  additive (fields on Document), so implementation can land in 1.x — but
+  1.0 should consciously say "not yet" rather than be silent. std.crypto
+  has AES if/when we do it.
+
+## Missing features — post-1.0 roadmap
+
+- [ ] Bidi + joining-script shaping (Arabic, Hebrew): UAX #9 reordering,
+  isol/init/medi/fina GSUB features. Large; needs script itemization.
+- [ ] CJK-aware line breaking (break opportunities without spaces; kinsoku
+  rules eventually).
+- [ ] Text rendering modes (`Tr`): outlined/stroked text, invisible text
+  (OCR overlays). Tiny and additive.
+- [ ] Reusable Form XObjects ("stamps") for user content — currently only
+  used internally for SVG embedding. Big win for batch documents with
+  repeated headers; pairs with the shared-asset API.
+- [ ] Interactive forms (AcroForm), digital signatures, file attachments —
+  each large and additive; explicitly out of 1.0 scope.
+- [ ] Tables stay out of scope: platen is a low-level library; regions +
+  writeLine compose into tables (see invoice benchmark).
+
+## Performance (post-review follow-ups, optional for 1.0.0)
+
+- [ ] **Shared pre-parsed asset API** — fonts/images reusable across
+  Documents (caller-owned cache; library stays stateless). Closes most of
+  the remaining per-document cost in the invoice benchmark
+  (per-doc font parse + GSUB/GPOS parse + image decode ≈ 0.25ms of 0.50ms).
+  Depends on the double-free fix above.
+- [ ] **Parallel page rendering in `output()`** — pages look independent but
+  rendering mutates shared `EmbeddedFont` state (kern cache, glyph
+  tracking); needs per-thread or frozen font caches first. Payoff ~10-15ms
+  on the 110-page bench after parallel stream compression (done).
+
+## Feature backlog (unchanged from earlier sessions)
+
+- [ ] Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR
+  composite paints
+- [ ] Additional PDF/A levels (2a, 3a for tagged PDF)
+- [ ] OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs

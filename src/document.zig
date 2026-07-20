@@ -212,10 +212,18 @@ pub const Document = struct {
     embedded_fonts: std.ArrayListUnmanaged(*EmbeddedFont) = .empty,
     // Track all embedded font families
     embedded_font_families: std.ArrayListUnmanaged(*EmbeddedFontFamily) = .empty,
-    // Track all loaded images
+    // Document-wide feature overrides set via setFeature; applied to every
+    // font at registration so load order doesn't matter.
+    feature_overrides: std.ArrayListUnmanaged(FeatureOverride) = .empty,
+    // Track all loaded images. `image_owned` runs in lockstep: true when the
+    // document created the Image (loadImage*) and must destroy it, false when
+    // it was registered by drawImage from a caller-owned Image - that allows
+    // sharing one decoded Image across many documents.
     loaded_images: std.ArrayListUnmanaged(*Image) = .empty,
-    // Track all loaded SVGs
+    image_owned: std.ArrayListUnmanaged(bool) = .empty,
+    // Track all loaded SVGs; `svg_owned` mirrors image_owned.
     loaded_svgs: std.ArrayListUnmanaged(*Svg) = .empty,
+    svg_owned: std.ArrayListUnmanaged(bool) = .empty,
     // Track gradients used in document
     gradients: std.ArrayListUnmanaged(GradientDef) = .empty,
     // Document outline (table of contents)
@@ -226,11 +234,19 @@ pub const Document = struct {
     metadata: DocumentMetadata = .{},
     /// Compression level for PDF streams (0-9). Default 1 for speed. Use 6 for smaller files.
     compression_level: i32 = 1,
+    /// Worker threads for compressing streams during `output()` (page
+    /// contents and font subsets). Default 1 = compress inline. Values > 1
+    /// require a thread-safe allocator (e.g. `std.heap.smp_allocator`).
+    /// Output bytes are identical regardless of this setting.
+    compress_threads: u32 = 1,
     /// PDF/A conformance level (default: none - no restrictions).
     conformance: pdfa.Conformance = .none,
     /// COLR color-font emission plans, rebuilt on each `output()` call. Each
     /// entry is heap-allocated so pointers stay stable as the list grows.
     color_plans: std.ArrayListUnmanaged(*ColorFontPlan) = .empty,
+    /// Timing breakdown of the most recent `output()` call (for performance
+    /// debugging). Per-document so concurrent documents don't race.
+    last_output_timing: pdf_output.OutputTiming = .{},
 
     /// Create a new PDF document.
     /// `io` is used for file operations such as `loadFont`, `loadImage`, and `loadSvg`.
@@ -262,18 +278,25 @@ pub const Document = struct {
             self.allocator.destroy(family);
         }
         self.embedded_font_families.deinit(self.allocator);
-        // Clean up loaded images
-        for (self.loaded_images.items) |image| {
-            image.deinit();
-            self.allocator.destroy(image);
+        self.feature_overrides.deinit(self.allocator);
+        // Clean up loaded images (only ones this document created)
+        for (self.loaded_images.items, self.image_owned.items) |image, owned| {
+            if (owned) {
+                image.deinit();
+                self.allocator.destroy(image);
+            }
         }
         self.loaded_images.deinit(self.allocator);
-        // Clean up loaded SVGs
-        for (self.loaded_svgs.items) |s| {
-            s.deinit();
-            self.allocator.destroy(s);
+        self.image_owned.deinit(self.allocator);
+        // Clean up loaded SVGs (only ones this document created)
+        for (self.loaded_svgs.items, self.svg_owned.items) |s, owned| {
+            if (owned) {
+                s.deinit();
+                self.allocator.destroy(s);
+            }
         }
         self.loaded_svgs.deinit(self.allocator);
+        self.svg_owned.deinit(self.allocator);
         // Clean up gradients
         self.gradients.deinit(self.allocator);
         // Clean up outline
@@ -328,7 +351,7 @@ pub const Document = struct {
     pub fn loadFont(self: *Document, path: []const u8, encoding: ?FontEncoding) !Font {
         const emb = try EmbeddedFont.fromFile(self.io, self.allocator, path);
         emb.encoding = encoding orelse .identity;
-        try self.embedded_fonts.append(self.allocator, emb);
+        try self.registerFont(emb);
         return Font{ .embedded = emb };
     }
 
@@ -338,7 +361,7 @@ pub const Document = struct {
     pub fn loadFontFromMemory(self: *Document, data: []const u8, encoding: ?FontEncoding) !Font {
         const emb = try EmbeddedFont.fromMemory(self.allocator, data, false);
         emb.encoding = encoding orelse .identity;
-        try self.embedded_fonts.append(self.allocator, emb);
+        try self.registerFont(emb);
         return Font{ .embedded = emb };
     }
 
@@ -377,28 +400,28 @@ pub const Document = struct {
         // Load regular (required)
         const regular = try EmbeddedFont.fromFile(self.io, self.allocator, opts.regular);
         regular.encoding = encoding;
-        try self.embedded_fonts.append(self.allocator, regular);
+        try self.registerFont(regular);
 
         // Load optional variants
         var bold: ?*EmbeddedFont = null;
         if (opts.bold) |path| {
             bold = try EmbeddedFont.fromFile(self.io, self.allocator, path);
             bold.?.encoding = encoding;
-            try self.embedded_fonts.append(self.allocator, bold.?);
+            try self.registerFont(bold.?);
         }
 
         var italic: ?*EmbeddedFont = null;
         if (opts.italic) |path| {
             italic = try EmbeddedFont.fromFile(self.io, self.allocator, path);
             italic.?.encoding = encoding;
-            try self.embedded_fonts.append(self.allocator, italic.?);
+            try self.registerFont(italic.?);
         }
 
         var bold_italic: ?*EmbeddedFont = null;
         if (opts.bold_italic) |path| {
             bold_italic = try EmbeddedFont.fromFile(self.io, self.allocator, path);
             bold_italic.?.encoding = encoding;
-            try self.embedded_fonts.append(self.allocator, bold_italic.?);
+            try self.registerFont(bold_italic.?);
         }
 
         // Create and store the family
@@ -437,28 +460,28 @@ pub const Document = struct {
         // Load regular (required)
         const regular = try EmbeddedFont.fromMemory(self.allocator, opts.regular, false);
         regular.encoding = encoding;
-        try self.embedded_fonts.append(self.allocator, regular);
+        try self.registerFont(regular);
 
         // Load optional variants
         var bold: ?*EmbeddedFont = null;
         if (opts.bold) |data| {
             bold = try EmbeddedFont.fromMemory(self.allocator, data, false);
             bold.?.encoding = encoding;
-            try self.embedded_fonts.append(self.allocator, bold.?);
+            try self.registerFont(bold.?);
         }
 
         var italic: ?*EmbeddedFont = null;
         if (opts.italic) |data| {
             italic = try EmbeddedFont.fromMemory(self.allocator, data, false);
             italic.?.encoding = encoding;
-            try self.embedded_fonts.append(self.allocator, italic.?);
+            try self.registerFont(italic.?);
         }
 
         var bold_italic: ?*EmbeddedFont = null;
         if (opts.bold_italic) |data| {
             bold_italic = try EmbeddedFont.fromMemory(self.allocator, data, false);
             bold_italic.?.encoding = encoding;
-            try self.embedded_fonts.append(self.allocator, bold_italic.?);
+            try self.registerFont(bold_italic.?);
         }
 
         // Create and store the family
@@ -485,18 +508,59 @@ pub const Document = struct {
     /// Load an image from file (JPEG or PNG).
     /// Returns a handle that can be used with drawImage().
     pub fn loadImage(self: *Document, path: []const u8) !*Image {
-        const image = try Image.fromFile(self.io, self.allocator, path);
-        try self.loaded_images.append(self.allocator, image);
+        const data = try std.Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(100 * 1024 * 1024));
+        errdefer self.allocator.free(data);
+        const image = try Image.fromMemoryLevel(self.allocator, data, true, self.imageCompressionLevel());
+        try self.registerImage(image, true);
         return image;
+    }
+
+    /// Compression level for image pixel streams. Floor of 6: image data is
+    /// compressed once at load and dominates file size, so the fast levels
+    /// used for content streams are a bad trade here. Levels 7-9 are honored.
+    fn imageCompressionLevel(self: *const Document) i32 {
+        return @max(6, self.compression_level);
     }
 
     /// Load an image from memory buffer (JPEG or PNG).
     /// Returns a handle that can be used with drawImage().
     /// The document does NOT take ownership of the data - caller must ensure it outlives the document.
     pub fn loadImageFromMemory(self: *Document, data: []const u8) !*Image {
-        const image = try Image.fromMemory(self.allocator, data, false);
-        try self.loaded_images.append(self.allocator, image);
+        const image = try Image.fromMemoryLevel(self.allocator, data, false, self.imageCompressionLevel());
+        try self.registerImage(image, true);
         return image;
+    }
+
+    pub const FeatureOverride = struct {
+        feature: opentype.Feature,
+        enabled: bool,
+    };
+
+    /// Register an embedded font and apply document-wide feature overrides,
+    /// so setFeature affects fonts regardless of load order.
+    fn registerFont(self: *Document, emb: *EmbeddedFont) !void {
+        try self.embedded_fonts.append(self.allocator, emb);
+        for (self.feature_overrides.items) |o| {
+            emb.setFeature(o.feature, o.enabled);
+        }
+    }
+
+    /// Register an image, recording whether this document owns (and must
+    /// destroy) it. Reserves capacity in both lists first so they stay in
+    /// lockstep even when an allocation fails.
+    fn registerImage(self: *Document, image: *Image, owned: bool) !void {
+        try self.loaded_images.ensureUnusedCapacity(self.allocator, 1);
+        try self.image_owned.ensureUnusedCapacity(self.allocator, 1);
+        self.loaded_images.appendAssumeCapacity(image);
+        self.image_owned.appendAssumeCapacity(owned);
+    }
+
+    /// Register an SVG; see registerImage for the ownership contract.
+    fn registerSvg(self: *Document, s: *Svg, owned: bool) !void {
+        try self.loaded_svgs.ensureUnusedCapacity(self.allocator, 1);
+        try self.svg_owned.ensureUnusedCapacity(self.allocator, 1);
+        self.loaded_svgs.appendAssumeCapacity(s);
+        self.svg_owned.appendAssumeCapacity(owned);
     }
 
     /// Get index of image (for resource naming)
@@ -540,8 +604,9 @@ pub const Document = struct {
 
         // Get image resource name
         const img_idx = self.getImageIndex(image) orelse {
-            // Image not in document, add it
-            try self.loaded_images.append(self.allocator, image);
+            // Foreign image (caller-owned, e.g. shared across documents):
+            // register without taking ownership
+            try self.registerImage(image, false);
             return self.drawImage(image, rect);
         };
 
@@ -567,7 +632,7 @@ pub const Document = struct {
     /// Returns a handle that can be used with drawSvg().
     pub fn loadSvg(self: *Document, path: []const u8) !*Svg {
         const s = try Svg.fromFile(self.io, self.allocator, path);
-        try self.loaded_svgs.append(self.allocator, s);
+        try self.registerSvg(s, true);
         return s;
     }
 
@@ -575,7 +640,7 @@ pub const Document = struct {
     /// Returns a handle that can be used with drawSvg().
     pub fn loadSvgFromMemory(self: *Document, data: []const u8) !*Svg {
         const s = try Svg.fromMemory(self.allocator, data);
-        try self.loaded_svgs.append(self.allocator, s);
+        try self.registerSvg(s, true);
         return s;
     }
 
@@ -619,8 +684,9 @@ pub const Document = struct {
 
         // Get SVG resource name
         const svg_idx = self.getSvgIndex(s) orelse {
-            // SVG not in document, add it
-            try self.loaded_svgs.append(self.allocator, s);
+            // Foreign SVG (caller-owned, e.g. shared across documents):
+            // register without taking ownership
+            try self.registerSvg(s, false);
             return self.drawSvg(s, rect);
         };
 
@@ -666,10 +732,18 @@ pub const Document = struct {
 
     /// Set OpenType feature for all embedded fonts
     /// Example: doc.setFeature(.liga, false) to disable ligatures
-    pub fn setFeature(self: *Document, feature: opentype.Feature, enabled: bool) void {
+    pub fn setFeature(self: *Document, feature: opentype.Feature, enabled: bool) !void {
         for (self.embedded_fonts.items) |font| {
             font.setFeature(feature, enabled);
         }
+        // Record the override so fonts loaded after this call get it too
+        for (self.feature_overrides.items) |*o| {
+            if (o.feature == feature) {
+                o.enabled = enabled;
+                return;
+            }
+        }
+        try self.feature_overrides.append(self.allocator, .{ .feature = feature, .enabled = enabled });
     }
 
     /// Set OpenType feature for a specific embedded font
@@ -717,15 +791,15 @@ pub const Document = struct {
     }
 
     /// Measure text dimensions with explicit style (without rendering).
+    /// Handles embedded fonts (real glyph advances plus kerning) as well as
+    /// the standard 14 - it must agree with what write*/draw* actually render.
     pub fn measureStyled(self: *Document, text_str: []const u8, style: TextStyle) TextMetrics {
         _ = self;
-        const font_style = FontStyle{
-            .font = style.standardFont() orelse .helvetica,
-            .size = style.size,
-            .char_spacing = style.char_spacing,
-            .line_height = 1.2,
+        return .{
+            .width = metrics.measureTextStyled(text_str, style),
+            .height = style.size * 1.2,
+            .char_count = text_str.len,
         };
-        return metrics.measureText(text_str, font_style);
     }
 
     /// Get current page index (0-based).
@@ -810,6 +884,10 @@ pub const Document = struct {
 
         const font_ref: FontRef = switch (style.font) {
             .embedded => |emb| blk: {
+                // A single embedded font has no variants: bold/italic would
+                // silently render regular. Load a family (loadFontFamily) to
+                // use style.bold/.italic with embedded fonts.
+                if (style.bold or style.italic) return error.FontVariantNotLoaded;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
@@ -836,11 +914,17 @@ pub const Document = struct {
             },
         };
 
-        // Calculate text width for decorations (only if decoration enabled)
-        const text_width = if (style.decoration.underline or style.decoration.strikethrough)
-            self.getTextWidthStyled(text_copy, style)
-        else
-            0;
+        // Width of the rendered run: from the already-shaped glyphs when we
+        // have them (avoids shaping the same string twice), else measured.
+        const text_width = blk: {
+            if (cached_glyphs) |glyphs| {
+                switch (font_ref) {
+                    .embedded => |emb| break :blk emb.glyphSequenceWidth(glyphs, style.size, style.char_spacing),
+                    else => {},
+                }
+            }
+            break :blk self.getTextWidthStyled(text_copy, style);
+        };
 
         // Reject text transparency for conformance levels that disallow it (PDF/A-1b).
         try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
@@ -868,8 +952,7 @@ pub const Document = struct {
     /// Writes text at the specified position with explicit style.
     /// Returns the bounding rectangle of the rendered text.
     pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle) !Rect {
-        try self.writeTextStyled(pos, str, style, 0);
-        const width = self.getTextWidthStyled(str, style);
+        const width = try self.writeTextStyled(pos, str, style, 0);
         // Y is baseline, so rect top is y - font_size (approximate ascender)
         return .{
             .x = pos.x,
@@ -881,7 +964,9 @@ pub const Document = struct {
 
     /// Internal: Write text at position with explicit style and word spacing.
     /// pos is in user coordinates (top-left origin), converted to PDF coordinates internally.
-    fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !void {
+    /// Returns the rendered width: computed from the shaped glyph run for
+    /// embedded fonts (no second shaping pass), measured otherwise.
+    fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !f64 {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -894,6 +979,10 @@ pub const Document = struct {
         var cached_glyphs: ?[]const u16 = null;
         const font_ref: FontRef = switch (style.font) {
             .embedded => |emb| blk: {
+                // A single embedded font has no variants: bold/italic would
+                // silently render regular. Load a family (loadFontFamily) to
+                // use style.bold/.italic with embedded fonts.
+                if (style.bold or style.italic) return error.FontVariantNotLoaded;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
@@ -920,11 +1009,17 @@ pub const Document = struct {
             },
         };
 
-        // Calculate text width for decorations (only if decoration enabled)
-        const text_width = if (style.decoration.underline or style.decoration.strikethrough)
-            self.getTextWidthStyled(text_copy, style)
-        else
-            0;
+        // Width of the rendered run: from the already-shaped glyphs when we
+        // have them (avoids shaping the same string twice), else measured.
+        const text_width = blk: {
+            if (cached_glyphs) |glyphs| {
+                switch (font_ref) {
+                    .embedded => |emb| break :blk emb.glyphSequenceWidth(glyphs, style.size, style.char_spacing),
+                    else => {},
+                }
+            }
+            break :blk self.getTextWidthStyled(text_copy, style);
+        };
 
         // Convert from user coordinates (top-left origin) to PDF coordinates (bottom-left origin)
         const pdf_y = self.currentPageSize().height - pos.y;
@@ -950,6 +1045,7 @@ pub const Document = struct {
                 .strikethrough = style.decoration.strikethrough,
             },
         });
+        return text_width;
     }
 
     /// Measures text width with explicit style.
@@ -1167,8 +1263,8 @@ pub const Document = struct {
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
-                        try self.writeTextStyled(.{ .x = abs_x + prefix_width, .y = abs_y }, "-", style, 0);
+                        _ = try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
+                        _ = try self.writeTextStyled(.{ .x = abs_x + prefix_width, .y = abs_y }, "-", style, 0);
                     }
                     region.cursor_x = prefix_width + hyphen_width;
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -1185,7 +1281,7 @@ pub const Document = struct {
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
+                        _ = try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                     }
                     region.cursor_x = self.getTextWidthStyled(prefix, style);
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -1202,7 +1298,7 @@ pub const Document = struct {
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
+                        _ = try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, prefix, style, 0);
                     }
                     region.cursor_x = self.getTextWidthStyled(prefix, style);
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -1219,7 +1315,7 @@ pub const Document = struct {
                     if (!opts.measure_only) {
                         const abs_x = region.x + region.padding.left;
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                        try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
+                        _ = try self.writeTextStyled(.{ .x = abs_x, .y = abs_y }, word, style, 0);
                     }
                     region.cursor_x = word_width;
                     if (region.cursor_x > max_x) max_x = region.cursor_x;
@@ -2697,15 +2793,9 @@ pub const Document = struct {
     /// Output timing information for performance analysis.
     pub const OutputTiming = pdf_output.OutputTiming;
 
-    /// Last output timing (for performance debugging).
-    /// Use pdf_output.last_output_timing for access.
-    fn getLastOutputTiming() *OutputTiming {
-        return &pdf_output.last_output_timing;
-    }
-
     /// Generate PDF output
     pub fn output(self: *Document) ![]u8 {
-        pdf_output.last_output_timing = .{};
+        self.last_output_timing = .{};
 
         var w = Writer.init(self.allocator);
         w.compression_level = self.compression_level;
@@ -2724,6 +2814,21 @@ pub const Document = struct {
         try self.writePdfaObjects(&w, &ids);
         try self.writeStandardFonts(&w, &ids);
         try self.subsetFontsAndRenderPages();
+
+        // Optionally compress page-content and font-subset streams on worker
+        // threads; the writer then picks up the results instead of
+        // compressing inline. Output bytes are identical either way.
+        var precompressed = std.AutoHashMapUnmanaged(usize, []const u8).empty;
+        defer {
+            var it = precompressed.valueIterator();
+            while (it.next()) |v| self.allocator.free(@constCast(v.*));
+            precompressed.deinit(self.allocator);
+        }
+        if (self.compress_threads > 1 and self.compression_level > 0) {
+            try self.precompressStreams(&precompressed);
+            w.precompressed = &precompressed;
+        }
+
         try self.writeEmbeddedFonts(&w, &ids);
 
         // Write COLR Type3 color-font objects (font dict + CharProc streams)
@@ -3005,14 +3110,80 @@ pub const Document = struct {
         for (self.embedded_fonts.items) |emb_font| {
             try emb_font.generateSubset();
         }
-        pdf_output.last_output_timing.subset_ms = pdf_output.milliTimestamp() - subset_start;
+        self.last_output_timing.subset_ms = pdf_output.milliTimestamp() - subset_start;
 
         // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
         const render_start = pdf_output.milliTimestamp();
         for (self.pages.items) |*page| {
             try self.renderPageCommands(page);
         }
-        pdf_output.last_output_timing.render_ms = pdf_output.milliTimestamp() - render_start;
+        self.last_output_timing.render_ms = pdf_output.milliTimestamp() - render_start;
+    }
+
+    const CompressJob = struct {
+        data: []const u8,
+        result: ?[]const u8 = null,
+    };
+
+    fn compressWorker(jobs: []CompressJob, next: *std.atomic.Value(usize), allocator: std.mem.Allocator, level: i32) void {
+        while (true) {
+            const i = next.fetchAdd(1, .monotonic);
+            if (i >= jobs.len) return;
+            // A failed job stays null; the writer just compresses it inline
+            jobs[i].result = zlib.compressLevel(allocator, jobs[i].data, level) catch null;
+        }
+    }
+
+    /// Compress page-content and font-subset streams on `compress_threads`
+    /// worker threads. Results land in `map` keyed by the raw data pointer
+    /// and are consumed by Writer.writeStreamCompressed. Requires a
+    /// thread-safe allocator.
+    fn precompressStreams(self: *Document, map: *std.AutoHashMapUnmanaged(usize, []const u8)) !void {
+        var jobs = std.ArrayListUnmanaged(CompressJob).empty;
+        defer jobs.deinit(self.allocator);
+
+        for (self.pages.items) |*page| {
+            if (page.content.items.len >= Writer.min_compress_len) {
+                try jobs.append(self.allocator, .{ .data = page.content.items });
+            }
+        }
+        for (self.embedded_fonts.items) |emb_font| {
+            const font_data = emb_font.getFontData();
+            if (font_data.len >= Writer.min_compress_len) {
+                try jobs.append(self.allocator, .{ .data = font_data });
+            }
+        }
+        if (jobs.items.len == 0) return;
+
+        const n_threads = @min(@as(usize, self.compress_threads), jobs.items.len);
+        var next = std.atomic.Value(usize).init(0);
+        const threads = try self.allocator.alloc(std.Thread, n_threads);
+        defer self.allocator.free(threads);
+
+        var spawned: usize = 0;
+        errdefer {
+            for (threads[0..spawned]) |t| t.join();
+            for (jobs.items) |job| {
+                if (job.result) |res| self.allocator.free(@constCast(res));
+            }
+        }
+        while (spawned < n_threads) : (spawned += 1) {
+            threads[spawned] = try std.Thread.spawn(.{}, compressWorker, .{
+                jobs.items, &next, self.allocator, self.compression_level,
+            });
+        }
+        for (threads) |t| t.join();
+
+        // No fallible ops after the join (the errdefer above must not run
+        // once threads are joined). A failed put just drops the entry - the
+        // writer compresses that stream inline.
+        for (jobs.items) |job| {
+            if (job.result) |res| {
+                map.put(self.allocator, @intFromPtr(job.data.ptr), res) catch {
+                    self.allocator.free(@constCast(res));
+                };
+            }
+        }
     }
 
     /// Write embedded font objects: CID fonts (Type0 + CIDFont + descriptor +
@@ -3152,7 +3323,7 @@ pub const Document = struct {
                 try self.writeToUnicodeStream(w, tounicode_id, tounicode_cmap);
             }
         }
-        pdf_output.last_output_timing.font_write_ms = pdf_output.milliTimestamp() - font_write_start;
+        self.last_output_timing.font_write_ms = pdf_output.milliTimestamp() - font_write_start;
     }
 
     /// Write image XObjects (+ SMask / ICC profile streams where present).
@@ -3635,7 +3806,7 @@ pub const Document = struct {
                 try w.endObject();
             }
         }
-        pdf_output.last_output_timing.page_write_ms = pdf_output.milliTimestamp() - page_write_start;
+        self.last_output_timing.page_write_ms = pdf_output.milliTimestamp() - page_write_start;
         return next_id;
     }
 
@@ -3851,7 +4022,7 @@ pub const Document = struct {
             .info_ref = if (info_id) |id| .{ .id = id } else null,
             .id = doc_id,
         });
-        pdf_output.last_output_timing.finish_ms = pdf_output.milliTimestamp() - finish_start;
+        self.last_output_timing.finish_ms = pdf_output.milliTimestamp() - finish_start;
         return result;
     }
 

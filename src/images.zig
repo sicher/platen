@@ -75,12 +75,18 @@ pub const Image = struct {
     /// Load image from memory buffer
     /// If owns_data is true, this Image takes ownership of the data slice
     pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*Image {
+        return fromMemoryLevel(allocator, data, owns_data, 6);
+    }
+
+    /// Load image from memory buffer, compressing PNG pixel data at the given
+    /// zlib level (clamped to 1-9; JPEG data is embedded as-is).
+    pub fn fromMemoryLevel(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, level: i32) !*Image {
         // Detect format from magic bytes
         const format = detectFormat(data) orelse return error.UnknownImageFormat;
 
         return switch (format) {
             .jpeg => parseJpeg(allocator, data, owns_data),
-            .png => parsePng(allocator, data, owns_data),
+            .png => parsePng(allocator, data, owns_data, std.math.clamp(level, 1, 9)),
         };
     }
 
@@ -293,7 +299,7 @@ const PngColorType = enum(u8) {
     rgba = 6,
 };
 
-fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*Image {
+fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, level: i32) !*Image {
     // Verify PNG signature
     const png_sig = [_]u8{ 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
     if (data.len < 8 or !std.mem.eql(u8, data[0..8], &png_sig)) {
@@ -432,14 +438,14 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*I
     errdefer if (alpha_data) |a| allocator.free(a);
 
     // Compress RGB data for PDF embedding
-    const compressed_rgb = try zlib.compress(allocator, rgb_data);
+    const compressed_rgb = try zlib.compressLevel(allocator, rgb_data, level);
     allocator.free(rgb_data);
     errdefer allocator.free(compressed_rgb);
 
     // Compress alpha data if present
     var compressed_alpha: ?[]u8 = null;
     if (alpha_data) |alpha| {
-        compressed_alpha = try zlib.compress(allocator, alpha);
+        compressed_alpha = try zlib.compressLevel(allocator, alpha, level);
         allocator.free(alpha);
     }
     errdefer if (compressed_alpha) |a| allocator.free(a);

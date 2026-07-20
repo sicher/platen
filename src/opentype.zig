@@ -165,13 +165,65 @@ pub const FeatureFlags = struct {
     const num_features = @typeInfo(Feature).@"enum".fields.len;
     flags: [num_features]bool,
 
-    /// Comptime mapping from Feature to array index
+    /// (tag value, field index) pairs sorted by tag value, built at comptime
+    /// for O(log n) runtime lookup (a linear scan over ~150 features showed up
+    /// as 30% of invoice-benchmark runtime).
+    const Entry = struct { value: u32, index: u16 };
+    const sorted_entries = blk: {
+        @setEvalBranchQuota(100_000);
+        const fields = @typeInfo(Feature).@"enum".fields;
+        var entries: [fields.len]Entry = undefined;
+        for (fields, 0..) |f, i| {
+            entries[i] = .{ .value = f.value, .index = i };
+        }
+        // Insertion sort by tag value
+        for (1..entries.len) |i| {
+            const key = entries[i];
+            var j = i;
+            while (j > 0 and entries[j - 1].value > key.value) : (j -= 1) {
+                entries[j] = entries[j - 1];
+            }
+            entries[j] = key;
+        }
+        break :blk entries;
+    };
+
+    /// Map a runtime Feature to its flags-array index via binary search.
     fn featureIndex(feature: Feature) usize {
+        const value = @intFromEnum(feature);
+        var lo: usize = 0;
+        var hi: usize = sorted_entries.len;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (sorted_entries[mid].value < value) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return sorted_entries[lo].index;
+    }
+
+    /// Comptime index of a feature (for building contiguous range scans).
+    pub fn comptimeIndex(comptime feature: Feature) usize {
+        @setEvalBranchQuota(100_000);
         const fields = @typeInfo(Feature).@"enum".fields;
         inline for (fields, 0..) |f, i| {
             if (@intFromEnum(feature) == f.value) return i;
         }
         unreachable;
+    }
+
+    /// True if any flag in the contiguous field range [first, last] is set.
+    /// Fields between first and last must be declared consecutively.
+    pub fn anyEnabledInRange(self: FeatureFlags, comptime first: Feature, comptime last: Feature) bool {
+        const lo = comptime comptimeIndex(first);
+        const hi = comptime comptimeIndex(last);
+        comptime std.debug.assert(lo <= hi);
+        for (self.flags[lo .. hi + 1]) |f| {
+            if (f) return true;
+        }
+        return false;
     }
 
     /// Initialize with default values (liga, kern, calt, mark, mkmk enabled)
@@ -798,7 +850,12 @@ pub const OpenTypeFeatures = struct {
     mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .empty, // Type 6
 
     // Kerning cache: (glyph1 << 16 | glyph2) -> kern value for O(1) lookup
-    kern_cache: std.AutoHashMapUnmanaged(u32, i16) = .empty,
+    /// Direct-mapped kerning cache: keys are (glyph1 << 16 | glyph2), the
+    /// sentinel 0xFFFFFFFF marks an empty slot (that pair just recomputes).
+    /// A plain array beats a hash map here - getKerning runs per glyph pair
+    /// in both measurement and rendering.
+    kern_cache_keys: [kern_cache_size]u32 = @splat(0xFFFF_FFFF),
+    kern_cache_values: [kern_cache_size]i16 = @splat(0),
 
     // Allocated memory for ligature data
     ligature_memory: std.ArrayListUnmanaged([]const u16) = .empty,
@@ -892,7 +949,6 @@ pub const OpenTypeFeatures = struct {
         self.mark_record_memory.deinit(self.allocator);
         self.mark_base_lookups.deinit(self.allocator);
         self.mark_mark_lookups.deinit(self.allocator);
-        self.kern_cache.deinit(self.allocator);
 
         // Free lookup map
         self.gsub_lookup_map.deinit(self.allocator);
@@ -2137,11 +2193,18 @@ pub const OpenTypeFeatures = struct {
     }
 
     /// Get kerning adjustment between two glyphs (O(1) with lazy caching)
+    const kern_cache_size = 4096; // power of two
+
+    fn kernCacheSlot(key: u32) usize {
+        return (key *% 2654435761) >> (32 - 12); // Knuth multiplicative hash
+    }
+
     pub fn getKerning(self: *OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
         // O(1) cache lookup
         const key = (@as(u32, glyph1) << 16) | @as(u32, glyph2);
-        if (self.kern_cache.get(key)) |cached| {
-            return cached;
+        const slot = kernCacheSlot(key);
+        if (self.kern_cache_keys[slot] == key) {
+            return self.kern_cache_values[slot];
         }
 
         // Cache miss - do the full lookup
@@ -2151,8 +2214,10 @@ pub const OpenTypeFeatures = struct {
             if (kern != 0) break;
         }
 
-        // Cache the result (even if 0, to avoid repeated lookups)
-        self.kern_cache.put(self.allocator, key, kern) catch {};
+        // Cache the result (even if 0, to avoid repeated lookups);
+        // colliding pairs simply overwrite each other
+        self.kern_cache_keys[slot] = key;
+        self.kern_cache_values[slot] = kern;
         return kern;
     }
 
@@ -2382,16 +2447,18 @@ pub const OpenTypeFeatures = struct {
             self.applySingleSubstInPlace(current.items, self.case_lookups.items);
         }
 
-        // Apply stylistic sets (ss01-ss20)
+        // Apply stylistic sets (ss01-ss20); length check first - most fonts
+        // have no lookups for most sets, and it's much cheaper than the
+        // feature-flag lookup
         for (Feature.stylistic_sets, 0..) |ss, i| {
-            if (flags.isEnabled(ss) and self.ss_lookups[i].items.len > 0) {
+            if (self.ss_lookups[i].items.len > 0 and flags.isEnabled(ss)) {
                 self.applySingleSubstInPlace(current.items, self.ss_lookups[i].items);
             }
         }
 
         // Apply character variants (cv01-cv99)
         for (Feature.character_variants, 0..) |cv, i| {
-            if (flags.isEnabled(cv) and self.cv_lookups[i].items.len > 0) {
+            if (self.cv_lookups[i].items.len > 0 and flags.isEnabled(cv)) {
                 self.applySingleSubstInPlace(current.items, self.cv_lookups[i].items);
             }
         }
