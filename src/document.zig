@@ -884,85 +884,10 @@ pub const Document = struct {
     }
 
     /// Write text at position with word spacing (styled version).
+    /// Write text at (x, y) with explicit word spacing (used by justified
+    /// layout). Thin wrapper over writeTextStyled.
     fn writeWithWordSpacingStyled(self: *Document, x: f64, y: f64, str: []const u8, word_spacing: f64, style: TextStyle) !void {
-        if (self.pages.items.len == 0) return error.NoPage;
-
-        var page = &self.pages.items[self.current_page];
-        const page_alloc = page.pageAllocator();
-
-        // Create owned copy of text, stripping soft-hyphens
-        // Allocated on page arena - freed when page is destroyed
-        const text_copy = try stripSoftHyphens(page_alloc, str);
-
-        // Determine font reference, mark as used, and cache glyphs
-        var cached_glyphs: ?[]const u16 = null;
-
-        const font_ref: FontRef = switch (style.font) {
-            .embedded => |emb| blk: {
-                // A single embedded font has no variants: bold/italic would
-                // silently render regular. Load a family (loadFontFamily) to
-                // use style.bold/.italic with embedded fonts.
-                if (style.bold or style.italic) return error.FontVariantNotLoaded;
-                try page.markEmbeddedUsed(self.allocator, emb);
-                if (emb.encoding == .identity) {
-                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
-                } else {
-                    emb.markCharsUsed(text_copy);
-                }
-                break :blk .{ .embedded = emb };
-            },
-            .embedded_family => |fam| blk: {
-                const emb = try fam.resolve(style.bold, style.italic);
-                try page.markEmbeddedUsed(self.allocator, emb);
-                if (emb.encoding == .identity) {
-                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
-                } else {
-                    emb.markCharsUsed(text_copy);
-                }
-                break :blk .{ .embedded = emb };
-            },
-            else => blk: {
-                const std_font = style.standardFont() orelse return error.NoFont;
-                try page.markFontUsed(self.allocator, std_font);
-                try self.used_fonts.put(self.allocator, std_font, {}); // Track at document level
-                break :blk .{ .standard = std_font };
-            },
-        };
-
-        // Width of the rendered run: from the already-shaped glyphs when we
-        // have them (avoids shaping the same string twice), else measured.
-        const text_width = blk: {
-            if (cached_glyphs) |glyphs| {
-                switch (font_ref) {
-                    .embedded => |emb| break :blk emb.glyphSequenceWidth(glyphs, style.size, style.char_spacing),
-                    else => {},
-                }
-            }
-            break :blk self.getTextWidthStyled(text_copy, style);
-        };
-
-        // Reject text transparency for conformance levels that disallow it (PDF/A-1b).
-        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
-
-        // Store deferred command with word spacing and cached glyphs
-        // Convert Y from top-left to PDF coordinates (bottom-left origin)
-        try page.commands.append(self.allocator, .{
-            .text = .{
-                .x = x,
-                .y = self.currentPageSize().height - y,
-                .font_size = style.size,
-                .char_spacing = style.char_spacing,
-                .word_spacing = word_spacing,
-                .text_data = text_copy,
-                .font = font_ref,
-                .text_color = style.color,
-                .opacity = style.opacity,
-                .cached_glyphs = cached_glyphs,
-                .text_width = text_width,
-                .underline = style.decoration.underline,
-                .strikethrough = style.decoration.strikethrough,
-            },
-        });
+        _ = try self.writeTextStyled(.{ .x = x, .y = y }, str, style, word_spacing);
     }
     /// Writes text at the specified position with explicit style.
     /// pos.y is the text baseline; opts.anchor selects which part of the

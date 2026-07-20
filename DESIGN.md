@@ -758,6 +758,27 @@ Shape styles are passed directly to draw methods:
 }
 ```
 
+### Graphics state: transforms & clipping (session #24)
+
+`pushState`/`popState` (PDF `q`/`Q`), `translate`, `rotateAt(center,
+degrees)`, `scaleAt(center, sx, sy)`, `clipRect`, `clipPath` (`W n`).
+
+Design points:
+- **User-space semantics**: y-down, top-left origin, positive rotation =
+  clockwise — CSS/Canvas conventions. Each user-space affine T is
+  conjugated with the page y-flip F into the PDF `cm` matrix: M = F·T·F
+  (F is self-inverse). One derivation in `Document.applyTransform`
+  instead of hand-tuned signs per operation; conjugation composes
+  correctly across sequential transforms because F·F = I.
+- **Deferred raw commands**: transforms/clips append `.raw` content
+  commands, so they interleave with text/shape commands in emission
+  order and apply to every content type.
+- **Balance enforcement**: `Page.state_depth` tracks push/pop;
+  `popState` underflow and unbalanced state at `output()` are errors
+  (`error.UnbalancedGraphicsState`).
+- Page-level `/Rotate` is separate: `PageOptions.rotation` (viewer
+  rotation, no coordinate change).
+
 ## Navigation
 
 ### Document Outline
@@ -871,6 +892,49 @@ verapdf --flavour 1b output.pdf
 
 - **Standard fonts**: PDF/A requires embedded fonts. Using standard fonts (Helvetica, etc.) will fail VeraPDF validation. Use `loadFont()` for compliance.
 - **CID fonts**: VeraPDF shows validation warnings for CID font embedding that may require further investigation.
+
+## Performance & Concurrency (sessions #23/#24)
+
+### Measurement invariant
+`measureStyled`/`measureTextWidthSpaced` must agree with what rendering
+draws. Three rules keep it true:
+- Measurement runs the same GSUB pipeline as rendering when
+  substitutions are active (`hasActiveGsub`), then sums final glyph
+  advances + kerning + char_spacing per rendered glyph (Tc semantics).
+- OT tables parse lazily, but measurement triggers the parse too
+  (`anyShapingFeatureEnabled`) so pre-render measurements don't miss
+  kerning.
+- `writeAt` never measures separately: `writeTextStyled` returns the
+  width computed from its own shaped run, and anchoring (.center/.right)
+  shifts the just-appended deferred command. Every string is shaped
+  exactly once.
+
+### Concurrency model
+- **Documents share nothing** — one Document per thread renders
+  concurrently without locking (documented guarantee; ~4.7x on 8-core
+  M1 Pro). A single Document is not thread-safe.
+- `doc.compress_threads = N`: `output()` compresses page-content and
+  font-subset streams on a worker pool. The writer consults a
+  pointer-keyed map of precompressed results and falls back inline on
+  any miss; output bytes are identical regardless of thread count
+  (regression-tested). Requires a thread-safe allocator.
+
+### Hot-path notes (invoice benchmark, session #23)
+- `FeatureFlags.featureIndex`: comptime-sorted table + binary search
+  (a linear scan over ~150 features was 33% of runtime).
+- Kerning cache: direct-mapped 4096-slot array in OpenTypeFeatures
+  (collisions overwrite; correctness unaffected).
+- Image pixel streams always compress at level >= 6
+  (`imageCompressionLevel`): compressed once at load, dominate file
+  size — fast levels are a bad trade there.
+
+### Asset ownership
+`loaded_images`/`loaded_svgs` carry lockstep `*_owned` bools: documents
+destroy only assets they created (loadImage*/loadSvg*). Assets
+registered via drawImage/drawSvg are caller-owned, enabling one decoded
+Image/Svg to be shared across many documents. Fonts remain per-document
+(subsetting mutates them); a shared pre-parsed font API is future work
+(TODO.md).
 
 ## API Design Guidelines
 

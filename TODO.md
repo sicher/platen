@@ -127,6 +127,13 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   tracking); needs per-thread or frozen font caches first. Payoff ~10-15ms
   on the 110-page bench after parallel stream compression (done).
 
+## Code health
+
+- [ ] **Split document.zig** (4200+ lines): output phase, text layout, and
+  graphics could be separate files per the token-efficiency guideline of
+  keeping sources small. Mechanical but churny — do it in a quiet moment,
+  not alongside feature work.
+
 ## Feature backlog (unchanged from earlier sessions)
 
 - [ ] Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR
