@@ -247,7 +247,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     defer doc.deinit();
 
     // Load the embedded font
-    const custom_font = doc.loadFont(font_path, null) catch |err| {
+    const custom_font = doc.loadFont(font_path, .identity) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -345,7 +345,7 @@ fn generateColorTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
 
-    const emoji = doc.loadFont(font_path, null) catch |err| {
+    const emoji = doc.loadFont(font_path, .identity) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -385,7 +385,7 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
     defer doc.deinit();
 
     // Load font with identity encoding (CID mode for full Unicode)
-    const font = doc.loadFont(font_path, null) catch |err| {
+    const font = doc.loadFont(font_path, .identity) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -429,7 +429,7 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
 
-    const font = doc.loadFont(font_path, null) catch |err| {
+    const font = doc.loadFont(font_path, .identity) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -496,7 +496,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
 
-    const font = doc.loadFont(font_path, null) catch |err| {
+    const font = doc.loadFont(font_path, .identity) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -504,7 +504,7 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     font.embedded.setFeature(.calt, true);
 
     // Also load a version without calt for comparison
-    const font_no_calt = doc.loadFont(font_path, null) catch |err| {
+    const font_no_calt = doc.loadFont(font_path, .identity) catch |err| {
         try print("Error loading font '{s}': {}\n", .{ font_path, err });
         return;
     };
@@ -950,7 +950,7 @@ fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     });
 
     // Load embedded font (PDF/A requires all fonts to be embedded)
-    const font = doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null) catch |err| {
+    const font = doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity) catch |err| {
         try print("Error: Could not load font for PDF/A test: {}\n", .{err});
         try print("  PDF/A-1b requires embedded fonts. Make sure test/fonts/Inter/Inter-Regular.ttf exists.\n", .{});
         return err;
@@ -1232,12 +1232,12 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     defer doc.deinit();
 
     // Load a variety of fonts
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", null);
-    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", .identity);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", .identity);
+    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     const FontEntry = struct {
         name: []const u8,

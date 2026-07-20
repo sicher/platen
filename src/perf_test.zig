@@ -499,7 +499,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // output step's timing.
     {
         const t = Timer.begin("Color emoji");
-        const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", null);
+        const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", .identity);
         const emoji_rows = [_][]const u8{
             "\u{2601}\u{1F600}\u{1F389}\u{1F680}\u{2764}\u{2B50}",
             "\u{1F31F}\u{1F308}\u{1F34E}\u{1F355}\u{1F381}\u{1F3A8}",

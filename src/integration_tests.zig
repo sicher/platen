@@ -256,10 +256,10 @@ fn generateCIDFontsPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Load fonts and set to CID (Identity-H) mode for full Unicode
     // Disable kerning to match fpdf2 reference (which uses text() without shaping)
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
     charter.embedded.setFeature(.kern, false);
 
-    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
     courier.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -315,87 +315,87 @@ fn generateInterFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load all font variants
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
-    const inter_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf", null);
-    const inter_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", .identity);
+    const inter_italic = try doc.loadFont("test/fonts/Inter/Inter-Italic.ttf", .identity);
+    const inter_bolditalic = try doc.loadFont("test/fonts/Inter/Inter-BoldItalic.ttf", .identity);
 
     // Feature comparison fonts
-    const inter_no_kern = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_no_kern = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_no_kern.embedded.setFeature(.kern, false);
 
-    const inter_no_mark = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_no_mark = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_no_mark.embedded.setFeature(.mark, false);
     inter_no_mark.embedded.setFeature(.mkmk, false);
 
     // Contextual alternates comparison (calt is ON by default now)
-    const inter_no_calt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_no_calt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_no_calt.embedded.setFeature(.calt, false);
 
     // Discretionary ligatures comparison (dlig is OFF by default)
-    const inter_dlig = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_dlig = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_dlig.embedded.setFeature(.dlig, true);
 
     // Tabular figures comparison (tnum is OFF by default - proportional is default)
-    const inter_tnum = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_tnum = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_tnum.embedded.setFeature(.tnum, true);
 
     // Fractions comparison (frac is OFF by default)
-    const inter_frac = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_frac = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_frac.embedded.setFeature(.frac, true);
 
     // Slashed zero comparison (zero is OFF by default)
-    const inter_zero = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_zero = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_zero.embedded.setFeature(.zero, true);
 
     // Case-sensitive forms comparison - need calt OFF for proper OFF display
     // (calt contextually applies case-like substitutions near uppercase)
-    const inter_nocalt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_nocalt = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_nocalt.embedded.setFeature(.calt, false);
 
-    const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_case = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_case.embedded.setFeature(.case_, true);
 
     // Stylistic sets (ss01-ss08 are OFF by default)
-    const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_ss01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_ss01.embedded.setFeature(.ss01, true);
-    const inter_ss02 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_ss02 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_ss02.embedded.setFeature(.ss02, true);
-    const inter_ss03 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_ss03 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_ss03.embedded.setFeature(.ss03, true);
-    const inter_ss05 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_ss05 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_ss05.embedded.setFeature(.ss05, true);
-    const inter_ss06 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_ss06 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_ss06.embedded.setFeature(.ss06, true);
-    const inter_ss08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_ss08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_ss08.embedded.setFeature(.ss08, true);
 
     // Character variants (cv01-cv14)
-    const inter_cv01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv01 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv01.embedded.setFeature(.cv01, true); // Alternate 1
-    const inter_cv02 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv02 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv02.embedded.setFeature(.cv02, true); // Alternate 4
-    const inter_cv03 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv03 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv03.embedded.setFeature(.cv03, true); // Alternate 6
-    const inter_cv04 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv04 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv04.embedded.setFeature(.cv04, true); // Alternate 9
-    const inter_cv05 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv05 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv05.embedded.setFeature(.cv05, true); // Alternate l
-    const inter_cv06 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv06 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv06.embedded.setFeature(.cv06, true); // Alternate u
-    const inter_cv07 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv07 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv07.embedded.setFeature(.cv07, true); // Alternate ß
-    const inter_cv08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv08 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv08.embedded.setFeature(.cv08, true); // Alternate I
-    const inter_cv09 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv09 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv09.embedded.setFeature(.cv09, true); // Alternate 3
-    const inter_cv10 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv10 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv10.embedded.setFeature(.cv10, true); // Alternate G
-    const inter_cv11 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv11 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv11.embedded.setFeature(.cv11, true); // Alternate a
-    const inter_cv12 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv12 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv12.embedded.setFeature(.cv12, true); // Alternate f
-    const inter_cv13 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter_cv13 = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter_cv13.embedded.setFeature(.cv13, true); // Alternate t
 
     try doc.addPage(.{});
@@ -628,9 +628,9 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
 
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-    const gentium_bold = try doc.loadFont("test/fonts/Gentium/Gentium-Bold.ttf", null);
-    const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf", null);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    const gentium_bold = try doc.loadFont("test/fonts/Gentium/Gentium-Bold.ttf", .identity);
+    const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf", .identity);
 
     // Define styles
     const title_style = platen.TextStyle{ .font = gentium_bold, .size = 18 };
@@ -787,19 +787,19 @@ fn generateOpenTypeFeaturessPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Satoshi has liga (fi, fl, ff, ffi, ffl), kern, tnum, pnum
-    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", null);
-    const satoshi_bold = try doc.loadFont("test/fonts/Satoshi/Satoshi-Bold.otf", null);
-    const satoshi_italic = try doc.loadFont("test/fonts/Satoshi/Satoshi-Italic.otf", null);
+    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", .identity);
+    const satoshi_bold = try doc.loadFont("test/fonts/Satoshi/Satoshi-Bold.otf", .identity);
+    const satoshi_italic = try doc.loadFont("test/fonts/Satoshi/Satoshi-Italic.otf", .identity);
 
     // Charter has kern but no liga
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", null);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", .identity);
 
     // Inter has tnum, pnum, zero features
     // Note: Disable kerning for Inter - fpdf2 reference uses text() without shaping for these
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", .identity);
     inter_bold.embedded.setFeature(.kern, false);
 
     // Define styles
@@ -2620,8 +2620,8 @@ fn generateValignPdf(allocator: std.mem.Allocator) ![]u8 {
     const label_10 = platen.TextStyle{ .font = platen.Font.helvetica, .size = 10, .bold = true };
 
     // Load embedded fonts (identity encoding is now default)
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
 
     try doc.addPage(.{});
 
@@ -2702,9 +2702,9 @@ fn generateKerningPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load Charter font (has good kerning data)
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", null);
-    const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf", null);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const charter_bold = try doc.loadFont("test/fonts/Charter/Charter Bold.ttf", .identity);
+    const charter_italic = try doc.loadFont("test/fonts/Charter/Charter Italic.ttf", .identity);
 
     // Define styles
     const charter_bold_16 = platen.TextStyle{ .font = charter_bold, .size = 16 };
@@ -2849,12 +2849,12 @@ fn generateGentiumFamilyPdf(allocator: std.mem.Allocator) ![]u8 {
     });
 
     // Load extra weights as separate fonts
-    const medium = try doc.loadFont("test/fonts/Gentium/Gentium-Medium.ttf", null);
-    const medium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-MediumItalic.ttf", null);
-    const semibold = try doc.loadFont("test/fonts/Gentium/Gentium-SemiBold.ttf", null);
-    const semibold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-SemiBoldItalic.ttf", null);
-    const extrabold = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBold.ttf", null);
-    const extrabold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBoldItalic.ttf", null);
+    const medium = try doc.loadFont("test/fonts/Gentium/Gentium-Medium.ttf", .identity);
+    const medium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-MediumItalic.ttf", .identity);
+    const semibold = try doc.loadFont("test/fonts/Gentium/Gentium-SemiBold.ttf", .identity);
+    const semibold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-SemiBoldItalic.ttf", .identity);
+    const extrabold = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBold.ttf", .identity);
+    const extrabold_italic = try doc.loadFont("test/fonts/Gentium/Gentium-ExtraBoldItalic.ttf", .identity);
 
     // Title style (using family with bold)
     const title_style = platen.TextStyle{ .font = gentium, .size = 24, .bold = true };
@@ -2932,7 +2932,7 @@ fn generatePdfaPdf(allocator: std.mem.Allocator) ![]u8 {
     doc.setConformance(.pdfa_1b);
 
     // Load embedded font (required for PDF/A - standard fonts not allowed)
-    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
 
     try doc.addPage(.{});
 
@@ -2978,7 +2978,7 @@ fn generatePdfa2bPdf(allocator: std.mem.Allocator) ![]u8 {
     doc.setConformance(.pdfa_2b);
 
     // Load embedded font (required for PDF/A - standard fonts not allowed)
-    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
 
     try doc.addPage(.{});
 
@@ -3022,12 +3022,12 @@ fn generateEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load Noto Emoji in different weights
-    const emoji_regular = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Regular.ttf", null);
-    const emoji_bold = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Bold.ttf", null);
-    const emoji_light = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Light.ttf", null);
+    const emoji_regular = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Regular.ttf", .identity);
+    const emoji_bold = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Bold.ttf", .identity);
+    const emoji_light = try doc.loadFont("test/fonts/Noto Emoji/NotoEmoji-Light.ttf", .identity);
 
     // Load Inter for labels
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3095,10 +3095,10 @@ fn generateColorEmojiPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // COLR v1 color font, rendered as a PDF Type3 color font.
-    const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", null);
+    const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", .identity);
 
     // Inter for labels.
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3151,9 +3151,9 @@ fn generateColorV0Pdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Bungee Color: a Latin display font with COLR v0 (flat solid-color layer
     // records — a fill layer plus an inline-detail layer per glyph).
-    const bungee = try doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf", null);
+    const bungee = try doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3188,9 +3188,9 @@ fn generateColorV1GradientPdf(allocator: std.mem.Allocator) ![]u8 {
     // Bungee Spice: a Latin display font whose COLR v1 paint graphs use linear
     // gradients (gold→dark red) on every glyph — exercises the gradient paint
     // path (shadings + clips) on a non-emoji font.
-    const spice = try doc.loadFont("test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf", null);
+    const spice = try doc.loadFont("test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3226,9 +3226,9 @@ fn generateColorSweepPdf(allocator: std.mem.Allocator) ![]u8 {
     // glyphs are squares painted with COLR v1 sweep gradients — 'A' a full
     // 0°..360° red→blue sweep, 'B' a 0°..90° sweep with pad extend, 'C' the
     // spec's 110°..230° example arc.
-    const sweep_font = try doc.loadFont("test/fonts/sweep/SweepTest.ttf", null);
+    const sweep_font = try doc.loadFont("test/fonts/sweep/SweepTest.ttf", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3250,9 +3250,9 @@ fn generateColorSplitPdf(allocator: std.mem.Allocator) ![]u8 {
 
     // 300 distinct color emoji overflow the 255 single-byte codes of one
     // Type3 font, exercising the multi-subfont split (/Tc1 + /Tc1s1).
-    const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", null);
+    const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3290,14 +3290,14 @@ fn generateColorBitmapPdf(allocator: std.mem.Allocator) ![]u8 {
     // Generated fixture fonts (scripts/gen_bitmap_fonts.py): 64px PNG strikes
     // — 'A' is a four-quadrant color square (orientation check), 'B' teal
     // with a semi-transparent half (SMask check) at a nonzero offset.
-    const sbix = try doc.loadFont("test/fonts/bitmap/SbixTest.ttf", null);
-    const cbdt = try doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", null);
+    const sbix = try doc.loadFont("test/fonts/bitmap/SbixTest.ttf", .identity);
+    const cbdt = try doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", .identity);
     // Real-world CBDT: Google's Noto Color Emoji CBDT build subset to 12
     // emoji (fontTools.subset; 109ppem strike, index format 1, image
     // format 17, no glyf table at all).
-    const noto = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-CBDT-subset.ttf", null);
+    const noto = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-CBDT-subset.ttf", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3330,9 +3330,9 @@ fn generatePixelFontPdf(allocator: std.mem.Allocator) ![]u8 {
     // Cozette (MIT): a real OTB pixel font — EBDT/EBLC 1-bit strikes at
     // 13 ppem, zero-length glyf. Glyphs render as Type3 ImageMask
     // CharProcs painted in the text color.
-    const cozette = try doc.loadFont("test/fonts/Cozette/cozette.otb", null);
+    const cozette = try doc.loadFont("test/fonts/Cozette/cozette.otb", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3362,9 +3362,9 @@ fn generateColorSvgPdf(allocator: std.mem.Allocator) ![]u8 {
     // Bungee Color SVG: the OT-SVG build of the same design as the COLR v0
     // variant (color_v0 test) — same layout and text, so the two renders
     // can be compared directly.
-    const bungee = try doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-SVG.ttf", null);
+    const bungee = try doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-SVG.ttf", .identity);
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     inter.embedded.setFeature(.kern, false);
 
     try doc.addPage(.{});
@@ -3397,12 +3397,12 @@ fn generateOpticalAlignPdf(allocator: std.mem.Allocator) ![]u8 {
     defer doc.deinit();
 
     // Load fonts with different metric profiles
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
-    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", null);
-    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", null);
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
-    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", null);
-    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const inter_bold = try doc.loadFont("test/fonts/Inter/Inter-Bold.ttf", .identity);
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    const satoshi = try doc.loadFont("test/fonts/Satoshi/Satoshi-Regular.otf", .identity);
+    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     const title_style = platen.TextStyle{ .font = inter_bold, .size = 16 };
     const subtitle_style = platen.TextStyle{ .font = inter, .size = 9, .color = platen.Color.rgb(100, 100, 100) };
@@ -3823,12 +3823,12 @@ test "debug: font metrics" {
     std.debug.print("\nHelvetica 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ hm.ascender, hm.y_max, hm.cap_height });
 
     // Embedded fonts
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     const inter_style = platen.TextStyle{ .font = inter, .size = 11 };
     const im = doc.getFontMetricsStyled(inter_style);
     std.debug.print("Inter 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ im.ascender, im.y_max, im.cap_height });
 
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", null);
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
     const gentium_style = platen.TextStyle{ .font = gentium, .size = 11 };
     const gm = doc.getFontMetricsStyled(gentium_style);
     std.debug.print("Gentium 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ gm.ascender, gm.y_max, gm.cap_height });

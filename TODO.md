@@ -107,6 +107,14 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 - [ ] Tables stay out of scope: platen is a low-level library; regions +
   writeLine compose into tables (see invoice benchmark).
 
+## Watch items
+
+- [ ] **One unreproduced failure** of "parallel stream compression produces
+  byte-identical output" under `zig build test` (2026-07-20, ~1 in 17 runs;
+  16 subsequent runs clean, 10 direct-binary runs clean). No race found on
+  review: distinct job slots, join-before-read, deterministic flate. Keep
+  watching; if it recurs, capture both outputs and diff.
+
 ## Performance (post-review follow-ups, optional for 1.0.0)
 
 - [ ] **Shared pre-parsed asset API** — fonts/images reusable across

@@ -88,6 +88,19 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
+## Coordinates & anchoring
+
+All coordinates are in points (1/72 inch) with the origin at the **top-left**
+of the page, y growing downward. Anchoring differs by content type,
+following typographic convention:
+
+- **Text** (`writeAt`): `y` is the **baseline** of the text.
+- **Shapes and images** (`drawRect`, `drawImage`, `drawSvg`, ...): `rect.y`
+  is the **top edge**.
+- **Regions** (`write`, `writeLine`, `writeStyled`): `y` is the top of the
+  region; the baseline of the first line is placed from font metrics
+  according to `valign`.
+
 ## Installation
 
 Add platen as a dependency in your `build.zig.zon`:
@@ -142,7 +155,7 @@ _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Monospace code", code);
 
 ```zig
 // Load a TTF or OTF font (default: identity/Unicode encoding)
-const font = try doc.loadFont("fonts/MyFont.ttf", null);
+const font = try doc.loadFont("fonts/MyFont.ttf", .identity);
 
 // Or specify encoding explicitly
 const latin_font = try doc.loadFont("fonts/Latin.ttf", .win_ansi);
@@ -563,7 +576,7 @@ Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotA
 
 | Method | Description |
 |--------|-------------|
-| `loadFont(path, ?encoding) -> Font` | Load TTF/OTF font from file (null = identity/Unicode) |
+| `loadFont(path, encoding) -> Font` | Load TTF/OTF font from file (.identity = Unicode, .win_ansi = legacy) |
 | `loadFontFromMemory(data, ?encoding) -> Font` | Load TTF/OTF font from memory buffer |
 | `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
 | `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
@@ -780,7 +793,7 @@ GPOS (Glyph Positioning):
 
 ```zig
 // Enable/disable features on embedded fonts
-const font = try doc.loadFont("fonts/Inter.ttf", null);
+const font = try doc.loadFont("fonts/Inter.ttf", .identity);
 font.embedded.setFeature(.dlig, true);   // Enable discretionary ligatures
 font.embedded.setFeature(.ss01, true);   // Enable stylistic set 1
 font.embedded.setFeature(.cv11, true);   // Enable character variant 11

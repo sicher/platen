@@ -753,7 +753,7 @@ fn fuzzDocument(ctx: FuzzDocContext, smith: *Smith) !void {
             .select_page => doc.selectPage(smith.index(doc.getPageCount())),
             .load_embedded_font => {
                 if (embedded_font == null) {
-                    embedded_font = doc.loadFontFromMemory(ctx.font_data, null) catch null;
+                    embedded_font = doc.loadFontFromMemory(ctx.font_data, .identity) catch null;
                 }
             },
             .write_at => {

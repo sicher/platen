@@ -18,14 +18,16 @@ pub fn compress(allocator: std.mem.Allocator, input: []const u8) Error![]u8 {
     return compressLevel(allocator, input, 6);
 }
 
-/// Compress data with specified compression level (0-9)
-/// Level 0 = no compression, 1 = fastest, 9 = best compression
+/// Compress data with specified compression level.
+/// Levels are clamped to 1-9 (1 = fastest, 9 = best compression); level 0
+/// (stored/no compression) is the caller's decision - Writer skips
+/// compression entirely when the document level is 0.
 pub fn compressLevel(allocator: std.mem.Allocator, input: []const u8, level: i32) Error![]u8 {
     if (input.len == 0) {
         return allocator.dupe(u8, &[_]u8{}) catch return Error.OutOfMemory;
     }
 
-    const opts: flate.Compress.Options = switch (level) {
+    const opts: flate.Compress.Options = switch (std.math.clamp(level, 1, 9)) {
         2 => .level_2,
         3 => .level_3,
         4 => .level_4,
@@ -110,4 +112,22 @@ test "compress with level" {
 
     // Level 9 should be at least as good as level 1
     try std.testing.expect(best.len <= fast.len);
+}
+
+test "compressLevel clamps out-of-range levels" {
+    const allocator = std.testing.allocator;
+    const input = "clamp test data, repeated: clamp test data, clamp test data.";
+
+    const at_9 = try compressLevel(allocator, input, 9);
+    defer allocator.free(at_9);
+    const above = try compressLevel(allocator, input, 42);
+    defer allocator.free(above);
+    const below = try compressLevel(allocator, input, -3);
+    defer allocator.free(below);
+    const at_1 = try compressLevel(allocator, input, 1);
+    defer allocator.free(at_1);
+
+    // 42 clamps to 9, -3 clamps to 1 (previously both silently meant 1)
+    try std.testing.expectEqualSlices(u8, at_9, above);
+    try std.testing.expectEqualSlices(u8, at_1, below);
 }

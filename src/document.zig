@@ -232,7 +232,10 @@ pub const Document = struct {
     page_labels: std.ArrayListUnmanaged(PageLabelEntry) = .empty,
     /// Document metadata (title, author, etc.)
     metadata: DocumentMetadata = .{},
-    /// Compression level for PDF streams (0-9). Default 1 for speed. Use 6 for smaller files.
+    /// Compression level for PDF streams: 0 = uncompressed, 1 = fastest
+    /// (default), 9 = smallest; use 6 for a good size/speed balance.
+    /// Out-of-range values are clamped to 1-9. Image pixel streams always
+    /// compress at >= 6 (see imageCompressionLevel).
     compression_level: i32 = 1,
     /// Worker threads for compressing streams during `output()` (page
     /// contents and font subsets). Default 1 = compress inline. Values > 1
@@ -347,20 +350,22 @@ pub const Document = struct {
 
     /// Load a TrueType font from file.
     /// Returns a Font that can be used in TextStyle.
-    /// Encoding defaults to .identity (Unicode). Pass .win_ansi for legacy 256-char mode.
-    pub fn loadFont(self: *Document, path: []const u8, encoding: ?FontEncoding) !Font {
+    /// Use .identity (Unicode, CID) unless you need .win_ansi legacy 256-char mode.
+    pub fn loadFont(self: *Document, path: []const u8, encoding: FontEncoding) !Font {
         const emb = try EmbeddedFont.fromFile(self.io, self.allocator, path);
-        emb.encoding = encoding orelse .identity;
+        emb.encoding = encoding;
         try self.registerFont(emb);
         return Font{ .embedded = emb };
     }
 
     /// Load a TrueType font from memory buffer.
     /// Returns a Font that can be used in TextStyle.
-    /// The document does NOT take ownership of the data - caller must ensure it outlives the document.
-    pub fn loadFontFromMemory(self: *Document, data: []const u8, encoding: ?FontEncoding) !Font {
+    /// Lifetime: BORROWS `data` - the bytes are referenced, not copied, and
+    /// must outlive the Document. (Sharing one font buffer across many
+    /// documents is the intended high-throughput pattern.)
+    pub fn loadFontFromMemory(self: *Document, data: []const u8, encoding: FontEncoding) !Font {
         const emb = try EmbeddedFont.fromMemory(self.allocator, data, false);
-        emb.encoding = encoding orelse .identity;
+        emb.encoding = encoding;
         try self.registerFont(emb);
         return Font{ .embedded = emb };
     }
@@ -375,8 +380,9 @@ pub const Document = struct {
         italic: ?[]const u8 = null,
         /// Path to bold-italic font file (optional).
         bold_italic: ?[]const u8 = null,
-        /// Font encoding (applies to all variants). null = identity (Unicode).
-        encoding: ?FontEncoding = null,
+        /// Font encoding (applies to all variants). Defaults to .identity
+        /// (Unicode, CID); use .win_ansi for legacy 256-char mode.
+        encoding: FontEncoding = .identity,
     };
 
     /// Load a font family with regular, bold, italic, and bold-italic variants.
@@ -395,7 +401,7 @@ pub const Document = struct {
     /// const style = TextStyle{ .font = gentium, .size = 12, .bold = true };
     /// ```
     pub fn loadFontFamily(self: *Document, opts: FontFamilyOptions) !Font {
-        const encoding = opts.encoding orelse .identity;
+        const encoding = opts.encoding;
 
         // Load regular (required)
         const regular = try EmbeddedFont.fromFile(self.io, self.allocator, opts.regular);
@@ -447,15 +453,17 @@ pub const Document = struct {
         italic: ?[]const u8 = null,
         /// Font data for bold-italic (optional).
         bold_italic: ?[]const u8 = null,
-        /// Font encoding (applies to all variants). null = identity (Unicode).
-        encoding: ?FontEncoding = null,
+        /// Font encoding (applies to all variants). Defaults to .identity
+        /// (Unicode, CID); use .win_ansi for legacy 256-char mode.
+        encoding: FontEncoding = .identity,
     };
 
     /// Load a font family from memory buffers.
+    /// Lifetime: BORROWS all buffers - they must outlive the Document.
     /// Only the regular variant is required; others are optional.
     /// The document does NOT take ownership of the data - caller must ensure buffers outlive the document.
     pub fn loadFontFamilyFromMemory(self: *Document, opts: FontFamilyMemoryOptions) !Font {
-        const encoding = opts.encoding orelse .identity;
+        const encoding = opts.encoding;
 
         // Load regular (required)
         const regular = try EmbeddedFont.fromMemory(self.allocator, opts.regular, false);
@@ -524,7 +532,9 @@ pub const Document = struct {
 
     /// Load an image from memory buffer (JPEG or PNG).
     /// Returns a handle that can be used with drawImage().
-    /// The document does NOT take ownership of the data - caller must ensure it outlives the document.
+    /// Lifetime: BORROWS `data` - JPEG bytes are embedded directly from the
+    /// buffer, so it must outlive the Document. (PNG data is transcoded up
+    /// front, but the borrow contract applies to both formats.)
     pub fn loadImageFromMemory(self: *Document, data: []const u8) !*Image {
         const image = try Image.fromMemoryLevel(self.allocator, data, false, self.imageCompressionLevel());
         try self.registerImage(image, true);
@@ -638,6 +648,8 @@ pub const Document = struct {
 
     /// Load an SVG from memory buffer.
     /// Returns a handle that can be used with drawSvg().
+    /// Lifetime: COPIES - the SVG is fully parsed and `data` may be freed
+    /// as soon as this returns.
     pub fn loadSvgFromMemory(self: *Document, data: []const u8) !*Svg {
         const s = try Svg.fromMemory(self.allocator, data);
         try self.registerSvg(s, true);

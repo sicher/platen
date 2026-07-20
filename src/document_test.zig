@@ -322,7 +322,7 @@ test "load embedded font from file" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     // Verify font was loaded
     try std.testing.expect(doc.embedded_fonts.items.len == 1);
@@ -340,7 +340,7 @@ test "embedded font character widths" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     // Courier Prime is monospace - all visible chars should have same width
     const width_A = font.embedded.widths['A'];
@@ -361,7 +361,7 @@ test "embedded font text measurement" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     // Measure text at 12pt
     const width = font.embedded.measureTextWidth("Hello", 12.0);
@@ -508,7 +508,7 @@ test "embedded font flags - monospace detection" {
     defer doc.deinit();
 
     // Courier Prime is monospace
-    const monospace = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const monospace = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
     try std.testing.expect(monospace.embedded.flags.fixed_pitch == true);
 }
 
@@ -516,7 +516,7 @@ test "embedded font bbox scaling" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     // BBox should be scaled to 1000 units
     // x_min should typically be negative or small
@@ -553,7 +553,7 @@ test "variable font loading" {
     defer doc.deinit();
 
     // Inter Variable is a variable font - should still load basic metrics
-    const font = doc.loadFont("test/fonts/Inter/InterVariable.ttf", null) catch |err| {
+    const font = doc.loadFont("test/fonts/Inter/InterVariable.ttf", .identity) catch |err| {
         // Variable fonts might have extra tables we don't handle yet
         // For now, skip if loading fails
         std.debug.print("Skipping variable font test: {}\n", .{err});
@@ -568,7 +568,7 @@ test "PDF output is valid with embedded font" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 24 };
@@ -1229,7 +1229,7 @@ test "mark positioning with Tm absolute coordinates" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", null);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
 
     try doc.addPage(.{});
 
@@ -2058,7 +2058,7 @@ test "embedded font decoration metrics from POST/OS2 tables" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", null);
+    const font = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
 
     // Check decoration metrics were loaded
     // Courier Prime should have reasonable values
@@ -2573,7 +2573,7 @@ test "loadFontFromMemory loads font from buffer" {
     defer std.testing.allocator.free(font_data);
 
     // Load from memory
-    const font = try doc.loadFontFromMemory(font_data, null);
+    const font = try doc.loadFontFromMemory(font_data, .identity);
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = font, .size = 12 };
@@ -2878,7 +2878,7 @@ test "embedded-font text opacity emits ExtGState" {
     // Disable content-stream compression so the `/GS1 gs` operator is greppable
     // (embedded-font pages otherwise FlateDecode-compress the content stream).
     doc.compression_level = 0;
-    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.otf", null);
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.otf", .identity);
     try doc.addPage(.{});
     const style = TextStyle{ .font = font, .size = 20, .opacity = 0.6 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Fade", style);
@@ -3012,7 +3012,7 @@ test "COLR color emoji emits a Type3 color font" {
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
-    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // Cloud (flat two-color) + grinning face (radial gradient).
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}\u{1F600}", .{ .font = emoji, .size = 48 });
@@ -3037,7 +3037,7 @@ test "COLR mixed run splits into Type3 (color) and CID (mono) segments" {
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
-    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // Emoji, space (non-color glyph), emoji → color / mono / color.
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600} \u{2601}", .{ .font = emoji, .size = 40 });
@@ -3056,7 +3056,7 @@ test "COLR color fonts are skipped under PDF/A conformance" {
     defer doc.deinit();
     doc.setConformance(.pdfa_2b);
 
-    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 40 });
 
@@ -3072,7 +3072,7 @@ test "COLR color font used only for non-color text emits no Type3" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // Only spaces: the emoji font is used, but no color glyph is present.
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "   ", .{ .font = emoji, .size = 40 });
@@ -3089,7 +3089,7 @@ test "COLR fonts with >255 color glyphs split into multiple Type3 subfonts" {
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
-    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
 
     // Collect 300 codepoints with distinct color glyphs from the font's cmap
@@ -3131,7 +3131,7 @@ test "sbix bitmap font emits a Type3 font with image CharProcs" {
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
-    const sbix = doc.loadFont("test/fonts/bitmap/SbixTest.ttf", null) catch return error.SkipZigTest;
+    const sbix = doc.loadFont("test/fonts/bitmap/SbixTest.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = sbix, .size = 72 });
 
@@ -3155,7 +3155,7 @@ test "CBDT bitmap font emits a Type3 font with image CharProcs" {
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
-    const cbdt = doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", null) catch return error.SkipZigTest;
+    const cbdt = doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = cbdt, .size = 72 });
 
@@ -3175,7 +3175,7 @@ test "OT-SVG font emits a Type3 color font (Bungee Color SVG)" {
     defer doc.deinit();
     doc.compression_level = 0; // keep streams searchable
 
-    const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-SVG.ttf", null) catch return error.SkipZigTest;
+    const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-SVG.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 });
 
@@ -3199,7 +3199,7 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
     defer doc.deinit();
     doc.compression_level = 0; // keep streams searchable
 
-    const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", null) catch return error.SkipZigTest;
+    const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "A", .{ .font = cozette, .size = 13, .color = platen.Color.rgb(200, 0, 0) });
 
@@ -3227,7 +3227,7 @@ test "unsupported SVG glyphs fall back to the mono outline" {
 
     // SvgTest fixture: A supported; B (transparency), C (gzip), D/E
     // (multi-glyph doc) must all fall back to their real outlines.
-    const svgf = doc.loadFont("test/fonts/svg/SvgTest.ttf", null) catch return error.SkipZigTest;
+    const svgf = doc.loadFont("test/fonts/svg/SvgTest.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDE", .{ .font = svgf, .size = 24 });
 
@@ -3246,7 +3246,7 @@ test "color font used on multiple pages gets per-page /Tc resources" {
     defer doc.deinit();
     doc.compression_level = 0;
 
-    const emoji = doc.loadFont(noto_color_emoji_path, null) catch return error.SkipZigTest;
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 24 });
     try doc.addPage(.{});
@@ -3267,7 +3267,7 @@ test "Type3 color fonts never assign single-byte code 32 (word-spacing hazard)" 
     defer doc.deinit();
     doc.compression_level = 0; // keep streams searchable
 
-    const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", null) catch return error.SkipZigTest;
+    const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // >31 distinct glyphs so the code space must skip 32: PDF applies word
     // spacing (Tw) to every single-byte code 32, which would silently add
@@ -3302,7 +3302,7 @@ test "COLR v0 font emits a Type3 color font (Bungee Color)" {
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
-    const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf", null) catch return error.SkipZigTest;
+    const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 });
 
