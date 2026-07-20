@@ -1,4 +1,4 @@
-//! zapdf - Fast PDF rendering library for Zig
+//! platen - Fast PDF rendering library for Zig
 //!
 //! A library for creating PDF documents, based on fpdf2.
 

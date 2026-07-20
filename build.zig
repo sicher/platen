@@ -11,22 +11,22 @@ pub fn build(b: *std.Build) void {
     });
 
     // Library module
-    const zapdf_mod = b.createModule(.{
-        .root_source_file = b.path("src/zapdf.zig"),
+    const platen_mod = b.createModule(.{
+        .root_source_file = b.path("src/platen.zig"),
         .target = target,
         .optimize = optimize,
     });
-    zapdf_mod.linkLibrary(zlib_dep.artifact("z"));
+    platen_mod.linkLibrary(zlib_dep.artifact("z"));
 
     // CLI executable
     const exe = b.addExecutable(.{
-        .name = "zapdf",
+        .name = "platen",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/cli.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zapdf", .module = zapdf_mod },
+                .{ .name = "platen", .module = platen_mod },
             },
         }),
     });
@@ -45,7 +45,7 @@ pub fn build(b: *std.Build) void {
 
     // Unit tests
     const test_mod = b.createModule(.{
-        .root_source_file = b.path("src/zapdf.zig"),
+        .root_source_file = b.path("src/platen.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -64,13 +64,13 @@ pub fn build(b: *std.Build) void {
     // Performance test executable
     // Run with: zig build perf -Doptimize=ReleaseFast -- [args]
     const perf_exe = b.addExecutable(.{
-        .name = "zapdf-perf",
+        .name = "platen-perf",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/perf_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zapdf", .module = zapdf_mod },
+                .{ .name = "platen", .module = platen_mod },
             },
         }),
     });

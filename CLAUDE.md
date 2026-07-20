@@ -36,7 +36,7 @@ If doing refactoring, start by running "zigmap" and "simgrep" to get good overvi
 
 - If a test fails. Never EVER do a "quick fix" to get the test to pass. ALWAYS investigate the cause of the fail, and investigate THOROUGHLY!!!
 
-- If possible, generate REFERENCE pdf:s with the python fpdf2 library, then integration tests that generate the same with zapdf and compares them.
+- If possible, generate REFERENCE pdf:s with the python fpdf2 library, then integration tests that generate the same with platen and compares them.
 
 - Make sure to keep a command line tool up to date, allowing access to all library innards so they can be tested!
 

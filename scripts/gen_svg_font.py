@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate test/fonts/svg/SvgTest.ttf — an OT-SVG test font exercising the
-supported path AND every fallback path of zapdf's SVG-table handling.
+supported path AND every fallback path of platen's SVG-table handling.
 
 Glyphs (upem 1000, each with a real square outline for the mono fallback):
   A (gid 1): supported — solid-fill SVG document.

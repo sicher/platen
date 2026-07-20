@@ -1,8 +1,8 @@
-//! Tests for zapdf Document and related functionality.
+//! Tests for platen Document and related functionality.
 
 const std = @import("std");
 const document = @import("document.zig");
-const zapdf = @import("zapdf.zig");
+const platen = @import("platen.zig");
 
 // Re-export commonly used types for tests
 const Document = document.Document;
@@ -11,14 +11,14 @@ const PageSize = document.PageSize;
 const Region = document.Region;
 const Border = document.Border;
 const Color = document.Color;
-const TextStyle = zapdf.TextStyle;
-const Font = zapdf.Font;
-const TextDecoration = zapdf.TextDecoration;
+const TextStyle = platen.TextStyle;
+const Font = platen.Font;
+const TextDecoration = platen.TextDecoration;
 
 // Unit conversion functions
-const inches = zapdf.inches;
-const mm = zapdf.mm;
-const cm = zapdf.cm;
+const inches = platen.inches;
+const mm = platen.mm;
+const cm = platen.cm;
 
 test "Document init/deinit" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
@@ -751,7 +751,7 @@ test "writeStyled multi-page via overflow handling" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
-    const page_opts = zapdf.PageOptions{ .margins = .{ .left = 50, .right = 50, .top = 50, .bottom = 50 } };
+    const page_opts = platen.PageOptions{ .margins = .{ .left = 50, .right = 50, .top = 50, .bottom = 50 } };
     try doc.addPage(page_opts);
 
     // Generate long text that should span multiple pages
@@ -1723,7 +1723,7 @@ test "setMetadata stores metadata" {
 
     try std.testing.expectEqualStrings("My Document", doc.metadata.title.?);
     try std.testing.expectEqualStrings("Test Author", doc.metadata.author.?);
-    try std.testing.expectEqualStrings(zapdf.version.full, doc.metadata.producer.?);
+    try std.testing.expectEqualStrings(platen.version.full, doc.metadata.producer.?);
 }
 
 test "metadata written to PDF Info dictionary" {
@@ -1749,7 +1749,7 @@ test "metadata written to PDF Info dictionary" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Subject (Test Subject)") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Keywords (test, pdf, zig)") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Creator (Test App)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Producer (" ++ zapdf.version.full ++ ")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Producer (" ++ platen.version.full ++ ")") != null);
     // Check auto-generated dates are present (format: D:YYYYMMDDHHmmSSZ)
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/CreationDate (D:") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/ModDate (D:") != null);
@@ -2943,7 +2943,7 @@ test "PDF/A-1b rejects transparency" {
     const result = doc.drawRect(.{ .x = 50, .y = 50, .width = 100, .height = 80 }, .{
         .fill = .{ .color = Color.red, .opacity = 0.5 },
     });
-    try std.testing.expectError(zapdf.pdfa.ConformanceError.TransparencyNotAllowed, result);
+    try std.testing.expectError(platen.pdfa.ConformanceError.TransparencyNotAllowed, result);
 }
 
 test "PDF/A-1b allows fully opaque drawing" {
@@ -3201,7 +3201,7 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
 
     const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", null) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "A", .{ .font = cozette, .size = 13, .color = zapdf.Color.rgb(200, 0, 0) });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "A", .{ .font = cozette, .size = 13, .color = platen.Color.rgb(200, 0, 0) });
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);

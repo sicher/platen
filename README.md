@@ -1,4 +1,4 @@
-# zapdf
+# platen
 
 A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, images, vector graphics, and PDF/A archival output. No external C dependencies.
 
@@ -41,19 +41,19 @@ See [PERFORMANCE.md](PERFORMANCE.md) for optimization details.
 
 ```zig
 const std = @import("std");
-const zapdf = @import("zapdf");
+const platen = @import("platen");
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
     // Create document. `init.io` is used for any file I/O the document
     // performs (loadFont/loadImage/loadSvg). In tests, pass `std.testing.io`.
-    var doc = zapdf.Document.init(allocator, init.io);
+    var doc = platen.Document.init(allocator, init.io);
     defer doc.deinit();
 
     // Add a page and write text
     try doc.addPage(.{});
-    const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 24 };
+    const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 24 };
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
 
     // Save to file
@@ -66,12 +66,12 @@ pub fn main(init: std.process.Init) !void {
 
 ## Installation
 
-Add zapdf as a dependency in your `build.zig.zon`:
+Add platen as a dependency in your `build.zig.zon`:
 
 ```zig
 .dependencies = .{
-    .zapdf = .{
-        .url = "https://codeberg.org/sicher/zapdf/archive/v1.0.0.tar.gz",
+    .platen = .{
+        .url = "https://codeberg.org/sicher/platen/archive/v1.0.0.tar.gz",
         .hash = "...",
     },
 },
@@ -82,18 +82,18 @@ To use the latest development version, replace `v1.0.0` with `main`.
 Then in your `build.zig`:
 
 ```zig
-const zapdf_dep = b.dependency("zapdf", .{
+const platen_dep = b.dependency("platen", .{
     .target = target,
     .optimize = optimize,
 });
-exe.root_module.addImport("zapdf", zapdf_dep.module("zapdf"));
+exe.root_module.addImport("platen", platen_dep.module("platen"));
 ```
 
 Or clone and build directly:
 
 ```bash
-git clone https://codeberg.org/sicher/zapdf.git
-cd zapdf
+git clone https://codeberg.org/sicher/platen.git
+cd platen
 zig build        # Build CLI tool
 zig build test   # Run tests
 ```
@@ -105,9 +105,9 @@ zig build test   # Run tests
 ```zig
 try doc.addPage(.{});
 
-const title = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
-const body = zapdf.TextStyle{ .font = zapdf.Font.times, .size = 12 };
-const code = zapdf.TextStyle{ .font = zapdf.Font.courier, .size = 10 };
+const title = platen.TextStyle{ .font = platen.Font.helvetica, .size = 16, .bold = true };
+const body = platen.TextStyle{ .font = platen.Font.times, .size = 12 };
+const code = platen.TextStyle{ .font = platen.Font.courier, .size = 10 };
 
 _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Title", title);
 _ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Body text in Times Roman", body);
@@ -124,7 +124,7 @@ const font = try doc.loadFont("fonts/MyFont.ttf", null);
 const latin_font = try doc.loadFont("fonts/Latin.ttf", .win_ansi);
 
 try doc.addPage(.{});
-const style = zapdf.TextStyle{ .font = font, .size = 14 };
+const style = platen.TextStyle{ .font = font, .size = 14 };
 _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Custom font with Unicode: 日本語 🎉", style);
 ```
 
@@ -142,10 +142,10 @@ const gentium = try doc.loadFontFamily(.{
 try doc.addPage(.{});
 
 // Use bold/italic flags - library selects correct variant automatically
-const body = zapdf.TextStyle{ .font = gentium, .size = 12 };
-const emphasis = zapdf.TextStyle{ .font = gentium, .size = 12, .italic = true };
-const strong = zapdf.TextStyle{ .font = gentium, .size = 12, .bold = true };
-const strong_emphasis = zapdf.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
+const body = platen.TextStyle{ .font = gentium, .size = 12 };
+const emphasis = platen.TextStyle{ .font = gentium, .size = 12, .italic = true };
+const strong = platen.TextStyle{ .font = gentium, .size = 12, .bold = true };
+const strong_emphasis = platen.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
 
 _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular text", body);
 _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Italic text", emphasis);
@@ -159,7 +159,7 @@ _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Bold italic text", strong_emphasis)
 try doc.addPage(.{});
 
 // Define a region for text
-var region = zapdf.Region{
+var region = platen.Region{
     .x = 72,
     .y = 72,
     .width = 468,  // page width minus margins
@@ -167,7 +167,7 @@ var region = zapdf.Region{
 };
 
 const text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit...";
-const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
+const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11 };
 
 // Incremental text with word wrapping (cursor advances on same line)
 const result = try doc.write(&region, text, style, .{});
@@ -187,7 +187,7 @@ var st = doc.createStyledText();
 defer st.deinit();
 try st.append("Normal text ", .{});
 try st.append("bold text ", .{ .bold = true });
-try st.append("colored text", .{ .color = zapdf.Color.blue });
+try st.append("colored text", .{ .color = platen.Color.blue });
 
 _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
 ```
@@ -213,7 +213,7 @@ Use `write()` or `writeStyled()` with `.measure_only = true` to measure without 
 Measurement is side-effect free - the region's cursor is unchanged after the call.
 
 ```zig
-var region = zapdf.Region{
+var region = platen.Region{
     .x = 50,
     .y = 100,
     .width = 200,
@@ -222,7 +222,7 @@ var region = zapdf.Region{
 };
 
 // Define text style
-const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 11 };
+const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11 };
 const line_height = style.size * 1.2;  // Default line height multiplier
 
 // Measure plain text (cursor unchanged after this call)
@@ -231,7 +231,7 @@ const result = try doc.write(&region, text, style, .{ .measure_only = true });
 // Or measure styled text
 var styled = doc.createStyledText();
 try styled.append("Hello ", .{});
-try styled.append("World", .{ .color = zapdf.Color.blue });
+try styled.append("World", .{ .color = platen.Color.blue });
 const styled_result = try doc.writeStyled(&region, &styled, style, .{ .measure_only = true });
 
 // Calculate height from lines_written
@@ -248,25 +248,25 @@ if (box_height <= region.remainingHeight()) {
 
 ```zig
 // Named color presets
-const color1 = zapdf.Color.red;
-const color2 = zapdf.Color.navy;
-const color3 = zapdf.Color.coral;
+const color1 = platen.Color.red;
+const color2 = platen.Color.navy;
+const color3 = platen.Color.coral;
 
 // From RGB (0-255 range) - the common case
-const color4 = zapdf.Color.rgb(128, 64, 192);
+const color4 = platen.Color.rgb(128, 64, 192);
 
 // From RGB floats (0.0-1.0 range)
-const color5 = zapdf.Color.rgbf(0.5, 0.25, 0.75);
+const color5 = platen.Color.rgbf(0.5, 0.25, 0.75);
 
 // From hex string
-const color6 = zapdf.Color.hex("#FF6600").?;
-const color7 = zapdf.Color.hex("F60").?;  // short form
+const color6 = platen.Color.hex("#FF6600").?;
+const color7 = platen.Color.hex("F60").?;  // short form
 
 // Greyscale (0 = black, 1 = white)
-const color8 = zapdf.Color.greyscale(0.5);
+const color8 = platen.Color.greyscale(0.5);
 
 // CMYK for print
-const color9 = zapdf.Color.cmyk(1, 0, 0, 0);  // cyan
+const color9 = platen.Color.cmyk(1, 0, 0, 0);  // cyan
 ```
 
 Available presets: `black`, `white`, `red`, `green`, `blue`, `cyan`, `magenta`, `yellow`, `orange`, `pink`, `purple`, `brown`, `navy`, `teal`, `coral`, `salmon`, `gold`, `silver`, `maroon`, `olive`, `lime`, `indigo`, `violet`, `turquoise`, `skyblue`, `forestgreen`, and many more.
@@ -280,15 +280,15 @@ try doc.addPage(.{});
 try doc.drawLine(
     .{ .x = 50, .y = 100 },
     .{ .x = 200, .y = 100 },
-    .{ .color = zapdf.Color.black, .width = 1.5 },
+    .{ .color = platen.Color.black, .width = 1.5 },
 );
 
 // Rectangle with stroke and fill
 try doc.drawRect(
     .{ .x = 50, .y = 120, .width = 100, .height = 50 },
     .{
-        .stroke = .{ .color = zapdf.Color.black },
-        .fill = .{ .color = zapdf.Color.lightgray },
+        .stroke = .{ .color = platen.Color.black },
+        .fill = .{ .color = platen.Color.lightgray },
     },
 );
 
@@ -296,14 +296,14 @@ try doc.drawRect(
 try doc.drawRoundedRect(
     .{ .x = 50, .y = 180, .width = 100, .height = 50 },
     10,  // corner radius
-    .{ .stroke = .{ .color = zapdf.Color.blue, .width = 2 } },
+    .{ .stroke = .{ .color = platen.Color.blue, .width = 2 } },
 );
 
 // Circle (fill only)
-try doc.drawCircle(.{ .x = 200, .y = 200 }, 30, .{ .fill = .{ .color = zapdf.Color.red } });
+try doc.drawCircle(.{ .x = 200, .y = 200 }, 30, .{ .fill = .{ .color = platen.Color.red } });
 
 // Polygon
-const points = [_]zapdf.Point{
+const points = [_]platen.Point{
     .{ .x = 300, .y = 150 },
     .{ .x = 350, .y = 200 },
     .{ .x = 250, .y = 200 },
@@ -329,8 +329,8 @@ try path.lineTo(.{ .x = 100, .y = 200 });
 try path.closePath();
 
 try doc.drawPath(&path, .{
-    .stroke = .{ .color = zapdf.Color.blue },
-    .fill = .{ .color = zapdf.Color.lightblue },
+    .stroke = .{ .color = platen.Color.blue },
+    .fill = .{ .color = platen.Color.lightblue },
 });
 ```
 
@@ -368,13 +368,13 @@ try doc.drawSvg(svg, .{ .x = 300, .y = 50, .width = 150, .height = 150 });
 
 ```zig
 // Define color stops
-const stops = [_]zapdf.ColorStop{
-    .{ .offset = 0.0, .color = zapdf.Color.red },
-    .{ .offset = 1.0, .color = zapdf.Color.blue },
+const stops = [_]platen.ColorStop{
+    .{ .offset = 0.0, .color = platen.Color.red },
+    .{ .offset = 1.0, .color = platen.Color.blue },
 };
 
 // Linear gradient (from point to point)
-const linear = zapdf.LinearGradient{
+const linear = platen.LinearGradient{
     .x0 = 50, .y0 = 50,    // start point
     .x1 = 250, .y1 = 50,   // end point
     .stops = &stops,
@@ -383,11 +383,11 @@ const linear_idx = try doc.addLinearGradient(linear);
 try doc.fillRectGradient(50, 50, 200, 100, linear_idx);
 
 // Radial gradient (from inner circle to outer circle)
-const radial_stops = [_]zapdf.ColorStop{
-    .{ .offset = 0.0, .color = zapdf.Color.yellow },
-    .{ .offset = 1.0, .color = zapdf.Color.red },
+const radial_stops = [_]platen.ColorStop{
+    .{ .offset = 0.0, .color = platen.Color.yellow },
+    .{ .offset = 1.0, .color = platen.Color.red },
 };
-const radial = zapdf.RadialGradient{
+const radial = platen.RadialGradient{
     .x0 = 150, .y0 = 250, .r0 = 0,    // inner circle (center, radius 0)
     .x1 = 150, .y1 = 250, .r1 = 50,   // outer circle (same center, radius 50)
     .stops = &radial_stops,
@@ -406,16 +406,16 @@ try doc.fillRectGradient(100, 200, 100, 100, radial_idx);
 try doc.addPage(.{});
 
 // Add page with specific size
-try doc.addPage(.{ .size = zapdf.PageSize.Letter });
+try doc.addPage(.{ .size = platen.PageSize.Letter });
 
 // Add page with size and custom margins
 try doc.addPage(.{
-    .size = zapdf.PageSize.A4,
+    .size = platen.PageSize.A4,
     .margins = .{ .left = 50, .right = 50, .top = 72, .bottom = 72 },
 });
 
 // Landscape orientation
-try doc.addPage(.{ .size = zapdf.PageSize.Letter.landscape() });
+try doc.addPage(.{ .size = platen.PageSize.Letter.landscape() });
 
 // Custom size
 try doc.addPage(.{ .size = .{ .width = 500, .height = 700 } });
@@ -436,7 +436,7 @@ doc.setMetadata(.{
     .subject = "Q4 Financial Results",
     .keywords = "finance, report, 2026, quarterly",
     .creator = "MyApp v1.0",
-    // .producer defaults to "zapdf"
+    // .producer defaults to "platen"
     // .creation_date and .mod_date auto-generated if not set
 });
 ```
@@ -446,8 +446,8 @@ doc.setMetadata(.{
 ```zig
 try doc.addPage(.{});
 
-const body = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
-const heading = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 16, .bold = true };
+const body = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
+const heading = platen.TextStyle{ .font = platen.Font.helvetica, .size = 16, .bold = true };
 
 // Write text and get its bounding rectangle
 const rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Click here for Zig documentation", body);
@@ -486,7 +486,7 @@ doc.setOutline(&outline);
 ### PDF/A Archival Format
 
 ```zig
-var doc = zapdf.Document.init(allocator, init.io);
+var doc = platen.Document.init(allocator, init.io);
 defer doc.deinit();
 
 // Enable PDF/A-1b conformance (archival format)
@@ -500,7 +500,7 @@ doc.setMetadata(.{
 
 // Add content as usual
 try doc.addPage(.{});
-const style = zapdf.TextStyle{ .font = zapdf.Font.helvetica, .size = 12 };
+const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
 _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "This document conforms to PDF/A-1b.", style);
 
 // Output includes XMP metadata, ICC color profile, and PDF/A identification
@@ -569,12 +569,12 @@ Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotA
 Text styling is done via `TextStyle` struct passed to text methods:
 
 ```zig
-const style = zapdf.TextStyle{
-    .font = zapdf.Font.helvetica,  // or .times, .courier, or embedded font
+const style = platen.TextStyle{
+    .font = platen.Font.helvetica,  // or .times, .courier, or embedded font
     .size = 12,
     .bold = true,
     .italic = false,
-    .color = zapdf.Color.navy,
+    .color = platen.Color.navy,
     .decoration = .underline,
     .opacity = 0.5,                // fill alpha: 0.0 transparent .. 1.0 opaque
 };
@@ -591,7 +591,7 @@ For mixed styles within a paragraph, use `StyledText`:
 var st = doc.createStyledText();
 try st.append("Normal ", .{});
 try st.append("bold ", .{ .bold = true });
-try st.append("red", .{ .color = zapdf.Color.red });
+try st.append("red", .{ .color = platen.Color.red });
 ```
 
 ### Navigation & Links
@@ -671,17 +671,17 @@ Create with `doc.createStyledText()`, then:
 
 ### Unit Conversions
 
-All measurements in zapdf are in points (1 pt = 1/72 inch).
+All measurements in platen are in points (1 pt = 1/72 inch).
 
 ```zig
-const x = zapdf.inches(1.5);  // 108 points
-const y = zapdf.mm(25.4);     // 72 points (1 inch)
-const z = zapdf.cm(2.54);     // 72 points (1 inch)
+const x = platen.inches(1.5);  // 108 points
+const y = platen.mm(25.4);     // 72 points (1 inch)
+const z = platen.cm(2.54);     // 72 points (1 inch)
 
 // Constants
-zapdf.pt_per_inch  // 72.0
-zapdf.pt_per_mm    // 2.834...
-zapdf.pt_per_cm    // 28.34...
+platen.pt_per_inch  // 72.0
+platen.pt_per_mm    // 2.834...
+platen.pt_per_cm    // 28.34...
 ```
 
 ### Types Reference

@@ -1,4 +1,4 @@
-//! Image handling for zapdf - JPEG and PNG embedding.
+//! Image handling for platen - JPEG and PNG embedding.
 //!
 //! Provides image parsing and data extraction for embedding in PDFs.
 //! JPEG data is embedded directly (already DCT compressed).

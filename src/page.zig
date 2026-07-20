@@ -1,4 +1,4 @@
-//! Page and content writer types for zapdf.
+//! Page and content writer types for platen.
 //!
 //! This module contains the internal page representation and content stream writer.
 

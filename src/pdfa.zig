@@ -1,11 +1,11 @@
-//! PDF/A conformance support for zapdf.
+//! PDF/A conformance support for platen.
 //!
 //! This module provides PDF/A conformance levels and validation to ensure
 //! generated PDFs meet archival standards.
 
 const std = @import("std");
 
-/// PDF/A conformance levels supported by zapdf.
+/// PDF/A conformance levels supported by platen.
 pub const Conformance = enum {
     /// No restrictions - default mode.
     none,

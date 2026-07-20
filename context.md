@@ -1,16 +1,35 @@
-# zapdf Context
+# platen Context
 
 ## Current Focus
-**v1.0.0 released** - Library is feature complete. Migrated to Zig 0.16.
+**Renamed zapdf → platen** (session #22). Library is feature complete (v1.0.0), Zig 0.16.
 **COLR color fonts: v0, v1 (incl. sweep gradients) all supported** - see sessions below.
 
 ## What's Next
-- **Audit backlog fully worked off** (items 1-5 done across sessions #19-#21).
-- Future enhancements only (see below).
+- **User actions pending for rename:** rename repo on Codeberg (sicher/zapdf →
+  sicher/platen; old URL auto-redirects), optionally rename the local project
+  directory (~/Documents/projects/zapdf → platen). In-repo URLs already point
+  at sicher/platen. Absolute paths in .claude/settings.local.json still say
+  /projects/zapdf on purpose — update them if/when the directory is renamed.
 - Future enhancements (if needed):
   - Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR composite paints
   - Additional PDF/A levels (2a, 3a for tagged PDF)
   - OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+
+## What We Did (Session 2026-07-20 #22 — rename zapdf → platen)
+- **Library renamed to platen** (letterpress plate; picked for no name
+  collisions — zapdf clashed with Zig's zap framework and the zpdf extractor;
+  vellum/quire taken). Tagline carries "fast": "platen — fast, stateless PDF
+  generation for Zig".
+- Mechanics: src/zapdf.zig → src/platen.zig; module/exe names, imports, docs,
+  scripts, CLI strings all renamed; build.zig.zon .name = .platen with new
+  fingerprint 0x84c0b5791b44e68e (fingerprint is derived from package name).
+- version.zig name → "platen", so PDF /Producer is now "platen 1.0.0" —
+  CLI outputs are deliberately NOT byte-identical to pre-rename ones.
+- test/reference/pixel_font.pdf regenerated: its page content literally
+  renders the library name ("zapdf!" → "platen!"); it's one of the
+  self-generated references (fpdf2 can't emit EBDT pixel fonts).
+- Verified: 400/400 tests, check-refs 46/46, CLI smoke PDF has
+  /Producer (platen 1.0.0).
 
 ## What We Did (Session 2026-07-20 #21 — perf touches + fixture, backlog 4-5)
 - **Backlog 4 done** (0dd0e5f): writeStreamCompressed skips zlib below 64
@@ -135,7 +154,7 @@
 - Bump library version to reflect 0.16 API breakage (Document.init/fromFile signatures).
 - Update README to mention Zig 0.16 requirement.
 - Remove the temporary `zig-pkg/` directory if it shouldn't be tracked (was created during the dependency hash refresh).
-- `zig-out/bin/zpdf` is a stale binary from an old build (build.zig only produces `zapdf` now) — safe to delete.
+- `zig-out/bin/zpdf` is a stale binary from an old build (build.zig only produces `platen` now) — safe to delete.
 
 ## What We Did (Session 2026-07-12 #16 — COLR: gradient tests, sweep, subfont split, composite fixes)
 - **BungeeSpice COLR v1 gradient tests** (vendored font, non-emoji):
@@ -143,7 +162,7 @@
     from fontTools (3-point (0,0)/(0,900)/(100,0) → axial `/Coords [0 0 0 900]`,
     gold↔dark-red stops), clips, no solid fills.
   - `color_v1_gradient` reference integration test (`generateColorV1GradientPdf`,
-    zapdf-generated reference, excluded in `gen_references.py`). Verified visually.
+    platen-generated reference, excluded in `gen_references.py`). Verified visually.
 - **PaintSweepGradient support** (`renderSweep` in `colr.zig`) — PDF has no conic
   shading, so: 120-wedge flat-colored triangle fan in the glyph clip.
   - **Spec essentials** (verified against the OT COLR spec): angles are biased
@@ -197,7 +216,7 @@
   - Fixtures: `test/fonts/bitmap/{SbixTest,CbdtTest}.ttf` from
     `scripts/gen_bitmap_fonts.py` (PIL PNGs: quadrant square for orientation,
     alpha half for SMask; CBDT built via TTX import). Unit tests
-    (bitmap_glyphs.zig registered in zapdf.zig test block), document tests
+    (bitmap_glyphs.zig registered in platen.zig test block), document tests
     (exact `cm` placement values), `color_bitmap` reference integration test.
     Validated visually (orientation, alpha, offsets all correct).
 - **All 374 tests pass** (was 359 at session start).
@@ -240,7 +259,7 @@
     (streams compress once they exceed a small size).
   - `src/integration_tests.zig` (reference): `color_emoji` case +
     `generateColorEmojiPdf` + `test "integration: color_emoji PDF"`. **Reference is
-    zapdf-generated** (`test/reference/color_emoji.pdf`) — fpdf2 can't emit COLR, so
+    platen-generated** (`test/reference/color_emoji.pdf`) — fpdf2 can't emit COLR, so
     it's added to `EXCLUDED_TESTS` in `gen_references.py` (like svg_equation/
     inter_fonts). To regenerate: run tests → copy `test/output/color_emoji_actual.pdf`
     → `test/reference/color_emoji.pdf`.
@@ -265,7 +284,7 @@
 - **Tests**: 2 `colr.zig` unit tests (v0 parse + render, ground-truth from fontTools:
   glyph 'A' = gid 2 → layers (2, palette 0 dark red) + (1062 'A.inline', palette 1
   salmon)); 1 `document_test.zig` Type3-emission test; 1 `color_v0` reference
-  integration test (`generateColorV0Pdf`, Bungee, zapdf-generated reference).
+  integration test (`generateColorV0Pdf`, Bungee, platen-generated reference).
   Validated visually (dark-red BUNGEE with salmon inline). All 359 tests pass.
 - Note: FontMatrix for upem 1000 prints as `0.0010000000` (`{d:.10}`), not `0.001`.
 - **CLI**: new `color-test [ttf] [out]` command + `generateColorTestPdf`.
@@ -295,17 +314,17 @@
   - `std.time.milliTimestamp()` / `std.time.timestamp()` removed — replaced with `pdf_output.milliTimestamp()` helper using `std.c.clock_gettime(.REALTIME, ...)`.
   - `std.meta.intToEnum` → `std.enums.fromInt`.
   - `std.mem.trimLeft` → `std.mem.trimStart`.
-- **`app_io` pattern**: `cli.zig`, `perf_test.zig`, and `integration_tests.zig` declare a `pub var app_io: std.Io` (defaulting to `std.testing.io` in test builds for `integration_tests.zig`). `cli.zig` sets `zapdf.integration_tests.app_io = init.io` so the CLI's `check-refs` command shares the same generators as the test suite.
+- **`app_io` pattern**: `cli.zig`, `perf_test.zig`, and `integration_tests.zig` declare a `pub var app_io: std.Io` (defaulting to `std.testing.io` in test builds for `integration_tests.zig`). `cli.zig` sets `platen.integration_tests.app_io = init.io` so the CLI's `check-refs` command shares the same generators as the test suite.
 - **stdout in CLI**: now buffered through `std.Io.File.stdout().writer(io, &buf)`; flushed in a `defer`.
 - **zlib dep**: bumped manifest hash from 1.3.1 to 1.3.2 to match what the registry now serves.
 
 ## What We Did (Session 2026-02-10 #12)
-- **Renamed project from zpdf to zapdf**:
-  - Renamed `src/zpdf.zig` → `src/zapdf.zig`
-  - Updated package name, module imports, executable names (`zapdf`, `zapdf-perf`)
+- **Renamed project from zpdf to platen**:
+  - Renamed `src/zpdf.zig` → `src/platen.zig`
+  - Updated package name, module imports, executable names (`platen`, `platen-perf`)
   - Updated all documentation, tests, CLI help text, build config (21 files, 906 replacements)
   - Updated `build.zig.zon` fingerprint (required after name change)
-  - Updated remote URL to `codeberg.org/sicher/zapdf.git`
+  - Updated remote URL to `codeberg.org/sicher/platen.git`
 - **Updated README description** for search discoverability
 - Commits: 52027e7, 19938ee
 
@@ -342,7 +361,7 @@
 ## What We Did (Session 2026-01-26 #8)
 - **Released v1.0.0** - Feature complete milestone
   - Added `src/version.zig` with version constants
-  - PDF producer now shows "zapdf 1.0.0"
+  - PDF producer now shows "platen 1.0.0"
   - Git tag: `v1.0.0`
 
 - **Consolidated duplicate code** (41 lines saved):
@@ -465,18 +484,18 @@
   - `src/data/sRGB2014.icc.LICENSE` - **NEW**: License for ICC profile
   - `src/document.zig` - conformance field, validation in writeOpacityRef(), PDF/A output
   - `src/writer.zig` - Added optional `id` field to trailer
-  - `src/zapdf.zig` - Re-export Conformance, ConformanceError
+  - `src/platen.zig` - Re-export Conformance, ConformanceError
   - `src/document_test.zig` - PDF/A tests
   - `src/cli.zig` - `pdfa-test` command
 
-- **CLI command**: `zapdf pdfa-test [out]` - generates PDF/A-1b test document
+- **CLI command**: `platen pdfa-test [out]` - generates PDF/A-1b test document
 
 - **Verification with VeraPDF**: All rules pass (fixed in Session #5)
 
 - **Integration test** (`src/integration_tests.zig`, `scripts/gen_references.py`):
   - `gen_pdfa()` in Python - generates fpdf2 reference PDF with PDF/A output intent
-  - `generatePdfaPdf()` in Zig - generates zapdf PDF with full PDF/A-1b conformance
-  - zapdf output includes additional structures (XMP, MarkInfo) beyond fpdf2
+  - `generatePdfaPdf()` in Zig - generates platen PDF with full PDF/A-1b conformance
+  - platen output includes additional structures (XMP, MarkInfo) beyond fpdf2
 
 ## What We Did (Session 2026-01-26 #3)
 - **Added opacity support to graphics API** (`src/layout.zig`, `src/graphics.zig`, `src/document.zig`):
@@ -512,18 +531,18 @@
   - `test "opacity state deduplication"` - same opacity reuses GS
 
 - **Added CLI command** (`src/cli.zig`):
-  - `zapdf opacity-test [out]` - generates visual test PDF
+  - `platen opacity-test [out]` - generates visual test PDF
 
 - **Added integration test** (`src/integration_tests.zig`, `scripts/gen_references.py`):
   - `gen_opacity()` in Python - generates fpdf2 reference PDF with opacity
-  - `generateOpacityPdf()` in Zig - generates zapdf PDF matching the reference
+  - `generateOpacityPdf()` in Zig - generates platen PDF matching the reference
   - Tests overlapping transparent shapes, different opacity levels, stroke opacity
 
 - **Fixed off-by-one bug in ExtGState references** (`src/graphics.zig`):
   - Bug: `writeExtGStateRef()` wrote `/GS0 gs` but resources defined `GS1, GS2, ...`
   - Resource names are 1-indexed (index 0 → "GS1"), content stream was 0-indexed
   - Fix: Added `+ 1` to index in `writeExtGStateRef()`
-  - Caught by comparing fpdf2 reference vs zapdf output in integration test
+  - Caught by comparing fpdf2 reference vs platen output in integration test
 
 ## What We Did (Session 2026-01-26 #2)
 - **Fixed gentium_family PDF size issue** (`src/ttf_subset.zig`, `src/embedded.zig`):
@@ -684,7 +703,7 @@
   _ = try doc.writeAt(..., doc.getCurrentTextStyle());
 
   // After:
-  const style_12 = zapdf.TextStyle{ .font = font, .size = 12 };
+  const style_12 = platen.TextStyle{ .font = font, .size = 12 };
   _ = try doc.writeAt(..., style_12);
   ```
 
@@ -769,7 +788,7 @@
   - Removed `measureWrappedText()` (~150 lines) - duplicated `write()` logic
   - Removed `measureTextWidth()` - duplicate of `getTextWidth()`
   - Removed `MeasureOptions` and `WrappedTextMetrics` types
-  - Updated zapdf.zig exports
+  - Updated platen.zig exports
 
 - **Added `measure_only` to `writeStyled()`** for consistency with `write()`
 
@@ -850,7 +869,7 @@
 
 - **Added 5 unit tests** in document_test.zig
 - **Added integration test** `styled_text` with 7 demonstration sections
-- **Exports**: `StyledText`, `Span` exported via zapdf.zig
+- **Exports**: `StyledText`, `Span` exported via platen.zig
 - 288 tests pass
 
 ## What We Did (Session 2026-01-23)
@@ -868,10 +887,10 @@
 
 - **Usage example**:
   ```zig
-  var region = zapdf.TextBox{ .x = 50, .y = 100, .width = 300, .height = 200 };
+  var region = platen.TextBox{ .x = 50, .y = 100, .width = 300, .height = 200 };
   doc.setTextStyle(.{});
   _ = try doc.write(&region, "Normal text ");
-  doc.setTextStyle(.{ .color = zapdf.Color.red });
+  doc.setTextStyle(.{ .color = platen.Color.red });
   _ = try doc.write(&region, "red text ");
   doc.setTextStyle(.{ .decoration = .{ .underline = true } });
   _ = try doc.write(&region, "underlined.");
@@ -900,7 +919,7 @@
   - **Rendering**: Decorations drawn as filled rectangles outside BT/ET blocks
 - **Added 6 unit tests** for decorations (using setTextStyle)
 - **Added integration test** `text_decorations` with fpdf2 reference
-- **Exports**: `TextDecoration`, `TextStyleOptions` exported via zapdf.zig
+- **Exports**: `TextDecoration`, `TextStyleOptions` exported via platen.zig
 - **Updated API docs**: 54 methods (added setTextStyle)
 - All tests pass
 
@@ -930,7 +949,7 @@
   - Added `setPageLabel(page_index, label)` method for label ranges
   - PDF output generates /PageLabels dict with /Nums number tree
   - Supports /S (style), /P (prefix), /St (start) entries
-- **Updated exports**: Outline, PageLabelStyle, PageLabel exported via zapdf.zig
+- **Updated exports**: Outline, PageLabelStyle, PageLabel exported via platen.zig
 - **Added 11 unit tests** for outlines and page labels:
   - Basic and nested outline items, PDF output verification
   - PageLabelStyle.pdfCode(), setPageLabel basic usage
@@ -998,10 +1017,10 @@
 - All 249 unit tests + 23 integration tests pass
 
 ## What We Did (Session 2026-01-21 #55) [COMPLETE]
-- **Created API_COMPARISON.md**: Comprehensive comparison of zapdf vs fpdf2 APIs
+- **Created API_COMPARISON.md**: Comprehensive comparison of platen vs fpdf2 APIs
   - Identified all functional gaps organized by category
   - Prioritized gaps: High (metadata, links, tables), Medium (annotations, shapes), Lower (encryption, PDF/A)
-  - Noted zapdf advantages: Knuth-Plass line breaking, measureWrappedText, more OpenType features
+  - Noted platen advantages: Knuth-Plass line breaking, measureWrappedText, more OpenType features
 - **Implemented document metadata (Info dictionary)**:
   - Added `DocumentMetadata` struct with optional fields: title, author, subject, keywords, creator, producer, creation_date, mod_date
   - Added `metadata` field to Document struct
@@ -1038,7 +1057,7 @@
   - Added `MeasureOptions` struct: width, first_indent, break_on_hyphens, line_breaking
   - Added `measureWrappedText()` to Document - uses same algorithm as `writeParagraph`
   - `fitsInHeight()` helper method for checking if text fits in available space
-  - Exported types in `zapdf.zig`
+  - Exported types in `platen.zig`
 - **Added 7 unit tests** for measureWrappedText:
   - Basic usage, multiple lines, empty text
   - Verifies line count matches `writeParagraph`
@@ -1063,7 +1082,7 @@
   - Skips `<style>` elements (CSS not supported)
 - **Added integration tests**:
   - `svg_use_defs`: use-defs.svg with directional shapes (boxes, triangles, arrows)
-  - `svg_equation`: MathJax quadratic formula (reference bootstrapped from zapdf)
+  - `svg_equation`: MathJax quadratic formula (reference bootstrapped from platen)
 - **Added unit tests**:
   - `test "parse defs and use"` - basic defs/use parsing
   - `test "use element clones paths properly"` - verifies deep cloning
@@ -1099,7 +1118,7 @@
   - `src/testing.zig`: Added `SemanticOptions` struct with `skip_fonts` field
   - `src/integration_tests.zig`: Test cases can specify `skip_fonts = true`
   - `src/cli.zig`: CLI supports skip_fonts for check-refs
-  - Needed because zapdf uses inline font dicts in Form XObjects while fpdf2 uses object references
+  - Needed because platen uses inline font dicts in Form XObjects while fpdf2 uses object references
 - All 20 integration tests pass (including svg and svg_text)
 
 ## What We Did (Session 2026-01-21 #50) [COMPLETE]
@@ -1161,7 +1180,7 @@
       - `/BBox [0 0 width height]`
       - `/Filter /FlateDecode`, compressed content stream
     - Add XObject resources to page resource dictionaries
-  - Re-exported types in `zapdf.zig`: `Svg`, `svg`, `xml` modules
+  - Re-exported types in `platen.zig`: `Svg`, `svg`, `xml` modules
 - **Added integration test** (`generateSvgPdf` in `integration_tests.zig`):
   - Tests basic shapes, paths, colors, transforms
   - Tests auto aspect ratio calculation
@@ -1192,7 +1211,7 @@
       - PNG: `/Filter /FlateDecode`, re-compressed pixel data
       - PNG with alpha: separate SMask XObject for transparency
     - Add XObject resources to page resource dictionaries
-  - Re-exported types in `zapdf.zig`: `Image`, `ImageFormat`, `ImageColorSpace`
+  - Re-exported types in `platen.zig`: `Image`, `ImageFormat`, `ImageColorSpace`
 - **Added fpdf2 reference generator** (`gen_images()` in `gen_references.py`):
   - Page 1: JPEG and PNG images at fixed sizes
   - Page 2: Aspect ratio tests (width-only, height-only specified)
@@ -1205,7 +1224,7 @@
 ## What We Did (Session 2026-01-20 #47) [COMPLETE]
 - **Fixed drawCircle coordinate handling** in `document.zig`:
   - fpdf2's `circle(x, y, r)` takes CENTER coordinates, not bounding box
-  - zapdf's `drawCircle` was incorrectly passing (x, y) directly to `drawEllipse` which expects bounding box coordinates
+  - platen's `drawCircle` was incorrectly passing (x, y) directly to `drawEllipse` which expects bounding box coordinates
   - Fix: Convert center to bounding box in drawCircle: `drawEllipse(x - radius, y - radius, diameter, diameter, style)`
   - Updated comment to correctly document that (x, y) is the CENTER of the circle
 - **Fixed default line cap** to match fpdf2:
@@ -1223,7 +1242,7 @@
   - Ellipse uses 4 cubic Bezier curves (KAPPA = 0.5522847498)
   - Polygon supports arbitrary point arrays
   - All methods use `q`/`Q` graphics state save/restore
-  - Re-exported new types in `zapdf.zig`
+  - Re-exported new types in `platen.zig`
 - **Added unit tests** for graphics primitives in `document_test.zig`:
   - Tests for all shape methods (drawLine, drawRect, drawCircle, drawEllipse, drawPolygon)
   - Tests for state setters (setLineWidth, setDashPattern, setLineCap, setLineJoin)
@@ -1251,12 +1270,12 @@
 - All 171 tests pass, PDF output matches reference files exactly
 
 ## What We Did (Session 2026-01-20 #44) [COMPLETE]
-- **Major zapdf.zig refactoring** (3415 → ~3800 lines across 5 modules):
+- **Major platen.zig refactoring** (3415 → ~3800 lines across 5 modules):
   - Created `document.zig` (~2000 lines): Document struct + internal types (Page, ContentWriter, etc.)
   - Created `document_test.zig` (1403 lines): All Document tests moved here
   - Created `color.zig` (159 lines): Color types
   - Created `layout.zig` (147 lines): Layout types (Region, Margins, etc.)
-  - Updated `zapdf.zig` (100 lines): Now a thin facade that re-exports from document.zig
+  - Updated `platen.zig` (100 lines): Now a thin facade that re-exports from document.zig
   - Made `findSoftHyphenBreak`, `findHyphenBreak`, `renderPageCommands` public for testing
 - **Fixed memory leak in Document.output()**: Added `defer w.deinit()` for Writer cleanup
 
@@ -1274,10 +1293,10 @@
   - Added `getFontMetrics()` to Document - returns metrics scaled to current font size
   - Standard fonts use hardcoded AFM-derived values (Helvetica, Times, Courier families)
   - Embedded fonts use actual metrics from TTF/OTF file
-- **Refactored zapdf.zig** (3615 → 3415 lines, -200):
+- **Refactored platen.zig** (3615 → 3415 lines, -200):
   - Created `layout.zig` (147 lines): Border, Align, VAlign, Margins, Padding, Region, PageSize, *Options
   - Moved `FontMetrics`, `StandardFontMetrics`, `getStandardFontMetrics` to `metrics.zig`
-  - zapdf.zig now re-exports layout types for API compatibility
+  - platen.zig now re-exports layout types for API compatibility
 - **Added tests** for all new APIs (color stored in commands, font metrics scaling)
 - All 171 tests pass
 
@@ -1307,7 +1326,7 @@
 
 ## What We Did (Session 2026-01-20 #40) [COMPLETE]
 - **Implemented arena allocator per page - ~4% overall improvement**:
-  - Added `arena` field to `Page` struct (zapdf.zig:280)
+  - Added `arena` field to `Page` struct (platen.zig:280)
   - Updated `Page.init()` to take backing allocator
   - Added `pageAllocator()` method for page-local allocations
   - All per-command allocations (text_data, cached_glyphs, raw content) now use page arena
@@ -1360,9 +1379,9 @@
   - Added timing breakdown display to perf_test
   - **Key finding**: Page rendering was 553ms (81% of output), not compression!
 - **Optimizations implemented**:
-  1. **Early exit from kerning/mark check loop** (zapdf.zig:666-684) - exit once both flags determined
+  1. **Early exit from kerning/mark check loop** (platen.zig:666-684) - exit once both flags determined
   2. **Cached `has_kern_data`/`has_mark_data` flags** (embedded.zig:174-176) - skip check loop for fonts without GPOS data
-  3. **Fast hex conversion** (zapdf.zig:32-41) - lookup table instead of `std.fmt.bufPrint`
+  3. **Fast hex conversion** (platen.zig:32-41) - lookup table instead of `std.fmt.bufPrint`
 - **Performance results**:
   - Page rendering: 553ms → 395ms (28% faster)
   - PDF output: 680ms → 518ms (24% faster)
@@ -1445,7 +1464,7 @@
 ## What We Did (Session 2026-01-19 #31) [COMPLETE]
 - **Fixed Gentium diacritics PDF Y coordinate issue**:
   - PDF was rendering bottom-up because test used wrong coordinate convention
-  - Changed from `y = 780; y -= ...` to `y = 32; y += ...` to match zapdf's top-origin system
+  - Changed from `y = 780; y -= ...` to `y = 32; y += ...` to match platen's top-origin system
 - **Enhanced Gentium diacritics reference with uppercase/lowercase pairs**:
   - All examples now show Aa, Ee, Oo pairs (e.g., Aa Ee Oo with diacritics)
   - Descriptions moved to word-wrapped regions on right side using `writeParagraph`
@@ -1700,7 +1719,7 @@
 
 ## What We Did (Session 2026-01-18 #16) [COMPLETE]
 - Implemented Text Flow API (regions, margins, word wrapping)
-  - **New types** in `zapdf.zig`:
+  - **New types** in `platen.zig`:
     - `Color` - RGB color (black, white, red, green, blue presets)
     - `Border` - Per-side border control (`.none`, `.all` presets)
     - `Align` - Text alignment (left, center, right, justify)
@@ -1729,8 +1748,8 @@
 
 ## What We Did (Session 2026-01-18 #15) [COMPLETE]
 - Fixed integration test consistency for opentype_features test
-  - Root issue: fpdf2's tnum/pnum/zero features not implemented in zapdf, causing position diffs
-  - Fix: Use shaped_text() with liga+kern only for sections zapdf can handle
+  - Root issue: fpdf2's tnum/pnum/zero features not implemented in platen, causing position diffs
+  - Fix: Use shaped_text() with liga+kern only for sections platen can handle
   - Disabled kerning for Inter fonts in test (fpdf2 uses text() for those sections)
   - All positions now match within 1pt tolerance
 - Regenerated all reference PDFs with consistent shaping
@@ -1772,7 +1791,7 @@
     - `getGlyphsForText()`: returns substituted glyph sequence
     - `getKerning()`: returns kerning value between glyph pair
     - Updated `generateCIDToUnicodeCMap()`: handles ligature → multi-codepoint mapping
-  - Updated `zapdf.zig`:
+  - Updated `platen.zig`:
     - Added `doc.setFeature(feature, enabled)` API
     - Added `doc.setFontFeature(font, feature, enabled)` for per-font control
     - `renderCIDTextWithKerning()`: uses TJ operator with kerning adjustments
@@ -1807,11 +1826,11 @@
   - Added `writeStreamCompressed()` function
   - Automatically adds `/Filter /FlateDecode` when compression saves space
   - Falls back to uncompressed if compression doesn't help
-- Updated `zapdf.zig` to use compression for:
+- Updated `platen.zig` to use compression for:
   - Font streams (CFF and TTF data)
   - ToUnicode CMap streams
   - Page content streams
-- Size comparison results (zapdf vs fpdf2):
+- Size comparison results (platen vs fpdf2):
   - inter_fonts: 77KB vs 95KB (**-18.8%**)
   - cid_fonts: 28KB vs 32KB (**-10.6%**)
   - all_fonts: 2.2KB vs 2.8KB (**-22.7%**)
@@ -1882,7 +1901,7 @@
 - Fixed bugs found during testing:
   - `desubroutinizeCharString()` now removes operand bytes when inlining callsubr/callgsubr
   - `desubroutinizeCharString()` only adds endchar at depth 0 (not in subroutines)
-- Test count: 63 test functions (26 embedded, 27 zapdf, 2 ttf, 8 integration)
+- Test count: 63 test functions (26 embedded, 27 platen, 2 ttf, 8 integration)
 - All tests pass
 
 ## What We Did (Session 2026-01-17 #8)
@@ -1920,9 +1939,9 @@
   - Added `getCharsetSID()` to extract original SID for each glyph
   - Must remove Encoding operator from Top DICT (old offset becomes invalid)
 - Analyzed subsetting size differences vs fpdf2
-  - fpdf2 inter_fonts: 95KB, zapdf: 446KB (4.7x larger)
-  - CFF: fpdf2 ~6-7KB each, zapdf ~60-70KB (String INDEX + Global Subrs not subsetted)
-  - TTF: fpdf2 ~12-41KB, zapdf ~30-60KB (sparse tables due to preserved glyph IDs)
+  - fpdf2 inter_fonts: 95KB, platen: 446KB (4.7x larger)
+  - CFF: fpdf2 ~6-7KB each, platen ~60-70KB (String INDEX + Global Subrs not subsetted)
+  - TTF: fpdf2 ~12-41KB, platen ~30-60KB (sparse tables due to preserved glyph IDs)
   - To match fpdf2: need TTF glyph ID remapping + CFF String/Subrs subsetting
 
 ## What We Did (Session 2026-01-17 #6)
@@ -2058,11 +2077,11 @@
 - Full PDF output with embedded fonts: Font dict, FontDescriptor, FontFile2 stream
 - Widths array generated from TTF cmap/hmtx tables, scaled to 1000 units
 - Added extensive tests (13 new tests) for font embedding
-- Added `zapdf embed-test [font] [output]` CLI command
+- Added `platen embed-test [font] [output]` CLI command
 - Tested with Courier Prime (monospace) and Charter (proportional)
 - Added qpdf-based structural comparison (like fpdf2's assert_pdf_equal)
 - Updated testing.zig with CompareMode (structural/semantic/auto)
-- CLI: `zapdf check-refs --structural` or `--semantic`
+- CLI: `platen check-refs --structural` or `--semantic`
 - Structural = qpdf QDF normalization, good for regression testing
 - Semantic = pdftotext text+positions, good for cross-implementation comparison
 - All 5 reference tests still pass
@@ -2071,7 +2090,7 @@
 - Created TTF parser (`src/ttf.zig`) - parses TrueType and OpenType fonts
 - Parses tables: head, hhea, hmtx, maxp, cmap, name
 - Supports cmap format 4 (BMP) and format 12 (full Unicode)
-- Added `zapdf font-info` CLI command to inspect fonts
+- Added `platen font-info` CLI command to inspect fonts
 - Tested with all test fonts: Courier Prime, Charter, Satoshi, Inter Variable
 - Updated test report to show both expected/actual PDFs side-by-side
 - Report uses relative paths, PDFs copied to output folder
@@ -2118,7 +2137,7 @@
 - Ported tests from fpdf2: page format, positioning, error handling, font tests
 
 ## Files of Interest
-- `src/zapdf.zig` - Main library facade, re-exports from document.zig
+- `src/platen.zig` - Main library facade, re-exports from document.zig
 - `src/document.zig` - Document struct, text rendering, image/SVG drawing, PDF output
 - `src/images.zig` - JPEG/PNG parsing and image handling
 - `src/svg.zig` - SVG parsing and Form XObject generation

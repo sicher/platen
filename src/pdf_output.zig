@@ -1,4 +1,4 @@
-//! PDF output generation for zapdf.
+//! PDF output generation for platen.
 //!
 //! This module handles the serialization of Document data to PDF format.
 //! It's separated from document.zig to reduce file size and improve modularity.

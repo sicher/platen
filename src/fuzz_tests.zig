@@ -1,4 +1,4 @@
-//! Fuzz tests hardening zapdf against malformed input and hostile API usage.
+//! Fuzz tests hardening platen against malformed input and hostile API usage.
 //!
 //! Continuous fuzzing:
 //!   zig build test --fuzz
@@ -14,7 +14,7 @@
 //!   sequence and parameter values without crashing or leaking.
 
 const std = @import("std");
-const zapdf = @import("zapdf.zig");
+const platen = @import("platen.zig");
 const ttf = @import("ttf.zig");
 const images = @import("images.zig");
 const svg = @import("svg.zig");
@@ -642,11 +642,11 @@ fn fuzzCoord(smith: *Smith) f64 {
     return @as(f64, @floatFromInt(smith.valueRangeAtMost(i32, -320_000, 320_000))) / 16.0;
 }
 
-fn fuzzPoint(smith: *Smith) zapdf.Point {
+fn fuzzPoint(smith: *Smith) platen.Point {
     return .{ .x = fuzzCoord(smith), .y = fuzzCoord(smith) };
 }
 
-fn fuzzRect(smith: *Smith) zapdf.Rect {
+fn fuzzRect(smith: *Smith) platen.Rect {
     return .{
         .x = fuzzCoord(smith),
         .y = fuzzCoord(smith),
@@ -655,7 +655,7 @@ fn fuzzRect(smith: *Smith) zapdf.Rect {
     };
 }
 
-fn fuzzColor(smith: *Smith) zapdf.Color {
+fn fuzzColor(smith: *Smith) platen.Color {
     return switch (smith.valueRangeAtMost(u8, 0, 2)) {
         0 => .{ .greyscale_val = fuzzCoord(smith) },
         1 => .{ .rgb_val = .{
@@ -672,12 +672,12 @@ fn fuzzColor(smith: *Smith) zapdf.Color {
     };
 }
 
-fn fuzzStrokeStyle(smith: *Smith) zapdf.StrokeStyle {
+fn fuzzStrokeStyle(smith: *Smith) platen.StrokeStyle {
     return .{
         .color = fuzzColor(smith),
         .width = fuzzCoord(smith),
-        .cap = smith.value(zapdf.LineCap),
-        .join = smith.value(zapdf.LineJoin),
+        .cap = smith.value(platen.LineCap),
+        .join = smith.value(platen.LineJoin),
         .dash = .{
             .dash = fuzzCoord(smith),
             .gap = fuzzCoord(smith),
@@ -687,7 +687,7 @@ fn fuzzStrokeStyle(smith: *Smith) zapdf.StrokeStyle {
     };
 }
 
-fn fuzzShapeStyle(smith: *Smith) zapdf.ShapeStyle {
+fn fuzzShapeStyle(smith: *Smith) platen.ShapeStyle {
     return .{
         .stroke = if (smith.value(bool)) fuzzStrokeStyle(smith) else null,
         .fill = if (smith.value(bool)) .{
@@ -697,14 +697,14 @@ fn fuzzShapeStyle(smith: *Smith) zapdf.ShapeStyle {
     };
 }
 
-fn fuzzTextStyle(smith: *Smith, embedded_font: ?zapdf.Font) zapdf.TextStyle {
-    const font: zapdf.Font = switch (smith.valueRangeAtMost(u8, 0, 5)) {
-        0 => zapdf.Font.helvetica,
-        1 => zapdf.Font.times,
-        2 => zapdf.Font.courier,
+fn fuzzTextStyle(smith: *Smith, embedded_font: ?platen.Font) platen.TextStyle {
+    const font: platen.Font = switch (smith.valueRangeAtMost(u8, 0, 5)) {
+        0 => platen.Font.helvetica,
+        1 => platen.Font.times,
+        2 => platen.Font.courier,
         3 => .symbol,
         4 => .zapf_dingbats,
-        else => embedded_font orelse zapdf.Font.helvetica,
+        else => embedded_font orelse platen.Font.helvetica,
     };
     return .{
         .font = font,
@@ -712,7 +712,7 @@ fn fuzzTextStyle(smith: *Smith, embedded_font: ?zapdf.Font) zapdf.TextStyle {
         .bold = smith.value(bool),
         .italic = smith.value(bool),
         .color = fuzzColor(smith),
-        .decoration = smith.value(zapdf.TextDecoration),
+        .decoration = smith.value(platen.TextDecoration),
         .char_spacing = fuzzCoord(smith),
     };
 }
@@ -739,11 +739,11 @@ const FuzzDocContext = struct {
 fn fuzzDocument(ctx: FuzzDocContext, smith: *Smith) !void {
     const allocator = std.testing.allocator;
 
-    var doc = zapdf.Document.init(allocator, std.testing.io);
+    var doc = platen.Document.init(allocator, std.testing.io);
     defer doc.deinit();
     try doc.addPage(.{});
 
-    var embedded_font: ?zapdf.Font = null;
+    var embedded_font: ?platen.Font = null;
     var text_buf: [48]u8 = undefined;
 
     var ops: usize = 0;
@@ -771,13 +771,13 @@ fn fuzzDocument(ctx: FuzzDocContext, smith: *Smith) !void {
             .draw_ellipse => doc.drawEllipse(fuzzRect(smith), fuzzShapeStyle(smith)) catch {},
             .draw_circle => doc.drawCircle(fuzzPoint(smith), fuzzCoord(smith), fuzzShapeStyle(smith)) catch {},
             .draw_polygon => {
-                var points: [6]zapdf.Point = undefined;
+                var points: [6]platen.Point = undefined;
                 const n = smith.valueRangeAtMost(u8, 0, points.len);
                 for (points[0..n]) |*p| p.* = fuzzPoint(smith);
                 doc.drawPolygon(points[0..n], fuzzShapeStyle(smith)) catch {};
             },
             .add_link => {
-                const dest: zapdf.Destination = .{
+                const dest: platen.Destination = .{
                     .page_index = smith.index(doc.getPageCount()),
                     .y = fuzzCoord(smith),
                 };
