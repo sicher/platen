@@ -1103,18 +1103,24 @@ fn generateTransformsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 100, .y = 720 }, "VERTICAL", helv, .{});
     try doc.popState();
 
-    // 7. clipPath: filled square clipped to a triangle (only the triangle
-    // should be purple)
-    _ = try doc.writeAt(.{ .x = 250, .y = 640 }, "clipPath: square clipped to triangle:", helv, .{});
+    // 7. clipPath: filled square clipped to a triangle. Both the square's
+    // extent and the clip path are drawn dashed (unclipped) so the effect
+    // is visible: purple appears only where they overlap.
+    _ = try doc.writeAt(.{ .x = 250, .y = 640 }, "clipPath: dashed square filled, clipped to dashed triangle:", helv, .{});
     var tri = doc.createPath();
     defer tri.deinit();
     try tri.moveTo(.{ .x = 320, .y = 660 });
     try tri.lineTo(.{ .x = 390, .y = 770 });
     try tri.lineTo(.{ .x = 250, .y = 770 });
     try tri.closePath();
+    // Unclipped guides: the content extent and the clip path
+    const dashed = platen.StrokeStyle{ .color = platen.Color.gray, .dash = .{ .dash = 3, .gap = 3 } };
+    try doc.drawRect(.{ .x = 240, .y = 650, .width = 160, .height = 90 }, .{ .stroke = dashed });
+    try doc.drawPath(&tri, .{ .stroke = dashed });
+    // Clipped fill
     try doc.pushState();
     try doc.clipPath(&tri);
-    try doc.drawRect(.{ .x = 240, .y = 650, .width = 160, .height = 130 }, .{ .fill = .{ .color = platen.Color.rebeccapurple } });
+    try doc.drawRect(.{ .x = 240, .y = 650, .width = 160, .height = 90 }, .{ .fill = .{ .color = platen.Color.rebeccapurple } });
     try doc.popState();
 
     return doc.output();
