@@ -78,7 +78,9 @@ pub const PageLabelStyle = layout.PageLabelStyle;
 pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WriteOptions = layout.WriteOptions;
-pub const LineOptions = layout.LineOptions;
+pub const WriteAtOptions = layout.WriteAtOptions;
+pub const Anchor = layout.Anchor;
+pub const BlockOptions = layout.BlockOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const PageSize = layout.PageSize;
 pub const PageOptions = layout.PageOptions;
@@ -962,15 +964,32 @@ pub const Document = struct {
         });
     }
     /// Writes text at the specified position with explicit style.
-    /// Returns the bounding rectangle of the rendered text.
-    pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle) !Rect {
+    /// pos.y is the text baseline; opts.anchor selects which part of the
+    /// text sits at pos.x (left edge by default, center, or right edge).
+    /// Returns the bounding rectangle of the rendered text
+    /// (ascender-to-descender, from real font metrics).
+    pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle, opts: WriteAtOptions) !Rect {
         const width = try self.writeTextStyled(pos, str, style, 0);
-        // Y is baseline, so rect top is y - font_size (approximate ascender)
+
+        // Anchoring: writeTextStyled shapes the text (which is where the
+        // width comes from), so shift the just-appended command instead of
+        // measuring up front - the text is shaped exactly once.
+        const x_left = switch (opts.anchor) {
+            .left => pos.x,
+            .center => pos.x - width / 2,
+            .right => pos.x - width,
+        };
+        if (opts.anchor != .left) {
+            var page = &self.pages.items[self.current_page];
+            page.commands.items[page.commands.items.len - 1].text.x = x_left;
+        }
+
+        const m = self.getFontMetricsStyled(style);
         return .{
-            .x = pos.x,
-            .y = pos.y - style.size,
+            .x = x_left,
+            .y = pos.y - m.ascender,
             .width = width,
-            .height = style.size,
+            .height = m.ascender - m.descender,
         };
     }
 
@@ -1391,10 +1410,11 @@ pub const Document = struct {
         };
     }
 
-    /// Write a block of text with alignment support.
-    /// Unlike write(), this is block-based: cursor moves to start of next line after.
-    /// Use this for table cells, headers, or any text that needs alignment.
-    pub fn writeLine(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: LineOptions) !WriteResult {
+    /// Write a wrapped block of text with alignment support
+    /// (left/center/right/justify). Text wraps within the region; the cursor
+    /// moves to the start of the next line afterwards. Use this for table
+    /// cells, headers, paragraphs - any aligned text.
+    pub fn writeBlock(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: BlockOptions) !WriteResult {
         var st = StyledText.init(self.allocator);
         defer st.deinit();
         try st.append(str, .{});
@@ -1943,7 +1963,7 @@ pub const Document = struct {
                             if (remaining_width <= line_width + 0.01) {
                                 if (region.remainingHeight() >= line_height) {
                                     const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style);
+                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style, .{});
                                     region.newLine(line_height);
                                     lines_written += 1;
                                 }
@@ -1975,8 +1995,8 @@ pub const Document = struct {
 
                                 const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                                 const x_pos = region.x + region.padding.left;
-                                _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, clean_prefix, render_style);
-                                _ = try self.writeAt(.{ .x = x_pos + prefix_width, .y = y_pos }, "-", render_style);
+                                _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, clean_prefix, render_style, .{});
+                                _ = try self.writeAt(.{ .x = x_pos + prefix_width, .y = y_pos }, "-", render_style, .{});
 
                                 region.newLine(line_height);
                                 lines_written += 1;
@@ -1987,7 +2007,7 @@ pub const Document = struct {
                                 // No break point fits, render remaining as-is (will overflow)
                                 if (region.remainingHeight() >= line_height) {
                                     const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style);
+                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style, .{});
                                     region.newLine(line_height);
                                     lines_written += 1;
                                 }
@@ -2020,7 +2040,7 @@ pub const Document = struct {
                         render_style.decoration = span.style.decoration;
 
                         const x_pos = region.x + region.padding.left;
-                        _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style);
+                        _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
 
                         region.newLine(line_height);
                         lines_written += 1;
@@ -2028,7 +2048,7 @@ pub const Document = struct {
                         // Render suffix on next line
                         if (suffix.len > 0 and region.remainingHeight() >= line_height) {
                             const y_pos2 = valignBaseline(region, line_height, fm, render_opts.valign);
-                            _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos2 }, suffix, render_style);
+                            _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos2 }, suffix, render_style, .{});
                             region.newLine(line_height);
                             lines_written += 1;
                         }
@@ -2060,7 +2080,7 @@ pub const Document = struct {
                         const remaining_width = self.getTextWidthStyled(remaining_text, style);
                         if (remaining_width <= line_width + 0.01) {
                             // Fits - render it and we're done
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style);
+                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
                             region.newLine(line_height);
                             lines_written += 1;
                             did_break = true;
@@ -2070,14 +2090,14 @@ pub const Document = struct {
                         // Doesn't fit - find break point
                         if (self.findCharacterBreakStyled(remaining_text, line_width, style)) |break_pos| {
                             const prefix = remaining_text[0..break_pos];
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style);
+                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
                             region.newLine(line_height);
                             lines_written += 1;
                             remaining_text = remaining_text[break_pos..];
                             did_break = true;
                         } else {
                             // Can't break (shouldn't happen) - render what we can
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style);
+                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
                             region.newLine(line_height);
                             lines_written += 1;
                             did_break = true;
@@ -2411,7 +2431,7 @@ pub const Document = struct {
 
                     // Get segment width and render using writeAt
                     const seg_width = self.getTextWidthStyled(segment, base_style);
-                    _ = try self.writeAt(.{ .x = current_x, .y = y_pos }, segment, render_style);
+                    _ = try self.writeAt(.{ .x = current_x, .y = y_pos }, segment, render_style, .{});
                     current_x += seg_width;
                 }
             }

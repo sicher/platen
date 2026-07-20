@@ -246,7 +246,7 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
 
     // Header: platen wordmark (SVG, vector), "INVOICE" + number/dates on the right
     try doc.drawSvg(logo, .{ .x = margin, .y = 42, .width = 110, .height = 0 });
-    _ = try doc.writeAt(.{ .x = margin, .y = 80 }, "Letterpress Lane 1, 111 22 Stockholm", small_gray);
+    _ = try doc.writeAt(.{ .x = margin, .y = 80 }, "Letterpress Lane 1, 111 22 Stockholm", small_gray, .{});
 
     try writeRight(&doc, right, 62, "INVOICE", h2);
     const inv_no = try std.fmt.bufPrint(&buf, "No. 2026-{d:0>5}", .{index + 1});
@@ -259,10 +259,10 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
 
     // Bill-to block
     const cust = customers[rand.uintLessThan(usize, customers.len)];
-    _ = try doc.writeAt(.{ .x = margin, .y = 130 }, "BILL TO", small_gray);
-    _ = try doc.writeAt(.{ .x = margin, .y = 144 }, cust.name, body_bold);
-    _ = try doc.writeAt(.{ .x = margin, .y = 157 }, cust.street, body);
-    _ = try doc.writeAt(.{ .x = margin, .y = 170 }, cust.city, body);
+    _ = try doc.writeAt(.{ .x = margin, .y = 130 }, "BILL TO", small_gray, .{});
+    _ = try doc.writeAt(.{ .x = margin, .y = 144 }, cust.name, body_bold, .{});
+    _ = try doc.writeAt(.{ .x = margin, .y = 157 }, cust.street, body, .{});
+    _ = try doc.writeAt(.{ .x = margin, .y = 170 }, cust.city, body, .{});
 
     // Table header band
     const col_qty: f64 = 360;
@@ -271,7 +271,7 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
     try doc.drawRect(.{ .x = margin, .y = table_top, .width = right - margin, .height = 18 }, .{
         .fill = .{ .color = platen.Color.rgb(238, 241, 247) },
     });
-    _ = try doc.writeAt(.{ .x = margin + 6, .y = table_top + 13 }, "Description", body_bold);
+    _ = try doc.writeAt(.{ .x = margin + 6, .y = table_top + 13 }, "Description", body_bold, .{});
     try writeRight(&doc, col_qty, table_top + 13, "Qty", body_bold);
     try writeRight(&doc, col_unit, table_top + 13, "Unit", body_bold);
     try writeRight(&doc, right - 6, table_top + 13, "Amount", body_bold);
@@ -287,7 +287,7 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
         subtotal_cents += amount_cents;
 
         y += 16;
-        _ = try doc.writeAt(.{ .x = margin + 6, .y = y }, item.desc, body);
+        _ = try doc.writeAt(.{ .x = margin + 6, .y = y }, item.desc, body, .{});
         const qty_s = try std.fmt.bufPrint(&buf, "{d}", .{qty});
         try writeRight(&doc, col_qty, y, qty_s, body);
         try writeRight(&doc, col_unit, y, try money(&buf2, item.unit_cents), body);
@@ -314,8 +314,8 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
 
     // Footer with invoice-unique payment reference
     const ref = try std.fmt.bufPrint(&buf2, "Payment ref: PLT-2026-{d:0>5}  |  IBAN SE12 3456 7890 1234  |  BIC PLTNSES1", .{index + 1});
-    _ = try doc.writeAt(.{ .x = margin, .y = 790 }, ref, small_gray);
-    _ = try doc.writeAt(.{ .x = margin, .y = 802 }, "Platen Industries AB  |  Org.nr 556677-8899  |  VAT SE556677889901", small_gray);
+    _ = try doc.writeAt(.{ .x = margin, .y = 790 }, ref, small_gray, .{});
+    _ = try doc.writeAt(.{ .x = margin, .y = 802 }, "Platen Industries AB  |  Org.nr 556677-8899  |  VAT SE556677889901", small_gray, .{});
 
     _ = @atomicRmw(u64, &phase_ns[1], .Add, @intCast(nanoNow() - t_content), .monotonic);
     const t_output = nanoNow();
@@ -325,8 +325,7 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
 }
 
 fn writeRight(doc: *platen.Document, x_right: f64, y: f64, text: []const u8, style: platen.TextStyle) !void {
-    const m = doc.measureStyled(text, style);
-    _ = try doc.writeAt(.{ .x = x_right - m.width, .y = y }, text, style);
+    _ = try doc.writeAt(.{ .x = x_right, .y = y }, text, style, .{ .anchor = .right });
 }
 
 fn money(buf: []u8, cents: u64) ![]u8 {

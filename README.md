@@ -78,7 +78,7 @@ pub fn main(init: std.process.Init) !void {
     // Add a page and write text
     try doc.addPage(.{});
     const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 24 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style, .{});
 
     // Save to file
     const pdf_data = try doc.output();
@@ -94,10 +94,13 @@ All coordinates are in points (1/72 inch) with the origin at the **top-left**
 of the page, y growing downward. Anchoring differs by content type,
 following typographic convention:
 
-- **Text** (`writeAt`): `y` is the **baseline** of the text.
+- **Text** (`writeAt`): `y` is the **baseline** of the text; `opts.anchor`
+  chooses which part of the text sits at `x` (`.left` default, `.center`,
+  `.right` - so right-aligning a value at a column edge is
+  `doc.writeAt(.{ .x = right_edge, .y = y }, text, style, .{ .anchor = .right })`).
 - **Shapes and images** (`drawRect`, `drawImage`, `drawSvg`, ...): `rect.y`
   is the **top edge**.
-- **Regions** (`write`, `writeLine`, `writeStyled`): `y` is the top of the
+- **Regions** (`write`, `writeBlock`, `writeStyled`): `y` is the top of the
   region; the baseline of the first line is placed from font metrics
   according to `valign`.
 
@@ -146,9 +149,9 @@ const title = platen.TextStyle{ .font = platen.Font.helvetica, .size = 16, .bold
 const body = platen.TextStyle{ .font = platen.Font.times, .size = 12 };
 const code = platen.TextStyle{ .font = platen.Font.courier, .size = 10 };
 
-_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Title", title);
-_ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Body text in Times Roman", body);
-_ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Monospace code", code);
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Title", title, .{});
+_ = try doc.writeAt(.{ .x = 50, .y = 80 }, "Body text in Times Roman", body, .{});
+_ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Monospace code", code, .{});
 ```
 
 ### Custom Fonts (TrueType/OpenType)
@@ -162,7 +165,7 @@ const latin_font = try doc.loadFont("fonts/Latin.ttf", .win_ansi);
 
 try doc.addPage(.{});
 const style = platen.TextStyle{ .font = font, .size = 14 };
-_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Custom font with Unicode: 日本語 🎉", style);
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Custom font with Unicode: 日本語 🎉", style, .{});
 ```
 
 ### Font Families (Bold/Italic Variants)
@@ -184,10 +187,10 @@ const emphasis = platen.TextStyle{ .font = gentium, .size = 12, .italic = true }
 const strong = platen.TextStyle{ .font = gentium, .size = 12, .bold = true };
 const strong_emphasis = platen.TextStyle{ .font = gentium, .size = 12, .bold = true, .italic = true };
 
-_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular text", body);
-_ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Italic text", emphasis);
-_ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Bold text", strong);
-_ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Bold italic text", strong_emphasis);
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular text", body, .{});
+_ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Italic text", emphasis, .{});
+_ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Bold text", strong, .{});
+_ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Bold italic text", strong_emphasis, .{});
 ```
 
 ### Text Flow with Word Wrapping
@@ -216,8 +219,8 @@ if (result.overflow) |_| {
 }
 
 // Block-based text with alignment (cursor moves to next line)
-_ = try doc.writeLine(&region, "Centered heading", style, .{ .alignment = .center });
-_ = try doc.writeLine(&region, "Right-aligned text", style, .{ .alignment = .right });
+_ = try doc.writeBlock(&region, "Centered heading", style, .{ .alignment = .center });
+_ = try doc.writeBlock(&region, "Right-aligned text", style, .{ .alignment = .right });
 
 // Styled text for mixed formatting within a paragraph
 var st = doc.createStyledText();
@@ -487,18 +490,18 @@ const body = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
 const heading = platen.TextStyle{ .font = platen.Font.helvetica, .size = 16, .bold = true };
 
 // Write text and get its bounding rectangle
-const rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Click here for Zig documentation", body);
+const rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Click here for Zig documentation", body, .{});
 
 // Add external link (URL)
 try doc.addExternalLink(rect, "https://ziglang.org/documentation/");
 
 // Internal links for TOC navigation
-const ch1_result = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduction", heading);
+const ch1_result = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduction", heading, .{});
 const chapter1_dest = doc.destination(ch1_result.y).?;  // save this location
 
 // Later, create a link to that chapter
 try doc.addPage(.{});
-const toc_rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Go to Chapter 1", body);
+const toc_rect = try doc.writeAt(.{ .x = 50, .y = 50 }, "Go to Chapter 1", body, .{});
 try doc.addLink(toc_rect, chapter1_dest);
 ```
 
@@ -538,7 +541,7 @@ doc.setMetadata(.{
 // Add content as usual
 try doc.addPage(.{});
 const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
-_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "This document conforms to PDF/A-1b.", style);
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "This document conforms to PDF/A-1b.", style, .{});
 
 // Output includes XMP metadata, ICC color profile, and PDF/A identification
 const pdf_data = try doc.output();
@@ -587,9 +590,9 @@ Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotA
 
 | Method | Description |
 |--------|-------------|
-| `writeAt(Point, str, TextStyle) -> Rect` | Write text at absolute position |
+| `writeAt(Point, str, TextStyle, WriteAtOptions) -> Rect` | Write text at absolute position |
 | `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Incremental write with word wrapping (cursor advances) |
-| `writeLine(*Region, str, TextStyle, LineOptions) -> WriteResult` | Block-based write with alignment (cursor to next line) |
+| `writeBlock(*Region, str, TextStyle, BlockOptions) -> WriteResult` | Wrapped block with alignment (cursor to next line) |
 | `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping and alignment |
 | `createStyledText() -> StyledText` | Create builder for mixed formatting (bold, colors, etc.) |
 
@@ -598,7 +601,7 @@ Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotA
 | Method | Description |
 |--------|-------------|
 | `write(*Region, str, style, .{ .measure_only = true })` | Measure layout without rendering (cursor unchanged) |
-| `writeLine(*Region, str, style, .{ .measure_only = true })` | Measure aligned layout without rendering |
+| `writeBlock(*Region, str, style, .{ .measure_only = true })` | Measure aligned layout without rendering |
 | `writeStyled(*Region, *StyledText, style, .{ .measure_only = true })` | Measure styled layout without rendering |
 
 ### Text Styling

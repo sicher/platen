@@ -758,7 +758,7 @@ fn fuzzDocument(ctx: FuzzDocContext, smith: *Smith) !void {
             },
             .write_at => {
                 const text = text_buf[0..smith.slice(&text_buf)];
-                _ = doc.writeAt(fuzzPoint(smith), text, fuzzTextStyle(smith, embedded_font)) catch {};
+                _ = doc.writeAt(fuzzPoint(smith), text, fuzzTextStyle(smith, embedded_font), .{}) catch {};
             },
             .write_region => {
                 var region = doc.getPageRegion() orelse continue;

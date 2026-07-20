@@ -131,6 +131,23 @@ pub const Border = struct {
     pub const all = Border{ .top = true, .bottom = true, .left = true, .right = true };
 };
 
+/// Horizontal anchoring of text placed at a point (writeAt): which part of
+/// the rendered text sits at pos.x.
+pub const Anchor = enum {
+    /// pos.x is the left edge of the text (default).
+    left,
+    /// pos.x is the horizontal center of the text.
+    center,
+    /// pos.x is the right edge of the text.
+    right,
+};
+
+/// Options for writeAt (point-positioned text).
+pub const WriteAtOptions = struct {
+    /// Which part of the text sits at pos.x.
+    anchor: Anchor = .left,
+};
+
 /// Horizontal text alignment.
 pub const Align = enum {
     left,
@@ -304,8 +321,8 @@ pub const WriteOptions = struct {
     line_height: f64 = 1.2,
 };
 
-/// Options for writeLine (block-based text with alignment).
-pub const LineOptions = struct {
+/// Options for writeBlock (wrapped block text with alignment).
+pub const BlockOptions = struct {
     /// If true, only measure text without rendering.
     measure_only: bool = false,
     /// Horizontal text alignment.

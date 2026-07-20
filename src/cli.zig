@@ -231,10 +231,10 @@ fn generateTextPdf(allocator: std.mem.Allocator, path: []const u8) !void {
     defer doc.deinit();
 
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", platen.TextStyle{ .font = platen.Font.helvetica, .size = 24 });
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "This is platen - a PDF library for Zig", platen.TextStyle{ .font = platen.Font.helvetica, .size = 16, .bold = true });
-    _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats", platen.TextStyle{ .font = platen.Font.times, .size = 12 });
-    _ = try doc.writeAt(.{ .x = 50, .y = 200 }, "Fixed-width font for code", platen.TextStyle{ .font = platen.Font.courier, .size = 10 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", platen.TextStyle{ .font = platen.Font.helvetica, .size = 24 }, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "This is platen - a PDF library for Zig", platen.TextStyle{ .font = platen.Font.helvetica, .size = 16, .bold = true }, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Built-in fonts: Helvetica, Times, Courier, Symbol, ZapfDingbats", platen.TextStyle{ .font = platen.Font.times, .size = 12 }, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 200 }, "Fixed-width font for code", platen.TextStyle{ .font = platen.Font.courier, .size = 10 }, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -256,40 +256,40 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
 
     // Title with standard font
     const title_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 24, .bold = true };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Embedded Font Test", title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Embedded Font Test", title_style, .{});
 
     // Show font info
     const info_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
     var info_buf: [256]u8 = undefined;
     const info = std.fmt.bufPrint(&info_buf, "Font: {s}", .{custom_font.embedded.name}) catch "Font: Unknown";
-    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, info, info_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 80 }, info, info_style, .{});
 
     // Use embedded font at various sizes
     const embed24_style = platen.TextStyle{ .font = custom_font, .size = 24 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 120 }, "The quick brown fox jumps over the lazy dog.", embed24_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 120 }, "The quick brown fox jumps over the lazy dog.", embed24_style, .{});
 
     const embed18_style = platen.TextStyle{ .font = custom_font, .size = 18 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 160 }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", embed18_style);
-    _ = try doc.writeAt(.{ .x = 50, .y = 190 }, "abcdefghijklmnopqrstuvwxyz", embed18_style);
-    _ = try doc.writeAt(.{ .x = 50, .y = 220 }, "0123456789 !@#$%^&*()", embed18_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 160 }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", embed18_style, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 190 }, "abcdefghijklmnopqrstuvwxyz", embed18_style, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 220 }, "0123456789 !@#$%^&*()", embed18_style, .{});
 
     // Mix with standard fonts
     const helv12_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 270 }, "Standard font (Helvetica) for comparison", helv12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 270 }, "Standard font (Helvetica) for comparison", helv12_style, .{});
 
     const embed12_style = platen.TextStyle{ .font = custom_font, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 290 }, "Embedded font at same size (12pt)", embed12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 290 }, "Embedded font at same size (12pt)", embed12_style, .{});
 
     // Multiple lines
     const embed14_style = platen.TextStyle{ .font = custom_font, .size = 14 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 340 }, "Line 1: This is a test of the embedded font.", embed14_style);
-    _ = try doc.writeAt(.{ .x = 50, .y = 360 }, "Line 2: Lorem ipsum dolor sit amet.", embed14_style);
-    _ = try doc.writeAt(.{ .x = 50, .y = 380 }, "Line 3: Consectetur adipiscing elit.", embed14_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 340 }, "Line 1: This is a test of the embedded font.", embed14_style, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 360 }, "Line 2: Lorem ipsum dolor sit amet.", embed14_style, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 380 }, "Line 3: Consectetur adipiscing elit.", embed14_style, .{});
 
     // Page 2 - stress test
     try doc.addPage(.{});
     const page2_title_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 18, .bold = true };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: Extended Character Test", page2_title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2: Extended Character Test", page2_title_style, .{});
 
     const page2_embed_style = platen.TextStyle{ .font = custom_font, .size = 14 };
     var y: f64 = 80;
@@ -302,17 +302,17 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     const line5 = "`abcdefghijklmno";
     const line6 = "pqrstuvwxyz{|}~";
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, line1, page2_embed_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, line1, page2_embed_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, line2, page2_embed_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, line2, page2_embed_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, line3, page2_embed_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, line3, page2_embed_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, line4, page2_embed_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, line4, page2_embed_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, line5, page2_embed_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, line5, page2_embed_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, line6, page2_embed_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, line6, page2_embed_style, .{});
     y += 30;
 
     // Show metrics
@@ -324,7 +324,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.embedded.descent,
         custom_font.embedded.cap_height,
     }) catch "Metrics unavailable";
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, ascent_info, metrics_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, ascent_info, metrics_style, .{});
     y += 15;
 
     const bbox_info = std.fmt.bufPrint(&metrics_buf, "BBox: [{d}, {d}, {d}, {d}]", .{
@@ -333,7 +333,7 @@ fn generateEmbedTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
         custom_font.embedded.bbox[2],
         custom_font.embedded.bbox[3],
     }) catch "BBox unavailable";
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, bbox_info, metrics_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, bbox_info, metrics_style, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -353,10 +353,10 @@ fn generateColorTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     try doc.addPage(.{});
 
     const title_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 20, .bold = true };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "COLR Color Emoji Test", title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "COLR Color Emoji Test", title_style, .{});
 
     const note_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 78 }, "Rendered via PDF Type3 color fonts (COLR v1 + CPAL).", note_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 78 }, "Rendered via PDF Type3 color fonts (COLR v1 + CPAL).", note_style, .{});
 
     // Flat-color and gradient emoji at a few sizes.
     const rows = [_][]const u8{
@@ -366,13 +366,13 @@ fn generateColorTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     };
     var y: f64 = 130;
     for ([_]f64{ 48, 36, 24 }, 0..) |size, i| {
-        _ = try doc.writeAt(.{ .x = 50, .y = y }, rows[i], .{ .font = emoji, .size = size });
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, rows[i], .{ .font = emoji, .size = size }, .{});
         y += size + 30;
     }
 
     // Space-separated emoji: exercises segmented rendering (color glyphs via
     // the Type3 font, the blank space glyph via the mono CID font).
-    _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "\u{1F600} \u{1F389} \u{1F680} \u{2764} \u{2B50}", .{ .font = emoji, .size = 28 });
+    _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "\u{1F600} \u{1F389} \u{1F680} \u{2764} \u{2B50}", .{ .font = emoji, .size = 28 }, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -394,11 +394,11 @@ fn generateCffTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outpu
 
     // Just a few characters to test subsetting
     const cff24_style = platen.TextStyle{ .font = font, .size = 24 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello CFF!", cff24_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello CFF!", cff24_style, .{});
 
     const cff18_style = platen.TextStyle{ .font = font, .size = 18 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDEFGHIJ", cff18_style);
-    _ = try doc.writeAt(.{ .x = 50, .y = 130 }, "0123456789", cff18_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDEFGHIJ", cff18_style, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 130 }, "0123456789", cff18_style, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -444,17 +444,17 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     const mark18_style = platen.TextStyle{ .font = font, .size = 18 };
 
     var y: f64 = 30;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mark Positioning Test", mark24_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Mark Positioning Test", mark24_style, .{});
     y += 30;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "GPOS Type 4 (mark-to-base) and Type 6 (mark-to-mark)", mark14_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "GPOS Type 4 (mark-to-base) and Type 6 (mark-to-mark)", mark14_style, .{});
     y += 24;
 
     // Test text with combining diacritical marks
     // These are separate Unicode combining characters (U+0300-U+036F)
 
     // Pre-composed vs combining (visual comparison)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Pre-composed: À É Î Õ Ü ñ", mark18_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Pre-composed: À É Î Õ Ü ñ", mark18_style, .{});
     y += 24;
     // U+0041 U+0300 = A + COMBINING GRAVE ACCENT
     // U+0045 U+0301 = E + COMBINING ACUTE ACCENT
@@ -462,22 +462,22 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     // U+004F U+0303 = O + COMBINING TILDE
     // U+0055 U+0308 = U + COMBINING DIAERESIS
     // U+006E U+0303 = n + COMBINING TILDE
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combining: A\xcc\x80 E\xcc\x81 I\xcc\x82 O\xcc\x83 U\xcc\x88 n\xcc\x83", mark18_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combining: A\xcc\x80 E\xcc\x81 I\xcc\x82 O\xcc\x83 U\xcc\x88 n\xcc\x83", mark18_style, .{});
     y += 30;
 
     // More complex combinations
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Double marks: o\xcc\x82\xcc\x81 e\xcc\x84\xcc\x81", mark18_style); // ô + acute, ē + acute
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Double marks: o\xcc\x82\xcc\x81 e\xcc\x84\xcc\x81", mark18_style, .{}); // ô + acute, ē + acute
     y += 24;
 
     // Vietnamese-style stacked diacritics
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Vietnamese: a\xcc\x82\xcc\x80 e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83", mark18_style); // â + grave, ê + acute, ô + tilde
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Vietnamese: a\xcc\x82\xcc\x80 e\xcc\x82\xcc\x81 o\xcc\x82\xcc\x83", mark18_style, .{}); // â + grave, ê + acute, ô + tilde
     y += 30;
 
     // Comparison row
     const mark12_style = platen.TextStyle{ .font = font, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "If mark positioning works, combining characters should align with pre-composed.", mark12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "If mark positioning works, combining characters should align with pre-composed.", mark12_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Without mark positioning, combining marks appear after the base character.", mark12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Without mark positioning, combining marks appear after the base character.", mark12_style, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -524,55 +524,55 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
 
     var y: f64 = 30;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Contextual Alternates (calt) Test", calt24_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Contextual Alternates (calt) Test", calt24_style, .{});
     y += 30;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter font: GSUB calt feature for programming ligatures", calt12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Inter font: GSUB calt feature for programming ligatures", calt12_style, .{});
     y += 24;
 
     // Test arrow sequences
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "calt OFF:", calt10_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "-> => <- <=> !== ===", no_calt16_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "calt OFF:", calt10_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "-> => <- <=> !== ===", no_calt16_style, .{});
     y += 22;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "calt ON:", calt10_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "-> => <- <=> !== ===", calt16_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "calt ON:", calt10_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "-> => <- <=> !== ===", calt16_style, .{});
     y += 30;
 
     // Test in context
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "In context (calt ON):", calt10_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "In context (calt ON):", calt10_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "function arrow() { return x => x + 1; }", calt14_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "function arrow() { return x => x + 1; }", calt14_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "if (a !== b && c <= d) { return a <=> b; }", calt14_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "if (a !== b && c <= d) { return a <=> b; }", calt14_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "const diff = a -> b -> c;", calt14_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "const diff = a -> b -> c;", calt14_style, .{});
     y += 30;
 
     // Test ASCII line (the problematic one from integration tests)
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Full ASCII (calt ON):", calt10_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Full ASCII (calt ON):", calt10_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@", calt11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@", calt11_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`", calt11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`", calt11_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "abcdefghijklmnopqrstuvwxyz{|}~", calt11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "abcdefghijklmnopqrstuvwxyz{|}~", calt11_style, .{});
     y += 24;
 
     // Same without calt for comparison
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Full ASCII (calt OFF):", calt10_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Full ASCII (calt OFF):", calt10_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@", no_calt11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@", no_calt11_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`", no_calt11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`", no_calt11_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "abcdefghijklmnopqrstuvwxyz{|}~", no_calt11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "abcdefghijklmnopqrstuvwxyz{|}~", no_calt11_style, .{});
     y += 24;
 
     // Regular text should be unchanged
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular text (should be identical with/without calt):", calt10_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Regular text (should be identical with/without calt):", calt10_style, .{});
     y += 16;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "The quick brown fox jumps over the lazy dog.", calt12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "The quick brown fox jumps over the lazy dog.", calt12_style, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -597,12 +597,12 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     const path_label_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 10 };
 
     // Title
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Path API Test", path_title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Path API Test", path_title_style, .{});
 
     var y: f64 = 70;
 
     // Triangle using moveTo/lineTo
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Triangle (moveTo, lineTo, closePath):", path_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Triangle (moveTo, lineTo, closePath):", path_label_style, .{});
     y += 15;
 
     var triangle = doc.createPath();
@@ -618,7 +618,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 80;
 
     // Bezier curve
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cubic Bezier curve (curveTo):", path_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Cubic Bezier curve (curveTo):", path_label_style, .{});
     y += 15;
 
     var bezier = doc.createPath();
@@ -635,7 +635,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 100;
 
     // Heart shape using curves
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Heart shape (multiple curveTo):", path_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Heart shape (multiple curveTo):", path_label_style, .{});
     y += 15;
 
     var heart = doc.createPath();
@@ -652,7 +652,7 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     y += 90;
 
     // Stroke only path
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke only (zigzag):", path_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke only (zigzag):", path_label_style, .{});
     y += 15;
 
     var zigzag = doc.createPath();
@@ -684,12 +684,12 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     const grad_label_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 10 };
 
     // Title
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Gradient Test", grad_title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Gradient Test", grad_title_style, .{});
 
     var y: f64 = 70;
 
     // Linear gradient horizontal
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (horizontal):", grad_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (horizontal):", grad_label_style, .{});
     y += 15;
 
     const lin_stops1 = [_]platen.ColorStop{
@@ -707,7 +707,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 70;
 
     // Linear gradient vertical
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (vertical):", grad_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (vertical):", grad_label_style, .{});
     y += 15;
 
     const lin_stops2 = [_]platen.ColorStop{
@@ -725,7 +725,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 70;
 
     // Linear gradient 3 colors
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (3 colors):", grad_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Linear gradient (3 colors):", grad_label_style, .{});
     y += 15;
 
     const lin_stops3 = [_]platen.ColorStop{
@@ -744,7 +744,7 @@ fn generateGradientTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     y += 70;
 
     // Radial gradient
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Radial gradient:", grad_label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Radial gradient:", grad_label_style, .{});
     y += 15;
 
     const rad_stops = [_]platen.ColorStop{
@@ -778,12 +778,12 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     const label_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 10 };
 
     // Title
-    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Opacity Test", title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 30 }, "Opacity Test", title_style, .{});
 
     var y: f64 = 70;
 
     // Overlapping rectangles with fill opacity
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fill opacity (overlapping rectangles):", label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fill opacity (overlapping rectangles):", label_style, .{});
     y += 20;
 
     // Draw a solid background rectangle
@@ -801,7 +801,7 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 150;
 
     // Different opacity levels
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fill opacity levels (100%, 75%, 50%, 25%):", label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Fill opacity levels (100%, 75%, 50%, 25%):", label_style, .{});
     y += 20;
 
     const opacities = [_]f64{ 1.0, 0.75, 0.5, 0.25 };
@@ -813,7 +813,7 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 80;
 
     // Stroke opacity
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke opacity (overlapping lines):", label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Stroke opacity (overlapping lines):", label_style, .{});
     y += 20;
 
     // Draw lines with different stroke opacities
@@ -829,7 +829,7 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 90;
 
     // Combined fill and stroke opacity
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combined fill + stroke opacity:", label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Combined fill + stroke opacity:", label_style, .{});
     y += 20;
 
     try doc.drawRoundedRect(.{ .x = 50, .y = y, .width = 100, .height = 60 }, 10, .{
@@ -845,7 +845,7 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 100;
 
     // Ellipse with opacity
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ellipse with opacity:", label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Ellipse with opacity:", label_style, .{});
     y += 20;
 
     try doc.drawEllipse(.{ .x = 50, .y = y, .width = 120, .height = 60 }, .{
@@ -854,19 +854,19 @@ fn generateOpacityTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 90;
 
     // Text opacity: semi-transparent text over a solid background bar.
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text opacity (100%, 60%, 30%):", label_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Text opacity (100%, 60%, 30%):", label_style, .{});
     y += 25;
 
     try doc.drawRect(.{ .x = 50, .y = y - 18, .width = 300, .height = 26 }, .{
         .fill = .{ .color = platen.Color.rgb(255, 210, 0) },
     });
     const big = platen.TextStyle{ .font = platen.Font.helvetica, .size = 20, .bold = true, .color = platen.Color.rgb(0, 60, 160) };
-    _ = try doc.writeAt(.{ .x = 55, .y = y }, "Full", big);
+    _ = try doc.writeAt(.{ .x = 55, .y = y }, "Full", big, .{});
     var faded = big;
     faded.opacity = 0.6;
-    _ = try doc.writeAt(.{ .x = 130, .y = y }, "60%", faded);
+    _ = try doc.writeAt(.{ .x = 130, .y = y }, "60%", faded, .{});
     faded.opacity = 0.3;
-    _ = try doc.writeAt(.{ .x = 210, .y = y }, "30%", faded);
+    _ = try doc.writeAt(.{ .x = 210, .y = y }, "30%", faded, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -895,37 +895,37 @@ fn generateMetadataTestPdf(allocator: std.mem.Allocator, output_path: []const u8
     const meta11_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11 };
     const meta_italic10_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 10, .italic = true };
 
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Document with Metadata", meta_title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Document with Metadata", meta_title_style, .{});
 
     var y: f64 = 100;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "This PDF has the following metadata set in the Info dictionary:", meta12_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "This PDF has the following metadata set in the Info dictionary:", meta12_style, .{});
     y += 30;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Title:", meta_bold11_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen Metadata Demo", meta11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Title:", meta_bold11_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen Metadata Demo", meta11_style, .{});
     y += 18;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Author:", meta_bold11_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen Library", meta11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Author:", meta_bold11_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen Library", meta11_style, .{});
     y += 18;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Subject:", meta_bold11_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "Demonstrating PDF metadata support", meta11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Subject:", meta_bold11_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "Demonstrating PDF metadata support", meta11_style, .{});
     y += 18;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Keywords:", meta_bold11_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "pdf, zig, metadata, demo", meta11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Keywords:", meta_bold11_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "pdf, zig, metadata, demo", meta11_style, .{});
     y += 18;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Creator:", meta_bold11_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen CLI tool", meta11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Creator:", meta_bold11_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen CLI tool", meta11_style, .{});
     y += 18;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Producer:", meta_bold11_style);
-    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen (default)", meta11_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Producer:", meta_bold11_style, .{});
+    _ = try doc.writeAt(.{ .x = 120, .y = y }, "platen (default)", meta11_style, .{});
     y += 40;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Use 'pdfinfo' or your PDF viewer's document properties to verify.", meta_italic10_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Use 'pdfinfo' or your PDF viewer's document properties to verify.", meta_italic10_style, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -962,25 +962,25 @@ fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     const body_style = platen.TextStyle{ .font = font, .size = 12 };
     const small_style = platen.TextStyle{ .font = font, .size = 10 };
 
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "PDF/A-1b Test Document", title_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "PDF/A-1b Test Document", title_style, .{});
 
     var y: f64 = 100;
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "This PDF conforms to PDF/A-1b (ISO 19005-1:2005 Level B).", body_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "This PDF conforms to PDF/A-1b (ISO 19005-1:2005 Level B).", body_style, .{});
     y += 30;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "PDF/A-1b Requirements:", body_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "PDF/A-1b Requirements:", body_style, .{});
     y += 20;
-    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- No transparency (opacity must be 1.0)", small_style);
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- No transparency (opacity must be 1.0)", small_style, .{});
     y += 15;
-    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- All fonts must be embedded (using Inter font)", small_style);
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- All fonts must be embedded (using Inter font)", small_style, .{});
     y += 15;
-    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- XMP metadata required", small_style);
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- XMP metadata required", small_style, .{});
     y += 15;
-    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- OutputIntent with ICC profile required", small_style);
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- OutputIntent with ICC profile required", small_style, .{});
     y += 15;
-    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- MarkInfo dictionary required", small_style);
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- MarkInfo dictionary required", small_style, .{});
     y += 15;
-    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- Document ID in trailer required", small_style);
+    _ = try doc.writeAt(.{ .x = 70, .y = y }, "- Document ID in trailer required", small_style, .{});
     y += 30;
 
     // Draw some shapes (fully opaque - required for PDF/A-1b)
@@ -998,7 +998,7 @@ fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     });
     y += 70;
 
-    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Validate with: verapdf --flavour 1b <file>", small_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Validate with: verapdf --flavour 1b <file>", small_style, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -1268,21 +1268,21 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     var y: f64 = 40;
 
     // Title
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 18 }, "Optical Top Alignment Test", title_style);
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 18 }, "Optical Top Alignment Test", title_style, .{});
     y += 30;
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 10 }, "Text positioned so cap-height touches the box top edge", subtitle_style);
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 10 }, "Text positioned so cap-height touches the box top edge", subtitle_style, .{});
     y += 20;
 
     // Legend
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 9 }, "Legend:", label_style);
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 9 }, "Legend:", label_style, .{});
     try doc.drawLine(.{ .x = left_margin + 40, .y = y + 5 }, .{ .x = left_margin + 60, .y = y + 5 }, cap_line_stroke);
-    _ = try doc.writeAt(.{ .x = left_margin + 62, .y = y + 9 }, "cap-height", .{ .font = inter, .size = 9, .color = platen.Color.rgb(255, 80, 80) });
+    _ = try doc.writeAt(.{ .x = left_margin + 62, .y = y + 9 }, "cap-height", .{ .font = inter, .size = 9, .color = platen.Color.rgb(255, 80, 80) }, .{});
     try doc.drawLine(.{ .x = left_margin + 115, .y = y + 5 }, .{ .x = left_margin + 135, .y = y + 5 }, asc_line_stroke);
-    _ = try doc.writeAt(.{ .x = left_margin + 137, .y = y + 9 }, "ascender", .{ .font = inter, .size = 9, .color = platen.Color.rgb(80, 80, 255) });
+    _ = try doc.writeAt(.{ .x = left_margin + 137, .y = y + 9 }, "ascender", .{ .font = inter, .size = 9, .color = platen.Color.rgb(80, 80, 255) }, .{});
     y += 20;
 
     // --- Section 1: Naive top alignment (baseline = box top + font_size) ---
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "NAIVE: baseline = box.y + font_size (visual gap at top)", .{ .font = inter_bold, .size = 11, .color = platen.Color.rgb(60, 60, 60) });
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "NAIVE: baseline = box.y + font_size (visual gap at top)", .{ .font = inter_bold, .size = 11, .color = platen.Color.rgb(60, 60, 60) }, .{});
     y += 22;
 
     for (test_fonts) |entry| {
@@ -1294,7 +1294,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
 
         // Naive: place baseline at box top + font_size (ascender extends into font_size space)
         const naive_baseline = y + font_size;
-        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = naive_baseline }, "Hbdgpq Ty", style);
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = naive_baseline }, "Hbdgpq Ty", style, .{});
 
         // Draw cap-height line (from baseline upward)
         const cap_y = naive_baseline - fm.cap_height;
@@ -1305,7 +1305,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
         try doc.drawLine(.{ .x = left_margin, .y = asc_y }, .{ .x = left_margin + box_width, .y = asc_y }, asc_line_stroke);
 
         // Label
-        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 14 }, entry.name, label_style);
+        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 14 }, entry.name, label_style, .{});
 
         y += box_height + box_spacing;
     }
@@ -1313,7 +1313,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 10;
 
     // --- Section 2: Optical alignment (baseline = box top + cap_height) ---
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "OPTICAL: baseline = box.y + cap_height (capitals touch top edge)", .{ .font = inter_bold, .size = 11, .color = platen.Color.rgb(60, 60, 60) });
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "OPTICAL: baseline = box.y + cap_height (capitals touch top edge)", .{ .font = inter_bold, .size = 11, .color = platen.Color.rgb(60, 60, 60) }, .{});
     y += 22;
 
     for (test_fonts) |entry| {
@@ -1325,7 +1325,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
 
         // Optical: place baseline so cap_height aligns with box top
         const optical_baseline = y + fm.cap_height;
-        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = optical_baseline }, "Hbdgpq Ty", style);
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = optical_baseline }, "Hbdgpq Ty", style, .{});
 
         // Draw cap-height line (should be at box top)
         const cap_y = optical_baseline - fm.cap_height;
@@ -1336,7 +1336,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
         try doc.drawLine(.{ .x = left_margin, .y = asc_y }, .{ .x = left_margin + box_width, .y = asc_y }, asc_line_stroke);
 
         // Label
-        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 14 }, entry.name, label_style);
+        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 14 }, entry.name, label_style, .{});
 
         y += box_height + box_spacing;
     }
@@ -1345,9 +1345,9 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     try doc.addPage(.{});
     y = 40;
 
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 18 }, "Optical Alignment at Various Sizes", title_style);
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 18 }, "Optical Alignment at Various Sizes", title_style, .{});
     y += 30;
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 10 }, "All text uses cap-height optical alignment", subtitle_style);
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 10 }, "All text uses cap-height optical alignment", subtitle_style, .{});
     y += 24;
 
     const sizes = [_]f64{ 12, 16, 24, 36, 48 };
@@ -1361,7 +1361,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
 
         // Optical alignment
         const baseline = y + fm.cap_height;
-        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = baseline }, "Hbdgpq Typography", style);
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = baseline }, "Hbdgpq Typography", style, .{});
 
         // Cap-height line
         try doc.drawLine(.{ .x = left_margin, .y = y }, .{ .x = left_margin + box_width, .y = y }, cap_line_stroke);
@@ -1369,7 +1369,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
         // Size label
         var size_buf: [32]u8 = undefined;
         const size_label = std.fmt.bufPrint(&size_buf, "{d}pt", .{size}) catch "?";
-        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 12 }, size_label, label_style);
+        _ = try doc.writeAt(.{ .x = left_margin + box_width + 6, .y = y + 12 }, size_label, label_style, .{});
 
         y += bh + box_spacing;
     }
@@ -1377,7 +1377,7 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
     y += 16;
 
     // Side-by-side comparison: naive vs optical in same row
-    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "Side by side: Naive (left) vs Optical (right)", .{ .font = inter_bold, .size = 11, .color = platen.Color.rgb(60, 60, 60) });
+    _ = try doc.writeAt(.{ .x = left_margin, .y = y + 12 }, "Side by side: Naive (left) vs Optical (right)", .{ .font = inter_bold, .size = 11, .color = platen.Color.rgb(60, 60, 60) }, .{});
     y += 24;
 
     const half_width: f64 = 232;
@@ -1390,16 +1390,16 @@ fn generateOpticalTestPdf(allocator: std.mem.Allocator, output_path: []const u8)
         // Left box: naive
         try doc.drawRect(.{ .x = left_margin, .y = y, .width = half_width, .height = bh }, .{ .stroke = thin_stroke });
         const naive_bl = y + compare_size;
-        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = naive_bl }, "Hbdgpq", style);
+        _ = try doc.writeAt(.{ .x = left_margin + 6, .y = naive_bl }, "Hbdgpq", style, .{});
 
         // Right box: optical
         try doc.drawRect(.{ .x = left_margin + half_width + 16, .y = y, .width = half_width, .height = bh }, .{ .stroke = thin_stroke });
         const optical_bl = y + fm.cap_height;
-        _ = try doc.writeAt(.{ .x = left_margin + half_width + 22, .y = optical_bl }, "Hbdgpq", style);
+        _ = try doc.writeAt(.{ .x = left_margin + half_width + 22, .y = optical_bl }, "Hbdgpq", style, .{});
 
         // Labels
-        _ = try doc.writeAt(.{ .x = left_margin, .y = y - 3 }, entry.name, label_style);
-        _ = try doc.writeAt(.{ .x = left_margin + half_width + 16, .y = y - 3 }, entry.name, label_style);
+        _ = try doc.writeAt(.{ .x = left_margin, .y = y - 3 }, entry.name, label_style, .{});
+        _ = try doc.writeAt(.{ .x = left_margin + half_width + 16, .y = y - 3 }, entry.name, label_style, .{});
 
         y += bh + box_spacing + 4;
     }

@@ -47,7 +47,7 @@ test "Document with text" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -145,7 +145,7 @@ test "text without page returns error" {
 
     // Should fail because no page is added
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    try std.testing.expectError(error.NoPage, doc.writeAt(.{ .x = 0, .y = 0 }, "test", style));
+    try std.testing.expectError(error.NoPage, doc.writeAt(.{ .x = 0, .y = 0 }, "test", style, .{}));
 }
 
 test "multiple fonts on single page" {
@@ -156,13 +156,13 @@ test "multiple fonts on single page" {
     try doc.addPage(.{});
 
     const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica", helvetica_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica", helvetica_style, .{});
 
     const times_style = TextStyle{ .font = Font.times, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Times", times_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Times", times_style, .{});
 
     const courier_style = TextStyle{ .font = Font.courier, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Courier", courier_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Courier", courier_style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -181,16 +181,16 @@ test "font styles" {
     try doc.addPage(.{});
 
     const normal_style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Normal", normal_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Normal", normal_style, .{});
 
     const bold_style = TextStyle{ .font = Font.helvetica, .size = 12, .bold = true };
-    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style, .{});
 
     const italic_style = TextStyle{ .font = Font.helvetica, .size = 12, .italic = true };
-    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Italic", italic_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Italic", italic_style, .{});
 
     const bold_italic_style = TextStyle{ .font = Font.helvetica, .size = 12, .bold = true, .italic = true };
-    _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "BoldItalic", bold_italic_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "BoldItalic", bold_italic_style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -207,10 +207,10 @@ test "multiple pages" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style, .{});
 
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -266,7 +266,7 @@ test "all 14 standard fonts" {
     var y: f64 = 50;
     for (all_fonts) |font| {
         const style = standardFontToStyle(font, 10);
-        _ = try doc.writeAt(.{ .x = 50, .y = y }, font.pdfName(), style);
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, font.pdfName(), style, .{});
         y += 15;
     }
 
@@ -380,7 +380,7 @@ test "render text with embedded font" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello, World!", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -416,15 +416,15 @@ test "mix standard and embedded fonts" {
 
     // Use standard font first
     const helvetica_style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica text", helvetica_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Helvetica text", helvetica_style, .{});
 
     // Switch to embedded font
     const embedded_style = TextStyle{ .font = courier_prime, .size = 14 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Courier Prime text", embedded_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Courier Prime text", embedded_style, .{});
 
     // Switch back to standard
     const times_style = TextStyle{ .font = Font.times, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times text", times_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Times text", times_style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -448,10 +448,10 @@ test "multiple embedded fonts" {
     try doc.addPage(.{});
 
     const regular_style = TextStyle{ .font = courier_regular, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", regular_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", regular_style, .{});
 
     const bold_style = TextStyle{ .font = courier_bold, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", bold_style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -481,11 +481,11 @@ test "embedded font on multiple pages" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 1", style, .{});
 
     try doc.addPage(.{});
     // Font should still be set
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Page 2", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -535,7 +535,7 @@ test "embedded font widths array in PDF" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Test", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Test", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -572,7 +572,7 @@ test "PDF output is valid with embedded font" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = .{ .embedded = font.embedded }, .size = 24 };
-    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Test embedded font!", style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Test embedded font!", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -679,25 +679,25 @@ test "writeStyled alignment" {
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
 }
 
-test "writeLine alignment" {
+test "writeBlock alignment" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
-    // Test that writeLine() works with different alignments (block-based)
+    // Test that writeBlock() works with different alignments (block-based)
     {
         var region = Region{ .x = 100, .y = 100, .width = 200, .height = 50 };
-        _ = try doc.writeLine(&region, "Centered text", style, .{ .alignment = .center });
+        _ = try doc.writeBlock(&region, "Centered text", style, .{ .alignment = .center });
     }
     {
         var region = Region{ .x = 100, .y = 150, .width = 200, .height = 50 };
-        _ = try doc.writeLine(&region, "Right aligned", style, .{ .alignment = .right });
+        _ = try doc.writeBlock(&region, "Right aligned", style, .{ .alignment = .right });
     }
     {
         var region = Region{ .x = 100, .y = 200, .width = 200, .height = 50 };
-        _ = try doc.writeLine(&region, "Justified text that wraps to multiple lines for testing", style, .{ .alignment = .justify });
+        _ = try doc.writeBlock(&region, "Justified text that wraps to multiple lines for testing", style, .{ .alignment = .justify });
     }
 
     const pdf = try doc.output();
@@ -850,7 +850,7 @@ test "soft hyphens stripped from text output" {
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
 
     // Write text with soft-hyphens
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "ex\xc2\xadplic\xc2\xadit", style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "ex\xc2\xadplic\xc2\xadit", style, .{});
 
     // The stored text should have soft-hyphens stripped
     const page = &doc.pages.items[0];
@@ -1235,7 +1235,7 @@ test "mark positioning with Tm absolute coordinates" {
 
     // Write "À" (A + combining grave)
     const style = TextStyle{ .font = inter, .size = 14 };
-    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style, .{});
 
     // Get the content stream
     const page = &doc.pages.items[0];
@@ -1297,7 +1297,7 @@ test "TextStyle color stored in command" {
 
     // Write text with explicit red color
     const red_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Red text", red_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Red text", red_style, .{});
 
     // Verify the command stored the color
     const page = &doc.pages.items[0];
@@ -1317,7 +1317,7 @@ test "Color grayscale stored in command" {
     // Write text with greyscale color via explicit style
     const gray = Color.greyscale(0.5);
     const gray_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = gray };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Gray text", gray_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Gray text", gray_style, .{});
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -1333,7 +1333,7 @@ test "Color CMYK stored in command" {
     // Write text with CMYK color via explicit style
     const cyan = Color.cmyk(1, 0, 0, 0);
     const cyan_style = TextStyle{ .font = Font.helvetica, .size = 12, .color = cyan };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Cyan text", cyan_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Cyan text", cyan_style, .{});
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -1956,7 +1956,7 @@ test "TextStyle underline decoration stored in command" {
 
     // Write text with underline via explicit style
     const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Underlined text", underline_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Underlined text", underline_style, .{});
 
     // Verify the command has underline enabled
     const page = &doc.pages.items[0];
@@ -1972,7 +1972,7 @@ test "TextStyle strikethrough decoration stored in command" {
 
     // Write text with strikethrough via explicit style
     const strikethrough_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .strikethrough = true } };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Strikethrough text", strikethrough_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Strikethrough text", strikethrough_style, .{});
 
     // Verify the command has strikethrough enabled
     const page = &doc.pages.items[0];
@@ -1987,7 +1987,7 @@ test "text width stored in command for decorations" {
     try doc.addPage(.{});
 
     const underline_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Hello", underline_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Hello", underline_style, .{});
 
     const page = &doc.pages.items[0];
     const cmd = page.commands.items[0];
@@ -2003,7 +2003,7 @@ test "TextStyle with both decorations" {
     try doc.addPage(.{});
 
     const both_style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true, .strikethrough = true } };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", both_style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", both_style, .{});
 
     // Verify both decorations stored in command
     const page = &doc.pages.items[0];
@@ -2026,7 +2026,7 @@ test "TextStyle with color and decoration" {
 
     // Color and decoration set together in style
     const style = TextStyle{ .font = Font.helvetica, .size = 12, .color = Color.red, .decoration = .{ .underline = true } };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style, .{});
 
     // Verify the command has both color and decoration
     const page = &doc.pages.items[0];
@@ -2041,7 +2041,7 @@ test "decoration not rendered when disabled" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style);
+    _ = try doc.writeAt(.{ .x = 0, .y = 0 }, "Test", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2548,10 +2548,10 @@ test "font family text rendering uses correct variant" {
     const bold_italic_style = TextStyle{ .font = font, .size = 12, .bold = true, .italic = true };
 
     // All should succeed without error
-    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Regular text", base_style);
-    _ = try doc.writeAt(.{ .x = 100, .y = 120 }, "Bold text", bold_style);
-    _ = try doc.writeAt(.{ .x = 100, .y = 140 }, "Italic text", italic_style);
-    _ = try doc.writeAt(.{ .x = 100, .y = 160 }, "Bold italic text", bold_italic_style);
+    _ = try doc.writeAt(.{ .x = 100, .y = 100 }, "Regular text", base_style, .{});
+    _ = try doc.writeAt(.{ .x = 100, .y = 120 }, "Bold text", bold_style, .{});
+    _ = try doc.writeAt(.{ .x = 100, .y = 140 }, "Italic text", italic_style, .{});
+    _ = try doc.writeAt(.{ .x = 100, .y = 160 }, "Bold italic text", bold_italic_style, .{});
 
     // Generate PDF output
     const pdf = try doc.output();
@@ -2577,7 +2577,7 @@ test "loadFontFromMemory loads font from buffer" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = font, .size = 12 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Text from memory-loaded font", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Text from memory-loaded font", style, .{});
 
     // Generate PDF and verify it contains embedded font
     const pdf = try doc.output();
@@ -2613,8 +2613,8 @@ test "loadFontFamilyFromMemory loads family from buffers" {
 
     // Verify rendering works
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", .{ .font = font, .size = 12 });
-    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", .{ .font = font, .size = 12, .bold = true });
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Regular", .{ .font = font, .size = 12 }, .{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "Bold", .{ .font = font, .size = 12, .bold = true }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2817,7 +2817,7 @@ test "text with fill opacity emits ExtGState" {
 
     try doc.addPage(.{});
     const style = TextStyle{ .font = Font.helvetica, .size = 24, .opacity = 0.5 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Semi-transparent", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Semi-transparent", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2837,7 +2837,7 @@ test "fully opaque text has no ExtGState" {
     try doc.addPage(.{});
     // Default opacity = 1.0
     const style = TextStyle{ .font = Font.helvetica, .size = 24 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Opaque", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Opaque", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2856,7 +2856,7 @@ test "text opacity shares ExtGState with shape opacity" {
         .fill = .{ .color = Color.rgb(255, 0, 0), .opacity = 0.4 },
     });
     const style = TextStyle{ .font = Font.helvetica, .size = 18, .opacity = 0.4 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Match", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 150 }, "Match", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2881,7 +2881,7 @@ test "embedded-font text opacity emits ExtGState" {
     const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.otf", .identity);
     try doc.addPage(.{});
     const style = TextStyle{ .font = font, .size = 20, .opacity = 0.6 };
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Fade", style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Fade", style, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -2901,7 +2901,7 @@ test "PDF/A-1b rejects transparent text" {
     const style = TextStyle{ .font = Font.helvetica, .size = 24, .opacity = 0.5 };
     try std.testing.expectError(
         error.TransparencyNotAllowed,
-        doc.writeAt(.{ .x = 50, .y = 50 }, "No transparency", style),
+        doc.writeAt(.{ .x = 50, .y = 50 }, "No transparency", style, .{}),
     );
 }
 
@@ -3015,7 +3015,7 @@ test "COLR color emoji emits a Type3 color font" {
     const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // Cloud (flat two-color) + grinning face (radial gradient).
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}\u{1F600}", .{ .font = emoji, .size = 48 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}\u{1F600}", .{ .font = emoji, .size = 48 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3040,7 +3040,7 @@ test "COLR mixed run splits into Type3 (color) and CID (mono) segments" {
     const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // Emoji, space (non-color glyph), emoji → color / mono / color.
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600} \u{2601}", .{ .font = emoji, .size = 40 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600} \u{2601}", .{ .font = emoji, .size = 40 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3058,7 +3058,7 @@ test "COLR color fonts are skipped under PDF/A conformance" {
 
     const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 40 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 40 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3075,7 +3075,7 @@ test "COLR color font used only for non-color text emits no Type3" {
     const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
     // Only spaces: the emoji font is used, but no color glyph is present.
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "   ", .{ .font = emoji, .size = 40 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "   ", .{ .font = emoji, .size = 40 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3109,7 +3109,7 @@ test "COLR fonts with >255 color glyphs split into multiple Type3 subfonts" {
     }
     try std.testing.expectEqual(@as(usize, 300), seen.count());
 
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, text.items, .{ .font = emoji, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, text.items, .{ .font = emoji, .size = 12 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3133,7 +3133,7 @@ test "sbix bitmap font emits a Type3 font with image CharProcs" {
 
     const sbix = doc.loadFont("test/fonts/bitmap/SbixTest.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = sbix, .size = 72 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = sbix, .size = 72 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3157,7 +3157,7 @@ test "CBDT bitmap font emits a Type3 font with image CharProcs" {
 
     const cbdt = doc.loadFont("test/fonts/bitmap/CbdtTest.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = cbdt, .size = 72 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = cbdt, .size = 72 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3177,7 +3177,7 @@ test "OT-SVG font emits a Type3 color font (Bungee Color SVG)" {
 
     const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-SVG.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3201,7 +3201,7 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
 
     const cozette = doc.loadFont("test/fonts/Cozette/cozette.otb", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "A", .{ .font = cozette, .size = 13, .color = platen.Color.rgb(200, 0, 0) });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "A", .{ .font = cozette, .size = 13, .color = platen.Color.rgb(200, 0, 0) }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3229,7 +3229,7 @@ test "unsupported SVG glyphs fall back to the mono outline" {
     // (multi-glyph doc) must all fall back to their real outlines.
     const svgf = doc.loadFont("test/fonts/svg/SvgTest.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDE", .{ .font = svgf, .size = 24 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "ABCDE", .{ .font = svgf, .size = 24 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3248,9 +3248,9 @@ test "color font used on multiple pages gets per-page /Tc resources" {
 
     const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 24 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{2601}", .{ .font = emoji, .size = 24 }, .{});
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600}", .{ .font = emoji, .size = 24 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F600}", .{ .font = emoji, .size = 24 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3272,7 +3272,7 @@ test "Type3 color fonts never assign single-byte code 32 (word-spacing hazard)" 
     // >31 distinct glyphs so the code space must skip 32: PDF applies word
     // spacing (Tw) to every single-byte code 32, which would silently add
     // extra advance to whichever glyph got that code.
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "abcdefghijklmnopqrstuvwxyz0123456789", .{ .font = cozette, .size = 13 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "abcdefghijklmnopqrstuvwxyz0123456789", .{ .font = cozette, .size = 13 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3304,7 +3304,7 @@ test "COLR v0 font emits a Type3 color font (Bungee Color)" {
 
     const bungee = doc.loadFont("test/fonts/Bungee Color/BungeeColor-Regular-COLRv0.ttf", .identity) catch return error.SkipZigTest;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "AB", .{ .font = bungee, .size = 72 }, .{});
 
     const pdf = try doc.output();
     defer doc.allocator.free(pdf);
@@ -3337,7 +3337,7 @@ test "parallel stream compression produces byte-identical output" {
                 try doc.addPage(.{});
                 var y: f64 = 40;
                 for (0..30) |_| {
-                    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Parallel compression must not change the output bytes.", style);
+                    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Parallel compression must not change the output bytes.", style, .{});
                     y += 14;
                 }
             }
@@ -3384,7 +3384,7 @@ test "measurement is independent of render order" {
 
     const before_render = doc.measureStyled(text, style).width;
     try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, text, style);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, text, style, .{});
     const after_render = doc.measureStyled(text, style).width;
 
     // Lazy GPOS parsing must not make the first measurement disagree with
@@ -3455,11 +3455,11 @@ test "bold on single embedded font errors instead of silently rendering regular"
     const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
 
     // Regular works
-    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "ok", .{ .font = font, .size = 12 });
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "ok", .{ .font = font, .size = 12 }, .{});
     // Bold/italic on a variant-less font is an error, matching the family
     // behavior for a missing variant
-    try std.testing.expectError(error.FontVariantNotLoaded, doc.writeAt(.{ .x = 50, .y = 70 }, "nope", .{ .font = font, .size = 12, .bold = true }));
-    try std.testing.expectError(error.FontVariantNotLoaded, doc.writeAt(.{ .x = 50, .y = 90 }, "nope", .{ .font = font, .size = 12, .italic = true }));
+    try std.testing.expectError(error.FontVariantNotLoaded, doc.writeAt(.{ .x = 50, .y = 70 }, "nope", .{ .font = font, .size = 12, .bold = true }, .{}));
+    try std.testing.expectError(error.FontVariantNotLoaded, doc.writeAt(.{ .x = 50, .y = 90 }, "nope", .{ .font = font, .size = 12, .italic = true }, .{}));
 }
 
 test "embedded-font measurement includes char_spacing" {
@@ -3505,4 +3505,65 @@ test "measurement applies GSUB ligatures like rendering" {
     // And strictly narrower than the unshaped sum of individual letters,
     // since the ligature glyphs replace multiple letters
     try std.testing.expect(glyphs.len < text.len);
+}
+
+test "writeAt anchor places text left, center, and right of the point" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const style = TextStyle{ .font = font, .size = 12 };
+    const text = "anchored";
+    const w = doc.measureStyled(text, style).width;
+
+    const r_left = try doc.writeAt(.{ .x = 300, .y = 100 }, text, style, .{});
+    const r_center = try doc.writeAt(.{ .x = 300, .y = 120 }, text, style, .{ .anchor = .center });
+    const r_right = try doc.writeAt(.{ .x = 300, .y = 140 }, text, style, .{ .anchor = .right });
+
+    try std.testing.expectApproxEqAbs(@as(f64, 300), r_left.x, 0.001);
+    try std.testing.expectApproxEqAbs(300 - w / 2, r_center.x, 0.001);
+    try std.testing.expectApproxEqAbs(300 - w, r_right.x, 0.001);
+
+    // The rendered output must move too, not just the returned Rect
+    doc.compression_level = 0;
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // Collect the x coordinate of each text-positioning op (Tm) in order
+    var xs: [3]f64 = undefined;
+    var count: usize = 0;
+    var it = std.mem.splitScalar(u8, pdf, '\n');
+    while (it.next()) |line| {
+        if (std.mem.endsWith(u8, line, " Td")) {
+            var tok = std.mem.tokenizeScalar(u8, line, ' ');
+            const x_str = tok.next().?;
+            if (count < 3) {
+                xs[count] = try std.fmt.parseFloat(f64, x_str);
+                count += 1;
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 3), count);
+    try std.testing.expectApproxEqAbs(@as(f64, 300), xs[0], 0.01);
+    try std.testing.expectApproxEqAbs(300 - w / 2, xs[1], 0.01);
+    try std.testing.expectApproxEqAbs(300 - w, xs[2], 0.01);
+}
+
+test "writeAt Rect uses real font metrics" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const style = TextStyle{ .font = font, .size = 12 };
+    const m = doc.getFontMetricsStyled(style);
+
+    const r = try doc.writeAt(.{ .x = 50, .y = 100 }, "Metrics", style, .{});
+    // Top of rect = baseline - ascender; height spans ascender to descender
+    try std.testing.expectApproxEqAbs(100 - m.ascender, r.y, 0.001);
+    try std.testing.expectApproxEqAbs(m.ascender - m.descender, r.height, 0.001);
+    // Inter's ascender at 12pt is ~10.7 - the old approximation (y - size,
+    // height = size) would be off by more than a point
+    try std.testing.expect(@abs(r.height - 12.0) > 1.0);
 }

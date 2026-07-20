@@ -2,6 +2,14 @@ const std = @import("std");
 
 /// Color with support for multiple color spaces.
 /// All values are normalized to 0.0-1.0 range.
+/// Color constructors use different scales - pick the one matching your
+/// source values:
+///   Color.rgb(255, 128, 0)      - integer channels 0-255 (CSS-style)
+///   Color.rgbf(1.0, 0.5, 0.0)   - float channels 0.0-1.0 (PDF-native)
+///   Color.greyscale(0.5)        - single float 0.0 (black) to 1.0 (white)
+///   Color.cmyk(c, m, y, k)      - print channels 0.0-1.0
+/// The 148 CSS named colors (Color.red, Color.slategray, ...) are also
+/// provided as constants.
 pub const Color = union(enum) {
     /// Grayscale: 0 = black, 1 = white
     greyscale_val: f64,

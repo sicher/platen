@@ -28,34 +28,34 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   kerning-order bug fixed in session #23. Fixing shifts layout for every
   ligature-bearing string — regenerate fpdf2 references.
 
-## API consistency
+## API consistency — ALL DONE (session #24)
 
-- [ ] **Unify `FromMemory` lifetime contracts.** `loadFontFromMemory` and
+- [x] **Unify `FromMemory` lifetime contracts.** `loadFontFromMemory` and
   `loadImageFromMemory` borrow (caller keeps bytes alive);
   `loadSvgFromMemory` fully copies but doesn't say so. Pick one story,
   document all three.
-- [ ] **`loadFont(path, encoding: ?FontEncoding)`:** `null` means
+- [x] **`loadFont(path, encoding: ?FontEncoding)`:** `null` means
   `.identity`, so the optional just creates two spellings of the default
   (tests use both). Make it non-optional with a documented default.
-- [ ] **Document anchoring conventions prominently:** text `y` = baseline,
+- [x] **Document anchoring conventions prominently:** text `y` = baseline,
   shapes/images `rect.y` = top edge. Correct, but only stated in a code
   comment inside `writeAt`.
-- [ ] **`compression_level: i32`** silently maps out-of-range values to
+- [x] **`compression_level: i32`** silently maps out-of-range values to
   level 1. Tighten the domain (enum or clamp with documentation).
 
-## Ergonomics / design decisions (breaking — decide before 1.0.0)
+## Ergonomics / design decisions (breaking — decide before 1.0.0) — ALL DONE (session #24)
 
-- [ ] **`writeLine` wraps into multiple lines** despite the name (doc says
+- [x] **`writeLine` wraps into multiple lines** despite the name (doc says
   "block-based"). Consider `writeBlock`/`writeAligned`, or lead the docs
   with "wraps".
-- [ ] **Rework `writeAt`** in one pass (re-measuring for the returned Rect
+- [x] **Rework `writeAt`** in one pass (re-measuring for the returned Rect
   is already fixed - writeAt now computes width from its own shaped run):
   point-anchored alignment
   (`anchor: left/center/right` — today right-aligning needs measure +
   subtract, shaping twice; see `writeRight` in `src/invoice_bench.zig`),
   make the Rect honest (uses `y - size`
   "approximate ascender" while exact `FontMetrics` exists).
-- [ ] **`Color.rgb(0-255)` vs `rgbf(0-1)` vs `greyscale(0-1)`** — mixed
+- [x] **`Color.rgb(0-255)` vs `rgbf(0-1)` vs `greyscale(0-1)`** — mixed
   scales; fine but easy to trip on. At minimum cross-reference in doc
   comments.
 
