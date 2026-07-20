@@ -84,6 +84,7 @@ pub const BlockOptions = layout.BlockOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
 pub const PageSize = layout.PageSize;
 pub const PageOptions = layout.PageOptions;
+pub const PageRotation = layout.PageRotation;
 
 // Graphics types
 pub const LineCap = layout.LineCap;
@@ -1804,7 +1805,7 @@ pub const Document = struct {
     };
 
     /// Measure function adapter for StyledText.prepare()
-    pub fn styledTextMeasure(text: []const u8, span_style: TextStyleOptions, ctx: *anyopaque) f64 {
+    fn styledTextMeasure(text: []const u8, span_style: TextStyleOptions, ctx: *anyopaque) f64 {
         const measure_ctx: *MeasureContext = @ptrCast(@alignCast(ctx));
         // Text width doesn't depend on color/decoration, just the font
         _ = span_style;
@@ -2593,6 +2594,124 @@ pub const Document = struct {
     /// Draw a path with the specified style.
     /// Coordinates are from top-left origin.
     /// Draw a path with the given style.
+    // ========================================================================
+    // Graphics state: transforms and clipping
+    // ========================================================================
+
+    /// 2D affine transform in row-vector convention: (x, y, 1) * M.
+    const Affine = struct {
+        a: f64,
+        b: f64,
+        c: f64,
+        d: f64,
+        e: f64,
+        f: f64,
+
+        const identity = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = 0, .f = 0 };
+
+        /// Apply `m` first, then `n` (row-vector product m * n).
+        fn concat(m: Affine, n: Affine) Affine {
+            return .{
+                .a = m.a * n.a + m.b * n.c,
+                .b = m.a * n.b + m.b * n.d,
+                .c = m.c * n.a + m.d * n.c,
+                .d = m.c * n.b + m.d * n.d,
+                .e = m.e * n.a + m.f * n.c + n.e,
+                .f = m.e * n.b + m.f * n.d + n.f,
+            };
+        }
+    };
+
+    /// Append raw content-stream bytes as a deferred command.
+    fn appendRawCommand(self: *Document, content: []const u8) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        var page = &self.pages.items[self.current_page];
+        const copy = try page.pageAllocator().dupe(u8, content);
+        try page.commands.append(self.allocator, .{ .raw = copy });
+    }
+
+    /// Emit a user-space affine transform as a PDF `cm` operator. The
+    /// content stream works in PDF coordinates (bottom-left origin), so the
+    /// user-space transform is conjugated with the y-flip: M = F * T * F.
+    fn applyTransform(self: *Document, t_user: Affine) !void {
+        const h = self.currentPageSize().height;
+        const flip = Affine{ .a = 1, .b = 0, .c = 0, .d = -1, .e = 0, .f = h };
+        const m = flip.concat(t_user).concat(flip);
+        var buf: [128]u8 = undefined;
+        const ops = std.fmt.bufPrint(&buf, "{d:.4} {d:.4} {d:.4} {d:.4} {d:.2} {d:.2} cm\n", .{ m.a, m.b, m.c, m.d, m.e, m.f }) catch unreachable;
+        try self.appendRawCommand(ops);
+    }
+
+    /// Save the graphics state (current transform and clip). Every pushState
+    /// must be balanced by a popState on the same page before output().
+    pub fn pushState(self: *Document) !void {
+        try self.appendRawCommand("q\n");
+        self.pages.items[self.current_page].state_depth += 1;
+    }
+
+    /// Restore the most recently pushed graphics state.
+    pub fn popState(self: *Document) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        var page = &self.pages.items[self.current_page];
+        if (page.state_depth == 0) return error.UnbalancedGraphicsState;
+        try self.appendRawCommand("Q\n");
+        page.state_depth -= 1;
+    }
+
+    /// Translate subsequent content by (dx, dy) in user space (y down).
+    /// Transforms compose in call order like Canvas/Cairo: later calls apply
+    /// closest to the drawn geometry. Scope with pushState/popState.
+    pub fn translate(self: *Document, dx: f64, dy: f64) !void {
+        try self.applyTransform(.{ .a = 1, .b = 0, .c = 0, .d = 1, .e = dx, .f = dy });
+    }
+
+    /// Rotate subsequent content by `degrees` around `center` (user space).
+    /// Positive angles rotate clockwise on the page, matching CSS/Canvas
+    /// convention for y-down coordinates.
+    pub fn rotateAt(self: *Document, center: Point, degrees: f64) !void {
+        const rad = degrees * std.math.pi / 180.0;
+        const cos = @cos(rad);
+        const sin = @sin(rad);
+        const to_origin = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = -center.x, .f = -center.y };
+        const rot = Affine{ .a = cos, .b = sin, .c = -sin, .d = cos, .e = 0, .f = 0 };
+        const back = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = center.x, .f = center.y };
+        try self.applyTransform(to_origin.concat(rot).concat(back));
+    }
+
+    /// Scale subsequent content by (sx, sy) around `center` (user space).
+    pub fn scaleAt(self: *Document, center: Point, sx: f64, sy: f64) !void {
+        const to_origin = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = -center.x, .f = -center.y };
+        const sc = Affine{ .a = sx, .b = 0, .c = 0, .d = sy, .e = 0, .f = 0 };
+        const back = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = center.x, .f = center.y };
+        try self.applyTransform(to_origin.concat(sc).concat(back));
+    }
+
+    /// Clip subsequent content to a rectangle (user space, y = top edge).
+    /// The clip lasts until the enclosing pushState is popped.
+    pub fn clipRect(self: *Document, rect: Rect) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        const pdf_y = self.currentPageSize().height - rect.y - rect.height;
+        var buf: [96]u8 = undefined;
+        const ops = std.fmt.bufPrint(&buf, "{d:.2} {d:.2} {d:.2} {d:.2} re W n\n", .{ rect.x, pdf_y, rect.width, rect.height }) catch unreachable;
+        try self.appendRawCommand(ops);
+    }
+
+    /// Clip subsequent content to a path (non-zero winding rule).
+    /// The clip lasts until the enclosing pushState is popped.
+    pub fn clipPath(self: *Document, p: *const Path) !void {
+        if (self.pages.items.len == 0) return error.NoPage;
+        if (p.isEmpty()) return;
+        var page = &self.pages.items[self.current_page];
+        const buf = try page.pageAllocator().alloc(u8, 64 + p.commands.items.len * 64);
+        var fbs = std.Io.Writer.fixed(buf);
+        try p.toPdfContent(self.currentPageSize().height, &fbs);
+        var len = fbs.end;
+        const tail = "W n\n";
+        @memcpy(buf[len..][0..tail.len], tail);
+        len += tail.len;
+        try page.commands.append(self.allocator, .{ .raw = buf[0..len] });
+    }
+
     pub fn drawPath(self: *Document, p: *const Path, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
         if (p.isEmpty()) return;
@@ -2661,7 +2780,7 @@ pub const Document = struct {
 
     /// Render deferred commands to page content bytes
     /// Called after subsetting so glyph IDs are properly remapped
-    pub fn renderPageCommands(self: *Document, page: *Page) !void {
+    fn renderPageCommands(self: *Document, page: *Page) !void {
         var cw = page.writer(self.allocator);
 
         for (page.commands.items) |cmd| {
@@ -3147,6 +3266,7 @@ pub const Document = struct {
         // Render deferred commands to content bytes (AFTER subsetting so glyph IDs are remapped)
         const render_start = pdf_output.milliTimestamp();
         for (self.pages.items) |*page| {
+            if (page.state_depth != 0) return error.UnbalancedGraphicsState;
             try self.renderPageCommands(page);
         }
         self.last_output_timing.render_ms = pdf_output.milliTimestamp() - render_start;
@@ -3561,6 +3681,9 @@ pub const Document = struct {
             try page_dict.put("MediaBox", .{ .array_val = &media_box });
 
             try page_dict.put("Contents", Value.ref(.{ .id = content_id }));
+            if (page.rotation != .none) {
+                try page_dict.put("Rotate", Value.int(@intFromEnum(page.rotation)));
+            }
 
             // Font resources (must stay in scope until writeDict completes)
             var font_res = Dict.init(self.allocator);

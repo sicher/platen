@@ -1237,10 +1237,10 @@ test "mark positioning with Tm absolute coordinates" {
     const style = TextStyle{ .font = inter, .size = 14 };
     _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style, .{});
 
-    // Get the content stream
+    // Render via output(); page.content stays populated afterwards
+    const pdf = try doc.output();
+    doc.allocator.free(pdf);
     const page = &doc.pages.items[0];
-    try doc.renderPageCommands(page);
-
     const content = page.content.items;
     std.debug.print("\n=== Mark positioning test content for 'À' ===\n{s}\n=== End content ===\n", .{content});
 
@@ -3566,4 +3566,74 @@ test "writeAt Rect uses real font metrics" {
     // Inter's ascender at 12pt is ~10.7 - the old approximation (y - size,
     // height = size) would be off by more than a point
     try std.testing.expect(@abs(r.height - 12.0) > 1.0);
+}
+
+test "transforms emit correct cm operators" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+    try doc.addPage(.{}); // A4: height 841.89
+
+    try doc.pushState();
+    try doc.translate(100, 50);
+    try doc.drawRect(.{ .x = 0, .y = 0, .width = 10, .height = 10 }, .{ .fill = .{ .color = Color.black } });
+    try doc.popState();
+
+    try doc.pushState();
+    try doc.rotateAt(.{ .x = 100, .y = 100 }, 90);
+    try doc.popState();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // User translate (dx, dy) becomes PDF translate (dx, -dy)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "1.0000 0.0000 0.0000 1.0000 100.00 -50.00 cm") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "q\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "Q\n") != null);
+
+    // 90 deg clockwise about user (100,100): after the y-flip conjugation
+    // the PDF-space linear part is [0 -1; 1 0] (still visually clockwise,
+    // since PDF y points up)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "0.0000 -1.0000 1.0000 0.0000") != null);
+}
+
+test "clipRect emits re W n in PDF coordinates" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+    try doc.addPage(.{});
+
+    try doc.pushState();
+    try doc.clipRect(.{ .x = 50, .y = 100, .width = 200, .height = 300 });
+    try doc.popState();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    // y_pdf = 841.89 - 100 - 300 = 441.89
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "50.00 441.89 200.00 300.00 re W n") != null);
+}
+
+test "unbalanced graphics state is rejected" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+
+    // popState with nothing pushed
+    try std.testing.expectError(error.UnbalancedGraphicsState, doc.popState());
+
+    // pushState without popState fails at output
+    try doc.pushState();
+    try std.testing.expectError(error.UnbalancedGraphicsState, doc.output());
+    try doc.popState();
+    const pdf = try doc.output();
+    doc.allocator.free(pdf);
+}
+
+test "page rotation lands in the page dict" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{ .rotation = .r90 });
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Rotate 90") != null);
 }

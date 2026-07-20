@@ -11,16 +11,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // CLI executable
+    // CLI executable. cli.zig imports the library source relatively (same
+    // module) so it can reach test infrastructure (integration test cases
+    // for check-refs) without those being exported from the platen module.
     const exe = b.addExecutable(.{
         .name = "platen",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/cli.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "platen", .module = platen_mod },
-            },
         }),
     });
 

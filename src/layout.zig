@@ -377,6 +377,17 @@ pub const PageSize = struct {
 pub const PageOptions = struct {
     size: PageSize = PageSize.A4,
     margins: Margins = .{},
+    /// Viewer rotation (/Rotate): the page is displayed rotated clockwise
+    /// by this many degrees without changing content coordinates.
+    rotation: PageRotation = .none,
+};
+
+/// Page display rotation for PageOptions (PDF /Rotate).
+pub const PageRotation = enum(u16) {
+    none = 0,
+    r90 = 90,
+    r180 = 180,
+    r270 = 270,
 };
 
 // ============================================================================

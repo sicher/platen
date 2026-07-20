@@ -59,34 +59,34 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   scales; fine but easy to trip on. At minimum cross-reference in doc
   comments.
 
-## Hygiene
+## Hygiene — ALL DONE (session #24)
 
-- [ ] **Stop exporting test infrastructure:** `platen.testing` and
+- [x] **Stop exporting test infrastructure:** `platen.testing` and
   `platen.integration_tests` ship in the root namespace. Use a separate
   test-root file for the build's test step.
-- [ ] **De-`pub` internal machinery on Document:** `renderPageCommands`
+- [x] **De-`pub` internal machinery on Document:** `renderPageCommands`
   (internal phase of `output()`, used by one test) and `styledTextMeasure`
   (`*anyopaque` callback).
 
-## Missing features — worth doing before 1.0.0
+## Missing features — worth doing before 1.0.0 — ALL DONE (session #24)
 
-- [ ] **Transforms & rotation.** No way to rotate or transform content — no
+- [x] **Transforms & rotation.** No way to rotate or transform content — no
   `cm` exposure, no graphics-state save/restore, no page `/Rotate`. Blocks
   watermarks, rotated labels, vertical captions. A small transform API
   (save/restore + translate/rotate/scale, applying to draw* and text) rounds
   out the 2D API and shapes how the graphics API should look — better
   decided before 1.0 than bolted on after.
-- [ ] **Clipping paths.** Path API exists but there is no public clip
+- [x] **Clipping paths.** Path API exists but there is no public clip
   (`W n`); the only use is internal to gradient fills. Natural companion to
   the transform work above — one "graphics state" feature.
-- [ ] **Honest Unicode limitations note.** README says "Full Unicode
+- [x] **Honest Unicode limitations note.** README says "Full Unicode
   support"; codepoint coverage via CID is real, but: RTL scripts render in
   wrong visual order (no bidi, no `init`/`medi`/`fina` joining — the Noto
   Sans Arabic font in test/fonts is referenced by nothing), and CJK text
   won't wrap in flowed text (line breaking is space-based). Either scope the
   claim in README or add a Limitations section. The features themselves are
   post-1.0 (below).
-- [ ] **Decide the encryption stance.** No RC4/AES support at all. API-wise
+- [x] **Decide the encryption stance.** No RC4/AES support at all. API-wise
   additive (fields on Document), so implementation can land in 1.x — but
   1.0 should consciously say "not yet" rather than be silent. std.crypto
   has AES if/when we do it.

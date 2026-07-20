@@ -8,7 +8,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 
 - **Text rendering** with standard PDF fonts (Helvetica, Times, Courier, Symbol, ZapfDingbats)
 - **TrueType/OpenType font embedding** with automatic subsetting
-- **Full Unicode support** via CID fonts (CJK, emoji, etc.)
+- **Unicode via CID fonts** (Latin, Greek, Cyrillic, CJK glyphs, emoji; see [Limitations](#limitations))
 - **OpenType features**: ligatures, kerning, mark positioning, stylistic sets, character variants, and more
 - **Color fonts**: COLR v0/v1 (layered, gradients, sweep gradients), sbix/CBDT/EBDT bitmap strikes, and OT-SVG — full color emoji support
 - **Text flow**: word wrapping, justified text, Knuth-Plass optimal line breaking
@@ -16,6 +16,8 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 - **Path API**: moveTo, lineTo, curveTo, quadTo for custom shapes
 - **Images**: JPEG and PNG embedding (with alpha channel support)
 - **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`
+- **Transforms**: translate/rotate/scale with graphics-state push/pop; page rotation
+- **Clipping**: rectangle and path clipping
 - **Gradients**: linear and radial
 - **Transparency**: fill/stroke opacity for shapes and fill opacity for text
 - **Document metadata**: title, author, subject, keywords
@@ -553,6 +555,35 @@ Available conformance levels:
 
 Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotAllowed`.
 
+### Transforms & Clipping
+
+```zig
+// Diagonal watermark across the page
+try doc.pushState();
+try doc.rotateAt(.{ .x = 297, .y = 420 }, -45); // degrees, positive = clockwise
+_ = try doc.writeAt(.{ .x = 297, .y = 420 }, "DRAFT", watermark_style, .{ .anchor = .center });
+try doc.popState();
+
+// Rotate a shape 30 degrees about its center
+try doc.pushState();
+try doc.rotateAt(.{ .x = 160, .y = 130 }, 30);
+try doc.drawRect(.{ .x = 100, .y = 100, .width = 120, .height = 60 }, .{ .stroke = .{} });
+try doc.popState();
+
+// Clip drawing to a rectangle
+try doc.pushState();
+try doc.clipRect(.{ .x = 100, .y = 520, .width = 100, .height = 60 });
+try doc.drawCircle(.{ .x = 150, .y = 550 }, 50, .{ .fill = .{ .color = platen.Color.orange } });
+try doc.popState();
+
+// Rotate the whole page for the viewer
+try doc.addPage(.{ .rotation = .r90 });
+```
+
+Transforms compose in call order (like Canvas/Cairo) and apply to everything
+drawn while active - text, shapes, images, SVGs. Every `pushState` must be
+balanced by `popState` before `output()`.
+
 ## API Reference
 
 ### Document Lifecycle
@@ -679,6 +710,11 @@ try st.append("red", .{ .color = platen.Color.red });
 |--------|-------------|
 | `createPath() -> Path` | Create path builder |
 | `drawPath(*Path, ShapeStyle)` | Render path |
+| `pushState()` / `popState()` | Save/restore graphics state (transform + clip); must balance |
+| `translate(dx, dy)` | Translate subsequent content (user space, y down) |
+| `rotateAt(center, degrees)` | Rotate about a point; positive = clockwise |
+| `scaleAt(center, sx, sy)` | Scale about a point |
+| `clipRect(Rect)` / `clipPath(*Path)` | Clip subsequent content until state pop |
 
 **Path methods:**
 | Method | Description |
@@ -802,6 +838,21 @@ font.embedded.setFeature(.ss01, true);   // Enable stylistic set 1
 font.embedded.setFeature(.cv11, true);   // Enable character variant 11
 font.embedded.setFeature(.liga, false);  // Disable standard ligatures
 ```
+
+## Limitations
+
+Known gaps, documented so you don't discover them the hard way:
+
+- **No bidirectional text or joining scripts.** Arabic, Hebrew, and other
+  RTL scripts render in logical (wrong visual) order, and Arabic
+  contextual forms (init/medi/fina) are not applied.
+- **No CJK line breaking.** CJK glyphs render correctly, but flowed text
+  (`write`, `writeBlock`) only breaks at spaces, so long CJK runs will not
+  wrap.
+- **No encryption.** Password protection (RC4/AES) is not supported yet;
+  planned for a post-1.0 release.
+- **No interactive features.** AcroForm fields, digital signatures, and
+  file attachments are out of scope for 1.0.
 
 ## Requirements
 

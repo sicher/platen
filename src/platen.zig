@@ -20,8 +20,6 @@ pub const zlib = @import("zlib.zig");
 pub const images = @import("images.zig");
 pub const svg = @import("svg.zig");
 pub const xml = @import("xml.zig");
-pub const testing = @import("testing.zig");
-pub const integration_tests = @import("integration_tests.zig");
 pub const pdf_output = @import("pdf_output.zig");
 pub const pdfa = @import("pdfa.zig");
 
@@ -80,6 +78,7 @@ pub const BlockOptions = document.BlockOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
 pub const PageSize = document.PageSize;
 pub const PageOptions = document.PageOptions;
+pub const PageRotation = document.PageRotation;
 
 // Re-export graphics types
 pub const LineCap = document.LineCap;

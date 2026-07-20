@@ -18,6 +18,7 @@ pub const Svg = svg.Svg;
 pub const PageSize = layout.PageSize;
 pub const Margins = layout.Margins;
 pub const PageOptions = layout.PageOptions;
+const PageRotation = layout.PageRotation;
 pub const Rect = layout.Rect;
 pub const Destination = layout.Destination;
 pub const OpacityState = layout.OpacityState;
@@ -87,6 +88,8 @@ pub const Page = struct {
     annotations: std.ArrayListUnmanaged(LinkAnnotation), // Link annotations
     size: PageSize, // Page dimensions
     margins: Margins, // Page margins
+    rotation: PageRotation, // Viewer rotation (/Rotate)
+    state_depth: usize = 0, // pushState/popState balance (must be 0 at output)
 
     // Arena allocator for page-local allocations (text_data, cached_glyphs, etc.)
     // All page allocations freed at once in deinit - no individual free() calls
@@ -104,6 +107,7 @@ pub const Page = struct {
             .opacity_states = .empty,
             .annotations = .empty,
             .size = opts.size,
+            .rotation = opts.rotation,
             .margins = opts.margins,
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
         };

@@ -1,7 +1,8 @@
 //! platen command line tool
 
 const std = @import("std");
-const platen = @import("platen");
+const platen = @import("platen.zig");
+const integration_tests = @import("integration_tests.zig");
 
 var stdout_buffer: [4096]u8 = undefined;
 var stdout_writer: std.Io.File.Writer = undefined;
@@ -11,7 +12,7 @@ var app_io: std.Io = undefined;
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
     app_io = init.io;
-    platen.integration_tests.app_io = init.io;
+    integration_tests.app_io = init.io;
     stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     stdout = &stdout_writer.interface;
     defer stdout.flush() catch {};
@@ -1007,8 +1008,8 @@ fn generatePdfaTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
 }
 
 // Use shared test infrastructure from platen module
-const testing = platen.testing;
-const test_cases = platen.integration_tests.cases;
+const testing = @import("testing.zig");
+const test_cases = integration_tests.cases;
 
 const TestResult = struct {
     name: []const u8,
