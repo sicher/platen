@@ -12,6 +12,30 @@ it goes back when TODO.md is in good shape. Zig 0.16, zero dependencies.
 - Rename fully complete: Codeberg repo renamed, local dir renamed to
   ~/Documents/projects/platen, .claude/settings.local.json paths updated.
 
+## What We Did (Session 2026-07-20 #24b — API consistency, breaking names, transforms)
+- **API consistency**: loadFont takes FontEncoding directly (was optional,
+  null = .identity; 126 sites migrated); FromMemory lifetime contracts
+  documented (fonts/images BORROW, SVG COPIES); README "Coordinates &
+  anchoring" section; zlib.compressLevel clamps 1-9.
+- **Breaking renames (user-approved)**: writeLine -> writeBlock
+  (LineOptions -> BlockOptions); writeAt gained WriteAtOptions with
+  anchor (.left/.center/.right — shifts the deferred command using the
+  shaped width, so anchored text shapes once); writeAt Rect now uses real
+  font metrics (baseline - ascender, ascender-to-descender height).
+- **Hygiene**: platen.testing/integration_tests no longer exported (CLI
+  imports library source relatively); renderPageCommands +
+  styledTextMeasure private again.
+- **Transforms & clipping**: pushState/popState, translate, rotateAt
+  (clockwise-positive, CSS convention), scaleAt, clipRect/clipPath,
+  PageOptions.rotation (/Rotate). User-space affine conjugated with
+  y-flip into cm; balance validated. "transforms" integration test with
+  platen-generated reference, visually verified.
+- **README**: Limitations section (no bidi/joining, no CJK wrap, no
+  encryption yet, no interactive features); Unicode claim scoped.
+- TODO.md road-to-1.0: all sections complete except optional perf
+  follow-ups. 416 tests pass. Watch item: one unreproduced failure of the
+  parallel-compression byte-identity test (details in TODO.md).
+
 ## What We Did (Session 2026-07-20 #23/#24 — benchmarks, perf, pre-1.0 hardening)
 - **Invoice benchmark** (`zig build bench-invoice`, src/invoice_bench.zig):
   1000 unique A4 invoices, Inter family + platen.svg wordmark, mirrors the
