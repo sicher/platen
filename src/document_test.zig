@@ -3637,3 +3637,28 @@ test "page rotation lands in the page dict" {
     defer doc.allocator.free(pdf);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Rotate 90") != null);
 }
+
+test "clipPath emits path ops and W n" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+    try doc.addPage(.{});
+
+    var tri = doc.createPath();
+    defer tri.deinit();
+    try tri.moveTo(.{ .x = 10, .y = 10 });
+    try tri.lineTo(.{ .x = 110, .y = 10 });
+    try tri.lineTo(.{ .x = 60, .y = 90 });
+    try tri.closePath();
+
+    try doc.pushState();
+    try doc.clipPath(&tri);
+    try doc.drawRect(.{ .x = 0, .y = 0, .width = 200, .height = 200 }, .{ .fill = .{ .color = Color.black } });
+    try doc.popState();
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    // Path construction (y flipped: 841.89 - 10 = 831.89) followed by clip
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "10.00 831.89 m") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "h\nW n") != null);
+}
