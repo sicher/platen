@@ -1,4 +1,6 @@
-# platen
+<p align="center">
+  <img src="platen.svg" alt="platen" width="480">
+</p>
 
 A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, color emoji fonts, images, vector graphics, and PDF/A archival output. Pure Zig — no dependencies at all.
 
