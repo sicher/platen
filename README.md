@@ -160,6 +160,9 @@ _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "Monospace code", code, .{});
 
 ### Custom Fonts (TrueType/OpenType)
 
+For fonts used by a single document. (To reuse a parsed font across many
+documents or threads, see [Font faces](#font-faces-parse-once-use-anywhere).)
+
 ```zig
 // Load a TTF or OTF font (default: identity/Unicode encoding)
 const font = try doc.loadFont("fonts/MyFont.ttf", .identity);
@@ -654,7 +657,8 @@ balanced by `popState` before `output()`.
 | `loadFont(path, encoding) -> Font` | Load TTF/OTF font from file (.identity = Unicode, .win_ansi = legacy) |
 | `loadFontFromMemory(data, ?encoding) -> Font` | Load TTF/OTF font from memory buffer |
 | `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
-| `FontFace.fromMemory/fromFile` | Parse a caller-owned, shareable font face |
+| `FontFace.fromMemory(alloc, bytes)` | Parse a caller-owned, shareable font face (bytes must outlive it) |
+| `FontFace.fromFile(io, alloc, path)` | Same, loading from a file (the face owns the bytes) |
 | `Font{ .face = &f }` / `Font{ .family = .{...} }` | Use faces directly in TextStyle - no load call |
 | `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
 | `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable OpenType feature for specific font |
