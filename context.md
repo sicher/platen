@@ -12,6 +12,23 @@ it goes back when TODO.md is in good shape. Zig 0.16, zero dependencies.
 - Rename fully complete: Codeberg repo renamed, local dir renamed to
   ~/Documents/projects/platen, .claude/settings.local.json paths updated.
 
+## What We Did (Session 2026-07-21 #26 — FontFace API, ownership guards)
+- **Font taxonomy collapsed to three public concepts** (user-driven
+  redesign): standard fonts (Font.helvetica), FontFace (one parsed file,
+  caller-owned+shareable, replaces SharedFont), FontFamily (faces with
+  bold/italic resolution). Faces go straight into TextStyle
+  (.face / .family) - no per-document load call; Document normalizes at
+  entry points into private clones (face_instances map). loadShared* gone.
+  Font union variant `family` (standard enum) renamed `standard`.
+- FontFace two-phase life cycle: setFeature/warmup during configuration,
+  frozen at first use (error.FaceFrozen) - enforced, not documented.
+- measureStyled is now fallible (!TextMetrics) - may instantiate a clone.
+- **Ownership rule enforced uniformly** (branch foreign-font-guard,
+  stacked): doc-obtained assets error in other docs (ForeignFont/
+  ForeignImage/ForeignSvg via document_owned marker); caller-created
+  assets shareable.
+- Bench --shared: 3,178/sec 1t, 18,962/sec 8t, unshared 2,058/sec.
+
 ## What We Did (Session 2026-07-21 #25 — SharedFont / cross-document caching)
 - **SharedFont API** (branch shared-assets, for ultra review before merge):
   parse font once (incl. all OT lookups eagerly), documents clone cheaply

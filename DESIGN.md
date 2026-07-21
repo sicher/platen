@@ -928,17 +928,24 @@ draws. Three rules keep it true:
   (`imageCompressionLevel`): compressed once at load, dominate file
   size — fast levels are a bad trade there.
 
-### SharedFont (session #25)
-`SharedFont.load` parses a font once — ttf tables, metrics, and **all**
-OpenType lookups eagerly (`parseGSUB` → `parseAllGSUBLookups`, so nothing
-parses lazily later). `Document.loadSharedFont` clones a per-document
-`EmbeddedFont`: struct copy shares the immutable parsed tables, while all
-mutable state is fresh and owned (glyph tracking maps, subset data,
-scratch buffers, and the OpenTypeFeatures scratch/kern-cache). Borrow
-flags (`EmbeddedFont.borrowed`, `OpenTypeFeatures.borrowed_tables`) make
-deinit skip shared memory. Safe across threads because clones never write
-to shared structures; correctness contract: SharedFont output is
-byte-identical to per-document parsing (regression-tested).
+### FontFace (sessions #25/#26)
+`FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,
+and **all** OpenType lookups eagerly (`parseGSUB` → `parseAllGSUBLookups`,
+so nothing parses lazily later). Faces go directly into styles
+(`Font{ .face = &f }`, `Font{ .family = ... }`); the Document normalizes
+such styles at its public entry points (writeTextStyled, measureStyled,
+getTextWidthStyled, getFontMetricsStyled) into a per-document
+`EmbeddedFont` clone held in `face_instances`, so internal layout/render
+layers only ever see `.embedded`. The clone is a struct copy sharing the
+immutable parsed tables while all mutable state is fresh and owned (glyph
+tracking maps, subset data, scratch buffers, OT scratch/kern-cache).
+Borrow flags (`EmbeddedFont.borrowed`, `OpenTypeFeatures.borrowed_tables`)
+make deinit skip shared memory. Two-phase life cycle: configuration
+(setFeature/warmup) until the first instantiation freezes the face
+(`error.FaceFrozen` afterwards - flag changes wouldn't propagate and
+warmup would race with cloning). Safe across threads because clones never
+write to shared structures; contract: face output is byte-identical to
+per-document parsing (regression-tested).
 
 Two prerequisites make this sound — if either changes, revisit:
 - `ttf.Font` mutates only during parse (cmap offsets, ascii caches).

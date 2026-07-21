@@ -59,7 +59,7 @@ Setting `doc.compress_threads = 8` compresses streams (page contents, font subse
 | Uncompressed, 8 threads, shared assets | 0.05ms | **~19000 PDFs/sec** |
 | Compressed (level 1), 1 thread | 0.94ms | ~1060 PDFs/sec |
 
-By default every document pays the full stateless cost: fonts are re-parsed, shaped, and subset per PDF, and the SVG is re-parsed per PDF. **Shared assets** (`--shared` in the benchmark) parse fonts and SVGs once via `SharedFont`/caller-owned `Svg` and reuse them across documents and threads — output stays byte-identical.
+By default every document pays the full stateless cost: fonts are re-parsed, shaped, and subset per PDF, and the SVG is re-parsed per PDF. **Shared assets** (`--shared` in the benchmark) parse fonts and SVGs once via caller-owned `FontFace`/`Svg` and reuse them across documents and threads — output stays byte-identical.
 
 Because documents share no state, they can be rendered concurrently without locking — one `Document` per thread scales close to linearly across cores (`--threads=N` in the benchmark). A single `Document` is not thread-safe; keep each document on one thread.
 
@@ -557,32 +557,42 @@ Available conformance levels:
 
 Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotAllowed`.
 
-### Shared Fonts (parse once, use in many documents)
+### Font faces (parse once, use anywhere)
 
-For batch generation, parse fonts once and reuse them — each document
-gets a lightweight clone (fresh subsetting/tracking state, shared parsed
-tables). A `SharedFont` is immutable after `load()` and safe to use from
-multiple threads:
+`FontFace` is a parsed font file — caller-owned and shareable, exactly
+like `Image` and `Svg`. Create it once and reference it from any number
+of documents on any threads; each document transparently keeps a private
+clone for its subsetting state. There is no per-document load call:
 
 ```zig
-// Once, at startup (font bytes must outlive the SharedFont):
-var inter = try platen.SharedFont.load(allocator, inter_bytes);
+// Once, at startup:
+var inter = try platen.FontFace.fromFile(io, allocator, "Inter-Regular.ttf");
 defer inter.deinit();
-var inter_bold = try platen.SharedFont.load(allocator, inter_bold_bytes);
+var inter_bold = try platen.FontFace.fromFile(io, allocator, "Inter-Bold.ttf");
 defer inter_bold.deinit();
-inter.warmup("Common text to pre-fill the kerning cache"); // optional
 
-// Per document (any thread):
-var doc = platen.Document.init(allocator, io);
-defer doc.deinit();
-const font = try doc.loadSharedFontFamily(.{ .regular = &inter, .bold = &inter_bold });
+// Optional configuration - before first use (frozen afterwards):
+try inter.setFeature(.dlig, true);                 // default feature flags
+try inter.warmup("Common text, pre-fills kerning"); // perf only
+
+// Per document (any thread) - just reference the faces in styles:
+const body = platen.TextStyle{ .font = .{ .face = &inter }, .size = 11 };
+const strong = platen.TextStyle{
+    .font = .{ .family = .{ .regular = &inter, .bold = &inter_bold } },
+    .size = 11,
+    .bold = true, // resolves the bold face
+};
 ```
+
+The three font concepts: **standard fonts** (`platen.Font.helvetica`,
+built into every viewer), a **`FontFace`** (one custom font file), and a
+**`FontFamily`** (a set of faces so `.bold`/`.italic` pick a variant).
 
 The ownership rule is uniform across all asset types: **anything obtained
 from a Document (`doc.loadFont`, `doc.loadImage`, `doc.loadSvg`) lives and
 dies with that Document** — using it in another document is an error
 (`ForeignFont`/`ForeignImage`/`ForeignSvg`). **Anything you create yourself
-(`SharedFont.load`, `Image.fromMemory`, `Svg.fromMemory`) is yours** and
+(`FontFace.fromMemory`, `Image.fromMemory`, `Svg.fromMemory`) is yours** and
 can be used in any number of documents, on any threads; you manage its
 lifetime.
 
@@ -644,8 +654,8 @@ balanced by `popState` before `output()`.
 | `loadFont(path, encoding) -> Font` | Load TTF/OTF font from file (.identity = Unicode, .win_ansi = legacy) |
 | `loadFontFromMemory(data, ?encoding) -> Font` | Load TTF/OTF font from memory buffer |
 | `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
-| `loadSharedFont(*SharedFont) -> Font` | Per-document clone of a shared, pre-parsed font |
-| `loadSharedFontFamily(opts) -> Font` | Family from SharedFonts (regular/bold/italic/bold_italic) |
+| `FontFace.fromMemory/fromFile` | Parse a caller-owned, shareable font face |
+| `Font{ .face = &f }` / `Font{ .family = .{...} }` | Use faces directly in TextStyle - no load call |
 | `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
 | `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable OpenType feature for specific font |
 | `getFontMetricsStyled(TextStyle) -> FontMetrics` | Get metrics (ascender, descender, etc.) for a style |
