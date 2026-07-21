@@ -975,6 +975,11 @@ draw time, via the `document_owned` marker). Assets the caller creates
 shareable. Rationale: fonts mutate (subset state - silent blank output +
 cross-doc pollution before the guard); images/SVGs are immutable but
 die with their owning document (dangling data at output time).
+Scope: these are logic-error guards that require live memory - a
+dangling pointer (owner already deinitialized) is UB before any check
+runs, like any freed pointer in Zig. Structural prevention would need
+document-scoped generational handles instead of pointers; judged not
+worth the ergonomics cost.
 
 `loaded_images`/`loaded_svgs` carry lockstep `*_owned` bools: documents
 destroy only assets they created (loadImage*/loadSvg*). Assets

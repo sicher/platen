@@ -617,6 +617,13 @@ dies with that Document** — using it in another document is an error
 can be used in any number of documents, on any threads; you manage its
 lifetime.
 
+The `Foreign*` errors catch *logic* errors while everything is alive.
+They cannot catch *lifetime* errors: a pointer used after its owner was
+deinitialized is dangling, and dereferencing it is undefined behavior
+before any check could run - standard raw-pointer rules, same as any
+freed pointer in Zig. Keep assets alive as long as anything references
+them.
+
 ### Transforms & Clipping
 
 ```zig
