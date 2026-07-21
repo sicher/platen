@@ -1005,6 +1005,11 @@ pub const Document = struct {
                 // silently render regular. Load a family (loadFontFamily) to
                 // use style.bold/.italic with embedded fonts.
                 if (style.bold or style.italic) return error.FontVariantNotLoaded;
+                // Fonts are per-document (they accumulate subset state):
+                // using a font loaded into another Document would silently
+                // render nothing and pollute that document's subset. Use
+                // SharedFont to reuse a parsed font across documents.
+                if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
@@ -1015,6 +1020,7 @@ pub const Document = struct {
             },
             .embedded_family => |fam| blk: {
                 const emb = try fam.resolve(style.bold, style.italic);
+                if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);

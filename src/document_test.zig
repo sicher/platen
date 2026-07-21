@@ -3765,3 +3765,19 @@ test "loadSharedFontFamily survives allocation failure at every point" {
     };
     try std.testing.checkAllAllocationFailures(allocator, Ctx.run, .{Ctx{ .reg = &shared_reg, .bold = &shared_bold }});
 }
+
+test "using a font from another document errors instead of silently rendering nothing" {
+    var doc_a = Document.init(std.testing.allocator, std.testing.io);
+    defer doc_a.deinit();
+    const font = try doc_a.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+
+    var doc_b = Document.init(std.testing.allocator, std.testing.io);
+    defer doc_b.deinit();
+    try doc_b.addPage(.{});
+    try std.testing.expectError(
+        error.ForeignFont,
+        doc_b.writeAt(.{ .x = 50, .y = 100 }, "foreign", .{ .font = font, .size = 12 }, .{}),
+    );
+    // And the foreign font's tracking state stays untouched
+    try std.testing.expectEqual(@as(usize, 0), font.embedded.cid_used_glyphs.count());
+}
