@@ -3781,3 +3781,27 @@ test "using a font from another document errors instead of silently rendering no
     // And the foreign font's tracking state stays untouched
     try std.testing.expectEqual(@as(usize, 0), font.embedded.cid_used_glyphs.count());
 }
+
+test "another document's image and svg are rejected, caller-created remain shareable" {
+    var doc_a = Document.init(std.testing.allocator, std.testing.io);
+    defer doc_a.deinit();
+    const doc_a_svg = try doc_a.loadSvgFromMemory("<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>");
+
+    var doc_b = Document.init(std.testing.allocator, std.testing.io);
+    defer doc_b.deinit();
+    try doc_b.addPage(.{});
+
+    // doc_a's SVG dies with doc_a - doc_b must not borrow it
+    try std.testing.expectError(error.ForeignSvg, doc_b.drawSvg(doc_a_svg, .{ .x = 0, .y = 0, .width = 10, .height = 10 }));
+
+    // Caller-created stays shareable (existing contract)
+    const svg_mod = @import("svg.zig");
+    const mine = try svg_mod.Svg.fromMemory(std.testing.allocator, "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>");
+    defer {
+        mine.deinit();
+        std.testing.allocator.destroy(mine);
+    }
+    try doc_b.drawSvg(mine, .{ .x = 0, .y = 20, .width = 10, .height = 10 });
+    const pdf = try doc_b.output();
+    doc_b.allocator.free(pdf);
+}

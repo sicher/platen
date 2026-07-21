@@ -945,6 +945,15 @@ Two prerequisites make this sound — if either changes, revisit:
 - GSUB/GPOS parse everything eagerly; shaping only reads lookup tables.
 
 ### Asset ownership
+Uniform rule, enforced at use time: assets obtained from a Document
+(loadFont/loadImage/loadSvg) are document-owned - using them in another
+document errors (ForeignFont at write time; ForeignImage/ForeignSvg at
+draw time, via the `document_owned` marker). Assets the caller creates
+(SharedFont.load, Image.fromMemory, Svg.fromMemory) are caller-owned and
+shareable. Rationale: fonts mutate (subset state - silent blank output +
+cross-doc pollution before the guard); images/SVGs are immutable but
+die with their owning document (dangling data at output time).
+
 `loaded_images`/`loaded_svgs` carry lockstep `*_owned` bools: documents
 destroy only assets they created (loadImage*/loadSvg*). Assets
 registered via drawImage/drawSvg are caller-owned, enabling one decoded

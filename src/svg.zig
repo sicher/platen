@@ -451,6 +451,10 @@ pub const Svg = struct {
     allocator: std.mem.Allocator,
     width: f64,
     height: f64,
+    /// Set when a Document created this SVG (doc.loadSvg*): it lives and
+    /// dies with that document. Caller-created SVGs (Svg.fromMemory) stay
+    /// false and are shareable across documents.
+    document_owned: bool = false,
     viewbox_x: f64 = 0,
     viewbox_y: f64 = 0,
     viewbox_width: f64 = 0,

@@ -51,6 +51,10 @@ pub const Image = struct {
     icc_profile: ?[]const u8,
     /// Whether data/alpha_data/icc_profile are owned by this struct
     owns_data: bool,
+    /// Set when a Document created this image (doc.loadImage*): it lives and
+    /// dies with that document and must not be drawn into other documents.
+    /// Caller-created images (Image.fromMemory) stay false and are shareable.
+    document_owned: bool = false,
 
     pub fn deinit(self: *Image) void {
         if (self.owns_data) {
