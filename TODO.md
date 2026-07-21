@@ -109,15 +109,15 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 
 ## Watch items
 
-- [ ] **One unreproduced failure** of "parallel stream compression produces
-  byte-identical output" under `zig build test` (2026-07-20, ~1 in 17 runs;
-  16 subsequent runs clean, 10 direct-binary runs clean). No race found on
-  review: distinct job slots, join-before-read, deterministic flate. Keep
-  watching; if it recurs, capture both outputs and diff.
+- [x] **RESOLVED: the "unreproduced" byte-identity flake was /CreationDate.**
+  The test compares two output() calls; when they straddle a second
+  boundary the auto-generated timestamp differs. Both byte-identity tests
+  now pin metadata.creation_date. (Found while byte-comparing SharedFont
+  output, 2026-07-20.)
 
 ## Performance (post-review follow-ups, optional for 1.0.0)
 
-- [ ] **Shared pre-parsed asset API** — fonts/images reusable across
+- [x] **Shared pre-parsed asset API** — fonts/images reusable across
   Documents (caller-owned cache; library stays stateless). Closes most of
   the remaining per-document cost in the invoice benchmark
   (per-doc font parse + GSUB/GPOS parse + image decode ≈ 0.25ms of 0.50ms).

@@ -3330,6 +3330,10 @@ test "parallel stream compression produces byte-identical output" {
             var doc = Document.init(alloc, std.testing.io);
             defer doc.deinit();
             doc.compress_threads = threads;
+            // Pin the timestamp: two output() calls straddling a second
+            // boundary would otherwise differ in /CreationDate (this was the
+            // "unreproducible" flake in this test)
+            doc.setMetadata(.{ .creation_date = "D:20260101120000" });
 
             const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
             const style = TextStyle{ .font = font, .size = 11 };
@@ -3661,4 +3665,103 @@ test "clipPath emits path ops and W n" {
     // Path construction (y flipped: 841.89 - 10 = 831.89) followed by clip
     try std.testing.expect(std.mem.indexOf(u8, pdf, "10.00 831.89 m") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "h\nW n") != null);
+}
+
+test "SharedFont documents are byte-identical to per-document parsing" {
+    const allocator = std.heap.smp_allocator; // clones + threads later
+    const embedded_mod = @import("embedded.zig");
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+
+    var shared = try embedded_mod.SharedFont.load(allocator, data);
+    defer shared.deinit();
+    shared.warmup("Warm kerning for AVATAR Wavelength offices");
+
+    const text = "Shared fonts: AVATAR office ffi 1/2 -> done.";
+
+    // Unshared baseline
+    var doc_a = Document.init(allocator, std.testing.io);
+    defer doc_a.deinit();
+    doc_a.setMetadata(.{ .creation_date = "D:20260101120000" });
+    const font_a = try doc_a.loadFontFromMemory(data, .identity);
+    try doc_a.addPage(.{});
+    _ = try doc_a.writeAt(.{ .x = 50, .y = 100 }, text, .{ .font = font_a, .size = 12 }, .{});
+    const pdf_a = try doc_a.output();
+    defer allocator.free(pdf_a);
+
+    // Two shared-font documents (reuse across documents)
+    for (0..2) |_| {
+        var doc_b = Document.init(allocator, std.testing.io);
+        defer doc_b.deinit();
+        doc_b.setMetadata(.{ .creation_date = "D:20260101120000" });
+        const font_b = try doc_b.loadSharedFont(&shared);
+        try doc_b.addPage(.{});
+        _ = try doc_b.writeAt(.{ .x = 50, .y = 100 }, text, .{ .font = font_b, .size = 12 }, .{});
+        const pdf_b = try doc_b.output();
+        defer allocator.free(pdf_b);
+
+        try std.testing.expectEqualSlices(u8, pdf_a, pdf_b);
+    }
+}
+
+test "SharedFont clones own all scratch buffers (no shared mutable state)" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+
+    var shared = try embedded_mod.SharedFont.load(allocator, data);
+    defer shared.deinit();
+    // Grow the prototype's scratch buffers (calt-heavy text exercises
+    // scratch_c, the buffer the review found shared)
+    shared.warmup("Warmup with arrows -> => and ligatures ffi ffl offices");
+
+    const clone = try shared.instantiate(allocator);
+    defer clone.deinit();
+    // Shape calt-heavy text on the clone so its scratch buffers are in use
+    const glyphs = try clone.markUnicodeCharsUsed("clone text -> with calt => arrows", null);
+    clone.allocator.free(glyphs);
+
+    const proto_ot = shared.prototype.ot_features.?;
+    const clone_ot = clone.ot_features.?;
+    // A clone's scratch storage must never alias the prototype's
+    if (clone_ot.scratch_c.capacity > 0 and proto_ot.scratch_c.capacity > 0) {
+        try std.testing.expect(clone_ot.scratch_c.items.ptr != proto_ot.scratch_c.items.ptr);
+    }
+    if (clone_ot.scratch_a.capacity > 0 and proto_ot.scratch_a.capacity > 0) {
+        try std.testing.expect(clone_ot.scratch_a.items.ptr != proto_ot.scratch_a.items.ptr);
+    }
+    // std.testing.allocator additionally catches the scratch_c leak and any
+    // double-free through the deinits above
+}
+
+test "loadSharedFontFamily survives allocation failure at every point" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+
+    const reg_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(reg_data);
+    const bold_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Bold.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(bold_data);
+
+    var shared_reg = try embedded_mod.SharedFont.load(allocator, reg_data);
+    defer shared_reg.deinit();
+    var shared_bold = try embedded_mod.SharedFont.load(allocator, bold_data);
+    defer shared_bold.deinit();
+
+    // Every allocation failure point must leave the Document consistent:
+    // no leak, no double-free when doc.deinit runs (the review found an
+    // errdefer that double-freed the regular font after registration)
+    const Ctx = struct {
+        reg: *embedded_mod.SharedFont,
+        bold: *embedded_mod.SharedFont,
+        fn run(failing: std.mem.Allocator, ctx: @This()) !void {
+            var doc = Document.init(failing, std.testing.io);
+            defer doc.deinit();
+            _ = try doc.loadSharedFontFamily(.{ .regular = ctx.reg, .bold = ctx.bold });
+        }
+    };
+    try std.testing.checkAllAllocationFailures(allocator, Ctx.run, .{Ctx{ .reg = &shared_reg, .bold = &shared_bold }});
 }

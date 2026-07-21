@@ -15,6 +15,8 @@
 //!   --threads=N     Worker threads, each rendering its own documents
 //!                   (default: 1; the library is stateless, so concurrent
 //!                   documents need no locking)
+//!   --shared        Parse fonts and logo once (SharedFont + caller-owned
+//!                   Svg) instead of per document
 //!   --output=PATH   Write a sample invoice to a file for inspection
 
 const std = @import("std");
@@ -32,6 +34,7 @@ const Config = struct {
     count: u32 = 1000,
     compress: i32 = 0,
     threads: u32 = 1,
+    shared: bool = false,
     output_path: ?[]const u8 = null,
 };
 
@@ -77,6 +80,10 @@ const Assets = struct {
     inter_regular: []u8,
     inter_bold: []u8,
     logo_svg: []u8,
+    // --shared mode: parsed once, reused by every document (and thread)
+    shared_regular: ?platen.SharedFont = null,
+    shared_bold: ?platen.SharedFont = null,
+    shared_svg: ?*platen.Svg = null,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -90,19 +97,30 @@ pub fn main(init: std.process.Init) !void {
 
     // Load assets once (process lifetime), mirroring SlothPDF's init() which
     // preloads fonts and images before its measured loop.
-    const assets = Assets{
+    var assets = Assets{
         .inter_regular = try std.Io.Dir.cwd().readFileAlloc(app_io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024)),
         .inter_bold = try std.Io.Dir.cwd().readFileAlloc(app_io, "test/fonts/Inter/Inter-Bold.ttf", allocator, .limited(16 * 1024 * 1024)),
         .logo_svg = try std.Io.Dir.cwd().readFileAlloc(app_io, "platen.svg", allocator, .limited(1024 * 1024)),
     };
+    if (config.shared) {
+        assets.shared_regular = try platen.SharedFont.load(allocator, assets.inter_regular);
+        assets.shared_bold = try platen.SharedFont.load(allocator, assets.inter_bold);
+        assets.shared_svg = try platen.Svg.fromMemory(allocator, assets.logo_svg);
+    }
     defer {
+        if (assets.shared_regular) |*s| s.deinit();
+        if (assets.shared_bold) |*s| s.deinit();
+        if (assets.shared_svg) |s| {
+            s.deinit();
+            allocator.destroy(s);
+        }
         allocator.free(assets.inter_regular);
         allocator.free(assets.inter_bold);
         allocator.free(assets.logo_svg);
     }
 
     std.debug.print("=== platen invoice benchmark ===\n", .{});
-    std.debug.print("invoices: {d}, compression level: {d}, threads: {d}\n\n", .{ config.count, config.compress, config.threads });
+    std.debug.print("invoices: {d}, compression level: {d}, threads: {d}, shared assets: {}\n\n", .{ config.count, config.compress, config.threads, config.shared });
 
     // Warmup (excluded from timing; SlothPDF reports post-warmup numbers)
     var prng = std.Random.DefaultPrng.init(0xbe4c4);
@@ -221,13 +239,19 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
     doc.compression_level = compress;
 
     const t_font = nanoNow();
-    const inter = try doc.loadFontFamilyFromMemory(.{
-        .regular = assets.inter_regular,
-        .bold = assets.inter_bold,
-    });
+    const inter = if (assets.shared_regular != null)
+        try doc.loadSharedFontFamily(.{
+            .regular = &assets.shared_regular.?,
+            .bold = &assets.shared_bold.?,
+        })
+    else
+        try doc.loadFontFamilyFromMemory(.{
+            .regular = assets.inter_regular,
+            .bold = assets.inter_bold,
+        });
     _ = @atomicRmw(u64, &phase_ns[0], .Add, @intCast(nanoNow() - t_font), .monotonic);
     const t_img = nanoNow();
-    const logo = try doc.loadSvgFromMemory(assets.logo_svg);
+    const logo = assets.shared_svg orelse try doc.loadSvgFromMemory(assets.logo_svg);
     _ = @atomicRmw(u64, &phase_ns[3], .Add, @intCast(nanoNow() - t_img), .monotonic);
     const t_content = nanoNow();
 
@@ -343,6 +367,8 @@ fn parseArgs(args_obj: std.process.Args) !Config {
             config.compress = try std.fmt.parseInt(i32, arg["--compress=".len..], 10);
         } else if (std.mem.startsWith(u8, arg, "--threads=")) {
             config.threads = try std.fmt.parseInt(u32, arg["--threads=".len..], 10);
+        } else if (std.mem.eql(u8, arg, "--shared")) {
+            config.shared = true;
         } else if (std.mem.startsWith(u8, arg, "--output=")) {
             config.output_path = arg["--output=".len..];
         } else {

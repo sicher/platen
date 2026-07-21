@@ -143,6 +143,7 @@ pub const DocumentMetadata = struct {
 const writeHex4 = text_render.writeHex4;
 
 /// Handle to a loaded font (either standard or embedded)
+pub const SharedFont = embedded.SharedFont;
 pub const FontHandle = union(enum) {
     standard: StandardFont,
     embedded: *EmbeddedFont,
@@ -459,6 +460,70 @@ pub const Document = struct {
         /// Font encoding (applies to all variants). Defaults to .identity
         /// (Unicode, CID); use .win_ansi for legacy 256-char mode.
         encoding: FontEncoding = .identity,
+    };
+
+    /// Load a font from a SharedFont (parsed once by the caller, reusable
+    /// across many documents and threads). The document gets its own
+    /// lightweight clone; the SharedFont must outlive this document.
+    pub fn loadSharedFont(self: *Document, shared: *const embedded.SharedFont) !Font {
+        const emb = try shared.instantiate(self.allocator);
+        errdefer emb.deinit();
+        try self.registerFont(emb);
+        return Font{ .embedded = emb };
+    }
+
+    /// Load a font family from SharedFonts; variants are optional like
+    /// loadFontFamily. All SharedFonts must outlive this document.
+    pub fn loadSharedFontFamily(self: *Document, opts: SharedFontFamilyOptions) !Font {
+        // Each variant: the errdefer covers only the gap between instantiate
+        // and registerFont. Once registered, embedded_fonts owns the font and
+        // doc.deinit reclaims it on any later failure - a longer-lived
+        // errdefer would double-free.
+        const regular = try opts.regular.instantiate(self.allocator);
+        {
+            errdefer regular.deinit();
+            try self.registerFont(regular);
+        }
+
+        var bold: ?*EmbeddedFont = null;
+        if (opts.bold) |b| {
+            const f = try b.instantiate(self.allocator);
+            errdefer f.deinit();
+            try self.registerFont(f);
+            bold = f;
+        }
+        var italic: ?*EmbeddedFont = null;
+        if (opts.italic) |i| {
+            const f = try i.instantiate(self.allocator);
+            errdefer f.deinit();
+            try self.registerFont(f);
+            italic = f;
+        }
+        var bold_italic: ?*EmbeddedFont = null;
+        if (opts.bold_italic) |bi| {
+            const f = try bi.instantiate(self.allocator);
+            errdefer f.deinit();
+            try self.registerFont(f);
+            bold_italic = f;
+        }
+
+        const family = try self.allocator.create(EmbeddedFontFamily);
+        errdefer self.allocator.destroy(family);
+        family.* = .{
+            .regular = regular,
+            .bold = bold,
+            .italic = italic,
+            .bold_italic = bold_italic,
+        };
+        try self.embedded_font_families.append(self.allocator, family);
+        return Font{ .embedded_family = family };
+    }
+
+    pub const SharedFontFamilyOptions = struct {
+        regular: *const embedded.SharedFont,
+        bold: ?*const embedded.SharedFont = null,
+        italic: ?*const embedded.SharedFont = null,
+        bold_italic: ?*const embedded.SharedFont = null,
     };
 
     /// Load a font family from memory buffers.

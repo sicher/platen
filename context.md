@@ -12,6 +12,19 @@ it goes back when TODO.md is in good shape. Zig 0.16, zero dependencies.
 - Rename fully complete: Codeberg repo renamed, local dir renamed to
   ~/Documents/projects/platen, .claude/settings.local.json paths updated.
 
+## What We Did (Session 2026-07-21 #25 — SharedFont / cross-document caching)
+- **SharedFont API** (branch shared-assets, for ultra review before merge):
+  parse font once (incl. all OT lookups eagerly), documents clone cheaply
+  with borrow flags; loadSharedFont/loadSharedFontFamily; byte-identical
+  output (regression-tested). Bench --shared: 1t 2020 -> 3135/sec,
+  8t 9100 -> **18,962/sec** (beats SlothPDF's own M4 number on an M1 Pro).
+- **Watch item RESOLVED**: the "unreproducible" byte-identity flake was
+  /CreationDate straddling a second boundary between two output() calls;
+  byte-identity tests now pin metadata.creation_date.
+- Ultrareview of already-merged main isn't possible (empty diff vs
+  origin/main; force-push rollback blocked by permissions — by design).
+  New work now flows branch -> /code-review ultra -> merge.
+
 ## What We Did (Session 2026-07-20 #24b — API consistency, breaking names, transforms)
 - **API consistency**: loadFont takes FontEncoding directly (was optional,
   null = .identity; 126 sites migrated); FromMemory lifetime contracts

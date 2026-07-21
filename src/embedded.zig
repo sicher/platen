@@ -175,6 +175,9 @@ pub const EmbeddedFont = struct {
     widths: [256]u16, // Widths in 1/1000 em for WinAnsi chars
     allocator: std.mem.Allocator,
     owns_data: bool, // Whether we own the TTF data
+    /// True on per-document clones of a SharedFont: parse-time allocations
+    /// (synthetic_loca, color tables) belong to the prototype.
+    borrowed: bool = false,
 
     // Metrics scaled to 1000 units (PDF standard)
     ascent: i16,
@@ -422,8 +425,50 @@ pub const EmbeddedFont = struct {
         // Free scratch buffers
         self.scratch_codepoints.deinit(self.allocator);
         self.scratch_glyphs.deinit(self.allocator);
-        if (self.synthetic_loca) |sl| self.allocator.free(sl);
+        if (!self.borrowed) {
+            if (self.synthetic_loca) |sl| self.allocator.free(sl);
+        }
         self.allocator.destroy(self);
+    }
+
+    /// Create a per-document font from a SharedFont prototype: the parsed
+    /// ttf tables, metrics, and OpenType lookups are borrowed (immutable
+    /// after parse); all per-document state (glyph tracking, subsetting,
+    /// scratch buffers, kerning cache) is fresh and owned. The prototype
+    /// must outlive the returned font.
+    fn fromShared(allocator: std.mem.Allocator, proto: *const EmbeddedFont) !*EmbeddedFont {
+        const emb = try allocator.create(EmbeddedFont);
+        errdefer allocator.destroy(emb);
+        emb.* = proto.*;
+        emb.allocator = allocator;
+        emb.name = try allocator.dupe(u8, proto.name);
+        errdefer allocator.free(emb.name);
+        emb.owns_data = false;
+        emb.borrowed = true;
+        emb.subset_data = null;
+        emb.used_chars = [_]bool{false} ** 256;
+        emb.cid_used_glyphs = .empty;
+        emb.cid_glyph_widths = .empty;
+        emb.glyph_to_codepoint = .empty;
+        emb.gid_remap = .empty;
+        emb.ligature_codepoints = .empty;
+        emb.scratch_codepoints = .empty;
+        emb.scratch_glyphs = .empty;
+        if (proto.ot_features) |proto_ot| {
+            const ot = try allocator.create(opentype.OpenTypeFeatures);
+            errdefer allocator.destroy(ot);
+            // Struct copy shares the parsed lookup tables (read-only after
+            // parse) and inherits the prototype's kern cache values; scratch
+            // buffers are reset so shaping never touches shared memory.
+            ot.* = proto_ot.*;
+            ot.allocator = allocator;
+            ot.scratch_a = .empty;
+            ot.scratch_b = .empty;
+            ot.scratch_c = .empty;
+            ot.borrowed_tables = true;
+            emb.ot_features = ot;
+        }
+        return emb;
     }
 
     /// Mark characters as used (call this when text is written)
@@ -3328,3 +3373,37 @@ test "Satoshi ligature codepoint tracking" {
         try std.testing.expectEqual(@as(usize, 2), entry.value_ptr.*.len);
     }
 }
+
+/// A font parsed once and shared across many Documents. Immutable after
+/// load(): safe to use from multiple threads (each document works on its
+/// own clone). Keep it (and the font bytes) alive until every document
+/// using it has been deinitialized.
+pub const SharedFont = struct {
+    prototype: *EmbeddedFont,
+
+    /// Parse font data (borrowed - must outlive the SharedFont) and
+    /// eagerly initialize all OpenType tables, so per-document use never
+    /// parses anything.
+    pub fn load(allocator: std.mem.Allocator, data: []const u8) !SharedFont {
+        const emb = try EmbeddedFont.fromMemory(allocator, data, false);
+        errdefer emb.deinit();
+        try emb.initOpenTypeFeatures();
+        return .{ .prototype = emb };
+    }
+
+    /// Optionally warm the shared kerning cache: measure representative
+    /// text once here and every per-document clone starts with those pair
+    /// lookups cached.
+    pub fn warmup(self: *SharedFont, text: []const u8) void {
+        _ = self.prototype.measureTextWidth(text, 12);
+    }
+
+    /// Create the per-document clone. Called by Document.loadSharedFont.
+    pub fn instantiate(self: *const SharedFont, allocator: std.mem.Allocator) !*EmbeddedFont {
+        return EmbeddedFont.fromShared(allocator, self.prototype);
+    }
+
+    pub fn deinit(self: *SharedFont) void {
+        self.prototype.deinit();
+    }
+};
