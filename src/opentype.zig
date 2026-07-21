@@ -876,6 +876,9 @@ pub const OpenTypeFeatures = struct {
     // Scratch buffers for shaping (reused across calls to avoid allocations)
     scratch_a: std.ArrayListUnmanaged(u16) = .empty,
     scratch_b: std.ArrayListUnmanaged(u16) = .empty,
+    /// True on per-document clones of a SharedFont: the parsed lookup
+    /// tables are borrowed from the prototype and must not be freed here.
+    borrowed_tables: bool = false,
     scratch_c: std.ArrayListUnmanaged(u16) = .empty, // For calt intermediate results
 
     pub fn init(allocator: std.mem.Allocator) OpenTypeFeatures {
@@ -890,6 +893,12 @@ pub const OpenTypeFeatures = struct {
     }
 
     pub fn deinit(self: *OpenTypeFeatures) void {
+        // Scratch buffers are always owned by this instance
+        self.scratch_a.deinit(self.allocator);
+        self.scratch_b.deinit(self.allocator);
+        // Per-document clones of a SharedFont borrow the parsed tables;
+        // only the prototype frees them
+        if (self.borrowed_tables) return;
         // Free allocated ligature component arrays
         for (self.ligature_memory.items) |slice| {
             self.allocator.free(slice);
@@ -954,8 +963,6 @@ pub const OpenTypeFeatures = struct {
         self.gsub_lookup_map.deinit(self.allocator);
 
         // Free scratch buffers
-        self.scratch_a.deinit(self.allocator);
-        self.scratch_b.deinit(self.allocator);
         self.scratch_c.deinit(self.allocator);
     }
 

@@ -3330,6 +3330,10 @@ test "parallel stream compression produces byte-identical output" {
             var doc = Document.init(alloc, std.testing.io);
             defer doc.deinit();
             doc.compress_threads = threads;
+            // Pin the timestamp: two output() calls straddling a second
+            // boundary would otherwise differ in /CreationDate (this was the
+            // "unreproducible" flake in this test)
+            doc.setMetadata(.{ .creation_date = "D:20260101120000" });
 
             const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
             const style = TextStyle{ .font = font, .size = 11 };
@@ -3661,4 +3665,42 @@ test "clipPath emits path ops and W n" {
     // Path construction (y flipped: 841.89 - 10 = 831.89) followed by clip
     try std.testing.expect(std.mem.indexOf(u8, pdf, "10.00 831.89 m") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "h\nW n") != null);
+}
+
+test "SharedFont documents are byte-identical to per-document parsing" {
+    const allocator = std.heap.smp_allocator; // clones + threads later
+    const embedded_mod = @import("embedded.zig");
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+
+    var shared = try embedded_mod.SharedFont.load(allocator, data);
+    defer shared.deinit();
+    shared.warmup("Warm kerning for AVATAR Wavelength offices");
+
+    const text = "Shared fonts: AVATAR office ffi 1/2 -> done.";
+
+    // Unshared baseline
+    var doc_a = Document.init(allocator, std.testing.io);
+    defer doc_a.deinit();
+    doc_a.setMetadata(.{ .creation_date = "D:20260101120000" });
+    const font_a = try doc_a.loadFontFromMemory(data, .identity);
+    try doc_a.addPage(.{});
+    _ = try doc_a.writeAt(.{ .x = 50, .y = 100 }, text, .{ .font = font_a, .size = 12 }, .{});
+    const pdf_a = try doc_a.output();
+    defer allocator.free(pdf_a);
+
+    // Two shared-font documents (reuse across documents)
+    for (0..2) |_| {
+        var doc_b = Document.init(allocator, std.testing.io);
+        defer doc_b.deinit();
+        doc_b.setMetadata(.{ .creation_date = "D:20260101120000" });
+        const font_b = try doc_b.loadSharedFont(&shared);
+        try doc_b.addPage(.{});
+        _ = try doc_b.writeAt(.{ .x = 50, .y = 100 }, text, .{ .font = font_b, .size = 12 }, .{});
+        const pdf_b = try doc_b.output();
+        defer allocator.free(pdf_b);
+
+        try std.testing.expectEqualSlices(u8, pdf_a, pdf_b);
+    }
 }

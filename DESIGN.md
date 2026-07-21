@@ -928,6 +928,22 @@ draws. Three rules keep it true:
   (`imageCompressionLevel`): compressed once at load, dominate file
   size — fast levels are a bad trade there.
 
+### SharedFont (session #25)
+`SharedFont.load` parses a font once — ttf tables, metrics, and **all**
+OpenType lookups eagerly (`parseGSUB` → `parseAllGSUBLookups`, so nothing
+parses lazily later). `Document.loadSharedFont` clones a per-document
+`EmbeddedFont`: struct copy shares the immutable parsed tables, while all
+mutable state is fresh and owned (glyph tracking maps, subset data,
+scratch buffers, and the OpenTypeFeatures scratch/kern-cache). Borrow
+flags (`EmbeddedFont.borrowed`, `OpenTypeFeatures.borrowed_tables`) make
+deinit skip shared memory. Safe across threads because clones never write
+to shared structures; correctness contract: SharedFont output is
+byte-identical to per-document parsing (regression-tested).
+
+Two prerequisites make this sound — if either changes, revisit:
+- `ttf.Font` mutates only during parse (cmap offsets, ascii caches).
+- GSUB/GPOS parse everything eagerly; shaping only reads lookup tables.
+
 ### Asset ownership
 `loaded_images`/`loaded_svgs` carry lockstep `*_owned` bools: documents
 destroy only assets they created (loadImage*/loadSvg*). Assets

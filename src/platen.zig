@@ -33,6 +33,7 @@ pub const DocumentMetadata = document.DocumentMetadata;
 pub const StandardFont = document.StandardFont;
 pub const Font = document.Font;
 pub const FontHandle = document.FontHandle;
+pub const SharedFont = document.SharedFont;
 pub const EmbeddedFont = document.EmbeddedFont;
 pub const FontFamilyOptions = Document.FontFamilyOptions;
 pub const FontFamilyMemoryOptions = Document.FontFamilyMemoryOptions;

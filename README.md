@@ -54,10 +54,12 @@ Setting `doc.compress_threads = 8` compresses streams (page contents, font subse
 | Mode | Latency | Throughput |
 |------|---------|------------|
 | Uncompressed, 1 thread | 0.50ms | ~2000 PDFs/sec |
+| Uncompressed, 1 thread, shared assets | 0.32ms | ~3100 PDFs/sec |
 | Uncompressed, 8 threads | 0.11ms | ~9100 PDFs/sec |
+| Uncompressed, 8 threads, shared assets | 0.05ms | **~19000 PDFs/sec** |
 | Compressed (level 1), 1 thread | 0.94ms | ~1060 PDFs/sec |
 
-Every document pays the full stateless cost: fonts are re-parsed, shaped, and subset per PDF, and the SVG is re-parsed per PDF — there is no cross-document caching.
+By default every document pays the full stateless cost: fonts are re-parsed, shaped, and subset per PDF, and the SVG is re-parsed per PDF. **Shared assets** (`--shared` in the benchmark) parse fonts and SVGs once via `SharedFont`/caller-owned `Svg` and reuse them across documents and threads — output stays byte-identical.
 
 Because documents share no state, they can be rendered concurrently without locking — one `Document` per thread scales close to linearly across cores (`--threads=N` in the benchmark). A single `Document` is not thread-safe; keep each document on one thread.
 
@@ -555,6 +557,32 @@ Available conformance levels:
 
 Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotAllowed`.
 
+### Shared Fonts (parse once, use in many documents)
+
+For batch generation, parse fonts once and reuse them — each document
+gets a lightweight clone (fresh subsetting/tracking state, shared parsed
+tables). A `SharedFont` is immutable after `load()` and safe to use from
+multiple threads:
+
+```zig
+// Once, at startup (font bytes must outlive the SharedFont):
+var inter = try platen.SharedFont.load(allocator, inter_bytes);
+defer inter.deinit();
+var inter_bold = try platen.SharedFont.load(allocator, inter_bold_bytes);
+defer inter_bold.deinit();
+inter.warmup("Common text to pre-fill the kerning cache"); // optional
+
+// Per document (any thread):
+var doc = platen.Document.init(allocator, io);
+defer doc.deinit();
+const font = try doc.loadSharedFontFamily(.{ .regular = &inter, .bold = &inter_bold });
+```
+
+The same pattern works for images and SVGs: create them once with
+`Image.fromMemory` / `Svg.fromMemory` and pass to `drawImage`/`drawSvg`
+in any number of documents (the document registers them without taking
+ownership).
+
 ### Transforms & Clipping
 
 ```zig
@@ -613,6 +641,8 @@ balanced by `popState` before `output()`.
 | `loadFont(path, encoding) -> Font` | Load TTF/OTF font from file (.identity = Unicode, .win_ansi = legacy) |
 | `loadFontFromMemory(data, ?encoding) -> Font` | Load TTF/OTF font from memory buffer |
 | `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
+| `loadSharedFont(*SharedFont) -> Font` | Per-document clone of a shared, pre-parsed font |
+| `loadSharedFontFamily(opts) -> Font` | Family from SharedFonts (regular/bold/italic/bold_italic) |
 | `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
 | `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable OpenType feature for specific font |
 | `getFontMetricsStyled(TextStyle) -> FontMetrics` | Get metrics (ascender, descender, etc.) for a style |
