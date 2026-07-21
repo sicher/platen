@@ -1004,8 +1004,9 @@ pub const Document = struct {
                 if (style.bold or style.italic) return error.FontVariantNotLoaded;
                 // Fonts are per-document (they accumulate subset state):
                 // using a font loaded into another Document would silently
-                // render nothing and pollute that document's subset. Use
-                // SharedFont to reuse a parsed font across documents.
+                // render nothing and pollute that document's subset. Use a
+                // FontFace (.face/.family styles) to reuse a parsed font
+                // across documents.
                 if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
