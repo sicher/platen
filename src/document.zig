@@ -28,6 +28,9 @@ pub const pagemod = @import("page.zig");
 pub const text_render = @import("text_render.zig");
 pub const format = @import("format.zig");
 pub const pdfa = @import("pdfa.zig");
+pub const encrypt = @import("encrypt.zig");
+pub const Encryption = encrypt.Encryption;
+pub const Permissions = encrypt.Permissions;
 const color_fonts = @import("color_fonts.zig");
 pub const colr = @import("colr.zig");
 
@@ -252,6 +255,11 @@ pub const Document = struct {
     compress_threads: u32 = 1,
     /// PDF/A conformance level (default: none - no restrictions).
     conformance: pdfa.Conformance = .none,
+    /// AES-256 encryption (default: none). Mutually exclusive with PDF/A.
+    encryption: ?encrypt.Encryption = null,
+    /// RNG for encryption IVs/salts and document IDs. Defaults to the
+    /// system CSPRNG; override for deterministic test output.
+    rng: ?std.Random = null,
     /// COLR color-font emission plans, rebuilt on each `output()` call. Each
     /// entry is heap-allocated so pointers stay stable as the list grows.
     color_plans: std.ArrayListUnmanaged(*ColorFontPlan) = .empty,
@@ -2946,6 +2954,13 @@ pub const Document = struct {
     /// Output timing information for performance analysis.
     pub const OutputTiming = pdf_output.OutputTiming;
 
+    fn writeHexString(w: anytype, key: []const u8, bytes: []const u8) !void {
+        try w.writeAll(key);
+        try w.writeByte('<');
+        for (bytes) |b| try w.print("{x:0>2}", .{b});
+        try w.writeAll(">\n");
+    }
+
     /// Generate PDF output
     pub fn output(self: *Document) ![]u8 {
         self.last_output_timing = .{};
@@ -2960,6 +2975,22 @@ pub const Document = struct {
 
         var ids = try self.reserveObjectIds();
         defer ids.deinit(self.allocator);
+
+        // Set up encryption before any stream is written.
+        var enc_material: ?encrypt.Material = null;
+        var encrypt_id: ObjectId = 0;
+        var sys_csprng: encrypt.SystemCsprng = undefined;
+        if (self.encryption) |enc_opts| {
+            if (self.conformance != .none) return error.EncryptionNotAllowedInPdfA;
+            const random = self.rng orelse blk: {
+                sys_csprng = try encrypt.SystemCsprng.init(self.io);
+                break :blk sys_csprng.random();
+            };
+            const m = encrypt.buildMaterial(enc_opts, random);
+            enc_material = m;
+            w.encryptor = .{ .key = m.file_key, .random = random };
+            _ = &encrypt_id; // assigned after all other objects exist
+        }
 
         try w.writeHeader();
         try self.writeCatalog(&w, &ids);
@@ -2995,7 +3026,32 @@ pub const Document = struct {
         const info_id = try self.writeInfoDict(&w, next_id);
         try self.writeOutlines(&w, &ids);
         try self.writePageLabels(&w, &ids);
-        return self.finishDocument(&w, &ids, info_id);
+
+        if (enc_material) |m| {
+            encrypt_id = w.nextObjectId();
+            try self.writeEncryptDict(&w, encrypt_id, m);
+        }
+        return self.finishDocument(&w, &ids, info_id, if (enc_material != null) encrypt_id else null);
+    }
+
+    /// Write the /Encrypt dictionary object (AESV3 / R6 crypt filter).
+    /// Strings are emitted as hex; the dict itself is never encrypted.
+    fn writeEncryptDict(self: *Document, w: *Writer, id: ObjectId, m: encrypt.Material) !void {
+        try w.beginObject(id);
+        var buf: [4096]u8 = undefined;
+        var fbs = std.Io.Writer.fixed(&buf);
+        try fbs.writeAll("<<\n/Filter /Standard\n/V 5\n/R 6\n/Length 256\n");
+        try fbs.print("/P {d}\n", .{m.p});
+        try fbs.writeAll("/CF << /StdCF << /CFM /AESV3 /AuthEvent /DocOpen /Length 32 >> >>\n");
+        try fbs.writeAll("/StmF /StdCF\n/StrF /Identity\n/EncryptMetadata true\n");
+        try writeHexString(&fbs, "/U ", &m.u);
+        try writeHexString(&fbs, "/UE ", &m.ue);
+        try writeHexString(&fbs, "/O ", &m.o);
+        try writeHexString(&fbs, "/OE ", &m.oe);
+        try writeHexString(&fbs, "/Perms ", &m.perms);
+        try fbs.writeAll(">>\n");
+        try w.output.appendSlice(self.allocator, fbs.buffered());
+        try w.endObject();
     }
 
     /// Object IDs reserved for one `output()` run, in emission order.
@@ -4165,13 +4221,13 @@ pub const Document = struct {
     }
 
     /// Write the xref table and trailer; returns the finished PDF bytes.
-    fn finishDocument(self: *Document, w: *Writer, ids: *const OutputIds, info_id: ?ObjectId) ![]u8 {
+    fn finishDocument(self: *Document, w: *Writer, ids: *const OutputIds, info_id: ?ObjectId, encrypt_id: ?ObjectId) ![]u8 {
         const finish_start = pdf_output.milliTimestamp();
 
         // Generate document ID for PDF/A (required in trailer)
+        // A file ID is required for encrypted documents and PDF/A.
         var doc_id_buf: [32]u8 = undefined;
-        const doc_id: ?[]const u8 = if (self.conformance != .none) blk: {
-            // Generate pseudo-random ID based on timestamp and content
+        const doc_id: ?[]const u8 = if (self.conformance != .none or encrypt_id != null) blk: {
             const timestamp = @as(u64, @intCast(pdf_output.milliTimestamp()));
             const content_hash = @as(u64, @intCast(w.output.items.len)) ^ 0xCAFEBABE;
             _ = std.fmt.bufPrint(&doc_id_buf, "{x:0>16}{x:0>16}", .{ timestamp, content_hash }) catch unreachable;
@@ -4182,6 +4238,7 @@ pub const Document = struct {
             .catalog_ref = .{ .id = ids.catalog_id },
             .info_ref = if (info_id) |id| .{ .id = id } else null,
             .id = doc_id,
+            .encrypt_ref = if (encrypt_id) |id| .{ .id = id } else null,
         });
         self.last_output_timing.finish_ms = pdf_output.milliTimestamp() - finish_start;
         return result;

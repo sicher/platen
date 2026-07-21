@@ -9,6 +9,7 @@
 const std = @import("std");
 const objects = @import("objects.zig");
 const zlib = @import("zlib.zig");
+const encrypt = @import("encrypt.zig");
 
 const ObjectId = objects.ObjectId;
 const Ref = objects.Ref;
@@ -16,6 +17,7 @@ const Dict = objects.Dict;
 const Value = objects.Value;
 
 pub const PDF_VERSION = "1.4";
+pub const PDF_VERSION_ENCRYPTED = "2.0"; // AESV3/R6 requires PDF 2.0
 
 /// Tracks byte offset for each object (for xref table)
 const ObjectOffset = struct {
@@ -35,6 +37,9 @@ pub const Writer = struct {
     /// hit instead of compressing inline; entries must be produced with the
     /// same compression_level so output stays byte-identical.
     precompressed: ?*const std.AutoHashMapUnmanaged(usize, []const u8) = null,
+    /// When set, every stream body is AES-256-CBC encrypted (IV prepended)
+    /// before emission. Streams under a crypt filter with StmF=AESV3.
+    encryptor: ?encrypt.Encryptor = null,
 
     pub fn init(allocator: std.mem.Allocator) Writer {
         return .{
@@ -51,8 +56,11 @@ pub const Writer = struct {
 
     /// Write PDF header with binary marker
     pub fn writeHeader(self: *Writer) !void {
-        // PDF version
-        try self.output.appendSlice(self.allocator, "%PDF-" ++ PDF_VERSION ++ "\n");
+        // PDF version (2.0 when encrypted, else 1.4)
+        const version = if (self.encryptor != null) PDF_VERSION_ENCRYPTED else PDF_VERSION;
+        try self.output.appendSlice(self.allocator, "%PDF-");
+        try self.output.appendSlice(self.allocator, version);
+        try self.output.append(self.allocator, '\n');
         // Binary marker (high-bit bytes to indicate binary content)
         try self.output.appendSlice(self.allocator, "%\xE2\xE3\xCF\xD3\n");
     }
@@ -84,8 +92,21 @@ pub const Writer = struct {
         try self.output.append(self.allocator, '\n');
     }
 
-    /// Write a stream object (dictionary + stream data)
+    /// Write a stream object (dictionary + stream data). Encrypts the body
+    /// when an encryptor is configured.
     pub fn writeStream(self: *Writer, dict: *Dict, data: []const u8) !void {
+        if (self.encryptor) |enc| {
+            const enc_len = encrypt.Encryptor.encryptedLen(data.len);
+            const buf = try self.allocator.alloc(u8, enc_len);
+            defer self.allocator.free(buf);
+            enc.encrypt(data, buf);
+            try dict.put("Length", Value.int(@intCast(enc_len)));
+            try self.writeDict(dict.*);
+            try self.output.appendSlice(self.allocator, "stream\n");
+            try self.output.appendSlice(self.allocator, buf);
+            try self.output.appendSlice(self.allocator, "\nendstream\n");
+            return;
+        }
         try dict.put("Length", Value.int(@intCast(data.len)));
         try self.writeDict(dict.*);
         try self.output.appendSlice(self.allocator, "stream\n");
@@ -124,26 +145,38 @@ pub const Writer = struct {
     /// Emit the compressed variant if it is smaller, the raw stream otherwise.
     fn writeStreamPicking(self: *Writer, dict: *Dict, data: []const u8, compressed: []const u8) !void {
         // Only use compression if it actually saves space
-        if (compressed.len < data.len) {
-            try dict.put("Filter", Value.name("FlateDecode"));
-            try dict.put("Length", Value.int(@intCast(compressed.len)));
+        if (compressed.len >= data.len) {
+            return self.writeStream(dict, data); // handles encryption itself
+        }
+        try dict.put("Filter", Value.name("FlateDecode"));
+        if (self.encryptor) |enc| {
+            const enc_len = encrypt.Encryptor.encryptedLen(compressed.len);
+            const buf = try self.allocator.alloc(u8, enc_len);
+            defer self.allocator.free(buf);
+            enc.encrypt(compressed, buf);
+            try dict.put("Length", Value.int(@intCast(enc_len)));
             try self.writeDict(dict.*);
             try self.output.appendSlice(self.allocator, "stream\n");
-            try self.output.appendSlice(self.allocator, compressed);
+            try self.output.appendSlice(self.allocator, buf);
             try self.output.appendSlice(self.allocator, "\nendstream\n");
-        } else {
-            // Fall back to uncompressed if compression doesn't help
-            try self.writeStream(dict, data);
+            return;
         }
+        try dict.put("Length", Value.int(@intCast(compressed.len)));
+        try self.writeDict(dict.*);
+        try self.output.appendSlice(self.allocator, "stream\n");
+        try self.output.appendSlice(self.allocator, compressed);
+        try self.output.appendSlice(self.allocator, "\nendstream\n");
     }
 
     /// Options for finishing the PDF
     pub const FinishOptions = struct {
         catalog_ref: Ref,
         info_ref: ?Ref = null,
-        /// Document ID for trailer (required for PDF/A). Two 16-byte hex strings.
-        /// Format: "<hex1><hex2>" where each hex is 16 bytes
+        /// Document ID for trailer (required for PDF/A and encryption).
+        /// Two 16-byte hex strings: "<hex1><hex2>".
         id: ?[]const u8 = null,
+        /// /Encrypt reference for the trailer (encrypted documents).
+        encrypt_ref: ?Ref = null,
     };
 
     /// Write xref table and trailer, return the final PDF bytes
@@ -200,6 +233,10 @@ pub const Writer = struct {
             header = std.fmt.bufPrint(&buf, "/Info {d} 0 R\n", .{info.id}) catch unreachable;
             try self.output.appendSlice(self.allocator, header);
         }
+        if (opts.encrypt_ref) |enc| {
+            header = std.fmt.bufPrint(&buf, "/Encrypt {d} 0 R\n", .{enc.id}) catch unreachable;
+            try self.output.appendSlice(self.allocator, header);
+        }
         if (opts.id) |id| {
             // Write ID array: two identical hex strings for new documents
             try self.output.appendSlice(self.allocator, "/ID [<");
@@ -217,6 +254,16 @@ pub const Writer = struct {
         try self.output.appendSlice(self.allocator, "%%EOF\n");
 
         return self.output.toOwnedSlice(self.allocator);
+    }
+
+    /// Next unused object ID (max recorded + 1). Objects are recorded in
+    /// beginObject, so this is valid once all normal objects are written.
+    pub fn nextObjectId(self: *Writer) ObjectId {
+        var max_id: ObjectId = 0;
+        for (self.offsets.items) |off| {
+            if (off.id > max_id) max_id = off.id;
+        }
+        return max_id + 1;
     }
 
     /// Get current byte position

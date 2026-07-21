@@ -22,6 +22,7 @@ pub const svg = @import("svg.zig");
 pub const xml = @import("xml.zig");
 pub const pdf_output = @import("pdf_output.zig");
 pub const pdfa = @import("pdfa.zig");
+pub const encrypt = @import("encrypt.zig");
 
 // Re-export Document as the primary type
 pub const Document = document.Document;
@@ -80,6 +81,8 @@ pub const BlockOptions = document.BlockOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
 pub const PageSize = document.PageSize;
 pub const PageOptions = document.PageOptions;
+pub const Encryption = document.Encryption;
+pub const Permissions = document.Permissions;
 pub const PageRotation = document.PageRotation;
 
 // Re-export graphics types
@@ -161,4 +164,5 @@ test {
     _ = @import("colr.zig");
     _ = @import("bitmap_glyphs.zig");
     _ = @import("svg_table.zig");
+    _ = @import("encrypt.zig");
 }

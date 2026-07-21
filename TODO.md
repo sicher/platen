@@ -102,6 +102,8 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 - [ ] Reusable Form XObjects ("stamps") for user content — currently only
   used internally for SVG embedding. Big win for batch documents with
   repeated headers; pairs with the shared-asset API.
+- [ ] Encrypt metadata strings too (StrF=AESV3): needs the file key
+  threaded through objects.zig string serialization.
 - [ ] Interactive forms (AcroForm), digital signatures, file attachments —
   each large and additive; explicitly out of 1.0 scope.
 - [ ] Tables stay out of scope: platen is a low-level library; regions +
