@@ -2,6 +2,14 @@
 
 ## Executive Summary
 
+> **Note (2026-07-21):** the sections below document the original
+> 2026-01 profiling round. For the latest optimization round — feature
+> flags, kern cache, single-shaping writeAt, parallel stream
+> compression, and FontFace cross-document caching (1,039 -> ~3,200
+> PDFs/sec single-thread on the invoice benchmark) — see
+> "2026-07 Optimization Round" below.
+
+
 Performance profiling on 2026-01-20 achieved **6x speedup** for OpenType text shaping and **75% overall improvement** for a 100-page PDF generation benchmark.
 
 | Metric | Before | After | Improvement |
@@ -231,6 +239,79 @@ Drawing benchmark (debug mode, 20 pages × ~1500 shapes = 30,000 shapes):
 |--------|--------|-------|---------|
 | Drawing shapes | 163ms | 88ms | **1.85x** |
 | Per-shape | 5.4μs | 2.9μs | 1.85x |
+
+## 2026-07 Optimization Round (sessions #23-#26)
+
+Profile-guided work on the invoice benchmark (`zig build bench-invoice`:
+1000 unique single-page A4 invoices, Inter family, SVG logo, unique data
+per render, single-threaded unless noted). Apple M1 Pro, ReleaseFast.
+
+| Stage | Invoice throughput |
+|-------|--------------------|
+| Baseline (2026-07-20) | 1,039 PDFs/sec |
+| + featureIndex + kern cache + image level | 1,602 PDFs/sec |
+| + SVG logo (was PNG) + writeAt single-shaping | ~2,000 PDFs/sec |
+| + shared assets (`--shared`) | ~3,200 PDFs/sec |
+| 8 threads, shared assets | ~18,600 PDFs/sec |
+
+### Hot-path fixes
+
+1. **FeatureFlags.featureIndex** (opentype.zig) — was an unrolled linear
+   compare chain over ~150 OpenType feature enum values, called up to
+   119x per shaped string via the ss01-ss20/cv01-cv99 loops: **33% of
+   total runtime**. Now a comptime-sorted table + binary search, plus
+   contiguous range scans (`anyEnabledInRange`) for the ss/cv blocks and
+   cheap `items.len` checks ordered before flag lookups.
+2. **Kerning cache** (opentype.zig) — `AutoHashMap(u32, i16)` replaced
+   by a direct-mapped 4096-slot array (Knuth multiplicative hash,
+   collisions overwrite). Removes wyhash + probing from the per-glyph-
+   pair path in both measurement and rendering.
+3. **writeAt shapes once** (document.zig) — writeTextStyled returns the
+   width computed from its own shaped glyph run (`glyphSequenceWidth`);
+   writeAt no longer re-measures for its returned Rect, and anchored
+   text (.center/.right) shifts the deferred command instead of
+   measure-then-write. This paid for shaped measurement (measurement now
+   runs the full GSUB pipeline, so measure == render) at net-zero cost.
+4. **Image compression floor** (document.zig) — image pixel streams
+   compress at `@max(6, compression_level)`: compressed once at load,
+   they dominate file size, so fast levels are a bad trade there.
+
+### Concurrency
+
+5. **Concurrent documents** — `last_output_timing` moved from a global
+   into Document (was a data race); one-Document-per-thread is a
+   documented guarantee. 8 threads: ~9,200 PDFs/sec unshared.
+6. **Parallel stream compression** — `doc.compress_threads = N`
+   compresses page-content and font-subset streams on a worker pool
+   during output(); byte-identical output (regression-tested). 110-page
+   benchmark: PDF output 34ms -> 18ms, total ~79ms -> ~56ms.
+
+### Cross-document caching (FontFace / caller-owned assets)
+
+7. **FontFace** parses a font once — ttf tables, metrics, and all
+   OpenType lookups eagerly — and documents clone it cheaply on first
+   use (shared immutable tables, fresh per-document mutable state). The
+   single-thread win is mostly the per-document GSUB/GPOS parse
+   (text+layout 0.28ms -> 0.16ms); font/logo load phases drop to ~0.
+   Caller-owned Image/Svg give the same amortization for raster/vector
+   assets. Output stays byte-identical to per-document parsing.
+8. `FontFace.warmup(text)` optionally pre-fills the kerning cache that
+   clones inherit (~0.06ms/doc saved on cold kern lookups).
+
+### Measurement instrumentation
+
+The invoice benchmark prints a per-phase breakdown (font load, logo,
+text+layout, output) and supports `--threads=N` / `--shared` /
+`--compress=N`. Current single-thread shared breakdown: ~0.001ms fonts,
+~0.000ms logo, ~0.16ms text+layout, ~0.15ms output.
+
+### Remaining known costs (by design or future work)
+
+- Per-document work that caching cannot remove: shaping, subsetting,
+  content generation, serialization (~0.31ms/invoice shared).
+- Parallel page rendering inside one document needs per-thread or
+  frozen font caches first (kern cache and glyph tracking mutate
+  EmbeddedFont during render) — see TODO.md.
 
 ## Shaping Microbenchmark Results
 
