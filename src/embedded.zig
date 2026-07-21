@@ -442,6 +442,7 @@ pub const EmbeddedFont = struct {
         emb.* = proto.*;
         emb.allocator = allocator;
         emb.name = try allocator.dupe(u8, proto.name);
+        errdefer allocator.free(emb.name);
         emb.owns_data = false;
         emb.borrowed = true;
         emb.subset_data = null;
@@ -463,6 +464,7 @@ pub const EmbeddedFont = struct {
             ot.allocator = allocator;
             ot.scratch_a = .empty;
             ot.scratch_b = .empty;
+            ot.scratch_c = .empty;
             ot.borrowed_tables = true;
             emb.ot_features = ot;
         }

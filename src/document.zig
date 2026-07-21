@@ -475,24 +475,36 @@ pub const Document = struct {
     /// Load a font family from SharedFonts; variants are optional like
     /// loadFontFamily. All SharedFonts must outlive this document.
     pub fn loadSharedFontFamily(self: *Document, opts: SharedFontFamilyOptions) !Font {
+        // Each variant: the errdefer covers only the gap between instantiate
+        // and registerFont. Once registered, embedded_fonts owns the font and
+        // doc.deinit reclaims it on any later failure - a longer-lived
+        // errdefer would double-free.
         const regular = try opts.regular.instantiate(self.allocator);
-        errdefer regular.deinit();
-        try self.registerFont(regular);
+        {
+            errdefer regular.deinit();
+            try self.registerFont(regular);
+        }
 
         var bold: ?*EmbeddedFont = null;
         if (opts.bold) |b| {
-            bold = try b.instantiate(self.allocator);
-            try self.registerFont(bold.?);
+            const f = try b.instantiate(self.allocator);
+            errdefer f.deinit();
+            try self.registerFont(f);
+            bold = f;
         }
         var italic: ?*EmbeddedFont = null;
         if (opts.italic) |i| {
-            italic = try i.instantiate(self.allocator);
-            try self.registerFont(italic.?);
+            const f = try i.instantiate(self.allocator);
+            errdefer f.deinit();
+            try self.registerFont(f);
+            italic = f;
         }
         var bold_italic: ?*EmbeddedFont = null;
         if (opts.bold_italic) |bi| {
-            bold_italic = try bi.instantiate(self.allocator);
-            try self.registerFont(bold_italic.?);
+            const f = try bi.instantiate(self.allocator);
+            errdefer f.deinit();
+            try self.registerFont(f);
+            bold_italic = f;
         }
 
         const family = try self.allocator.create(EmbeddedFontFamily);
