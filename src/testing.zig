@@ -159,6 +159,49 @@ fn comparePdfsStructural(
 }
 
 /// Run qpdf to normalize PDF to QDF format
+/// Result of validating an encrypted PDF with qpdf.
+pub const EncCheck = struct {
+    /// qpdf accepted the correct password and reported the file valid.
+    ok_with_password: bool,
+    /// qpdf rejected the wrong/no password (proves it is really encrypted).
+    rejects_wrong_password: bool,
+};
+
+/// Validate an encrypted PDF against qpdf (an independent reader): the
+/// correct password must decrypt+check cleanly, and a wrong password must
+/// be refused. Returns error.QpdfNotAvailable if qpdf is not installed
+/// (callers skip, matching the reference-comparison tests).
+pub fn qpdfCheckEncrypted(io: std.Io, allocator: std.mem.Allocator, pdf: []const u8, password: []const u8) !EncCheck {
+    var tmp = try createTempFile(io, allocator, "enc_", ".pdf", pdf);
+    defer tmp.cleanup(io, allocator);
+
+    // Correct password: expect exit 0.
+    const pw_arg = try std.fmt.allocPrint(allocator, "--password={s}", .{password});
+    defer allocator.free(pw_arg);
+    const good = std.process.run(allocator, io, .{
+        .argv = &.{ "qpdf", pw_arg, "--check", tmp.path },
+    }) catch return error.QpdfNotAvailable;
+    defer allocator.free(good.stdout);
+    defer allocator.free(good.stderr);
+
+    // Wrong password: expect nonzero exit.
+    const bad = std.process.run(allocator, io, .{
+        .argv = &.{ "qpdf", "--password=DEFINITELY-WRONG", "--check", tmp.path },
+    }) catch return error.QpdfNotAvailable;
+    defer allocator.free(bad.stdout);
+    defer allocator.free(bad.stderr);
+
+    const good_ok = switch (good.term) {
+        .exited => |c| c == 0 and std.mem.indexOf(u8, good.stdout, "R = 6") != null,
+        else => false,
+    };
+    const bad_rejected = switch (bad.term) {
+        .exited => |c| c != 0,
+        else => true,
+    };
+    return .{ .ok_with_password = good_ok, .rejects_wrong_password = bad_rejected };
+}
+
 fn runQpdf(io: std.Io, allocator: std.mem.Allocator, pdf_path: []const u8) ![]const u8 {
     const result = std.process.run(allocator, io, .{
         .argv = &.{ "qpdf", "--deterministic-id", "--qdf", pdf_path, "-" },

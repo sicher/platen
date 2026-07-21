@@ -3911,11 +3911,6 @@ test "encryption: in-process roundtrip recovers content" {
     const pdf = try doc.output();
     defer std.testing.allocator.free(pdf);
 
-    // Also emit a fixed-password artifact for the qpdf interop check
-    // (scripts/check_encryption.py). Best-effort - ignore if the output
-    // dir is absent in some environments.
-    writeQpdfFixture() catch {};
-
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Filter /Standard") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/AESV3") != null);
     // Content is not in the clear
@@ -3941,6 +3936,30 @@ fn parseHexEntry(pdf: []const u8, key: []const u8) ![64]u8 {
     var out: [64]u8 = undefined;
     _ = try std.fmt.hexToBytes(&out, hex);
     return out;
+}
+
+test "encryption: qpdf (independent reader) validates the encrypted PDF" {
+    const platen_testing = @import("testing.zig");
+    var prng = std.Random.DefaultPrng.init(0xc0ffee);
+
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.encryption = .{ .user_password = "s3cret", .permissions = .{ .printing = false } };
+    doc.rng = prng.random();
+    doc.setMetadata(.{ .creation_date = "D:20260101120000" });
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, "Encrypted content for qpdf.", .{ .font = font, .size = 14 }, .{});
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+
+    const result = platen_testing.qpdfCheckEncrypted(std.testing.io, std.testing.allocator, pdf, "s3cret") catch |err| {
+        if (err == error.QpdfNotAvailable) return; // skip when qpdf absent
+        return err;
+    };
+    try std.testing.expect(result.ok_with_password); // R6, correct password decrypts+validates
+    try std.testing.expect(result.rejects_wrong_password); // really encrypted
 }
 
 test "encryption is rejected under PDF/A" {
@@ -3971,23 +3990,4 @@ test "unencrypted output is byte-identical regardless of encryption field defaul
     try std.testing.expectEqualSlices(u8, a, b); // deterministic, unchanged
     try std.testing.expect(std.mem.startsWith(u8, a, "%PDF-1.4"));
     try std.testing.expect(std.mem.indexOf(u8, a, "/Encrypt") == null);
-}
-
-/// Write test/output/encrypted.pdf with user password "hunter2" for the
-/// out-of-process qpdf interop check (scripts/check_encryption.py). Kept
-/// deterministic via a pinned RNG and creation date.
-fn writeQpdfFixture() !void {
-    var prng = std.Random.DefaultPrng.init(0x9abcdef);
-    var doc = Document.init(std.testing.allocator, std.testing.io);
-    defer doc.deinit();
-    doc.encryption = .{ .user_password = "hunter2", .permissions = .{ .printing = false } };
-    doc.rng = prng.random();
-    doc.setMetadata(.{ .title = "platen encryption interop", .creation_date = "D:20260101120000" });
-
-    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
-    try doc.addPage(.{});
-    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, "Secret contents behind AES-256.", .{ .font = font, .size = 18 }, .{});
-    const pdf = try doc.output();
-    defer std.testing.allocator.free(pdf);
-    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = "test/output/encrypted.pdf", .data = pdf });
 }

@@ -1013,8 +1013,10 @@ emit `IV ++ AES-256-CBC(PKCS#7)` in place of the raw body.
   not. Full string encryption is a possible follow-up.
 - Cost: the R6 KDF is ~5ms/document by design (password hardening) and
   runs per document (unique salts); content encryption is ~8us/stream.
-  Verified interoperable with qpdf (R=6, correct/wrong password,
-  permission enforcement, clean decrypt).
+  Interop is verified in the test suite: an integration test runs qpdf
+  (an independent reader) on encrypted output - correct password decrypts
+  and reports R=6, wrong password is rejected - skipping when qpdf is
+  absent, like the reference-comparison tests.
 - PDF/A forbids encryption: `output()` returns
   `error.EncryptionNotAllowedInPdfA`.
 
