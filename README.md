@@ -675,18 +675,19 @@ balanced by `popState` before `output()`.
 | `getPageIndex() -> usize` | Get current page index (0-based) |
 | `setMetadata(DocumentMetadata)` | Set title, author, subject, keywords, etc. |
 
-### Fonts
+### Fonts (document-owned)
+
+Methods on `Document`; the returned `Font` lives and dies with this
+document. For fonts shared across documents, see
+[Caller-owned assets](#caller-owned-assets) below.
 
 | Method | Description |
 |--------|-------------|
 | `loadFont(path, encoding) -> Font` | Load TTF/OTF font from file (.identity = Unicode, .win_ansi = legacy) |
-| `loadFontFromMemory(data, ?encoding) -> Font` | Load TTF/OTF font from memory buffer |
+| `loadFontFromMemory(data, encoding) -> Font` | Load TTF/OTF font from memory buffer (borrows data) |
 | `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
-| `FontFace.fromMemory(alloc, bytes)` | Parse a caller-owned, shareable font face (bytes must outlive it) |
-| `FontFace.fromFile(io, alloc, path)` | Same, loading from a file (the face owns the bytes) |
-| `Font{ .face = &f }` / `Font{ .family = .{...} }` | Use faces directly in TextStyle - no load call |
 | `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
-| `setFontFeature(*EmbeddedFont, Feature, bool)` | Enable/disable OpenType feature for specific font |
+| `setFeature(Feature, bool)` | Set an OpenType feature for all fonts in this document (current and future) |
 | `getFontMetricsStyled(TextStyle) -> FontMetrics` | Get metrics (ascender, descender, etc.) for a style |
 
 ### Text Output
@@ -748,18 +749,41 @@ try st.append("red", .{ .color = platen.Color.red });
 | `setOutline(*Outline)` | Set the document outline (takes ownership) |
 | `setPageLabel(page_index, PageLabel)` | Set page numbering style |
 
-### Images & SVG
+### Images & SVG (document-owned)
+
+Methods on `Document`; loaded assets live and die with this document.
+`drawImage`/`drawSvg` also accept caller-owned assets (below).
 
 | Method | Description |
 |--------|-------------|
-| `loadImage(path) -> *Image` | Load JPEG or PNG image from file (document-owned) |
-| `loadImageFromMemory(data) -> *Image` | Load image from memory buffer (document-owned; borrows data) |
-| `Image.fromMemory(alloc, bytes) -> *Image` | Caller-owned, shareable image (borrows bytes; free with deinit) |
-| `Svg.fromMemory(alloc, text) -> *Svg` | Caller-owned, shareable SVG (copies; free with deinit) |
-| `drawImage(*Image, Rect)` | Draw image (omit width/height for auto-scale) |
+| `loadImage(path) -> *Image` | Load JPEG or PNG image from file |
+| `loadImageFromMemory(data) -> *Image` | Load image from memory buffer (borrows data) |
 | `loadSvg(path) -> *Svg` | Load SVG from file |
 | `loadSvgFromMemory(data) -> *Svg` | Load SVG from memory buffer |
+| `drawImage(*Image, Rect)` | Draw image (omit width/height for auto-scale) |
 | `drawSvg(*Svg, Rect)` | Draw SVG (omit width/height for original size) |
+
+### Caller-owned assets
+
+Created by you, not by a document: shareable across any number of
+documents and threads, freed by you with a single `deinit()` after every
+document that used them is gone. Using a *document-owned* asset in
+another document errors (`ForeignFont`/`ForeignImage`/`ForeignSvg`).
+
+| Function | Description |
+|----------|-------------|
+| `FontFace.fromMemory(alloc, bytes) -> FontFace` | Parse a font face (borrows bytes; identity encoding) |
+| `FontFace.fromFile(io, alloc, path) -> FontFace` | Parse a font face from a file (owns the bytes) |
+| `FontFace.setFeature(Feature, bool)` | Default OpenType flags for this face (before first use; `FaceFrozen` after) |
+| `FontFace.warmup(text)` | Optional: pre-fill the kerning cache clones inherit (before first use) |
+| `FontFace.deinit()` | Free the face (after all documents using it are deinitialized) |
+| `Image.fromMemory(alloc, bytes) -> *Image` | Decode an image once (borrows bytes) |
+| `Svg.fromMemory(alloc, text) -> *Svg` | Parse an SVG once (copies the text) |
+| `Image.deinit()` / `Svg.deinit()` | Free the asset (single call) |
+
+Faces are used directly in styles - no per-document call:
+`.font = .{ .face = &face }` or
+`.font = .{ .family = .{ .regular = &r, .bold = &b } }`.
 
 ### Drawing Shapes
 
