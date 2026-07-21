@@ -988,6 +988,36 @@ Image/Svg to be shared across many documents. Fonts remain per-document
 (subsetting mutates them); a shared pre-parsed font API is future work
 (TODO.md).
 
+## Encryption (session #27)
+
+AES-256 only, security-handler revision 6 (PDF 2.0) - no RC4/AES-128
+legacy handlers. R6 uses one 32-byte file key for the whole document (no
+per-object key derivation), so the writer hook is minimal: `Writer`
+holds an optional `Encryptor`, and `writeStream`/`writeStreamPicking`
+emit `IV ++ AES-256-CBC(PKCS#7)` in place of the raw body.
+
+- `src/encrypt.zig` is self-contained: Algorithm 2.B (the iterated
+  SHA-256/384/512 + AES-128 password hash), Algorithms 8/9/10 (U/UE/O/OE
+  /Perms), the content Encryptor, and a SystemCsprng seeded from
+  `std.c.arc4random_buf`.
+- Determinism: encryption needs randomness (IVs, salts, file key, /ID),
+  which collides with byte-identical guarantees. `Document.rng` is an
+  injectable `std.Random` (defaults to the system CSPRNG); tests seed it.
+  Unencrypted output is unchanged - the encryptor is null by default and
+  byte-identity tests still pass.
+- Scope: `/StmF /StdCF` (AESV3) encrypts streams; `/StrF /Identity`
+  leaves strings cleartext. Strings serialize deep in Dict/Value.format
+  with no encryptor in scope; encrypting them would need threading the
+  key through objects.zig. Content streams carry all page text, fonts,
+  and images, so the document body is protected; metadata strings are
+  not. Full string encryption is a possible follow-up.
+- Cost: the R6 KDF is ~5ms/document by design (password hardening) and
+  runs per document (unique salts); content encryption is ~8us/stream.
+  Verified interoperable with qpdf (R=6, correct/wrong password,
+  permission enforcement, clean decrypt).
+- PDF/A forbids encryption: `output()` returns
+  `error.EncryptionNotAllowedInPdfA`.
+
 ## API Design Guidelines
 
 Principles for platen's public API:

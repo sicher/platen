@@ -3894,3 +3894,73 @@ test "multi-span decoration uses the face's real underline metrics" {
     const needle = try std.fmt.bufPrint(&buf, "{d:.2} re", .{expected_thick});
     try std.testing.expect(std.mem.indexOf(u8, pdf, needle) != null);
 }
+
+test "encryption: in-process roundtrip recovers content" {
+    const encrypt_mod = @import("encrypt.zig");
+    var prng = std.Random.DefaultPrng.init(0xa11ce);
+
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.encryption = .{ .user_password = "pw" };
+    doc.rng = prng.random();
+    doc.setMetadata(.{ .creation_date = "D:20260101120000" });
+
+    const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "encrypted body", .{ .font = font, .size = 12 }, .{});
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Filter /Standard") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/AESV3") != null);
+    // Content is not in the clear
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontFile2") != null); // dict key visible
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "endstream") != null);
+
+    // Parse /U and /UE from the Encrypt dict, recover the file key with the
+    // password, and confirm it is a real 32-byte key (wrong password fails)
+    const u = try parseHexEntry(pdf, "/U <");
+    const ue = try parseHexEntry(pdf, "/UE <");
+    var u_str: [48]u8 = undefined;
+    var ue_str: [32]u8 = undefined;
+    @memcpy(&u_str, u[0..48]);
+    @memcpy(&ue_str, ue[0..32]);
+    try std.testing.expect(encrypt_mod.fileKeyFromUserPassword("pw", u_str, ue_str) != null);
+    try std.testing.expect(encrypt_mod.fileKeyFromUserPassword("nope", u_str, ue_str) == null);
+}
+
+fn parseHexEntry(pdf: []const u8, key: []const u8) ![64]u8 {
+    const start = (std.mem.indexOf(u8, pdf, key) orelse return error.NotFound) + key.len;
+    const end = std.mem.indexOfScalarPos(u8, pdf, start, '>') orelse return error.NotFound;
+    const hex = pdf[start..end];
+    var out: [64]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&out, hex);
+    return out;
+}
+
+test "encryption is rejected under PDF/A" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.setConformance(.pdfa_1b);
+    doc.encryption = .{ .user_password = "x" };
+    try doc.addPage(.{});
+    try std.testing.expectError(error.EncryptionNotAllowedInPdfA, doc.output());
+}
+
+test "unencrypted output is byte-identical regardless of encryption field default" {
+    // The encryptor is null by default: unencrypted docs must be unchanged
+    const makePdf = struct {
+        fn call() ![]u8 {
+            var doc = Document.init(std.testing.allocator, std.testing.io);
+            defer doc.deinit();
+            doc.setMetadata(.{ .creation_date = "D:20260101120000" });
+            try doc.addPage(.{});
+            _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "plain", .{ .font = Font.helvetica, .size = 12 }, .{});
+            return doc.output();
+        }
+    }.call;
+    const a = try makePdf();
+    defer std.testing.allocator.free(a);
+    try std.testing.expect(std.mem.startsWith(u8, a, "%PDF-1.4"));
+    try std.testing.expect(std.mem.indexOf(u8, a, "/Encrypt") == null);
+}

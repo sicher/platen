@@ -23,6 +23,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 - **Document metadata**: title, author, subject, keywords
 - **Links**: internal (TOC navigation) and external (URLs)
 - **PDF/A conformance**: PDF/A-1b and PDF/A-2b archival formats (VeraPDF validated)
+- **Encryption**: AES-256 (PDF 2.0 / security handler R6), password + permissions
 - **Compression**: FlateDecode for smaller file sizes
 
 ## Performance
@@ -560,6 +561,29 @@ Available conformance levels:
 
 Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotAllowed`.
 
+### Encryption
+
+AES-256 encryption (PDF 2.0, security-handler revision 6):
+
+```zig
+doc.encryption = .{
+    .user_password = "open-me",       // "" = encrypted at rest, opens without a prompt
+    .owner_password = "full-control", // defaults to user_password
+    .permissions = .{ .printing = false, .copying = false },
+};
+```
+
+All content streams - page contents, fonts, images - are encrypted with
+AES-256-CBC. Notes:
+- Forces PDF 2.0; rejected under PDF/A (`error.EncryptionNotAllowedInPdfA`).
+- Metadata strings (title, author) are **not** encrypted in this version
+  (`/StrF /Identity`); only content streams are.
+- Permissions are advisory - viewers honor them; only the user password
+  gates decryption.
+- Each document pays a fixed ~5ms password-hardening cost (the R6 key
+  derivation, by design); content encryption itself is negligible. Set
+  `doc.rng` to a seeded `std.Random` for deterministic output in tests.
+
 ### Font faces (parse once, use anywhere)
 
 `FontFace` is a parsed font file — caller-owned and shareable, exactly
@@ -947,8 +971,6 @@ Known gaps, documented so you don't discover them the hard way:
 - **No CJK line breaking.** CJK glyphs render correctly, but flowed text
   (`write`, `writeBlock`) only breaks at spaces, so long CJK runs will not
   wrap.
-- **No encryption.** Password protection (RC4/AES) is not supported yet;
-  planned for a post-1.0 release.
 - **No interactive features.** AcroForm fields, digital signatures, and
   file attachments are out of scope for 1.0.
 

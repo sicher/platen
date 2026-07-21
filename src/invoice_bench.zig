@@ -34,6 +34,7 @@ const Config = struct {
     count: u32 = 1000,
     compress: i32 = 0,
     threads: u32 = 1,
+    encrypt: bool = false,
     shared: bool = false,
     output_path: ?[]const u8 = null,
 };
@@ -124,7 +125,7 @@ pub fn main(init: std.process.Init) !void {
     // Warmup (excluded from timing; SlothPDF reports post-warmup numbers)
     var prng = std.Random.DefaultPrng.init(0xbe4c4);
     for (0..20) |i| {
-        const pdf = try renderInvoice(allocator, assets, @intCast(i), config.compress, prng.random());
+        const pdf = try renderInvoice(allocator, assets, @intCast(i), config.compress, config.encrypt, prng.random());
         allocator.free(pdf);
     }
 
@@ -136,7 +137,7 @@ pub fn main(init: std.process.Init) !void {
         prng = std.Random.DefaultPrng.init(0xbe4c4);
         const t0 = nanoNow();
         for (0..config.count) |i| {
-            const pdf = try renderInvoice(allocator, assets, @intCast(i), config.compress, prng.random());
+            const pdf = try renderInvoice(allocator, assets, @intCast(i), config.compress, config.encrypt, prng.random());
             total_bytes += pdf.len;
             allocator.free(pdf);
         }
@@ -158,6 +159,7 @@ pub fn main(init: std.process.Init) !void {
                 .first_index = start,
                 .doc_count = n_docs,
                 .compress = config.compress,
+                .encrypt = config.encrypt,
             };
             start += n_docs;
         }
@@ -197,7 +199,7 @@ pub fn main(init: std.process.Init) !void {
         // Render the sample outside the timed loop so --output works in
         // every mode
         var sample_prng = std.Random.DefaultPrng.init(0xbe4c4);
-        const pdf = try renderInvoice(allocator, assets, config.count - 1, config.compress, sample_prng.random());
+        const pdf = try renderInvoice(allocator, assets, config.count - 1, config.compress, config.encrypt, sample_prng.random());
         defer allocator.free(pdf);
         try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = path, .data = pdf });
         std.debug.print("\nwrote sample invoice: {s}\n", .{path});
@@ -210,6 +212,7 @@ const Worker = struct {
     first_index: u32,
     doc_count: u32,
     compress: i32,
+    encrypt: bool,
     thread: ?std.Thread = null,
     bytes: u64 = 0,
     err: ?anyerror = null,
@@ -218,7 +221,7 @@ const Worker = struct {
         var prng = std.Random.DefaultPrng.init(0xbe4c4 ^ (@as(u64, self.first_index) << 20));
         for (0..self.doc_count) |i| {
             const index = self.first_index + @as(u32, @intCast(i));
-            const pdf = renderInvoice(self.allocator, self.assets.*, index, self.compress, prng.random()) catch |e| {
+            const pdf = renderInvoice(self.allocator, self.assets.*, index, self.compress, self.encrypt, prng.random()) catch |e| {
                 self.err = e;
                 return;
             };
@@ -232,10 +235,11 @@ const Worker = struct {
 /// Updated with atomic adds so the threaded mode can share it.
 var phase_ns = [4]u64{ 0, 0, 0, 0 };
 
-fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compress: i32, rand: std.Random) ![]u8 {
+fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compress: i32, encrypt: bool, rand: std.Random) ![]u8 {
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
     doc.compression_level = compress;
+    if (encrypt) doc.encryption = .{ .user_password = "benchmark" };
 
     const t_font = nanoNow();
     // Face styles need no load call at all - the document instantiates its
@@ -366,6 +370,8 @@ fn parseArgs(args_obj: std.process.Args) !Config {
             config.count = try std.fmt.parseInt(u32, arg["--count=".len..], 10);
         } else if (std.mem.startsWith(u8, arg, "--compress=")) {
             config.compress = try std.fmt.parseInt(i32, arg["--compress=".len..], 10);
+        } else if (std.mem.eql(u8, arg, "--encrypt")) {
+            config.encrypt = true;
         } else if (std.mem.startsWith(u8, arg, "--threads=")) {
             config.threads = try std.fmt.parseInt(u32, arg["--threads=".len..], 10);
         } else if (std.mem.eql(u8, arg, "--shared")) {
