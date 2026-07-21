@@ -39,7 +39,7 @@ const Value = objects.Value;
 
 // Type aliases
 pub const StandardFont = fonts.StandardFont;
-pub const FontFamily = fonts.Family;
+
 pub const Font = layout.Font;
 pub const FontEncoding = layout.FontEncoding;
 pub const EmbeddedFontFamily = layout.EmbeddedFontFamily;
@@ -143,7 +143,9 @@ pub const DocumentMetadata = struct {
 const writeHex4 = text_render.writeHex4;
 
 /// Handle to a loaded font (either standard or embedded)
-pub const SharedFont = embedded.SharedFont;
+pub const FontFace = embedded.FontFace;
+pub const FontFamily = layout.FontFamily;
+pub const StandardFamilyName = layout.StandardFamilyName;
 pub const FontHandle = union(enum) {
     standard: StandardFont,
     embedded: *EmbeddedFont,
@@ -219,6 +221,8 @@ pub const Document = struct {
     // Document-wide feature overrides set via setFeature; applied to every
     // font at registration so load order doesn't matter.
     feature_overrides: std.ArrayListUnmanaged(FeatureOverride) = .empty,
+    // Per-document clones of caller-owned FontFaces, created on first use
+    face_instances: std.AutoHashMapUnmanaged(*const embedded.FontFace, *EmbeddedFont) = .empty,
     // Track all loaded images. `image_owned` runs in lockstep: true when the
     // document created the Image (loadImage*) and must destroy it, false when
     // it was registered by drawImage from a caller-owned Image - that allows
@@ -286,21 +290,16 @@ pub const Document = struct {
         }
         self.embedded_font_families.deinit(self.allocator);
         self.feature_overrides.deinit(self.allocator);
+        self.face_instances.deinit(self.allocator);
         // Clean up loaded images (only ones this document created)
         for (self.loaded_images.items, self.image_owned.items) |image, owned| {
-            if (owned) {
-                image.deinit();
-                self.allocator.destroy(image);
-            }
+            if (owned) image.deinit();
         }
         self.loaded_images.deinit(self.allocator);
         self.image_owned.deinit(self.allocator);
         // Clean up loaded SVGs (only ones this document created)
         for (self.loaded_svgs.items, self.svg_owned.items) |s, owned| {
-            if (owned) {
-                s.deinit();
-                self.allocator.destroy(s);
-            }
+            if (owned) s.deinit();
         }
         self.loaded_svgs.deinit(self.allocator);
         self.svg_owned.deinit(self.allocator);
@@ -462,70 +461,6 @@ pub const Document = struct {
         encoding: FontEncoding = .identity,
     };
 
-    /// Load a font from a SharedFont (parsed once by the caller, reusable
-    /// across many documents and threads). The document gets its own
-    /// lightweight clone; the SharedFont must outlive this document.
-    pub fn loadSharedFont(self: *Document, shared: *const embedded.SharedFont) !Font {
-        const emb = try shared.instantiate(self.allocator);
-        errdefer emb.deinit();
-        try self.registerFont(emb);
-        return Font{ .embedded = emb };
-    }
-
-    /// Load a font family from SharedFonts; variants are optional like
-    /// loadFontFamily. All SharedFonts must outlive this document.
-    pub fn loadSharedFontFamily(self: *Document, opts: SharedFontFamilyOptions) !Font {
-        // Each variant: the errdefer covers only the gap between instantiate
-        // and registerFont. Once registered, embedded_fonts owns the font and
-        // doc.deinit reclaims it on any later failure - a longer-lived
-        // errdefer would double-free.
-        const regular = try opts.regular.instantiate(self.allocator);
-        {
-            errdefer regular.deinit();
-            try self.registerFont(regular);
-        }
-
-        var bold: ?*EmbeddedFont = null;
-        if (opts.bold) |b| {
-            const f = try b.instantiate(self.allocator);
-            errdefer f.deinit();
-            try self.registerFont(f);
-            bold = f;
-        }
-        var italic: ?*EmbeddedFont = null;
-        if (opts.italic) |i| {
-            const f = try i.instantiate(self.allocator);
-            errdefer f.deinit();
-            try self.registerFont(f);
-            italic = f;
-        }
-        var bold_italic: ?*EmbeddedFont = null;
-        if (opts.bold_italic) |bi| {
-            const f = try bi.instantiate(self.allocator);
-            errdefer f.deinit();
-            try self.registerFont(f);
-            bold_italic = f;
-        }
-
-        const family = try self.allocator.create(EmbeddedFontFamily);
-        errdefer self.allocator.destroy(family);
-        family.* = .{
-            .regular = regular,
-            .bold = bold,
-            .italic = italic,
-            .bold_italic = bold_italic,
-        };
-        try self.embedded_font_families.append(self.allocator, family);
-        return Font{ .embedded_family = family };
-    }
-
-    pub const SharedFontFamilyOptions = struct {
-        regular: *const embedded.SharedFont,
-        bold: ?*const embedded.SharedFont = null,
-        italic: ?*const embedded.SharedFont = null,
-        bold_italic: ?*const embedded.SharedFont = null,
-    };
-
     /// Load a font family from memory buffers.
     /// Lifetime: BORROWS all buffers - they must outlive the Document.
     /// Only the regular variant is required; others are optional.
@@ -615,6 +550,45 @@ pub const Document = struct {
         feature: opentype.Feature,
         enabled: bool,
     };
+
+    /// Resolve .face/.family styles to this document's private clone
+    /// (instantiating on first use); all other styles pass through. Internal
+    /// layers below the public entry points only ever see resolved styles.
+    fn normalizeStyle(self: *Document, style: TextStyle) !TextStyle {
+        switch (style.font) {
+            .face => |f| {
+                // A single face has no variants (same rule as .embedded)
+                if (style.bold or style.italic) return error.FontVariantNotLoaded;
+                var s = style;
+                s.font = .{ .embedded = try self.faceInstance(f) };
+                return s;
+            },
+            .family => |fam| {
+                const f = try fam.resolve(style.bold, style.italic);
+                var s = style;
+                s.font = .{ .embedded = try self.faceInstance(f) };
+                // Flags have served their purpose (variant selection)
+                s.bold = false;
+                s.italic = false;
+                return s;
+            },
+            else => return style,
+        }
+    }
+
+    /// This document's clone of a caller-owned face (created on first use).
+    fn faceInstance(self: *Document, f: *const embedded.FontFace) !*EmbeddedFont {
+        if (self.face_instances.get(f)) |emb| return emb;
+        const emb = try f.instantiate(self.allocator);
+        {
+            errdefer emb.deinit();
+            try self.registerFont(emb);
+        }
+        // Registered: the document owns emb now. A failed map insert just
+        // means the next use creates another clone - wasteful, not unsound.
+        self.face_instances.put(self.allocator, f, emb) catch {};
+        return emb;
+    }
 
     /// Register an embedded font and apply document-wide feature overrides,
     /// so setFeature affects fonts regardless of load order.
@@ -836,12 +810,6 @@ pub const Document = struct {
         try self.feature_overrides.append(self.allocator, .{ .feature = feature, .enabled = enabled });
     }
 
-    /// Set OpenType feature for a specific embedded font
-    pub fn setFontFeature(self: *Document, font: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
-        _ = self;
-        font.setFeature(feature, enabled);
-    }
-
     /// Get font metrics for a specific TextStyle.
     pub fn getFontMetricsStyled(_: *Document, style: TextStyle) FontMetrics {
         const size = style.size;
@@ -851,6 +819,9 @@ pub const Document = struct {
         const emb: ?*EmbeddedFont = switch (style.font) {
             .embedded => |e| e,
             .embedded_family => |fam| fam.resolve(style.bold, style.italic) catch fam.regular,
+            // Metrics are immutable prototype fields - no instantiation needed
+            .face => |f| f.prototype,
+            .family => |fam| if (fam.resolve(style.bold, style.italic)) |f| f.prototype else |_| fam.regular.prototype,
             else => null,
         };
 
@@ -883,11 +854,14 @@ pub const Document = struct {
     /// Measure text dimensions with explicit style (without rendering).
     /// Handles embedded fonts (real glyph advances plus kerning) as well as
     /// the standard 14 - it must agree with what write*/draw* actually render.
-    pub fn measureStyled(self: *Document, text_str: []const u8, style: TextStyle) TextMetrics {
-        _ = self;
+    pub fn measureStyled(self: *Document, text_str: []const u8, style: TextStyle) !TextMetrics {
+        // .face/.family styles resolve to this document's clone (first use
+        // may instantiate, hence the error union) so document-level feature
+        // overrides are reflected in measurement
+        const s = try self.normalizeStyle(style);
         return .{
-            .width = metrics.measureTextStyled(text_str, style),
-            .height = style.size * 1.2,
+            .width = metrics.measureTextStyled(text_str, s),
+            .height = s.size * 1.2,
             .char_count = text_str.len,
         };
     }
@@ -998,8 +972,9 @@ pub const Document = struct {
     /// pos is in user coordinates (top-left origin), converted to PDF coordinates internally.
     /// Returns the rendered width: computed from the shaped glyph run for
     /// embedded fonts (no second shaping pass), measured otherwise.
-    fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !f64 {
+    fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style_in: TextStyle, word_spacing: f64) !f64 {
         if (self.pages.items.len == 0) return error.NoPage;
+        const style = try self.normalizeStyle(style_in);
 
         var page = &self.pages.items[self.current_page];
         const page_alloc = page.pageAllocator();
@@ -1017,8 +992,9 @@ pub const Document = struct {
                 if (style.bold or style.italic) return error.FontVariantNotLoaded;
                 // Fonts are per-document (they accumulate subset state):
                 // using a font loaded into another Document would silently
-                // render nothing and pollute that document's subset. Use
-                // SharedFont to reuse a parsed font across documents.
+                // render nothing and pollute that document's subset. Use a
+                // FontFace (.face/.family styles) to reuse a parsed font
+                // across documents.
                 if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
@@ -1039,7 +1015,9 @@ pub const Document = struct {
                 }
                 break :blk .{ .embedded = emb };
             },
-            .family, .symbol, .zapf_dingbats => blk: {
+            // Normalized above - internal emission never sees these
+            .face, .family => unreachable,
+            .standard, .symbol, .zapf_dingbats => blk: {
                 const std_font = style.standardFont() orelse return error.InvalidFont;
                 try page.markFontUsed(self.allocator, std_font);
                 try self.used_fonts.put(self.allocator, std_font, {}); // Track at document level
@@ -1088,8 +1066,15 @@ pub const Document = struct {
 
     /// Measures text width with explicit style.
     /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
-    fn getTextWidthStyled(self: *Document, str: []const u8, style: TextStyle) f64 {
-        _ = self; // Document not needed for measurement with explicit style
+    fn getTextWidthStyled(self: *Document, str: []const u8, style_in: TextStyle) f64 {
+        // Resolve faces to this document's clone. On OOM the prototype
+        // fallback in metrics still yields correct widths; a variant
+        // contract violation (bold on a single face) measures as 0 - public
+        // entry points normalize with `try` first, so this is defensive.
+        const style = self.normalizeStyle(style_in) catch |err| switch (err) {
+            error.OutOfMemory => style_in,
+            else => return 0,
+        };
 
         // Fast path: no soft-hyphens
         if (!containsSoftHyphens(str)) {
@@ -1122,7 +1107,10 @@ pub const Document = struct {
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
-    pub fn write(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: WriteOptions) !WriteResult {
+    pub fn write(self: *Document, region: *Region, str: []const u8, style_in: TextStyle, opts: WriteOptions) !WriteResult {
+        // Resolve .face/.family up front so measure_only paths error on
+        // invalid styles (e.g. bold on a single face) exactly like rendering
+        const style = try self.normalizeStyle(style_in);
         const line_height = style.size * opts.line_height;
         const font_metrics = self.getFontMetricsStyled(style);
         const ascender = font_metrics.ascender;
@@ -1820,8 +1808,9 @@ pub const Document = struct {
 
     /// Write styled text into a region with alignment support.
     /// Uses Knuth-Plass optimal line breaking when requested.
-    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style: TextStyle, opts: ParagraphOptions) !WriteResult {
+    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style_in: TextStyle, opts: ParagraphOptions) !WriteResult {
         if (self.pages.items.len == 0) return error.NoPage;
+        const style = try self.normalizeStyle(style_in);
 
         const line_height = style.size * opts.line_height;
         const line_width = region.contentWidth();
@@ -2461,7 +2450,14 @@ pub const Document = struct {
             var strikeout_pos: f64 = 250;
             var strikeout_thick: f64 = 50;
 
-            if (base_style.embeddedFont()) |emb| {
+            const deco_emb: ?*EmbeddedFont = switch (base_style.font) {
+                .embedded => |e| e,
+                .embedded_family => |fam| fam.resolve(base_style.bold, base_style.italic) catch fam.regular,
+                .face => |f| f.prototype,
+                .family => |fam| if (fam.resolve(base_style.bold, base_style.italic)) |f| f.prototype else |_| fam.regular.prototype,
+                else => null,
+            };
+            if (deco_emb) |emb| {
                 underline_pos = @floatFromInt(emb.underline_position);
                 underline_thick = @floatFromInt(emb.underline_thickness);
                 strikeout_pos = @floatFromInt(emb.strikeout_position);
@@ -3569,8 +3565,12 @@ pub const Document = struct {
         for (self.loaded_svgs.items, 0..) |s, i| {
             const svg_id = ids.svg_base_ids.items[i];
 
-            // Generate PDF content stream from SVG
-            const svg_content = try s.toPdfContent(self.allocator);
+            // Generate PDF content stream from SVG. The Svg is const (safe
+            // to share across documents/threads); opacity pairs land in a
+            // per-render list this document owns.
+            var opacity_states = std.ArrayListUnmanaged(svg.OpacityState).empty;
+            defer opacity_states.deinit(self.allocator);
+            const svg_content = try s.toPdfContent(self.allocator, &opacity_states);
             defer self.allocator.free(svg_content);
 
             try w.beginObject(svg_id);
@@ -3589,7 +3589,7 @@ pub const Document = struct {
             try form_dict.put("BBox", .{ .array_val = &bbox });
 
             // Build resources dictionary (may include ExtGState, Font, or both)
-            const has_transparency = s.opacity_states.items.len > 0;
+            const has_transparency = opacity_states.items.len > 0;
             const has_text = s.used_fonts.items.len > 0;
 
             if (has_transparency or has_text) {
@@ -3606,8 +3606,8 @@ pub const Document = struct {
                 }
 
                 if (has_transparency) {
-                    gs_dicts = try self.allocator.alloc(Dict, s.opacity_states.items.len);
-                    for (s.opacity_states.items, 0..) |state, idx| {
+                    gs_dicts = try self.allocator.alloc(Dict, opacity_states.items.len);
+                    for (opacity_states.items, 0..) |state, idx| {
                         gs_dicts[idx] = Dict.init(self.allocator);
                         try gs_dicts[idx].put("Type", Value.name("ExtGState"));
                         try gs_dicts[idx].put("ca", Value.real(state.fill_opacity));

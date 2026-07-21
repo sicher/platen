@@ -15,7 +15,7 @@
 //!   --threads=N     Worker threads, each rendering its own documents
 //!                   (default: 1; the library is stateless, so concurrent
 //!                   documents need no locking)
-//!   --shared        Parse fonts and logo once (SharedFont + caller-owned
+//!   --shared        Parse fonts and logo once (FontFace + caller-owned
 //!                   Svg) instead of per document
 //!   --output=PATH   Write a sample invoice to a file for inspection
 
@@ -81,8 +81,8 @@ const Assets = struct {
     inter_bold: []u8,
     logo_svg: []u8,
     // --shared mode: parsed once, reused by every document (and thread)
-    shared_regular: ?platen.SharedFont = null,
-    shared_bold: ?platen.SharedFont = null,
+    shared_regular: ?platen.FontFace = null,
+    shared_bold: ?platen.FontFace = null,
     shared_svg: ?*platen.Svg = null,
 };
 
@@ -103,8 +103,8 @@ pub fn main(init: std.process.Init) !void {
         .logo_svg = try std.Io.Dir.cwd().readFileAlloc(app_io, "platen.svg", allocator, .limited(1024 * 1024)),
     };
     if (config.shared) {
-        assets.shared_regular = try platen.SharedFont.load(allocator, assets.inter_regular);
-        assets.shared_bold = try platen.SharedFont.load(allocator, assets.inter_bold);
+        assets.shared_regular = try platen.FontFace.fromMemory(allocator, assets.inter_regular);
+        assets.shared_bold = try platen.FontFace.fromMemory(allocator, assets.inter_bold);
         assets.shared_svg = try platen.Svg.fromMemory(allocator, assets.logo_svg);
     }
     defer {
@@ -112,7 +112,6 @@ pub fn main(init: std.process.Init) !void {
         if (assets.shared_bold) |*s| s.deinit();
         if (assets.shared_svg) |s| {
             s.deinit();
-            allocator.destroy(s);
         }
         allocator.free(assets.inter_regular);
         allocator.free(assets.inter_bold);
@@ -239,11 +238,13 @@ fn renderInvoice(allocator: std.mem.Allocator, assets: Assets, index: u32, compr
     doc.compression_level = compress;
 
     const t_font = nanoNow();
-    const inter = if (assets.shared_regular != null)
-        try doc.loadSharedFontFamily(.{
+    // Face styles need no load call at all - the document instantiates its
+    // private clones lazily on first use
+    const inter: platen.Font = if (assets.shared_regular != null)
+        .{ .family = .{
             .regular = &assets.shared_regular.?,
             .bold = &assets.shared_bold.?,
-        })
+        } }
     else
         try doc.loadFontFamilyFromMemory(.{
             .regular = assets.inter_regular,

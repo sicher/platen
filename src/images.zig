@@ -66,6 +66,7 @@ pub const Image = struct {
                 self.allocator.free(icc);
             }
         }
+        self.allocator.destroy(self);
     }
 
     /// Load image from file, detecting format from header
@@ -73,13 +74,15 @@ pub const Image = struct {
         const data = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(100 * 1024 * 1024));
         errdefer allocator.free(data);
 
-        return fromMemory(allocator, data, true);
+        return fromMemoryLevel(allocator, data, true, 6);
     }
 
-    /// Load image from memory buffer
-    /// If owns_data is true, this Image takes ownership of the data slice
-    pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*Image {
-        return fromMemoryLevel(allocator, data, owns_data, 6);
+    /// Load image from memory buffer. Caller-owned and shareable across
+    /// documents/threads; free with deinit() after every document using it
+    /// is deinitialized. Lifetime: BORROWS `data` - it must outlive the
+    /// Image (JPEG bytes are embedded directly from the buffer).
+    pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8) !*Image {
+        return fromMemoryLevel(allocator, data, false, 6);
     }
 
     /// Load image from memory buffer, compressing PNG pixel data at the given
@@ -708,7 +711,6 @@ test "parse JPEG file" {
         if (err == error.FileNotFound) return;
         return err;
     };
-    defer allocator.destroy(image);
     defer image.deinit();
 
     try std.testing.expectEqual(@as(u32, 2924), image.width);
@@ -726,7 +728,6 @@ test "parse PNG file" {
         if (err == error.FileNotFound) return;
         return err;
     };
-    defer allocator.destroy(image);
     defer image.deinit();
 
     try std.testing.expectEqual(@as(u32, 1024), image.width);
@@ -752,8 +753,7 @@ test "parse indexed PNG with tRNS (2-bit palette)" {
         0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     };
 
-    const image = try Image.fromMemory(allocator, &png, false);
-    defer allocator.destroy(image);
+    const image = try Image.fromMemory(allocator, &png);
     defer image.deinit();
 
     try std.testing.expectEqual(@as(u32, 4), image.width);

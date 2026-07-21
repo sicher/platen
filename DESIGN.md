@@ -928,31 +928,58 @@ draws. Three rules keep it true:
   (`imageCompressionLevel`): compressed once at load, dominate file
   size — fast levels are a bad trade there.
 
-### SharedFont (session #25)
-`SharedFont.load` parses a font once — ttf tables, metrics, and **all**
-OpenType lookups eagerly (`parseGSUB` → `parseAllGSUBLookups`, so nothing
-parses lazily later). `Document.loadSharedFont` clones a per-document
-`EmbeddedFont`: struct copy shares the immutable parsed tables, while all
-mutable state is fresh and owned (glyph tracking maps, subset data,
-scratch buffers, and the OpenTypeFeatures scratch/kern-cache). Borrow
-flags (`EmbeddedFont.borrowed`, `OpenTypeFeatures.borrowed_tables`) make
-deinit skip shared memory. Safe across threads because clones never write
-to shared structures; correctness contract: SharedFont output is
-byte-identical to per-document parsing (regression-tested).
+### FontFace (sessions #25/#26)
+`FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,
+and **all** OpenType lookups eagerly (`parseGSUB` → `parseAllGSUBLookups`,
+so nothing parses lazily later). Faces go directly into styles
+(`Font{ .face = &f }`, `Font{ .family = ... }`); the Document normalizes
+such styles at its public entry points (writeTextStyled, measureStyled,
+getTextWidthStyled, getFontMetricsStyled) into a per-document
+`EmbeddedFont` clone held in `face_instances`, so internal layout/render
+layers only ever see `.embedded`. The clone is a struct copy sharing the
+immutable parsed tables while all mutable state is fresh and owned (glyph
+tracking maps, subset data, scratch buffers, OT scratch/kern-cache).
+Borrow flags (`EmbeddedFont.borrowed`, `OpenTypeFeatures.borrowed_tables`)
+make deinit skip shared memory. Two-phase life cycle: configuration
+(setFeature/warmup) until the first instantiation freezes the face
+(`error.FaceFrozen` afterwards - flag changes wouldn't propagate and
+warmup would race with cloning). Safe across threads because clones never
+write to shared structures; contract: face output is byte-identical to
+per-document parsing (regression-tested).
 
 Two prerequisites make this sound — if either changes, revisit:
 - `ttf.Font` mutates only during parse (cmap offsets, ascii caches).
 - GSUB/GPOS parse everything eagerly; shaping only reads lookup tables.
+
+### Svg render-time constness (session #26 audit)
+`Svg.toPdfContent` takes `*const Svg`: opacity pairs discovered during
+rendering land in a caller-owned output list (the document builds the
+/GS{n} ExtGState resources from it), instead of mutating the Svg. This
+makes shared SVGs genuinely thread-safe - previously any SVG with
+opacity < 1.0 appended to itself during output(), a data race for
+cross-thread sharing that single-threaded dedupe masked. The transparency
+signal color-font code relies on is now the returned list's length.
+Constness is compiler-enforced; no test can regress it silently.
+
+### Asset cleanup
+Image.deinit and Svg.deinit destroy the struct too (single call, matching
+FontFace.deinit). Image.fromMemory takes (alloc, bytes) and always
+borrows; ownership transfer lives on the internal fromMemoryLevel.
 
 ### Asset ownership
 Uniform rule, enforced at use time: assets obtained from a Document
 (loadFont/loadImage/loadSvg) are document-owned - using them in another
 document errors (ForeignFont at write time; ForeignImage/ForeignSvg at
 draw time, via the `document_owned` marker). Assets the caller creates
-(SharedFont.load, Image.fromMemory, Svg.fromMemory) are caller-owned and
+(FontFace.fromMemory/fromFile, Image.fromMemory, Svg.fromMemory) are caller-owned and
 shareable. Rationale: fonts mutate (subset state - silent blank output +
 cross-doc pollution before the guard); images/SVGs are immutable but
 die with their owning document (dangling data at output time).
+Scope: these are logic-error guards that require live memory - a
+dangling pointer (owner already deinitialized) is UB before any check
+runs, like any freed pointer in Zig. Structural prevention would need
+document-scoped generational handles instead of pointers; judged not
+worth the ergonomics cost.
 
 `loaded_images`/`loaded_svgs` carry lockstep `*_owned` bools: documents
 destroy only assets they created (loadImage*/loadSvg*). Assets

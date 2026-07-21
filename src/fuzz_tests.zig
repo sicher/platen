@@ -141,9 +141,8 @@ fn fuzzImageFromMemory(_: void, smith: *Smith) !void {
     defer allocator.free(buf);
     const data = fuzzInput(smith, buf);
 
-    const image = images.Image.fromMemory(allocator, data, false) catch return;
+    const image = images.Image.fromMemory(allocator, data) catch return;
     image.deinit();
-    allocator.destroy(image);
 }
 
 test "fuzz images.Image.fromMemory" {
@@ -178,11 +177,12 @@ fn fuzzSvgFromMemory(_: void, smith: *Smith) !void {
     const s = svg.Svg.fromMemory(allocator, data) catch return;
     defer {
         s.deinit();
-        allocator.destroy(s);
     }
 
     // Also exercise rendering of whatever parsed.
-    const content = s.toPdfContent(allocator) catch return;
+    var states = std.ArrayListUnmanaged(svg.OpacityState).empty;
+    defer states.deinit(allocator);
+    const content = s.toPdfContent(allocator, &states) catch return;
     allocator.free(content);
 }
 
@@ -472,9 +472,10 @@ fn exerciseSvgDoc(allocator: std.mem.Allocator, maybe_doc: ?[]const u8) void {
     const s = svg.Svg.fromMemory(allocator, doc) catch return;
     defer {
         s.deinit();
-        allocator.destroy(s);
     }
-    const content = s.toPdfContent(allocator) catch return;
+    var states = std.ArrayListUnmanaged(svg.OpacityState).empty;
+    defer states.deinit(allocator);
+    const content = s.toPdfContent(allocator, &states) catch return;
     allocator.free(content);
 }
 

@@ -295,7 +295,7 @@ test "Document measureText" {
     defer doc.deinit();
 
     const style = TextStyle{ .font = Font.helvetica, .size = 12 };
-    const m = doc.measureStyled("Hello", style);
+    const m = try doc.measureStyled("Hello", style);
 
     // "Hello" = H(722) + e(556) + l(222) + l(222) + o(556) = 2278
     // Width = 2278 * 12 / 1000 = 27.336
@@ -308,7 +308,7 @@ test "Document measureText with spacing" {
     defer doc.deinit();
 
     const style = TextStyle{ .font = Font.helvetica, .size = 12, .char_spacing = 2.0 };
-    const m = doc.measureStyled("Hello", style);
+    const m = try doc.measureStyled("Hello", style);
 
     // Base ~27.336 + 4 * 2.0 = 35.336
     try std.testing.expectApproxEqAbs(@as(f64, 35.336), m.width, 0.01);
@@ -3357,7 +3357,6 @@ test "parallel stream compression produces byte-identical output" {
     try std.testing.expectEqualSlices(u8, single, threaded);
 }
 
-
 test "measureStyled matches embedded font advances" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
@@ -3371,10 +3370,10 @@ test "measureStyled matches embedded font advances" {
     const emb = style.embeddedFont().?;
     try std.testing.expectApproxEqAbs(
         emb.measureTextWidth(text, 10),
-        doc.measureStyled(text, style).width,
+        (try doc.measureStyled(text, style)).width,
         0.001,
     );
-    try std.testing.expectApproxEqAbs(@as(f64, 12.0), doc.measureStyled(text, style).height, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f64, 12.0), (try doc.measureStyled(text, style)).height, 0.001);
 }
 
 test "measurement is independent of render order" {
@@ -3386,10 +3385,10 @@ test "measurement is independent of render order" {
     // Kern-heavy pairs, so missing GPOS data changes the measured width.
     const text = "AVATAR Wavelength To Ty. Justified copy.";
 
-    const before_render = doc.measureStyled(text, style).width;
+    const before_render = (try doc.measureStyled(text, style)).width;
     try doc.addPage(.{});
     _ = try doc.writeAt(.{ .x = 50, .y = 50 }, text, style, .{});
-    const after_render = doc.measureStyled(text, style).width;
+    const after_render = (try doc.measureStyled(text, style)).width;
 
     // Lazy GPOS parsing must not make the first measurement disagree with
     // later ones - justification/alignment depend on a stable width.
@@ -3407,17 +3406,15 @@ test "caller-owned Image and Svg can be shared across documents" {
     // Decode once, draw into two documents; deinit of neither document may
     // destroy the caller-owned assets (double-free is caught by the testing
     // allocator).
-    const image = try images_mod.Image.fromMemory(allocator, png_data, false);
+    const image = try images_mod.Image.fromMemory(allocator, png_data);
     defer {
         image.deinit();
-        allocator.destroy(image);
     }
     const svg = try svg_mod.Svg.fromMemory(allocator,
         \\<svg width="40" height="40"><rect x="0" y="0" width="40" height="40" fill="blue"/></svg>
     );
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     for (0..2) |_| {
@@ -3475,8 +3472,8 @@ test "embedded-font measurement includes char_spacing" {
     const spaced = TextStyle{ .font = font, .size = 12, .char_spacing = 2.0 };
     const text = "Hello spacing"; // 13 glyphs -> 12 gaps
 
-    const w_plain = doc.measureStyled(text, plain).width;
-    const w_spaced = doc.measureStyled(text, spaced).width;
+    const w_plain = (try doc.measureStyled(text, plain)).width;
+    const w_spaced = (try doc.measureStyled(text, spaced)).width;
     try std.testing.expectApproxEqAbs(w_plain + 12 * 2.0, w_spaced, 0.001);
 }
 
@@ -3519,7 +3516,7 @@ test "writeAt anchor places text left, center, and right of the point" {
     const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
     const style = TextStyle{ .font = font, .size = 12 };
     const text = "anchored";
-    const w = doc.measureStyled(text, style).width;
+    const w = (try doc.measureStyled(text, style)).width;
 
     const r_left = try doc.writeAt(.{ .x = 300, .y = 100 }, text, style, .{});
     const r_center = try doc.writeAt(.{ .x = 300, .y = 120 }, text, style, .{ .anchor = .center });
@@ -3667,16 +3664,16 @@ test "clipPath emits path ops and W n" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "h\nW n") != null);
 }
 
-test "SharedFont documents are byte-identical to per-document parsing" {
+test "FontFace documents are byte-identical to per-document parsing" {
     const allocator = std.heap.smp_allocator; // clones + threads later
     const embedded_mod = @import("embedded.zig");
 
     const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(data);
 
-    var shared = try embedded_mod.SharedFont.load(allocator, data);
-    defer shared.deinit();
-    shared.warmup("Warm kerning for AVATAR Wavelength offices");
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
+    try face.warmup("Warm kerning for AVATAR Wavelength offices");
 
     const text = "Shared fonts: AVATAR office ffi 1/2 -> done.";
 
@@ -3690,14 +3687,13 @@ test "SharedFont documents are byte-identical to per-document parsing" {
     const pdf_a = try doc_a.output();
     defer allocator.free(pdf_a);
 
-    // Two shared-font documents (reuse across documents)
+    // Two face-based documents (reuse across documents; no load call)
     for (0..2) |_| {
         var doc_b = Document.init(allocator, std.testing.io);
         defer doc_b.deinit();
         doc_b.setMetadata(.{ .creation_date = "D:20260101120000" });
-        const font_b = try doc_b.loadSharedFont(&shared);
         try doc_b.addPage(.{});
-        _ = try doc_b.writeAt(.{ .x = 50, .y = 100 }, text, .{ .font = font_b, .size = 12 }, .{});
+        _ = try doc_b.writeAt(.{ .x = 50, .y = 100 }, text, .{ .font = .{ .face = &face }, .size = 12 }, .{});
         const pdf_b = try doc_b.output();
         defer allocator.free(pdf_b);
 
@@ -3705,26 +3701,26 @@ test "SharedFont documents are byte-identical to per-document parsing" {
     }
 }
 
-test "SharedFont clones own all scratch buffers (no shared mutable state)" {
+test "FontFace clones own all scratch buffers (no shared mutable state)" {
     const allocator = std.testing.allocator;
     const embedded_mod = @import("embedded.zig");
 
     const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(data);
 
-    var shared = try embedded_mod.SharedFont.load(allocator, data);
-    defer shared.deinit();
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
     // Grow the prototype's scratch buffers (calt-heavy text exercises
     // scratch_c, the buffer the review found shared)
-    shared.warmup("Warmup with arrows -> => and ligatures ffi ffl offices");
+    try face.warmup("Warmup with arrows -> => and ligatures ffi ffl offices");
 
-    const clone = try shared.instantiate(allocator);
+    const clone = try face.instantiate(allocator);
     defer clone.deinit();
     // Shape calt-heavy text on the clone so its scratch buffers are in use
     const glyphs = try clone.markUnicodeCharsUsed("clone text -> with calt => arrows", null);
     clone.allocator.free(glyphs);
 
-    const proto_ot = shared.prototype.ot_features.?;
+    const proto_ot = face.prototype.ot_features.?;
     const clone_ot = clone.ot_features.?;
     // A clone's scratch storage must never alias the prototype's
     if (clone_ot.scratch_c.capacity > 0 and proto_ot.scratch_c.capacity > 0) {
@@ -3737,7 +3733,7 @@ test "SharedFont clones own all scratch buffers (no shared mutable state)" {
     // double-free through the deinits above
 }
 
-test "loadSharedFontFamily survives allocation failure at every point" {
+test "face family style survives allocation failure at every point" {
     const allocator = std.testing.allocator;
     const embedded_mod = @import("embedded.zig");
 
@@ -3746,24 +3742,34 @@ test "loadSharedFontFamily survives allocation failure at every point" {
     const bold_data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Bold.ttf", allocator, .limited(16 * 1024 * 1024));
     defer allocator.free(bold_data);
 
-    var shared_reg = try embedded_mod.SharedFont.load(allocator, reg_data);
-    defer shared_reg.deinit();
-    var shared_bold = try embedded_mod.SharedFont.load(allocator, bold_data);
-    defer shared_bold.deinit();
+    var face_reg = try embedded_mod.FontFace.fromMemory(allocator, reg_data);
+    defer face_reg.deinit();
+    var face_bold = try embedded_mod.FontFace.fromMemory(allocator, bold_data);
+    defer face_bold.deinit();
 
     // Every allocation failure point must leave the Document consistent:
     // no leak, no double-free when doc.deinit runs (the review found an
     // errdefer that double-freed the regular font after registration)
     const Ctx = struct {
-        reg: *embedded_mod.SharedFont,
-        bold: *embedded_mod.SharedFont,
+        reg: *embedded_mod.FontFace,
+        bold: *embedded_mod.FontFace,
         fn run(failing: std.mem.Allocator, ctx: @This()) !void {
             var doc = Document.init(failing, std.testing.io);
             defer doc.deinit();
-            _ = try doc.loadSharedFontFamily(.{ .regular = ctx.reg, .bold = ctx.bold });
+            try doc.addPage(.{});
+            // Family style: variant resolution + first-use instantiation of
+            // both faces, at every possible allocation-failure point
+            const style = TextStyle{
+                .font = .{ .family = .{ .regular = ctx.reg, .bold = ctx.bold } },
+                .size = 11,
+            };
+            _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "regular", style, .{});
+            var bold_style = style;
+            bold_style.bold = true;
+            _ = try doc.writeAt(.{ .x = 50, .y = 70 }, "bold", bold_style, .{});
         }
     };
-    try std.testing.checkAllAllocationFailures(allocator, Ctx.run, .{Ctx{ .reg = &shared_reg, .bold = &shared_bold }});
+    try std.testing.checkAllAllocationFailures(allocator, Ctx.run, .{Ctx{ .reg = &face_reg, .bold = &face_bold }});
 }
 
 test "using a font from another document errors instead of silently rendering nothing" {
@@ -3799,9 +3805,92 @@ test "another document's image and svg are rejected, caller-created remain share
     const mine = try svg_mod.Svg.fromMemory(std.testing.allocator, "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>");
     defer {
         mine.deinit();
-        std.testing.allocator.destroy(mine);
     }
     try doc_b.drawSvg(mine, .{ .x = 0, .y = 20, .width = 10, .height = 10 });
     const pdf = try doc_b.output();
     doc_b.allocator.free(pdf);
+}
+
+test "FontFace configuration is rejected after first use" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
+
+    // Configuration phase: allowed
+    try face.setFeature(.dlig, true);
+    try face.warmup("configure me");
+
+    // First document use freezes the face
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "frozen now", .{ .font = .{ .face = &face }, .size = 12 }, .{});
+
+    try std.testing.expectError(error.FaceFrozen, face.setFeature(.liga, false));
+    try std.testing.expectError(error.FaceFrozen, face.warmup("too late"));
+
+    // The dlig default made it into the document's clone
+    const clone = doc.face_instances.get(&face).?;
+    try std.testing.expect(clone.feature_flags.isEnabled(.dlig));
+}
+
+test "measure_only errors on invalid face variant like rendering does" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
+
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    var region = Region{ .x = 50, .y = 50, .width = 300, .height = 200 };
+
+    // bold on a single face is invalid; measure_only must say so instead of
+    // silently measuring regular-weight widths
+    const bad = TextStyle{ .font = .{ .face = &face }, .size = 12, .bold = true };
+    try std.testing.expectError(
+        error.FontVariantNotLoaded,
+        doc.write(&region, "hello world", bad, .{ .measure_only = true }),
+    );
+}
+
+test "multi-span decoration uses the face's real underline metrics" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
+
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+    try doc.addPage(.{});
+    var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
+
+    // Two decorated spans force the multi-style path
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("under ", .{ .decoration = .{ .underline = true } });
+    try st.append("lined", .{ .color = Color.red, .decoration = .{ .underline = true } });
+
+    const style = TextStyle{ .font = .{ .face = &face }, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{});
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // The underline rect height must come from Inter's post table, not the
+    // base-14 default (50/1000 -> 0.60 at 12pt)
+    const expected_thick = @as(f64, @floatFromInt(face.prototype.underline_thickness)) * 12.0 / 1000.0;
+    try std.testing.expect(@abs(expected_thick - 0.60) > 0.05); // premise: Inter differs from default
+    var buf: [32]u8 = undefined;
+    const needle = try std.fmt.bufPrint(&buf, "{d:.2} re", .{expected_thick});
+    try std.testing.expect(std.mem.indexOf(u8, pdf, needle) != null);
 }

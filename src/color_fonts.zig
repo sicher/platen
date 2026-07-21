@@ -94,10 +94,7 @@ pub const ColorFontPlan = struct {
         self.pages.deinit(allocator);
         self.res.deinit();
         for (self.images.items) |img| switch (img) {
-            .color => |c| {
-                c.deinit();
-                allocator.destroy(c);
-            },
+            .color => |c| c.deinit(), // deinit destroys the Image itself
             .mask => |m| allocator.free(m.rows),
         };
         self.images.deinit(allocator);
@@ -281,15 +278,16 @@ fn renderSvgGlyphCharProc(doc: *Document, emb: *EmbeddedFont, gid: u16) ![]u8 {
     const s = svg.Svg.fromMemory(doc.allocator, svg_doc) catch return error.NotAColorGlyph;
     defer {
         s.deinit();
-        doc.allocator.destroy(s);
     }
 
-    const ops = try s.toPdfContent(doc.allocator);
+    var opacity_states = std.ArrayListUnmanaged(svg.OpacityState).empty;
+    defer opacity_states.deinit(doc.allocator);
+    const ops = try s.toPdfContent(doc.allocator, &opacity_states);
     defer doc.allocator.free(ops);
     // Transparency/text usage is only known after rendering (the ops
     // would reference /GS{n} or font resources that the Type3 font's
     // shared Resources dict does not carry).
-    if (s.hasTransparency() or s.hasText()) return error.NotAColorGlyph;
+    if (opacity_states.items.len > 0 or s.hasText()) return error.NotAColorGlyph;
 
     const wx = emb.glyphAdvanceFontUnits(gid);
     return std.fmt.allocPrint(doc.allocator, "{d} 0 d0\n{s}", .{ wx, ops });
@@ -308,11 +306,10 @@ fn renderBitmapGlyphCharProc(doc: *Document, plan: *ColorFontPlan, emb: *Embedde
         .png => |png| {
             // The image borrows the PNG slice (font data outlives the
             // plan) and owns only its decoded/recompressed buffers.
-            const img = try Image.fromMemory(doc.allocator, png, false);
+            const img = try Image.fromMemory(doc.allocator, png);
             {
                 errdefer {
                     img.deinit();
-                    doc.allocator.destroy(img);
                 }
                 try plan.images.append(doc.allocator, .{ .color = img });
             }

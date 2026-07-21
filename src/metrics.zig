@@ -148,7 +148,17 @@ pub fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
             const emb = fam.resolve(style.bold, style.italic) catch fam.regular;
             return emb.measureTextWidthSpaced(str, style.size, style.char_spacing);
         },
-        .family, .symbol, .zapf_dingbats => {
+        .face => |f| {
+            // Document-free path: measure against the shared prototype
+            // (same result; Documents normalize .face to their private
+            // clone before internal layout ever measures)
+            return f.prototype.measureTextWidthSpaced(str, style.size, style.char_spacing);
+        },
+        .family => |fam| {
+            const f = fam.resolve(style.bold, style.italic) catch fam.regular;
+            return f.prototype.measureTextWidthSpaced(str, style.size, style.char_spacing);
+        },
+        .standard, .symbol, .zapf_dingbats => {
             const std_font = style.standardFont() orelse return 0;
             const font_style = FontStyle{
                 .font = std_font,

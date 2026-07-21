@@ -175,7 +175,7 @@ pub const EmbeddedFont = struct {
     widths: [256]u16, // Widths in 1/1000 em for WinAnsi chars
     allocator: std.mem.Allocator,
     owns_data: bool, // Whether we own the TTF data
-    /// True on per-document clones of a SharedFont: parse-time allocations
+    /// True on per-document clones of a FontFace: parse-time allocations
     /// (synthetic_loca, color tables) belong to the prototype.
     borrowed: bool = false,
 
@@ -431,7 +431,7 @@ pub const EmbeddedFont = struct {
         self.allocator.destroy(self);
     }
 
-    /// Create a per-document font from a SharedFont prototype: the parsed
+    /// Create a per-document font from a FontFace prototype: the parsed
     /// ttf tables, metrics, and OpenType lookups are borrowed (immutable
     /// after parse); all per-document state (glyph tracking, subsetting,
     /// scratch buffers, kerning cache) is fresh and owned. The prototype
@@ -3374,36 +3374,69 @@ test "Satoshi ligature codepoint tracking" {
     }
 }
 
-/// A font parsed once and shared across many Documents. Immutable after
-/// load(): safe to use from multiple threads (each document works on its
-/// own clone). Keep it (and the font bytes) alive until every document
-/// using it has been deinitialized.
-pub const SharedFont = struct {
+/// A parsed font file: one weight/style of one typeface. Caller-owned and
+/// shareable - like Image and Svg, create it once and use it in any number
+/// of documents, on any threads (each document works on a private clone).
+///
+/// Life cycle: after fromMemory/fromFile the face is in its configuration
+/// phase - setFeature and warmup may be called from the creating thread.
+/// The first use by any document freezes it; from then on it is immutable
+/// and thread-safe, and configuration calls return error.FaceFrozen.
+/// Keep the face (and, for fromMemory, the font bytes) alive until every
+/// document that used it has been deinitialized.
+pub const FontFace = struct {
+    /// Internal: the fully-parsed prototype that per-document clones copy
+    /// from. Do not use it in styles or mutate it directly - Zig cannot
+    /// hide fields, but this one is not API.
     prototype: *EmbeddedFont,
+    /// Set by the first per-document instantiation; configuration is
+    /// rejected afterwards (changes would not propagate to existing
+    /// clones, and warmup would race with concurrent cloning).
+    frozen: bool = false,
 
-    /// Parse font data (borrowed - must outlive the SharedFont) and
-    /// eagerly initialize all OpenType tables, so per-document use never
-    /// parses anything.
-    pub fn load(allocator: std.mem.Allocator, data: []const u8) !SharedFont {
+    /// Parse font data (borrowed - must outlive the FontFace) and eagerly
+    /// initialize all OpenType tables, so per-document use never parses
+    /// anything. Faces always use identity (Unicode/CID) encoding; the
+    /// legacy .win_ansi mode is only available via doc.loadFont.
+    pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8) !FontFace {
         const emb = try EmbeddedFont.fromMemory(allocator, data, false);
         errdefer emb.deinit();
         try emb.initOpenTypeFeatures();
         return .{ .prototype = emb };
     }
 
-    /// Optionally warm the shared kerning cache: measure representative
-    /// text once here and every per-document clone starts with those pair
-    /// lookups cached.
-    pub fn warmup(self: *SharedFont, text: []const u8) void {
+    /// Parse a font file. The face owns the loaded bytes.
+    pub fn fromFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !FontFace {
+        const emb = try EmbeddedFont.fromFile(io, allocator, path);
+        errdefer emb.deinit();
+        try emb.initOpenTypeFeatures();
+        return .{ .prototype = emb };
+    }
+
+    /// Set a default OpenType feature flag for this face; every document
+    /// clone inherits these defaults (documents can still override with
+    /// doc.setFeature). Configuration phase only.
+    pub fn setFeature(self: *FontFace, feature: opentype.Feature, enabled: bool) error{FaceFrozen}!void {
+        if (@atomicLoad(bool, &self.frozen, .acquire)) return error.FaceFrozen;
+        self.prototype.setFeature(feature, enabled);
+    }
+
+    /// Optionally pre-fill the kerning cache by measuring representative
+    /// text; every document clone starts with those pair lookups cached.
+    /// Configuration phase only.
+    pub fn warmup(self: *FontFace, text: []const u8) error{FaceFrozen}!void {
+        if (@atomicLoad(bool, &self.frozen, .acquire)) return error.FaceFrozen;
         _ = self.prototype.measureTextWidth(text, 12);
     }
 
-    /// Create the per-document clone. Called by Document.loadSharedFont.
-    pub fn instantiate(self: *const SharedFont, allocator: std.mem.Allocator) !*EmbeddedFont {
+    /// Create the per-document clone and freeze the face. Called by
+    /// Document when a .face style is first used.
+    pub fn instantiate(self: *const FontFace, allocator: std.mem.Allocator) !*EmbeddedFont {
+        @atomicStore(bool, @constCast(&self.frozen), true, .release);
         return EmbeddedFont.fromShared(allocator, self.prototype);
     }
 
-    pub fn deinit(self: *SharedFont) void {
+    pub fn deinit(self: *FontFace) void {
         self.prototype.deinit();
     }
 };

@@ -10,7 +10,7 @@ pub const TextMetrics = metrics.TextMetrics;
 pub const EmbeddedFont = embedded.EmbeddedFont;
 pub const FontEncoding = embedded.FontEncoding;
 pub const StandardFont = fonts.StandardFont;
-pub const FontFamily = fonts.Family;
+pub const StandardFamilyName = fonts.Family;
 
 // ============================================================================
 // Font and Text Style Types
@@ -40,24 +40,48 @@ pub const EmbeddedFontFamily = struct {
     }
 };
 
-/// Reference to a font (standard family, special font, or embedded).
+/// A set of FontFace variants so that TextStyle.bold/.italic resolve to
+/// the right file. Only regular is required.
+pub const FontFamily = struct {
+    regular: *const embedded.FontFace,
+    bold: ?*const embedded.FontFace = null,
+    italic: ?*const embedded.FontFace = null,
+    bold_italic: ?*const embedded.FontFace = null,
+
+    /// Resolve to the face for the given variant flags.
+    pub fn resolve(self: *const FontFamily, is_bold: bool, is_italic: bool) error{FontVariantNotLoaded}!*const embedded.FontFace {
+        if (is_bold and is_italic) return self.bold_italic orelse error.FontVariantNotLoaded;
+        if (is_bold) return self.bold orelse error.FontVariantNotLoaded;
+        if (is_italic) return self.italic orelse error.FontVariantNotLoaded;
+        return self.regular;
+    }
+};
+
+/// Reference to a font. The three public concepts:
+/// - standard fonts, via the constants (Font.helvetica, Font.times, ...)
+/// - .face: one custom font file (a caller-owned FontFace)
+/// - .family: a FontFamily of faces, so .bold/.italic pick a variant
+/// The .embedded/.embedded_family variants are what doc.loadFont* return
+/// (document-owned) and what .face styles resolve to internally.
 pub const Font = union(enum) {
-    family: FontFamily,
+    standard: StandardFamilyName,
     symbol,
     zapf_dingbats,
     embedded: *EmbeddedFont,
     embedded_family: *EmbeddedFontFamily,
+    face: *const embedded.FontFace,
+    family: FontFamily,
 
     // Convenience constants for standard font families
-    pub const helvetica = Font{ .family = .helvetica };
-    pub const times = Font{ .family = .times };
-    pub const courier = Font{ .family = .courier };
+    pub const helvetica = Font{ .standard = .helvetica };
+    pub const times = Font{ .standard = .times };
+    pub const courier = Font{ .standard = .courier };
 
     /// Resolve to StandardFont (for standard fonts only).
-    /// Returns null for embedded fonts.
+    /// Returns null for custom fonts.
     pub fn toStandardFont(self: Font, bold: bool, italic: bool) ?StandardFont {
         return switch (self) {
-            .family => |fam| fonts.StandardFont.fromFamilyStyle(fam, if (bold and italic)
+            .standard => |fam| fonts.StandardFont.fromFamilyStyle(fam, if (bold and italic)
                 .bold_italic
             else if (bold)
                 .bold
@@ -67,7 +91,7 @@ pub const Font = union(enum) {
                 .normal),
             .symbol => .symbol,
             .zapf_dingbats => .zapf_dingbats,
-            .embedded, .embedded_family => null,
+            .embedded, .embedded_family, .face, .family => null,
         };
     }
 };
