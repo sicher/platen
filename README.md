@@ -591,6 +591,24 @@ The three font concepts: **standard fonts** (`platen.Font.helvetica`,
 built into every viewer), a **`FontFace`** (one custom font file), and a
 **`FontFamily`** (a set of faces so `.bold`/`.italic` pick a variant).
 
+### Caller-owned images and SVGs
+
+Like `FontFace`, images and SVGs can be created directly and shared
+across any number of documents and threads - decode once, draw
+everywhere. One `deinit()` call frees them; call it after every document
+that used the asset has been deinitialized:
+
+```zig
+const logo = try platen.Image.fromMemory(allocator, png_bytes); // borrows bytes
+defer logo.deinit();
+const art = try platen.Svg.fromMemory(allocator, svg_text);     // copies
+defer art.deinit();
+
+// Any document, any thread - drawImage/drawSvg register them as borrowed:
+try doc_a.drawImage(logo, .{ .x = 50, .y = 50, .width = 100, .height = 0 });
+try doc_b.drawSvg(art, .{ .x = 50, .y = 200, .width = 80, .height = 80 });
+```
+
 The ownership rule is uniform across all asset types: **anything obtained
 from a Document (`doc.loadFont`, `doc.loadImage`, `doc.loadSvg`) lives and
 dies with that Document** — using it in another document is an error
@@ -727,8 +745,10 @@ try st.append("red", .{ .color = platen.Color.red });
 
 | Method | Description |
 |--------|-------------|
-| `loadImage(path) -> *Image` | Load JPEG or PNG image from file |
-| `loadImageFromMemory(data) -> *Image` | Load JPEG or PNG image from memory buffer |
+| `loadImage(path) -> *Image` | Load JPEG or PNG image from file (document-owned) |
+| `loadImageFromMemory(data) -> *Image` | Load image from memory buffer (document-owned; borrows data) |
+| `Image.fromMemory(alloc, bytes) -> *Image` | Caller-owned, shareable image (borrows bytes; free with deinit) |
+| `Svg.fromMemory(alloc, text) -> *Svg` | Caller-owned, shareable SVG (copies; free with deinit) |
 | `drawImage(*Image, Rect)` | Draw image (omit width/height for auto-scale) |
 | `loadSvg(path) -> *Svg` | Load SVG from file |
 | `loadSvgFromMemory(data) -> *Svg` | Load SVG from memory buffer |

@@ -460,7 +460,6 @@ pub const Svg = struct {
     viewbox_width: f64 = 0,
     viewbox_height: f64 = 0,
     elements: std.ArrayListUnmanaged(SvgElement),
-    opacity_states: std.ArrayListUnmanaged(OpacityState) = .empty,
     used_fonts: std.ArrayListUnmanaged(UsedFont) = .empty,
     defs: std.StringHashMapUnmanaged(SvgElement) = .empty, // Elements defined in <defs> by ID
 
@@ -470,7 +469,6 @@ pub const Svg = struct {
             .width = 0,
             .height = 0,
             .elements = .empty,
-            .opacity_states = .empty,
             .used_fonts = .empty,
             .defs = .empty,
         };
@@ -481,7 +479,6 @@ pub const Svg = struct {
             elem.deinit(self.allocator);
         }
         self.elements.deinit(self.allocator);
-        self.opacity_states.deinit(self.allocator);
         self.used_fonts.deinit(self.allocator);
         // Free defs keys and elements
         var it = self.defs.iterator();
@@ -490,16 +487,7 @@ pub const Svg = struct {
             entry.value_ptr.deinit(self.allocator);
         }
         self.defs.deinit(self.allocator);
-    }
-
-    /// Get or add an opacity state, returns index for naming (GS1, GS2, etc.)
-    pub fn getOrAddOpacityState(self: *Svg, fill_op: f64, stroke_op: f64) !usize {
-        const state = OpacityState{ .fill_opacity = fill_op, .stroke_opacity = stroke_op };
-        for (self.opacity_states.items, 0..) |s, i| {
-            if (s.eql(state)) return i;
-        }
-        try self.opacity_states.append(self.allocator, state);
-        return self.opacity_states.items.len - 1;
+        self.allocator.destroy(self);
     }
 
     /// Get or add a font, returns index for naming (F1, F2, etc.)
@@ -509,11 +497,6 @@ pub const Svg = struct {
         }
         try self.used_fonts.append(self.allocator, font);
         return self.used_fonts.items.len - 1;
-    }
-
-    /// Check if this SVG uses any transparency
-    pub fn hasTransparency(self: *const Svg) bool {
-        return self.opacity_states.items.len > 0;
     }
 
     /// Check if this SVG uses any text
@@ -530,10 +513,14 @@ pub const Svg = struct {
     }
 
     /// Load SVG from memory buffer
+    /// Load SVG from memory buffer. Caller-owned and shareable across
+    /// documents/threads; free with deinit() after every document using it
+    /// is deinitialized. Lifetime: COPIES - `data` may be freed as soon as
+    /// this returns.
     pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8) !*Svg {
         const svg = try allocator.create(Svg);
-        errdefer allocator.destroy(svg);
         svg.* = Svg.init(allocator);
+        // deinit destroys the struct too, so one errdefer covers everything
         errdefer svg.deinit();
 
         try svg.parse(data);
@@ -1030,12 +1017,15 @@ pub const Svg = struct {
         }
     }
 
-    /// Generate PDF content stream for this SVG
-    pub fn toPdfContent(self: *Svg, allocator: std.mem.Allocator) ![]u8 {
+    /// Generate PDF content stream for this SVG. The Svg itself is not
+    /// mutated (safe to share across documents and threads); opacity pairs
+    /// discovered during rendering are appended to `opacity_states`, which
+    /// the caller owns and uses to build the /GS{n} ExtGState resources.
+    pub fn toPdfContent(self: *const Svg, allocator: std.mem.Allocator, opacity_states: *std.ArrayListUnmanaged(OpacityState)) ![]u8 {
         var content = std.ArrayListUnmanaged(u8).empty;
         errdefer content.deinit(allocator);
 
-        var writer = ContentWriter{ .buffer = &content, .allocator = allocator };
+        var writer = ContentWriter{ .buffer = &content, .allocator = allocator, .opacity_states = opacity_states };
 
         // Apply coordinate flip (SVG Y-down to PDF Y-up)
         // Matrix: 1 0 0 -1 0 height
@@ -1064,7 +1054,7 @@ pub const Svg = struct {
         return content.toOwnedSlice(allocator);
     }
 
-    fn renderElement(self: *Svg, writer: *ContentWriter, elem: *SvgElement) !void {
+    fn renderElement(self: *const Svg, writer: *ContentWriter, elem: *SvgElement) !void {
         switch (elem.*) {
             .rect => |r| try renderRect(self, writer, r),
             .circle => |c| try renderCircle(self, writer, c),
@@ -1090,6 +1080,18 @@ pub const Svg = struct {
 const ContentWriter = struct {
     buffer: *std.ArrayListUnmanaged(u8),
     allocator: std.mem.Allocator,
+    /// Opacity pairs discovered while rendering; owned by the caller of
+    /// toPdfContent. Indexes name the /GS{n} ExtGState resources.
+    opacity_states: *std.ArrayListUnmanaged(OpacityState),
+
+    fn getOrAddOpacityState(self: *ContentWriter, fill_op: f64, stroke_op: f64) !usize {
+        const state = OpacityState{ .fill_opacity = fill_op, .stroke_opacity = stroke_op };
+        for (self.opacity_states.items, 0..) |s, i| {
+            if (s.eql(state)) return i;
+        }
+        try self.opacity_states.append(self.allocator, state);
+        return self.opacity_states.items.len - 1;
+    }
 
     pub fn print(self: *ContentWriter, comptime fmt: []const u8, args: anytype) !void {
         var buf: [512]u8 = undefined;
@@ -1107,9 +1109,10 @@ const ContentWriter = struct {
     }
 };
 
-fn renderRect(svg: *Svg, writer: *ContentWriter, rect: anytype) !void {
+fn renderRect(svg: *const Svg, writer: *ContentWriter, rect: anytype) !void {
+    _ = svg;
     try applyTransform(writer, rect.transform);
-    try applyStyle(svg, writer, rect.style);
+    try applyStyle(writer, rect.style);
 
     if (rect.rx == 0 and rect.ry == 0) {
         // Simple rectangle
@@ -1182,7 +1185,7 @@ fn renderRoundedRect(writer: *ContentWriter, x: f64, y: f64, w: f64, h: f64, rx:
     try writer.append("h\n");
 }
 
-fn renderCircle(svg: *Svg, writer: *ContentWriter, circle: anytype) !void {
+fn renderCircle(svg: *const Svg, writer: *ContentWriter, circle: anytype) !void {
     // Circle is ellipse with rx = ry = r
     try renderEllipse(svg, writer, .{
         .cx = circle.cx,
@@ -1194,9 +1197,10 @@ fn renderCircle(svg: *Svg, writer: *ContentWriter, circle: anytype) !void {
     });
 }
 
-fn renderEllipse(svg: *Svg, writer: *ContentWriter, ellipse: anytype) !void {
+fn renderEllipse(svg: *const Svg, writer: *ContentWriter, ellipse: anytype) !void {
+    _ = svg;
     try applyTransform(writer, ellipse.transform);
-    try applyStyle(svg, writer, ellipse.style);
+    try applyStyle(writer, ellipse.style);
 
     // Use shared ellipse path generator
     var buf: [512]u8 = undefined;
@@ -1207,9 +1211,10 @@ fn renderEllipse(svg: *Svg, writer: *ContentWriter, ellipse: anytype) !void {
     try restoreTransform(writer, ellipse.transform);
 }
 
-fn renderLine(svg: *Svg, writer: *ContentWriter, line: anytype) !void {
+fn renderLine(svg: *const Svg, writer: *ContentWriter, line: anytype) !void {
+    _ = svg;
     try applyTransform(writer, line.transform);
-    try applyStyle(svg, writer, line.style);
+    try applyStyle(writer, line.style);
 
     try writer.print("{d:.2} {d:.2} m\n", .{ line.x1, line.y1 });
     try writer.print("{d:.2} {d:.2} l\n", .{ line.x2, line.y2 });
@@ -1222,11 +1227,12 @@ fn renderLine(svg: *Svg, writer: *ContentWriter, line: anytype) !void {
     try restoreTransform(writer, line.transform);
 }
 
-fn renderPolyline(svg: *Svg, writer: *ContentWriter, polyline: anytype) !void {
+fn renderPolyline(svg: *const Svg, writer: *ContentWriter, polyline: anytype) !void {
+    _ = svg;
     if (polyline.points.items.len == 0) return;
 
     try applyTransform(writer, polyline.transform);
-    try applyStyle(svg, writer, polyline.style);
+    try applyStyle(writer, polyline.style);
 
     const first = polyline.points.items[0];
     try writer.print("{d:.2} {d:.2} m\n", .{ first.x, first.y });
@@ -1243,11 +1249,12 @@ fn renderPolyline(svg: *Svg, writer: *ContentWriter, polyline: anytype) !void {
     try restoreTransform(writer, polyline.transform);
 }
 
-fn renderPolygon(svg: *Svg, writer: *ContentWriter, polygon: anytype) !void {
+fn renderPolygon(svg: *const Svg, writer: *ContentWriter, polygon: anytype) !void {
+    _ = svg;
     if (polygon.points.items.len == 0) return;
 
     try applyTransform(writer, polygon.transform);
-    try applyStyle(svg, writer, polygon.style);
+    try applyStyle(writer, polygon.style);
 
     const first = polygon.points.items[0];
     try writer.print("{d:.2} {d:.2} m\n", .{ first.x, first.y });
@@ -1261,9 +1268,10 @@ fn renderPolygon(svg: *Svg, writer: *ContentWriter, polygon: anytype) !void {
     try restoreTransform(writer, polygon.transform);
 }
 
-fn renderPath(svg: *Svg, writer: *ContentWriter, path: anytype) !void {
+fn renderPath(svg: *const Svg, writer: *ContentWriter, path: anytype) !void {
+    _ = svg;
     try applyTransform(writer, path.transform);
-    try applyStyle(svg, writer, path.style);
+    try applyStyle(writer, path.style);
 
     var cur_x: f64 = 0;
     var cur_y: f64 = 0;
@@ -1374,7 +1382,7 @@ fn renderPath(svg: *Svg, writer: *ContentWriter, path: anytype) !void {
     try restoreTransform(writer, path.transform);
 }
 
-fn renderText(svg: *Svg, writer: *ContentWriter, text: anytype) !void {
+fn renderText(svg: *const Svg, writer: *ContentWriter, text: anytype) !void {
     if (text.content.len == 0) return;
 
     try applyTransform(writer, text.transform);
@@ -1456,12 +1464,12 @@ fn restoreTransform(writer: *ContentWriter, transform: Transform) !void {
     try writer.append("Q\n");
 }
 
-fn applyStyle(svg: *Svg, writer: *ContentWriter, style: Style) !void {
+fn applyStyle(writer: *ContentWriter, style: Style) !void {
     // Apply opacity via ExtGState if not fully opaque
     const fill_op = style.getFillOpacity();
     const stroke_op = style.getStrokeOpacity();
     if (fill_op < 1.0 or stroke_op < 1.0) {
-        const gs_index = try svg.getOrAddOpacityState(fill_op, stroke_op);
+        const gs_index = try writer.getOrAddOpacityState(fill_op, stroke_op);
         try writer.print("/GS{d} gs\n", .{gs_index + 1}); // 1-indexed names
     }
 
@@ -2179,7 +2187,6 @@ test "parse simple SVG" {
     const svg = try Svg.fromMemory(allocator, svg_data);
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     try std.testing.expectEqual(@as(f64, 100), svg.width);
@@ -2266,10 +2273,11 @@ test "generate PDF content" {
     const svg = try Svg.fromMemory(allocator, svg_data);
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
-    const content = try svg.toPdfContent(allocator);
+    var states = std.ArrayListUnmanaged(OpacityState).empty;
+    defer states.deinit(allocator);
+    const content = try svg.toPdfContent(allocator, &states);
     defer allocator.free(content);
 
     // Should contain coordinate flip and rectangle commands
@@ -2290,7 +2298,6 @@ test "percentage root dimensions fall back to viewBox" {
     const svg = try Svg.fromMemory(allocator, svg_data);
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     // "100%" must not parse as 100 points; intrinsic size comes from viewBox
@@ -2315,7 +2322,6 @@ test "parse defs and use" {
     const svg = try Svg.fromMemory(allocator, svg_data);
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     // Defs should have 2 elements
@@ -2343,7 +2349,6 @@ test "use-defs.svg element counts" {
     const svg = try Svg.fromFile(std.testing.io, allocator, "test/images/use-defs.svg");
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     // 4 defs: box, tri, arrow-r, arrow-l (all paths)
@@ -2374,7 +2379,6 @@ test "use element clones paths properly" {
     const svg = try Svg.fromMemory(allocator, svg_data);
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     // Should have 1 def and 1 element (from use)
@@ -2394,7 +2398,6 @@ test "parse MathJax equation SVG with xlink:href" {
     const svg = try Svg.fromFile(std.testing.io, allocator, "test/images/equation.svg");
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     // The SVG has 11 path definitions in <defs> (style element is skipped)
@@ -2417,7 +2420,9 @@ test "parse MathJax equation SVG with xlink:href" {
     try std.testing.expectEqual(@as(usize, 2), rect_count); // 2 fraction line rects
 
     // Generate PDF content to verify rendering works
-    const content = try svg.toPdfContent(allocator);
+    var states = std.ArrayListUnmanaged(OpacityState).empty;
+    defer states.deinit(allocator);
+    const content = try svg.toPdfContent(allocator, &states);
     defer allocator.free(content);
     try std.testing.expect(content.len > 0);
 }

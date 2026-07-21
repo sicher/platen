@@ -3385,6 +3385,9 @@ test "Satoshi ligature codepoint tracking" {
 /// Keep the face (and, for fromMemory, the font bytes) alive until every
 /// document that used it has been deinitialized.
 pub const FontFace = struct {
+    /// Internal: the fully-parsed prototype that per-document clones copy
+    /// from. Do not use it in styles or mutate it directly - Zig cannot
+    /// hide fields, but this one is not API.
     prototype: *EmbeddedFont,
     /// Set by the first per-document instantiation; configuration is
     /// rejected afterwards (changes would not propagate to existing
@@ -3393,7 +3396,8 @@ pub const FontFace = struct {
 
     /// Parse font data (borrowed - must outlive the FontFace) and eagerly
     /// initialize all OpenType tables, so per-document use never parses
-    /// anything.
+    /// anything. Faces always use identity (Unicode/CID) encoding; the
+    /// legacy .win_ansi mode is only available via doc.loadFont.
     pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8) !FontFace {
         const emb = try EmbeddedFont.fromMemory(allocator, data, false);
         errdefer emb.deinit();

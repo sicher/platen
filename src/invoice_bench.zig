@@ -112,7 +112,6 @@ pub fn main(init: std.process.Init) !void {
         if (assets.shared_bold) |*s| s.deinit();
         if (assets.shared_svg) |s| {
             s.deinit();
-            allocator.destroy(s);
         }
         allocator.free(assets.inter_regular);
         allocator.free(assets.inter_bold);

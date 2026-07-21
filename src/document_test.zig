@@ -3357,7 +3357,6 @@ test "parallel stream compression produces byte-identical output" {
     try std.testing.expectEqualSlices(u8, single, threaded);
 }
 
-
 test "measureStyled matches embedded font advances" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
@@ -3407,17 +3406,15 @@ test "caller-owned Image and Svg can be shared across documents" {
     // Decode once, draw into two documents; deinit of neither document may
     // destroy the caller-owned assets (double-free is caught by the testing
     // allocator).
-    const image = try images_mod.Image.fromMemory(allocator, png_data, false);
+    const image = try images_mod.Image.fromMemory(allocator, png_data);
     defer {
         image.deinit();
-        allocator.destroy(image);
     }
     const svg = try svg_mod.Svg.fromMemory(allocator,
         \\<svg width="40" height="40"><rect x="0" y="0" width="40" height="40" fill="blue"/></svg>
     );
     defer {
         svg.deinit();
-        allocator.destroy(svg);
     }
 
     for (0..2) |_| {
@@ -3808,7 +3805,6 @@ test "another document's image and svg are rejected, caller-created remain share
     const mine = try svg_mod.Svg.fromMemory(std.testing.allocator, "<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>");
     defer {
         mine.deinit();
-        std.testing.allocator.destroy(mine);
     }
     try doc_b.drawSvg(mine, .{ .x = 0, .y = 20, .width = 10, .height = 10 });
     const pdf = try doc_b.output();

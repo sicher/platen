@@ -951,6 +951,21 @@ Two prerequisites make this sound — if either changes, revisit:
 - `ttf.Font` mutates only during parse (cmap offsets, ascii caches).
 - GSUB/GPOS parse everything eagerly; shaping only reads lookup tables.
 
+### Svg render-time constness (session #26 audit)
+`Svg.toPdfContent` takes `*const Svg`: opacity pairs discovered during
+rendering land in a caller-owned output list (the document builds the
+/GS{n} ExtGState resources from it), instead of mutating the Svg. This
+makes shared SVGs genuinely thread-safe - previously any SVG with
+opacity < 1.0 appended to itself during output(), a data race for
+cross-thread sharing that single-threaded dedupe masked. The transparency
+signal color-font code relies on is now the returned list's length.
+Constness is compiler-enforced; no test can regress it silently.
+
+### Asset cleanup
+Image.deinit and Svg.deinit destroy the struct too (single call, matching
+FontFace.deinit). Image.fromMemory takes (alloc, bytes) and always
+borrows; ownership transfer lives on the internal fromMemoryLevel.
+
 ### Asset ownership
 Uniform rule, enforced at use time: assets obtained from a Document
 (loadFont/loadImage/loadSvg) are document-owned - using them in another

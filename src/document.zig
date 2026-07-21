@@ -293,19 +293,13 @@ pub const Document = struct {
         self.face_instances.deinit(self.allocator);
         // Clean up loaded images (only ones this document created)
         for (self.loaded_images.items, self.image_owned.items) |image, owned| {
-            if (owned) {
-                image.deinit();
-                self.allocator.destroy(image);
-            }
+            if (owned) image.deinit();
         }
         self.loaded_images.deinit(self.allocator);
         self.image_owned.deinit(self.allocator);
         // Clean up loaded SVGs (only ones this document created)
         for (self.loaded_svgs.items, self.svg_owned.items) |s, owned| {
-            if (owned) {
-                s.deinit();
-                self.allocator.destroy(s);
-            }
+            if (owned) s.deinit();
         }
         self.loaded_svgs.deinit(self.allocator);
         self.svg_owned.deinit(self.allocator);
@@ -814,12 +808,6 @@ pub const Document = struct {
             }
         }
         try self.feature_overrides.append(self.allocator, .{ .feature = feature, .enabled = enabled });
-    }
-
-    /// Set OpenType feature for a specific embedded font
-    pub fn setFontFeature(self: *Document, font: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
-        _ = self;
-        font.setFeature(feature, enabled);
     }
 
     /// Get font metrics for a specific TextStyle.
@@ -3577,8 +3565,12 @@ pub const Document = struct {
         for (self.loaded_svgs.items, 0..) |s, i| {
             const svg_id = ids.svg_base_ids.items[i];
 
-            // Generate PDF content stream from SVG
-            const svg_content = try s.toPdfContent(self.allocator);
+            // Generate PDF content stream from SVG. The Svg is const (safe
+            // to share across documents/threads); opacity pairs land in a
+            // per-render list this document owns.
+            var opacity_states = std.ArrayListUnmanaged(svg.OpacityState).empty;
+            defer opacity_states.deinit(self.allocator);
+            const svg_content = try s.toPdfContent(self.allocator, &opacity_states);
             defer self.allocator.free(svg_content);
 
             try w.beginObject(svg_id);
@@ -3597,7 +3589,7 @@ pub const Document = struct {
             try form_dict.put("BBox", .{ .array_val = &bbox });
 
             // Build resources dictionary (may include ExtGState, Font, or both)
-            const has_transparency = s.opacity_states.items.len > 0;
+            const has_transparency = opacity_states.items.len > 0;
             const has_text = s.used_fonts.items.len > 0;
 
             if (has_transparency or has_text) {
@@ -3614,8 +3606,8 @@ pub const Document = struct {
                 }
 
                 if (has_transparency) {
-                    gs_dicts = try self.allocator.alloc(Dict, s.opacity_states.items.len);
-                    for (s.opacity_states.items, 0..) |state, idx| {
+                    gs_dicts = try self.allocator.alloc(Dict, opacity_states.items.len);
+                    for (opacity_states.items, 0..) |state, idx| {
                         gs_dicts[idx] = Dict.init(self.allocator);
                         try gs_dicts[idx].put("Type", Value.name("ExtGState"));
                         try gs_dicts[idx].put("ca", Value.real(state.fill_opacity));
