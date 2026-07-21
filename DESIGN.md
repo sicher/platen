@@ -956,7 +956,7 @@ Uniform rule, enforced at use time: assets obtained from a Document
 (loadFont/loadImage/loadSvg) are document-owned - using them in another
 document errors (ForeignFont at write time; ForeignImage/ForeignSvg at
 draw time, via the `document_owned` marker). Assets the caller creates
-(SharedFont.load, Image.fromMemory, Svg.fromMemory) are caller-owned and
+(FontFace.fromMemory/fromFile, Image.fromMemory, Svg.fromMemory) are caller-owned and
 shareable. Rationale: fonts mutate (subset state - silent blank output +
 cross-doc pollution before the guard); images/SVGs are immutable but
 die with their owning document (dangling data at output time).

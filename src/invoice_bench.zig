@@ -15,7 +15,7 @@
 //!   --threads=N     Worker threads, each rendering its own documents
 //!                   (default: 1; the library is stateless, so concurrent
 //!                   documents need no locking)
-//!   --shared        Parse fonts and logo once (SharedFont + caller-owned
+//!   --shared        Parse fonts and logo once (FontFace + caller-owned
 //!                   Svg) instead of per document
 //!   --output=PATH   Write a sample invoice to a file for inspection
 

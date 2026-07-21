@@ -3842,3 +3842,59 @@ test "FontFace configuration is rejected after first use" {
     const clone = doc.face_instances.get(&face).?;
     try std.testing.expect(clone.feature_flags.isEnabled(.dlig));
 }
+
+test "measure_only errors on invalid face variant like rendering does" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
+
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    var region = Region{ .x = 50, .y = 50, .width = 300, .height = 200 };
+
+    // bold on a single face is invalid; measure_only must say so instead of
+    // silently measuring regular-weight widths
+    const bad = TextStyle{ .font = .{ .face = &face }, .size = 12, .bold = true };
+    try std.testing.expectError(
+        error.FontVariantNotLoaded,
+        doc.write(&region, "hello world", bad, .{ .measure_only = true }),
+    );
+}
+
+test "multi-span decoration uses the face's real underline metrics" {
+    const allocator = std.testing.allocator;
+    const embedded_mod = @import("embedded.zig");
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(16 * 1024 * 1024));
+    defer allocator.free(data);
+    var face = try embedded_mod.FontFace.fromMemory(allocator, data);
+    defer face.deinit();
+
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+    try doc.addPage(.{});
+    var region = Region{ .x = 50, .y = 50, .width = 400, .height = 200 };
+
+    // Two decorated spans force the multi-style path
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("under ", .{ .decoration = .{ .underline = true } });
+    try st.append("lined", .{ .color = Color.red, .decoration = .{ .underline = true } });
+
+    const style = TextStyle{ .font = .{ .face = &face }, .size = 12 };
+    _ = try doc.writeStyled(&region, &st, style, .{});
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    // The underline rect height must come from Inter's post table, not the
+    // base-14 default (50/1000 -> 0.60 at 12pt)
+    const expected_thick = @as(f64, @floatFromInt(face.prototype.underline_thickness)) * 12.0 / 1000.0;
+    try std.testing.expect(@abs(expected_thick - 0.60) > 0.05); // premise: Inter differs from default
+    var buf: [32]u8 = undefined;
+    const needle = try std.fmt.bufPrint(&buf, "{d:.2} re", .{expected_thick});
+    try std.testing.expect(std.mem.indexOf(u8, pdf, needle) != null);
+}

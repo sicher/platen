@@ -175,7 +175,7 @@ pub const EmbeddedFont = struct {
     widths: [256]u16, // Widths in 1/1000 em for WinAnsi chars
     allocator: std.mem.Allocator,
     owns_data: bool, // Whether we own the TTF data
-    /// True on per-document clones of a SharedFont: parse-time allocations
+    /// True on per-document clones of a FontFace: parse-time allocations
     /// (synthetic_loca, color tables) belong to the prototype.
     borrowed: bool = false,
 
@@ -431,7 +431,7 @@ pub const EmbeddedFont = struct {
         self.allocator.destroy(self);
     }
 
-    /// Create a per-document font from a SharedFont prototype: the parsed
+    /// Create a per-document font from a FontFace prototype: the parsed
     /// ttf tables, metrics, and OpenType lookups are borrowed (immutable
     /// after parse); all per-document state (glyph tracking, subsetting,
     /// scratch buffers, kerning cache) is fresh and owned. The prototype

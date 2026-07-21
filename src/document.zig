@@ -1078,9 +1078,14 @@ pub const Document = struct {
     /// Measures text width with explicit style.
     /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
     fn getTextWidthStyled(self: *Document, str: []const u8, style_in: TextStyle) f64 {
-        // Resolve faces to this document's clone when possible; on OOM the
-        // prototype fallback in metrics still yields correct widths
-        const style = self.normalizeStyle(style_in) catch style_in;
+        // Resolve faces to this document's clone. On OOM the prototype
+        // fallback in metrics still yields correct widths; a variant
+        // contract violation (bold on a single face) measures as 0 - public
+        // entry points normalize with `try` first, so this is defensive.
+        const style = self.normalizeStyle(style_in) catch |err| switch (err) {
+            error.OutOfMemory => style_in,
+            else => return 0,
+        };
 
         // Fast path: no soft-hyphens
         if (!containsSoftHyphens(str)) {
@@ -1113,7 +1118,10 @@ pub const Document = struct {
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
-    pub fn write(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: WriteOptions) !WriteResult {
+    pub fn write(self: *Document, region: *Region, str: []const u8, style_in: TextStyle, opts: WriteOptions) !WriteResult {
+        // Resolve .face/.family up front so measure_only paths error on
+        // invalid styles (e.g. bold on a single face) exactly like rendering
+        const style = try self.normalizeStyle(style_in);
         const line_height = style.size * opts.line_height;
         const font_metrics = self.getFontMetricsStyled(style);
         const ascender = font_metrics.ascender;
@@ -1811,8 +1819,9 @@ pub const Document = struct {
 
     /// Write styled text into a region with alignment support.
     /// Uses Knuth-Plass optimal line breaking when requested.
-    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style: TextStyle, opts: ParagraphOptions) !WriteResult {
+    pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style_in: TextStyle, opts: ParagraphOptions) !WriteResult {
         if (self.pages.items.len == 0) return error.NoPage;
+        const style = try self.normalizeStyle(style_in);
 
         const line_height = style.size * opts.line_height;
         const line_width = region.contentWidth();
@@ -2452,7 +2461,14 @@ pub const Document = struct {
             var strikeout_pos: f64 = 250;
             var strikeout_thick: f64 = 50;
 
-            if (base_style.embeddedFont()) |emb| {
+            const deco_emb: ?*EmbeddedFont = switch (base_style.font) {
+                .embedded => |e| e,
+                .embedded_family => |fam| fam.resolve(base_style.bold, base_style.italic) catch fam.regular,
+                .face => |f| f.prototype,
+                .family => |fam| if (fam.resolve(base_style.bold, base_style.italic)) |f| f.prototype else |_| fam.regular.prototype,
+                else => null,
+            };
+            if (deco_emb) |emb| {
                 underline_pos = @floatFromInt(emb.underline_position);
                 underline_thick = @floatFromInt(emb.underline_thickness);
                 strikeout_pos = @floatFromInt(emb.strikeout_position);
