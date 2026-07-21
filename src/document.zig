@@ -2983,7 +2983,7 @@ pub const Document = struct {
         if (self.encryption) |enc_opts| {
             if (self.conformance != .none) return error.EncryptionNotAllowedInPdfA;
             const random = self.rng orelse blk: {
-                sys_csprng = encrypt.SystemCsprng.init();
+                sys_csprng = try encrypt.SystemCsprng.init(self.io);
                 break :blk sys_csprng.random();
             };
             const m = encrypt.buildMaterial(enc_opts, random);

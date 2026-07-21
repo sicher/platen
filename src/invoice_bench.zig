@@ -92,7 +92,7 @@ pub fn main(init: std.process.Init) !void {
     app_io = init.io;
 
     const config = parseArgs(init.minimal.args) catch {
-        std.debug.print("Usage: bench-invoice [--count=N] [--compress=N] [--threads=N] [--output=PATH]\n", .{});
+        std.debug.print("Usage: bench-invoice [--count=N] [--compress=N] [--threads=N] [--shared] [--encrypt] [--output=PATH]\n", .{});
         return;
     };
 

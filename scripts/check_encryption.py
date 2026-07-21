@@ -10,7 +10,7 @@ import subprocess, sys, tempfile, os
 def main():
     pdf = "test/output/encrypted.pdf"
     if not os.path.exists(pdf):
-        print(f"skip: {pdf} not found (run the enc_check example or integration test first)")
+        print(f"skip: {pdf} not found (run `zig build test` first to write the fixture)")
         return 0
 
     # Wrong password must fail

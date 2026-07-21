@@ -15,16 +15,17 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 const Sha384 = std.crypto.hash.sha2.Sha384;
 const Sha512 = std.crypto.hash.sha2.Sha512;
 
-/// A cryptographically secure RNG seeded from OS entropy, for callers who
-/// do not supply their own. Returns a std.Random plus its backing state
-/// (the state must outlive the returned Random - keep it on the stack of
-/// the calling frame).
+/// A cryptographically secure RNG for callers who do not supply their own.
+/// Seeded from the platform CSPRNG via std.Io.randomSecure (getrandom on
+/// Linux, getentropy on BSD/macOS, CNG on Windows) - no libc-symbol floor,
+/// so it builds and runs everywhere platen does. The backing state must
+/// outlive the returned std.Random (keep it in the calling frame).
 pub const SystemCsprng = struct {
     state: std.Random.DefaultCsprng,
 
-    pub fn init() SystemCsprng {
+    pub fn init(io: std.Io) error{EntropyUnavailable}!SystemCsprng {
         var seed: [std.Random.DefaultCsprng.secret_seed_length]u8 = undefined;
-        std.c.arc4random_buf(&seed, seed.len);
+        io.randomSecure(&seed) catch return error.EntropyUnavailable;
         return .{ .state = std.Random.DefaultCsprng.init(seed) };
     }
 
