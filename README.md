@@ -578,10 +578,13 @@ defer doc.deinit();
 const font = try doc.loadSharedFontFamily(.{ .regular = &inter, .bold = &inter_bold });
 ```
 
-The same pattern works for images and SVGs: create them once with
-`Image.fromMemory` / `Svg.fromMemory` and pass to `drawImage`/`drawSvg`
-in any number of documents (the document registers them without taking
-ownership).
+The ownership rule is uniform across all asset types: **anything obtained
+from a Document (`doc.loadFont`, `doc.loadImage`, `doc.loadSvg`) lives and
+dies with that Document** — using it in another document is an error
+(`ForeignFont`/`ForeignImage`/`ForeignSvg`). **Anything you create yourself
+(`SharedFont.load`, `Image.fromMemory`, `Svg.fromMemory`) is yours** and
+can be used in any number of documents, on any threads; you manage its
+lifetime.
 
 ### Transforms & Clipping
 

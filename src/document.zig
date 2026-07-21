@@ -587,6 +587,7 @@ pub const Document = struct {
         const data = try std.Io.Dir.cwd().readFileAlloc(self.io, path, self.allocator, .limited(100 * 1024 * 1024));
         errdefer self.allocator.free(data);
         const image = try Image.fromMemoryLevel(self.allocator, data, true, self.imageCompressionLevel());
+        image.document_owned = true;
         try self.registerImage(image, true);
         return image;
     }
@@ -605,6 +606,7 @@ pub const Document = struct {
     /// front, but the borrow contract applies to both formats.)
     pub fn loadImageFromMemory(self: *Document, data: []const u8) !*Image {
         const image = try Image.fromMemoryLevel(self.allocator, data, false, self.imageCompressionLevel());
+        image.document_owned = true;
         try self.registerImage(image, true);
         return image;
     }
@@ -682,8 +684,11 @@ pub const Document = struct {
 
         // Get image resource name
         const img_idx = self.getImageIndex(image) orelse {
-            // Foreign image (caller-owned, e.g. shared across documents):
-            // register without taking ownership
+            // Another document's image would dangle once that document
+            // deinits; only caller-created images (Image.fromMemory) are
+            // shareable across documents
+            if (image.document_owned) return error.ForeignImage;
+            // Caller-owned: register without taking ownership
             try self.registerImage(image, false);
             return self.drawImage(image, rect);
         };
@@ -710,6 +715,7 @@ pub const Document = struct {
     /// Returns a handle that can be used with drawSvg().
     pub fn loadSvg(self: *Document, path: []const u8) !*Svg {
         const s = try Svg.fromFile(self.io, self.allocator, path);
+        s.document_owned = true;
         try self.registerSvg(s, true);
         return s;
     }
@@ -720,6 +726,7 @@ pub const Document = struct {
     /// as soon as this returns.
     pub fn loadSvgFromMemory(self: *Document, data: []const u8) !*Svg {
         const s = try Svg.fromMemory(self.allocator, data);
+        s.document_owned = true;
         try self.registerSvg(s, true);
         return s;
     }
@@ -764,8 +771,11 @@ pub const Document = struct {
 
         // Get SVG resource name
         const svg_idx = self.getSvgIndex(s) orelse {
-            // Foreign SVG (caller-owned, e.g. shared across documents):
-            // register without taking ownership
+            // Another document's SVG would dangle once that document
+            // deinits; only caller-created SVGs (Svg.fromMemory) are
+            // shareable across documents
+            if (s.document_owned) return error.ForeignSvg;
+            // Caller-owned: register without taking ownership
             try self.registerSvg(s, false);
             return self.drawSvg(s, rect);
         };
@@ -1005,6 +1015,11 @@ pub const Document = struct {
                 // silently render regular. Load a family (loadFontFamily) to
                 // use style.bold/.italic with embedded fonts.
                 if (style.bold or style.italic) return error.FontVariantNotLoaded;
+                // Fonts are per-document (they accumulate subset state):
+                // using a font loaded into another Document would silently
+                // render nothing and pollute that document's subset. Use
+                // SharedFont to reuse a parsed font across documents.
+                if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
@@ -1015,6 +1030,7 @@ pub const Document = struct {
             },
             .embedded_family => |fam| blk: {
                 const emb = try fam.resolve(style.bold, style.italic);
+                if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
                     cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
