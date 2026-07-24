@@ -116,7 +116,7 @@ Add platen as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .platen = .{
-        .url = "https://codeberg.org/sicher/platen/archive/main.tar.gz",
+        .url = "https://git.urverk.org/urverk/platen/archive/main.tar.gz",
         .hash = "...",
     },
 },
@@ -137,7 +137,7 @@ exe.root_module.addImport("platen", platen_dep.module("platen"));
 Or clone and build directly:
 
 ```bash
-git clone https://codeberg.org/sicher/platen.git
+git clone https://git.urverk.org/urverk/platen.git
 cd platen
 zig build        # Build CLI tool
 zig build test   # Run tests
