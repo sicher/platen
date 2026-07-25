@@ -14,9 +14,20 @@ DIR=tools
 
 setup() { # name
   local name="$1" d="$DIR/$1"
-  if [ -d "$d/.git" ]; then
-    echo "== $name: updating"
-    git -C "$d" pull --ff-only --quiet
+  # rev-parse, not [ -d "$d/.git" ]: a submodule or worktree has a .git
+  # FILE, and the directory test would send us down the clone path only to
+  # fail on an existing directory.
+  if git -C "$d" rev-parse --git-dir >/dev/null 2>&1; then
+    if [ -f "$d/.git" ]; then
+      # Submodule: the parent repo pins the revision, so pulling here would
+      # fight it. Leave it to `git submodule update`.
+      echo "== $name: submodule — run 'git submodule update --init $d'"
+    else
+      echo "== $name: updating"
+      git -C "$d" pull --ff-only --quiet
+    fi
+  elif [ -e "$d" ]; then
+    echo "== $name: $d exists but is not a checkout — leaving it alone" >&2
   else
     echo "== $name: cloning"
     git clone --quiet "$HOST/$name" "$d"
@@ -28,7 +39,7 @@ for t in simgrep zigmap; do setup "$t"; done
 
 # Both are Zig programs; build them if they aren't built yet.
 for t in simgrep zigmap; do
-  if [ ! -x "$DIR/$t/zig-out/bin/$t" ]; then
+  if [ -d "$DIR/$t" ] && [ ! -x "$DIR/$t/zig-out/bin/$t" ]; then
     echo "== $t: building"
     ( cd "$DIR/$t" && zig build -Doptimize=ReleaseFast )
   fi
