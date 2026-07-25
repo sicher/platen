@@ -14,11 +14,11 @@ All code should be written in Zig 0.16. It should be self contained. Users clone
 
 ## Tools
 
-https://codeberg.org/sicher/simgrep
+https://git.urverk.org/urverk/simgrep
 
 for searching for code duplications! Use the --min-lines=N and --min-clones=M arguments to tailor searches.
 
-https://codeberg.org/sicher/zigmap
+https://git.urverk.org/urverk/zigmap
 
 for generating codemaps!
 
