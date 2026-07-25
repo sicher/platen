@@ -4,8 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Library module
-    const platen_mod = b.createModule(.{
+    // Library module. addModule (not createModule) so DEPENDENTS can reach it
+    // as `b.dependency("platen", ...).module("platen")` — the form the README
+    // documents. It is returned as well, so the internal uses below are
+    // unaffected.
+    const platen_mod = b.addModule("platen", .{
         .root_source_file = b.path("src/platen.zig"),
         .target = target,
         .optimize = optimize,
