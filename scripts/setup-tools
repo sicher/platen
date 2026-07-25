@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Clone and build the local dev tools this project expects. Each lives in
+# its own repo and is gitignored here, so a fresh clone starts without them.
+#
+#   simgrep  code-duplication search
+#   zigmap   codemap generator
+#
+# They land in tools/ — see CLAUDE.md.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+HOST=https://git.urverk.org/urverk
+DIR=tools
+
+setup() { # name
+  local name="$1" d="$DIR/$1"
+  if [ -d "$d/.git" ]; then
+    echo "== $name: updating"
+    git -C "$d" pull --ff-only --quiet
+  else
+    echo "== $name: cloning"
+    git clone --quiet "$HOST/$name" "$d"
+  fi
+}
+
+mkdir -p "$DIR"
+for t in simgrep zigmap; do setup "$t"; done
+
+# Both are Zig programs; build them if they aren't built yet.
+for t in simgrep zigmap; do
+  if [ ! -x "$DIR/$t/zig-out/bin/$t" ]; then
+    echo "== $t: building"
+    ( cd "$DIR/$t" && zig build -Doptimize=ReleaseFast )
+  fi
+done
+
+echo "done -- binaries under $DIR/*/zig-out/bin"
