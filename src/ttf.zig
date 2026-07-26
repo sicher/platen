@@ -388,7 +388,8 @@ pub const Font = struct {
 
 /// Table directory - index of all tables in the font
 pub const TableDirectory = struct {
-    entries: []const TableEntry,
+    /// Number of table entries; each is 16 bytes at `data[12 + i*16]`.
+    count: u16,
     data: []const u8, // Reference to underlying data for entry access
 
     pub fn parse(data: []const u8, num_tables: u16) Error!TableDirectory {
@@ -399,17 +400,21 @@ pub const TableDirectory = struct {
             return Error.OutOfBounds;
         }
 
+        // The directory is NOT cast to []const TableEntry: font data comes
+        // from the caller and may be arbitrarily aligned (@embedFile yields
+        // alignment 1, which crashed with "incorrect alignment"), and the
+        // on-disk fields are big-endian, so a native-endian struct view would
+        // read garbage anyway. Entries are decoded field-by-field in `find`.
         return TableDirectory{
-            .entries = @as([*]const TableEntry, @ptrCast(@alignCast(data.ptr + dir_start)))[0..num_tables],
+            .count = num_tables,
             .data = data,
         };
     }
 
     pub fn find(self: *const TableDirectory, tag: [4]u8) ?TableEntry {
         // Linear search (typically < 20 tables)
-        const num = @divExact(self.entries.len * 16, 16); // entry count
         var i: usize = 0;
-        while (i < self.entries.len) : (i += 1) {
+        while (i < self.count) : (i += 1) {
             const offset = 12 + i * 16;
             if (offset + 16 > self.data.len) break;
 
@@ -423,7 +428,6 @@ pub const TableDirectory = struct {
                 };
             }
         }
-        _ = num;
         return null;
     }
 };
