@@ -8,10 +8,18 @@ pub fn build(b: *std.Build) void {
     // as `b.dependency("platen", ...).module("platen")` — the form the README
     // documents. It is returned as well, so the internal uses below are
     // unaffected.
+    //
+    // `link_libc` because `document.zig` reaches for `std.c.clock_gettime`
+    // when it stamps PDF/A metadata. macOS links libc whether or not
+    // anyone says so, so this built here for a year and failed the first
+    // time a Linux runner tried it, pointing at a line in std that looks
+    // nothing like a build setting. Declared on the MODULE, so dependents
+    // inherit it rather than each rediscovering the same thing.
     const platen_mod = b.addModule("platen", .{
         .root_source_file = b.path("src/platen.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     // CLI executable. cli.zig imports the library source relatively (same
@@ -23,6 +31,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/cli.zig"),
             .target = target,
             .optimize = optimize,
+            // Roots at the source directly rather than importing the
+            // module, so it does not inherit the module's `link_libc`.
+            .link_libc = true,
         }),
     });
 
@@ -43,6 +54,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/platen.zig"),
         .target = target,
         .optimize = optimize,
+        // A separate module instance over the same source, so it needs the
+        // declaration of its own — `link_libc` is per module, not per file.
+        .link_libc = true,
     });
     const lib_tests = b.addTest(.{
         .root_module = test_mod,
