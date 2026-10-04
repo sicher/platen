@@ -109,6 +109,8 @@ pub const BreakPoint = document.BreakPoint;
 
 // Re-export PDF/A types
 pub const Conformance = pdfa.Conformance;
+/// Largest magnitude any Document API number may have (error.InvalidNumber beyond).
+pub const max_value = @import("validate.zig").max_value;
 pub const ConformanceError = pdfa.ConformanceError;
 
 // ============================================================================
@@ -158,6 +160,8 @@ test {
     _ = @import("testing.zig");
     _ = @import("integration_tests.zig");
     _ = @import("document_test.zig");
+    _ = @import("invalid_number_test.zig");
+    _ = @import("validate.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");
     _ = @import("fuzz_tests.zig");

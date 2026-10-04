@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const layout = @import("layout.zig");
+const validate = @import("validate.zig");
 
 pub const OutlineItem = layout.OutlineItem;
 pub const Destination = layout.Destination;
@@ -30,6 +31,7 @@ pub const Outline = struct {
     /// Add a top-level outline item.
     /// Returns the item so it can be used as parent for addChild().
     pub fn add(self: *Outline, title: []const u8, dest: Destination) !*OutlineItem {
+        try validate.check(dest);
         const item = try self.allocator.create(OutlineItem);
         item.* = .{ .title = title, .dest = dest };
 
@@ -46,6 +48,7 @@ pub const Outline = struct {
     /// Add a child outline item under a parent.
     /// Returns the item so it can be used as parent for deeper nesting.
     pub fn addChild(self: *Outline, parent: *OutlineItem, title: []const u8, dest: Destination) !*OutlineItem {
+        try validate.check(dest);
         const item = try self.allocator.create(OutlineItem);
         item.* = .{ .title = title, .dest = dest, .parent = parent };
 

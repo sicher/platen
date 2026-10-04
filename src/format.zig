@@ -64,6 +64,9 @@ pub fn writeF64_3(buf: []u8, val: f64) []u8 {
 
 /// Shared implementation: fixed `decimals` (2 or 3) fractional digits, all
 /// branching resolved at comptime so the hot wrappers stay fully inlined.
+/// Precondition: `val` is finite and |val| < 2^64 / 1000 (NaN or larger
+/// magnitudes panic in @intFromFloat). Document entry points guarantee it
+/// by bounding caller input with validate.max_value; see validate.zig.
 fn writeF64N(buf: []u8, val: f64, comptime decimals: u2) []u8 {
     const scale: f64 = if (decimals == 2) 100.0 else 1000.0;
     const max_frac: u64 = if (decimals == 2) 99 else 999;

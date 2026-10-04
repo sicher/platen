@@ -109,6 +109,12 @@ following typographic convention:
   region; the baseline of the first line is placed from font metrics
   according to `valign`.
 
+Every number passed to a `Document` method (coordinates, sizes, radii,
+style widths, colors, opacities, transform factors) must be finite and
+within ±`platen.max_value` (1,000,000). Anything else - NaN, infinity,
+or a larger magnitude - returns `error.InvalidNumber` and leaves the
+document unchanged. Values are never silently clamped.
+
 ## Installation
 
 Add platen as a dependency in your `build.zig.zon`:

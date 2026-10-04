@@ -332,6 +332,20 @@ Two layers, both seeded with real tables/files from test fixtures:
   regressions fail CI-style rather than only under `--fuzz`.
 
 Hardening invariants the fuzzers enforce (added after real findings):
+- **Number validation at the Document boundary** (validate.zig): every f64
+  a caller passes to a fallible entry point must be finite and within
+  ±`max_value` (1e6), else `error.InvalidNumber` before any mutation.
+  Error, not clamp (user decision 2026-10-05): a moved coordinate is a
+  wrong document. The limit is what keeps format.writeF64N (u64 integer
+  part) and the fixed content-stream buffers safe - including derived
+  values such as scaleAt's center*(1-s) products (<= 1e12). `check()`
+  walks struct/union/optional/array fields at comptime, so new style
+  fields are covered automatically; slices (polygon points, path
+  commands, StyledText spans, gradient stops) are checked explicitly.
+  Public entry points that delegate must not re-validate derived values
+  (drawCircle -> private emitEllipse, not drawEllipse).
+  `invalid_number_test.zig` runs every entry point against NaN/inf/1e300
+  and asserts the document is unchanged.
 - Color-font table parsers (colr, bitmap_glyphs, svg_table) use the
   bounds-checked readers in binary.zig and **clamp every record count at
   parse time** to what physically fits in the table — a malformed count

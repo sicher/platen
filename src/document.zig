@@ -29,6 +29,7 @@ pub const text_render = @import("text_render.zig");
 pub const format = @import("format.zig");
 pub const pdfa = @import("pdfa.zig");
 pub const encrypt = @import("encrypt.zig");
+const validate = @import("validate.zig");
 pub const Encryption = encrypt.Encryption;
 pub const Permissions = encrypt.Permissions;
 const color_fonts = @import("color_fonts.zig");
@@ -337,6 +338,7 @@ pub const Document = struct {
     /// Add a new page with the specified options (size, margins).
     /// The new page becomes the current page for subsequent operations.
     pub fn addPage(self: *Document, opts: PageOptions) !void {
+        try validate.check(opts);
         try self.pages.append(self.allocator, Page.init(self.allocator, opts));
         self.current_page = self.pages.items.len - 1;
     }
@@ -344,6 +346,7 @@ pub const Document = struct {
     /// Insert a page at the specified index.
     /// Pages at and after the index are shifted. The inserted page becomes current.
     pub fn insertPage(self: *Document, index: usize, opts: PageOptions) !void {
+        try validate.check(opts);
         try self.pages.insert(self.allocator, index, Page.init(self.allocator, opts));
         self.current_page = index;
     }
@@ -637,6 +640,7 @@ pub const Document = struct {
     /// If width or height is 0, the original dimension is used (maintaining aspect ratio if one is specified).
     /// Coordinates are from top-left origin.
     pub fn drawImage(self: *Document, image: *Image, rect: Rect) !void {
+        try validate.check(rect);
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -725,6 +729,7 @@ pub const Document = struct {
     /// If width or height is 0, the original dimension is used (maintaining aspect ratio if one is specified).
     /// Coordinates are from top-left origin.
     pub fn drawSvg(self: *Document, s: *Svg, rect: Rect) !void {
+        try validate.check(rect);
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -863,6 +868,7 @@ pub const Document = struct {
     /// Handles embedded fonts (real glyph advances plus kerning) as well as
     /// the standard 14 - it must agree with what write*/draw* actually render.
     pub fn measureStyled(self: *Document, text_str: []const u8, style: TextStyle) !TextMetrics {
+        try validate.check(style);
         // .face/.family styles resolve to this document's clone (first use
         // may instantiate, hence the error union) so document-level feature
         // overrides are reflected in measurement
@@ -891,6 +897,7 @@ pub const Document = struct {
     /// The rect specifies the clickable area on the current page.
     /// The dest specifies the target page and y position.
     pub fn addLink(self: *Document, rect: Rect, dest: Destination) !void {
+        try validate.check(.{ rect, dest });
         if (self.pages.items.len == 0) return error.NoPage;
         var page = &self.pages.items[self.current_page];
         try page.annotations.append(self.allocator, .{
@@ -902,6 +909,7 @@ pub const Document = struct {
     /// The rect specifies the clickable area on the current page.
     /// The url is copied to page-local storage.
     pub fn addExternalLink(self: *Document, rect: Rect, url: []const u8) !void {
+        try validate.check(rect);
         if (self.pages.items.len == 0) return error.NoPage;
         var page = &self.pages.items[self.current_page];
         const page_alloc = page.pageAllocator();
@@ -952,6 +960,7 @@ pub const Document = struct {
     /// Returns the bounding rectangle of the rendered text
     /// (ascender-to-descender, from real font metrics).
     pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle, opts: WriteAtOptions) !Rect {
+        try validate.check(.{ pos, style });
         const width = try self.writeTextStyled(pos, str, style, 0);
 
         // Anchoring: writeTextStyled shapes the text (which is where the
@@ -1116,6 +1125,7 @@ pub const Document = struct {
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
     pub fn write(self: *Document, region: *Region, str: []const u8, style_in: TextStyle, opts: WriteOptions) !WriteResult {
+        try validate.check(.{ region.*, style_in, opts });
         // Resolve .face/.family up front so measure_only paths error on
         // invalid styles (e.g. bold on a single face) exactly like rendering
         const style = try self.normalizeStyle(style_in);
@@ -1418,6 +1428,7 @@ pub const Document = struct {
     /// moves to the start of the next line afterwards. Use this for table
     /// cells, headers, paragraphs - any aligned text.
     pub fn writeBlock(self: *Document, region: *Region, str: []const u8, style: TextStyle, opts: BlockOptions) !WriteResult {
+        try validate.check(.{ region.*, style, opts });
         var st = StyledText.init(self.allocator);
         defer st.deinit();
         try st.append(str, .{});
@@ -1504,6 +1515,7 @@ pub const Document = struct {
 
     /// Draws a region's border and fill (without text).
     pub fn drawRegion(self: *Document, region: Region) !void {
+        try validate.check(region);
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -1632,6 +1644,7 @@ pub const Document = struct {
     /// Draw a line between two points.
     /// Coordinates are from top-left origin.
     pub fn drawLine(self: *Document, p1: Point, p2: Point, style: StrokeStyle) !void {
+        try validate.check(.{ p1, p2, style });
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -1672,6 +1685,7 @@ pub const Document = struct {
     /// Coordinates are from top-left origin.
     /// Style controls stroke and/or fill. If both are null, defaults to stroke with black.
     pub fn drawRect(self: *Document, rect: Rect, style: ShapeStyle) !void {
+        try validate.check(.{ rect, style });
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -1692,6 +1706,7 @@ pub const Document = struct {
     /// If radius is 0 or larger than half the smallest dimension, falls back to regular rect.
     /// Coordinates are from top-left origin.
     pub fn drawRoundedRect(self: *Document, rect: Rect, radius: f64, style: ShapeStyle) !void {
+        try validate.check(.{ rect, radius, style });
         // Clamp radius to half of smallest dimension
         const max_r = @min(rect.width, rect.height) / 2.0;
         const r = @min(radius, max_r);
@@ -1721,16 +1736,21 @@ pub const Document = struct {
     /// Rect defines the bounding box of the ellipse.
     /// Coordinates are from top-left origin.
     pub fn drawEllipse(self: *Document, rect: Rect, style: ShapeStyle) !void {
+        try validate.check(.{ rect, style });
+        const rx = rect.width / 2.0;
+        const ry = rect.height / 2.0;
+        return self.emitEllipse(.{ .x = rect.x + rx, .y = rect.y + ry }, rx, ry, style);
+    }
+
+    /// Shared by drawEllipse/drawCircle after each validated its own
+    /// arguments (so drawCircle's derived values are not re-checked
+    /// against the limit as if the caller had passed them).
+    fn emitEllipse(self: *Document, center: Point, rx: f64, ry: f64, style: ShapeStyle) !void {
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
-        const page_height = self.currentPageSize().height;
-
-        // Calculate center and radii from bounding box
-        const rx = rect.width / 2.0;
-        const ry = rect.height / 2.0;
-        const cx = rect.x + rx;
-        const pdf_cy = page_height - (rect.y + ry);
+        const cx = center.x;
+        const pdf_cy = self.currentPageSize().height - center.y;
 
         var buf: [1024]u8 = undefined;
         var len = beginShapeCommand(&buf, style);
@@ -1746,19 +1766,15 @@ pub const Document = struct {
     /// Center is the center point of the circle.
     /// Coordinates are from top-left origin.
     pub fn drawCircle(self: *Document, center: Point, radius: f64, style: ShapeStyle) !void {
-        // Convert center + radius to bounding box for drawEllipse
-        const diameter = radius * 2.0;
-        return self.drawEllipse(.{
-            .x = center.x - radius,
-            .y = center.y - radius,
-            .width = diameter,
-            .height = diameter,
-        }, style);
+        try validate.check(.{ center, radius, style });
+        return self.emitEllipse(center, radius, radius, style);
     }
 
     /// Draw a closed polygon.
     /// Coordinates are from top-left origin.
     pub fn drawPolygon(self: *Document, points: []const Point, style: ShapeStyle) !void {
+        try validate.check(style);
+        try validate.checkEach(points);
         if (self.pages.items.len == 0) return error.NoPage;
         if (points.len < 3) return; // Need at least 3 points for a polygon
 
@@ -1817,6 +1833,8 @@ pub const Document = struct {
     /// Write styled text into a region with alignment support.
     /// Uses Knuth-Plass optimal line breaking when requested.
     pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style_in: TextStyle, opts: ParagraphOptions) !WriteResult {
+        try validate.check(.{ region.*, style_in, opts });
+        try validate.checkEach(text.spans.items);
         if (self.pages.items.len == 0) return error.NoPage;
         const style = try self.normalizeStyle(style_in);
 
@@ -2672,6 +2690,7 @@ pub const Document = struct {
     /// Transforms compose in call order like Canvas/Cairo: later calls apply
     /// closest to the drawn geometry. Scope with pushState/popState.
     pub fn translate(self: *Document, dx: f64, dy: f64) !void {
+        try validate.check(.{ dx, dy });
         try self.applyTransform(.{ .a = 1, .b = 0, .c = 0, .d = 1, .e = dx, .f = dy });
     }
 
@@ -2679,6 +2698,7 @@ pub const Document = struct {
     /// Positive angles rotate clockwise on the page, matching CSS/Canvas
     /// convention for y-down coordinates.
     pub fn rotateAt(self: *Document, center: Point, degrees: f64) !void {
+        try validate.check(.{ center, degrees });
         const rad = degrees * std.math.pi / 180.0;
         const cos = @cos(rad);
         const sin = @sin(rad);
@@ -2690,6 +2710,7 @@ pub const Document = struct {
 
     /// Scale subsequent content by (sx, sy) around `center` (user space).
     pub fn scaleAt(self: *Document, center: Point, sx: f64, sy: f64) !void {
+        try validate.check(.{ center, sx, sy });
         const to_origin = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = -center.x, .f = -center.y };
         const sc = Affine{ .a = sx, .b = 0, .c = 0, .d = sy, .e = 0, .f = 0 };
         const back = Affine{ .a = 1, .b = 0, .c = 0, .d = 1, .e = center.x, .f = center.y };
@@ -2699,6 +2720,7 @@ pub const Document = struct {
     /// Clip subsequent content to a rectangle (user space, y = top edge).
     /// The clip lasts until the enclosing pushState is popped.
     pub fn clipRect(self: *Document, rect: Rect) !void {
+        try validate.check(rect);
         if (self.pages.items.len == 0) return error.NoPage;
         const pdf_y = self.currentPageSize().height - rect.y - rect.height;
         var buf: [96]u8 = undefined;
@@ -2709,6 +2731,7 @@ pub const Document = struct {
     /// Clip subsequent content to a path (non-zero winding rule).
     /// The clip lasts until the enclosing pushState is popped.
     pub fn clipPath(self: *Document, p: *const Path) !void {
+        try validate.checkEach(p.commands.items);
         if (self.pages.items.len == 0) return error.NoPage;
         if (p.isEmpty()) return;
         var page = &self.pages.items[self.current_page];
@@ -2723,6 +2746,8 @@ pub const Document = struct {
     }
 
     pub fn drawPath(self: *Document, p: *const Path, style: ShapeStyle) !void {
+        try validate.check(style);
+        try validate.checkEach(p.commands.items);
         if (self.pages.items.len == 0) return error.NoPage;
         if (p.isEmpty()) return;
 
@@ -2747,6 +2772,8 @@ pub const Document = struct {
 
     /// Add a linear gradient to the document and return its index.
     pub fn addLinearGradient(self: *Document, grad: LinearGradient) !usize {
+        try validate.check(grad);
+        try validate.checkEach(grad.stops);
         const idx = self.gradients.items.len;
         try self.gradients.append(self.allocator, .{ .linear = grad });
         return idx;
@@ -2754,6 +2781,8 @@ pub const Document = struct {
 
     /// Add a radial gradient to the document and return its index.
     pub fn addRadialGradient(self: *Document, grad: RadialGradient) !usize {
+        try validate.check(grad);
+        try validate.checkEach(grad.stops);
         const idx = self.gradients.items.len;
         try self.gradients.append(self.allocator, .{ .radial = grad });
         return idx;
@@ -2762,6 +2791,7 @@ pub const Document = struct {
     /// Fill a rectangle with a gradient.
     /// The gradient index must have been obtained from addLinearGradient or addRadialGradient.
     pub fn fillRectGradient(self: *Document, rect: Rect, gradient_idx: usize) !void {
+        try validate.check(rect);
         if (self.pages.items.len == 0) return error.NoPage;
         if (gradient_idx >= self.gradients.items.len) return error.InvalidGradient;
 
