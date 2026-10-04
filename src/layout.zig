@@ -215,7 +215,7 @@ pub const TextDecoration = struct {
 };
 
 /// Options for text styling (color, decoration).
-/// Use with setTextStyle() to configure text appearance.
+/// Per-span style for StyledText.append() (font and size come from the base style).
 pub const TextStyleOptions = struct {
     /// Text color.
     color: Color = Color.black,

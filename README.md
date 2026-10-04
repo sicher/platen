@@ -230,11 +230,12 @@ if (result.overflow) |_| {
 _ = try doc.writeBlock(&region, "Centered heading", style, .{ .alignment = .center });
 _ = try doc.writeBlock(&region, "Right-aligned text", style, .{ .alignment = .right });
 
-// Styled text for mixed formatting within a paragraph
+// Styled text for mixed color/decoration within a paragraph
+// (spans share the base style's font, size, and weight)
 var st = doc.createStyledText();
 defer st.deinit();
 try st.append("Normal text ", .{});
-try st.append("bold text ", .{ .bold = true });
+try st.append("underlined text ", .{ .decoration = .{ .underline = true } });
 try st.append("colored text", .{ .color = platen.Color.blue });
 
 _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
@@ -278,6 +279,7 @@ const result = try doc.write(&region, text, style, .{ .measure_only = true });
 
 // Or measure styled text
 var styled = doc.createStyledText();
+defer styled.deinit();
 try styled.append("Hello ", .{});
 try styled.append("World", .{ .color = platen.Color.blue });
 const styled_result = try doc.writeStyled(&region, &styled, style, .{ .measure_only = true });
@@ -428,7 +430,7 @@ const linear = platen.LinearGradient{
     .stops = &stops,
 };
 const linear_idx = try doc.addLinearGradient(linear);
-try doc.fillRectGradient(50, 50, 200, 100, linear_idx);
+try doc.fillRectGradient(.{ .x = 50, .y = 50, .width = 200, .height = 100 }, linear_idx);
 
 // Radial gradient (from inner circle to outer circle)
 const radial_stops = [_]platen.ColorStop{
@@ -441,7 +443,7 @@ const radial = platen.RadialGradient{
     .stops = &radial_stops,
 };
 const radial_idx = try doc.addRadialGradient(radial);
-try doc.fillRectGradient(100, 200, 100, 100, radial_idx);
+try doc.fillRectGradient(.{ .x = 100, .y = 200, .width = 100, .height = 100 }, radial_idx);
 ```
 
 ### Page Sizes
@@ -469,7 +471,7 @@ try doc.addPage(.{ .size = platen.PageSize.Letter.landscape() });
 try doc.addPage(.{ .size = .{ .width = 500, .height = 700 } });
 
 // Page navigation (for TOC, footers, etc.)
-const total = doc.pageCount();
+const total = doc.getPageCount();
 doc.selectPage(0);  // go back to first page
 try doc.insertPage(0, .{});  // insert page at beginning
 ```
@@ -505,7 +507,7 @@ try doc.addExternalLink(rect, "https://ziglang.org/documentation/");
 
 // Internal links for TOC navigation
 const ch1_result = try doc.writeAt(.{ .x = 50, .y = 100 }, "Chapter 1: Introduction", heading, .{});
-const chapter1_dest = doc.destination(ch1_result.y).?;  // save this location
+const chapter1_dest = doc.getDestination(ch1_result.y).?;  // save this location
 
 // Later, create a link to that chapter
 try doc.addPage(.{});
@@ -520,12 +522,12 @@ try doc.addLink(toc_rect, chapter1_dest);
 var outline = doc.createOutline();
 
 // Add top-level items
-const ch1 = try outline.add("Chapter 1: Introduction", doc.destination(0).?);
-const ch2 = try outline.add("Chapter 2: Details", doc.destination(100).?);
+const ch1 = try outline.add("Chapter 1: Introduction", doc.getDestination(0).?);
+const ch2 = try outline.add("Chapter 2: Details", doc.getDestination(100).?);
 
 // Add nested items
-_ = try outline.addChild(ch1, "Section 1.1: Background", doc.destination(50).?);
-_ = try outline.addChild(ch1, "Section 1.2: Overview", doc.destination(75).?);
+_ = try outline.addChild(ch1, "Section 1.1: Background", doc.getDestination(50).?);
+_ = try outline.addChild(ch1, "Section 1.2: Overview", doc.getDestination(75).?);
 
 // Set the outline on the document
 doc.setOutline(&outline);
@@ -686,6 +688,16 @@ balanced by `popState` before `output()`.
 | `Document.init(allocator, io)` | Create a new PDF document. `io` is `std.Io` (use `init.io` from main, or `std.testing.io` in tests) |
 | `deinit()` | Free all document resources |
 | `output() -> []u8` | Generate PDF output as bytes |
+| `setConformance(Conformance)` | Select PDF/A-1b or PDF/A-2b (before adding content) |
+
+Settings are plain fields on `Document`, set before `output()`:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `compression_level` | `1` | 0 = uncompressed, 1 = fastest, 9 = smallest |
+| `compress_threads` | `1` | Worker threads for stream compression (needs a thread-safe allocator) |
+| `encryption` | `null` | `Encryption` options (AES-256) |
+| `rng` | `null` | RNG for encryption IVs and document IDs (system CSPRNG if null) |
 
 ### Pages & Layout
 
@@ -694,7 +706,7 @@ balanced by `popState` before `output()`.
 | `addPage(PageOptions)` | Add a new page with size and margins |
 | `insertPage(index, PageOptions)` | Insert page at index (shifts others) |
 | `selectPage(index)` | Select page for subsequent operations |
-| `pageCount() -> usize` | Get total number of pages |
+| `getPageCount() -> usize` | Get total number of pages |
 | `getPageRegion() -> ?Region` | Get drawable region for current page |
 | `getPageIndex() -> usize` | Get current page index (0-based) |
 | `setMetadata(DocumentMetadata)` | Set title, author, subject, keywords, etc. |
@@ -722,7 +734,7 @@ document. For fonts shared across documents, see
 | `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Incremental write with word wrapping (cursor advances) |
 | `writeBlock(*Region, str, TextStyle, BlockOptions) -> WriteResult` | Wrapped block with alignment (cursor to next line) |
 | `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping and alignment |
-| `createStyledText() -> StyledText` | Create builder for mixed formatting (bold, colors, etc.) |
+| `createStyledText() -> StyledText` | Create builder for mixed colors/decorations within a paragraph |
 
 ### Text Measurement
 
@@ -731,6 +743,7 @@ document. For fonts shared across documents, see
 | `write(*Region, str, style, .{ .measure_only = true })` | Measure layout without rendering (cursor unchanged) |
 | `writeBlock(*Region, str, style, .{ .measure_only = true })` | Measure aligned layout without rendering |
 | `writeStyled(*Region, *StyledText, style, .{ .measure_only = true })` | Measure styled layout without rendering |
+| `measureStyled(str, TextStyle) -> TextMetrics` | Measure a single unwrapped run (width, height) |
 
 ### Text Styling
 
@@ -743,7 +756,8 @@ const style = platen.TextStyle{
     .bold = true,
     .italic = false,
     .color = platen.Color.navy,
-    .decoration = .underline,
+    .decoration = .{ .underline = true }, // and/or .strikethrough
+    .char_spacing = 0,             // extra points between characters
     .opacity = 0.5,                // fill alpha: 0.0 transparent .. 1.0 opaque
 };
 ```
@@ -753,12 +767,15 @@ decorations, using the same transparency mechanism as shapes. Values below `1.0`
 require transparency support and are rejected by PDF/A-1b
 (`error.TransparencyNotAllowed`).
 
-For mixed styles within a paragraph, use `StyledText`:
+For mixed colors and decorations within a paragraph, use `StyledText`.
+Spans carry `TextStyleOptions` (color, decoration); font, size, and
+bold/italic come from the base style passed to `writeStyled`:
 
 ```zig
 var st = doc.createStyledText();
+defer st.deinit();
 try st.append("Normal ", .{});
-try st.append("bold ", .{ .bold = true });
+try st.append("underlined ", .{ .decoration = .{ .underline = true } });
 try st.append("red", .{ .color = platen.Color.red });
 ```
 
@@ -766,7 +783,7 @@ try st.append("red", .{ .color = platen.Color.red });
 
 | Method | Description |
 |--------|-------------|
-| `destination(y) -> ?Destination` | Get destination at y position on current page |
+| `getDestination(y) -> ?Destination` | Get destination at y position on current page |
 | `addLink(Rect, Destination)` | Add internal link (jumps to page/position) |
 | `addExternalLink(Rect, url)` | Add external link (opens URL) |
 | `createOutline() -> Outline` | Create outline builder for table of contents |
@@ -802,7 +819,9 @@ another document errors (`ForeignFont`/`ForeignImage`/`ForeignSvg`).
 | `FontFace.warmup(text)` | Optional: pre-fill the kerning cache clones inherit (before first use) |
 | `FontFace.deinit()` | Free the face (after all documents using it are deinitialized) |
 | `Image.fromMemory(alloc, bytes) -> *Image` | Decode an image once (borrows bytes) |
+| `Image.fromFile(io, alloc, path) -> *Image` | Decode an image from a file |
 | `Svg.fromMemory(alloc, text) -> *Svg` | Parse an SVG once (copies the text) |
+| `Svg.fromFile(io, alloc, path) -> *Svg` | Parse an SVG from a file |
 | `Image.deinit()` / `Svg.deinit()` | Free the asset (single call) |
 
 Faces are used directly in styles - no per-document call:
@@ -832,11 +851,6 @@ Faces are used directly in styles - no per-document call:
 |--------|-------------|
 | `createPath() -> Path` | Create path builder |
 | `drawPath(*Path, ShapeStyle)` | Render path |
-| `pushState()` / `popState()` | Save/restore graphics state (transform + clip); must balance |
-| `translate(dx, dy)` | Translate subsequent content (user space, y down) |
-| `rotateAt(center, degrees)` | Rotate about a point; positive = clockwise |
-| `scaleAt(center, sx, sy)` | Scale about a point |
-| `clipRect(Rect)` / `clipPath(*Path)` | Clip subsequent content until state pop |
 
 **Path methods:**
 | Method | Description |
@@ -847,6 +861,16 @@ Faces are used directly in styles - no per-document call:
 | `quadTo(cp, end)` | Quadratic Bezier curve (2 Points) |
 | `closePath()` | Close subpath |
 | `deinit()` | Free path resources |
+
+### Transforms & Clipping
+
+| Method | Description |
+|--------|-------------|
+| `pushState()` / `popState()` | Save/restore graphics state (transform + clip); must balance |
+| `translate(dx, dy)` | Translate subsequent content (user space, y down) |
+| `rotateAt(center, degrees)` | Rotate about a point; positive = clockwise |
+| `scaleAt(center, sx, sy)` | Scale about a point |
+| `clipRect(Rect)` / `clipPath(*Path)` | Clip subsequent content until state pop |
 
 ### Gradients
 
@@ -894,20 +918,22 @@ platen.pt_per_cm    // 28.34...
 **Text:**
 - `Align` - Horizontal: `.left`, `.center`, `.right`, `.justify`
 - `VAlign` - Vertical: `.top` (optical cap-height), `.top_ascent`, `.top_leading`, `.middle`, `.bottom`
-- `TextDecoration` - `.none`, `.underline`, `.strikethrough`, `.underline_strikethrough`
+- `Anchor` - `writeAt` horizontal anchor: `.left`, `.center`, `.right`
+- `TextDecoration` - Flags struct: `.{ .underline = true }`, `.{ .strikethrough = true }`, or both; `TextDecoration.none`
 - `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
-- `WriteOptions` / `LineOptions` / `ParagraphOptions` - Text layout options
+- `WriteAtOptions` / `WriteOptions` / `BlockOptions` / `ParagraphOptions` - Options for `writeAt` / `write` / `writeBlock` / `writeStyled`
+- `TextStyleOptions` - Per-span style in `StyledText` (color, decoration)
 - `WriteResult` - Result with lines_written, overflow text, and bounding rect
 - `TextMetrics` / `FontMetrics` - Measurement results
 
 **Fonts:**
-- `Font` - Union type: `.family` (FontFamily), `.symbol`, `.zapf_dingbats`, `.embedded` (*EmbeddedFont), `.embedded_family` (*EmbeddedFontFamily)
+- `Font` - Union type: `.standard` (helvetica/times/courier), `.symbol`, `.zapf_dingbats`, `.face` (*const FontFace), `.family` (FontFamily); `.embedded` / `.embedded_family` are the document-owned fonts returned by `doc.loadFont*`
 - `Font.helvetica`, `Font.times`, `Font.courier` - Convenience constants for standard font families
-- `FontFamily` - `.helvetica`, `.times`, `.courier` (resolved to bold/italic via TextStyle)
-- `StandardFont` - `.helvetica`, `.helvetica_bold`, `.helvetica_italic`, `.helvetica_bold_italic`, `.times_roman`, `.times_bold`, `.times_italic`, `.times_bold_italic`, `.courier`, `.courier_bold`, `.courier_italic`, `.courier_bold_italic`, `.symbol`, `.zapfdingbats`
-- `EmbeddedFont` - Loaded TTF/OTF font
-- `EmbeddedFontFamily` - Font family with regular/bold/italic/bold-italic variants (from `loadFontFamily`)
-- `TextStyle` - Complete text style (font, size, bold, italic, color, decoration)
+- `FontFace` - One parsed TTF/OTF file, caller-owned and shareable (see [Font faces](#font-faces-parse-once-use-anywhere))
+- `FontFamily` - `FontFace` variants (`.regular` required; `.bold`, `.italic`, `.bold_italic` optional), resolved via TextStyle bold/italic
+- `StandardFont` - `.helvetica`, `.helvetica_bold`, `.helvetica_oblique`, `.helvetica_bold_oblique`, `.times_roman`, `.times_bold`, `.times_italic`, `.times_bold_italic`, `.courier`, `.courier_bold`, `.courier_oblique`, `.courier_bold_oblique`, `.symbol`, `.zapf_dingbats`
+- `EmbeddedFont` - A document's font instance (what `loadFont` returns inside `Font.embedded`)
+- `TextStyle` - Complete text style (font, size, bold, italic, color, decoration, char_spacing, opacity)
 
 **Graphics:**
 - `StrokeStyle` - Stroke settings (color, width, cap, join, dash)
