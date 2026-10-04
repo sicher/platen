@@ -6,17 +6,13 @@ zig-pkg/
 *.so
 *.dylib
 
-# Tools build artifacts
-tools/*/zig-out/
-tools/*/.zig-cache/
-tools/bun/
-test/output/
+# Dev tools (scripts/setup-tools) and local environments
+.tools/
 .venv/
+test/output/
 
 # Python cache
 __pycache__/
 
-
 # macOS
 .DS_Store
-

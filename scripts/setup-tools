@@ -1,48 +1,57 @@
 #!/usr/bin/env bash
-# Clone and build the local dev tools this project expects. Each lives in
-# its own repo and is gitignored here, so a fresh clone starts without them.
+# Clone (and build) the local dev tools this project expects. .tools/ is
+# gitignored -- each tool lives in its own repo, so a fresh clone starts
+# without them.
 #
+#   devkit   release mechanism (devkit release / sync-dev / pin-deps / publish)
 #   simgrep  code-duplication search
 #   zigmap   codemap generator
 #
-# They land in tools/ — see CLAUDE.md.
+# The body of this script is IDENTICAL in every urverk repo and only the
+# two lists below differ. Keep it that way: a convention is one script
+# with a per-repo list, not seven scripts that resemble each other.
+#
+# .tools/, never tools/. In quote, tools/ holds tracked project scripts
+# (svg2tvg, sign_untrusted, ...), so a clone landing there is a collision
+# that would surface exactly once, confusingly.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 HOST=https://git.urverk.org/urverk
-DIR=tools
+DIR=.tools
+
+CLONE="devkit simgrep zigmap"
+BUILD="simgrep zigmap"
 
 setup() { # name
-  local name="$1" d="$DIR/$1"
-  # rev-parse, not [ -d "$d/.git" ]: a submodule or worktree has a .git
-  # FILE, and the directory test would send us down the clone path only to
-  # fail on an existing directory.
-  if git -C "$d" rev-parse --git-dir >/dev/null 2>&1; then
-    if [ -f "$d/.git" ]; then
-      # Submodule: the parent repo pins the revision, so pulling here would
-      # fight it. Leave it to `git submodule update`.
-      echo "== $name: submodule — run 'git submodule update --init $d'"
-    else
-      echo "== $name: updating"
-      git -C "$d" pull --ff-only --quiet
-    fi
-  elif [ -e "$d" ]; then
-    echo "== $name: $d exists but is not a checkout — leaving it alone" >&2
+  local name="$1" dir="$DIR/$1"
+  # rev-parse, not [ -d "$dir/.git" ]: a submodule or a worktree has a
+  # .git FILE, and the directory test sends those down the clone path
+  # only to fail on a directory that is already there (platen, 07-26).
+  if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "== $name: updating"
+    git -C "$dir" pull --ff-only --quiet
+  elif [ -e "$dir" ]; then
+    echo "== $name: $dir exists but is not a checkout -- leaving it alone" >&2
   else
     echo "== $name: cloning"
-    git clone --quiet "$HOST/$name" "$d"
+    git clone --quiet "$HOST/$name" "$dir"
   fi
 }
 
 mkdir -p "$DIR"
-for t in simgrep zigmap; do setup "$t"; done
+for t in $CLONE; do setup "$t"; done
 
-# Both are Zig programs; build them if they aren't built yet.
-for t in simgrep zigmap; do
+# The Zig ones are built on first setup; devkit runs from its checkout.
+for t in $BUILD; do
   if [ -d "$DIR/$t" ] && [ ! -x "$DIR/$t/zig-out/bin/$t" ]; then
     echo "== $t: building"
     ( cd "$DIR/$t" && zig build -Doptimize=ReleaseFast )
   fi
 done
 
-echo "done -- binaries under $DIR/*/zig-out/bin"
+if [ -n "$BUILD" ]; then
+  echo "done -- clones in $DIR/, binaries under $DIR/*/zig-out/bin"
+else
+  echo "done -- clones in $DIR/"
+fi
