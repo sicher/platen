@@ -408,7 +408,7 @@ pub fn assembleTTF(allocator: std.mem.Allocator, tables: TTFTables) ![]u8 {
 
 /// Get all component glyph IDs referenced by a composite glyph
 pub fn getCompositeComponents(glyf: []const u8, loca: []const u8, loca_format: i16, glyph_id: u16) [16]u16 {
-    var components: [16]u16 = [_]u16{0} ** 16;
+    var components: [16]u16 = @splat(0);
     var comp_idx: usize = 0;
 
     const glyph_offset = getLocaOffset(loca, glyph_id, loca_format);

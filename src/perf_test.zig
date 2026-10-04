@@ -57,7 +57,7 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("\n=== PLATEN Performance Test ===\n", .{});
     std.debug.print("Pages: {d}, Iterations: {d}\n\n", .{ config.pages, config.iterations });
 
-    var total_times = [_]i64{0} ** 8;
+    var total_times: [8]i64 = @splat(0);
     var pdf_bytes: ?[]u8 = null;
     defer if (pdf_bytes) |b| allocator.free(b);
 

@@ -1002,7 +1002,7 @@ Known gaps, documented so you don't discover them the hard way:
 
 ## Requirements
 
-- Zig 0.16+
+- Zig 0.17+
 - No dependencies — compression uses `std.compress.flate`
 
 ## License

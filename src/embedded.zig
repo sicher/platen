@@ -198,7 +198,7 @@ pub const EmbeddedFont = struct {
     encoding: FontEncoding = .identity,
 
     // Subsetting support (WinAnsi mode)
-    used_chars: [256]bool = [_]bool{false} ** 256, // Track which WinAnsi chars are used
+    used_chars: [256]bool = @splat(false), // Track which WinAnsi chars are used
     subset_data: ?[]const u8 = null, // Generated subset TTF (lazily created)
 
     // CID mode: track Unicode codepoint → glyph ID mappings
@@ -446,7 +446,7 @@ pub const EmbeddedFont = struct {
         emb.owns_data = false;
         emb.borrowed = true;
         emb.subset_data = null;
-        emb.used_chars = [_]bool{false} ** 256;
+        emb.used_chars = @splat(false);
         emb.cid_used_glyphs = .empty;
         emb.cid_glyph_widths = .empty;
         emb.glyph_to_codepoint = .empty;

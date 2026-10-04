@@ -74,7 +74,7 @@ pub fn decompress(allocator: std.mem.Allocator, input: []const u8, uncompressed_
 test "compress and decompress roundtrip" {
     const allocator = std.testing.allocator;
     // Use repetitive text that compresses well
-    const input = "Hello, world! This is a test of zlib compression. " ** 10;
+    const input = @import("testing.zig").repeat("Hello, world! This is a test of zlib compression. ", 10);
 
     const compressed = try compress(allocator, input);
     defer allocator.free(compressed);
@@ -97,7 +97,7 @@ test "compress empty input" {
 
 test "compress with level" {
     const allocator = std.testing.allocator;
-    const input = "Repeated text. " ** 50;
+    const input = @import("testing.zig").repeat("Repeated text. ", 50);
 
     // Level 1 (fast) vs Level 9 (best)
     const fast = try compressLevel(allocator, input, 1);

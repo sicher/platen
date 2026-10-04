@@ -42,9 +42,7 @@ pub fn build(b: *std.Build) void {
     // Run command
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run the CLI tool");
     run_step.dependOn(&run_cmd.step);
@@ -60,9 +58,6 @@ pub fn build(b: *std.Build) void {
     });
     const lib_tests = b.addTest(.{
         .root_module = test_mod,
-        // Vendored runner working around a Zig 0.16.0 compile error in the
-        // stock runner's fuzz mode; see scripts/test_runner.zig.
-        .test_runner = .{ .path = b.path("scripts/test_runner.zig"), .mode = .server },
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);
@@ -84,9 +79,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_perf = b.addRunArtifact(perf_exe);
-    if (b.args) |args| {
-        run_perf.addArgs(args);
-    }
+    run_perf.addPassthruArgs();
 
     const perf_step = b.step("perf", "Run performance tests (use -Doptimize=ReleaseFast)");
     perf_step.dependOn(&run_perf.step);
@@ -106,9 +99,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_invoice_bench = b.addRunArtifact(invoice_bench_exe);
-    if (b.args) |args| {
-        run_invoice_bench.addArgs(args);
-    }
+    run_invoice_bench.addPassthruArgs();
 
     const invoice_bench_step = b.step("bench-invoice", "Run invoice throughput benchmark (use -Doptimize=ReleaseFast)");
     invoice_bench_step.dependOn(&run_invoice_bench.step);

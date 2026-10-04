@@ -7,6 +7,17 @@
 
 const std = @import("std");
 
+/// `s` repeated `n` times, built at comptime (replaces the `**` operator
+/// that Zig 0.17 removed).
+pub fn repeat(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const out = comptime blk: {
+        var buf: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(buf[i * s.len ..][0..s.len], s);
+        break :blk buf;
+    };
+    return &out;
+}
+
 /// Comparison mode
 pub const CompareMode = enum {
     /// Structural comparison using qpdf QDF normalization

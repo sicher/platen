@@ -518,7 +518,7 @@ const TableBuilder = struct {
 
 /// A minimal but valid-headered PNG blob (only the 24-byte prefix is read).
 fn fakePng(comptime w: u32, comptime h: u32) [24]u8 {
-    var png = [_]u8{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R' } ++ [_]u8{0} ** 8;
+    var png = [_]u8{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R' } ++ @as([8]u8, @splat(0));
     std.mem.writeInt(u32, png[16..20], w, .big);
     std.mem.writeInt(u32, png[20..24], h, .big);
     return png;

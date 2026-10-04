@@ -346,7 +346,7 @@ const times_bold_italic_widths = [256]u16{
 };
 
 // Courier is monospace - all variants use the same width (600)
-const courier_widths = [1]u16{600} ** 256;
+const courier_widths: [256]u16 = @splat(600);
 
 const symbol_widths = [256]u16{
     250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250, 250,

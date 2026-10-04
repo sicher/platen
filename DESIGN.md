@@ -1074,9 +1074,14 @@ _ = try doc.writeStyled(&box, &st, .{});  // all defaults
 _ = try doc.writeStyled(&box, &st, .{ .alignment = .justify });
 ```
 
-## Zig 0.16 Compatibility Notes
+## Zig Compatibility Notes
 
-The project targets Zig 0.16. Key things to remember when extending the code:
+The project targets Zig 0.17 (migrated from 0.16 on 2026-10-05). Key things to remember when extending the code:
+
+- **0.17: no `**` operator.** Array repetition is gone. Use `@splat(v)` against a typed result (`x: [256]bool = @splat(false)`, or `@as([8]u8, @splat(0))` inside `++`). For comptime string repetition in tests use `testing.repeat(s, n)`.
+- **0.17: `@typeInfo` enums are struct-of-arrays.** `.@"enum".fields` became parallel `field_names` / `field_values` slices.
+- **0.17: build args.** `b.args` is gone; forward `zig build <step> -- ...` with `run.addPassthruArgs()`.
+- **0.17: stock test runner.** The vendored `scripts/test_runner.zig` (a 0.16 `--fuzz` compile workaround) was deleted; upstream carries the fix.
 
 - **`std.Io`-driven file I/O**. There is no implicit "current process" I/O in 0.16. `Document` carries an `io: std.Io` and threads it through `loadFont`, `loadImage`, `loadSvg`. Free functions that touch the filesystem (e.g. `ttf.Font.fromFile`, `Image.fromFile`, `Svg.fromFile`, `EmbeddedFont.fromFile`) take `io` as the first parameter. CLI / perf / integration entry points hold a module-level `app_io` that is initialised from `init.io` (or `std.testing.io` in test builds).
 - **Writer interface**: `std.Io.Writer.fixed(buf)` for fixed-buffer writing; pass `&w` (a `*std.Io.Writer`) — there is no `.writer()` accessor. `w.buffered()` returns the slice written so far, `w.end` is the cursor. For dynamic buffers use `std.Io.Writer.Allocating`.

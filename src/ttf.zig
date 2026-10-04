@@ -31,14 +31,14 @@ pub const Font = struct {
     cmap_format: u16 = 0,
 
     // ASCII glyph cache for O(1) lookup of common characters
-    ascii_glyphs: [128]u16 = [_]u16{0} ** 128,
+    ascii_glyphs: [128]u16 = @splat(0),
     has_ascii_cache: bool = false,
 
     // Cached hmtx table data for fast width lookups
     hmtx_data: ?[]const u8 = null,
 
     // ASCII width cache for O(1) width lookup of common characters (in font units)
-    ascii_widths: [128]u16 = [_]u16{0} ** 128,
+    ascii_widths: [128]u16 = @splat(0),
     has_ascii_widths: bool = false,
 
     /// Load a font from file

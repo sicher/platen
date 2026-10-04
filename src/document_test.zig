@@ -755,7 +755,7 @@ test "writeStyled multi-page via overflow handling" {
     try doc.addPage(page_opts);
 
     // Generate long text that should span multiple pages
-    const paragraph = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor. " ** 100;
+    const paragraph = @import("testing.zig").repeat("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor. ", 100);
 
     var st = doc.createStyledText();
     defer st.deinit();

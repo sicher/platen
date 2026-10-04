@@ -162,7 +162,7 @@ pub const Feature = enum(u32) {
 
 /// Feature enable/disable flags using a custom bitset (EnumArray exceeds comptime branch limit)
 pub const FeatureFlags = struct {
-    const num_features = @typeInfo(Feature).@"enum".fields.len;
+    const num_features = @typeInfo(Feature).@"enum".field_values.len;
     flags: [num_features]bool,
 
     /// (tag value, field index) pairs sorted by tag value, built at comptime
@@ -171,10 +171,10 @@ pub const FeatureFlags = struct {
     const Entry = struct { value: u32, index: u16 };
     const sorted_entries = blk: {
         @setEvalBranchQuota(100_000);
-        const fields = @typeInfo(Feature).@"enum".fields;
-        var entries: [fields.len]Entry = undefined;
-        for (fields, 0..) |f, i| {
-            entries[i] = .{ .value = f.value, .index = i };
+        const values = @typeInfo(Feature).@"enum".field_values;
+        var entries: [values.len]Entry = undefined;
+        for (values, 0..) |v, i| {
+            entries[i] = .{ .value = v, .index = i };
         }
         // Insertion sort by tag value
         for (1..entries.len) |i| {
@@ -207,9 +207,9 @@ pub const FeatureFlags = struct {
     /// Comptime index of a feature (for building contiguous range scans).
     pub fn comptimeIndex(comptime feature: Feature) usize {
         @setEvalBranchQuota(100_000);
-        const fields = @typeInfo(Feature).@"enum".fields;
-        inline for (fields, 0..) |f, i| {
-            if (@intFromEnum(feature) == f.value) return i;
+        const values = @typeInfo(Feature).@"enum".field_values;
+        inline for (values, 0..) |v, i| {
+            if (@intFromEnum(feature) == v) return i;
         }
         unreachable;
     }
@@ -228,10 +228,10 @@ pub const FeatureFlags = struct {
 
     /// Initialize with default values (liga, kern, calt, mark, mkmk enabled)
     pub fn init() FeatureFlags {
-        var f: FeatureFlags = .{ .flags = [_]bool{false} ** num_features };
-        const fields = @typeInfo(Feature).@"enum".fields;
-        inline for (fields, 0..) |field, i| {
-            const feat: Feature = @enumFromInt(field.value);
+        var f: FeatureFlags = .{ .flags = @splat(false) };
+        const values = @typeInfo(Feature).@"enum".field_values;
+        inline for (values, 0..) |v, i| {
+            const feat: Feature = @enumFromInt(v);
             f.flags[i] = feat.defaultEnabled();
         }
         return f;
@@ -239,12 +239,12 @@ pub const FeatureFlags = struct {
 
     /// Initialize with all features disabled
     pub fn initAllDisabled() FeatureFlags {
-        return .{ .flags = [_]bool{false} ** num_features };
+        return .{ .flags = @splat(false) };
     }
 
     /// Initialize with all features enabled
     pub fn initAllEnabled() FeatureFlags {
-        return .{ .flags = [_]bool{true} ** num_features };
+        return .{ .flags = @splat(true) };
     }
 
     pub fn isEnabled(self: FeatureFlags, feature: Feature) bool {
