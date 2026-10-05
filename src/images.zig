@@ -188,6 +188,9 @@ fn parseJpeg(allocator: std.mem.Allocator, data: []const u8, owns_data: bool) !*
         if (i + 2 > data.len) break;
         const length = (@as(usize, data[i]) << 8) | data[i + 1];
         if (length < 2) return error.InvalidJpeg;
+        // A segment running past the end of the file is malformed (and
+        // the APP2 slice below would read out of bounds).
+        if (i + length > data.len) return error.InvalidJpeg;
 
         // Check for SOF markers (Start of Frame)
         if (isSOFMarker(marker) and !found_sof) {
@@ -343,6 +346,20 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
     const color_type = std.enums.fromInt(PngColorType, color_type_byte) orelse {
         return error.UnsupportedPngColorType;
     };
+    if (width == 0 or height == 0) return error.InvalidPng;
+
+    // Bit depth must be one the PNG spec allows for the color type (an
+    // unchecked 0 made scanlines 0 bytes wide and let a 60-byte file reach
+    // the pixel loops with a 2^31-pixel width). 16-bit with alpha is valid
+    // PNG but separateAlphaChannel only handles 8-bit samples, so it is
+    // refused rather than decoded as garbage.
+    const depth_ok = switch (color_type) {
+        .grayscale => bit_depth == 1 or bit_depth == 2 or bit_depth == 4 or bit_depth == 8 or bit_depth == 16,
+        .indexed => bit_depth == 1 or bit_depth == 2 or bit_depth == 4 or bit_depth == 8,
+        .rgb => bit_depth == 8 or bit_depth == 16,
+        .grayscale_alpha, .rgba => bit_depth == 8,
+    };
+    if (!depth_ok) return error.UnsupportedPngBitDepth;
 
     // Collect all IDAT chunks (plus PLTE/tRNS for indexed color)
     var idat_chunks = std.ArrayListUnmanaged([]const u8).empty;
@@ -392,7 +409,12 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
     // Calculate expected decompressed size
     // Each scanline has: 1 filter byte + scanline_width pixels
     const scanline_width = calculateScanlineWidth(width, color_type, bit_depth);
-    const expected_raw_len = height * (1 + scanline_width);
+    const expected_raw_len = std.math.mul(usize, height, 1 + scanline_width) catch
+        return error.InvalidPngData;
+    // zlib.decompress allocates expected_raw_len up front, and the header
+    // is attacker-controlled. Deflate expands at most ~1032:1, so a larger
+    // claim cannot be satisfied by this data: refuse before allocating.
+    if (expected_raw_len / 1032 > total_compressed) return error.InvalidPngData;
 
     // Decompress using zlib
     const zlib = @import("zlib.zig");
@@ -649,7 +671,7 @@ fn separateAlphaChannel(
     height: u32,
     color_type: PngColorType,
 ) !SeparatedChannels {
-    const pixel_count = width * height;
+    const pixel_count = @as(usize, width) * height;
 
     switch (color_type) {
         .rgba => {
@@ -782,4 +804,91 @@ test "Paeth predictor" {
     try std.testing.expectEqual(@as(u8, 20), paethPredictor(10, 20, 5));
     try std.testing.expectEqual(@as(u8, 0), paethPredictor(0, 0, 0));
     try std.testing.expectEqual(@as(u8, 100), paethPredictor(100, 100, 100));
+}
+
+// ----------------------------------------------------------------------------
+// Hostile-header regression tests (2026-10-05 audit)
+// ----------------------------------------------------------------------------
+
+/// Minimal PNG: signature, IHDR, one IDAT holding zlib(`raw`), IEND.
+/// CRCs are left zero (the decoder does not check them).
+fn testPng(width: u32, height: u32, bit_depth: u8, color_type: u8, raw: []const u8) ![]u8 {
+    const zlib = @import("zlib.zig");
+    const z = try zlib.compress(std.testing.allocator, raw);
+    defer std.testing.allocator.free(z);
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(std.testing.allocator);
+    const a = std.testing.allocator;
+    try out.appendSlice(a, &.{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' });
+    var ihdr: [25]u8 = @splat(0);
+    std.mem.writeInt(u32, ihdr[0..4], 13, .big);
+    @memcpy(ihdr[4..8], "IHDR");
+    std.mem.writeInt(u32, ihdr[8..12], width, .big);
+    std.mem.writeInt(u32, ihdr[12..16], height, .big);
+    ihdr[16] = bit_depth;
+    ihdr[17] = color_type;
+    try out.appendSlice(a, &ihdr);
+    var hdr: [8]u8 = undefined;
+    std.mem.writeInt(u32, hdr[0..4], @intCast(z.len), .big);
+    @memcpy(hdr[4..8], "IDAT");
+    try out.appendSlice(a, &hdr);
+    try out.appendSlice(a, z);
+    try out.appendSlice(a, &.{ 0, 0, 0, 0 }); // CRC
+    try out.appendSlice(a, &.{ 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0, 0, 0, 0 });
+    return out.toOwnedSlice(a);
+}
+
+fn expectPngError(expected: anyerror, png: []const u8) !void {
+    const result = Image.fromMemory(std.testing.allocator, png);
+    if (result) |img| {
+        img.deinit();
+        return error.TestUnexpectedResult;
+    } else |err| try std.testing.expectEqual(expected, err);
+}
+
+test "PNG bit depth 0 with a huge width is rejected (no overflow)" {
+    // Bit depth 0 made scanlines 0 bytes wide, so 2 raw bytes passed the
+    // size check and width * height (u32) overflowed in the alpha split.
+    const png = try testPng(0x8000_0000, 2, 0, 6, &.{ 0, 0 });
+    defer std.testing.allocator.free(png);
+    try expectPngError(error.UnsupportedPngBitDepth, png);
+}
+
+test "PNG bit depth must be valid for the color type" {
+    const cases = [_]struct { depth: u8, ct: u8 }{
+        .{ .depth = 3, .ct = 0 }, .{ .depth = 4, .ct = 2 }, .{ .depth = 16, .ct = 3 },
+        .{ .depth = 2, .ct = 4 }, .{ .depth = 1, .ct = 6 },
+        // 16-bit with alpha decoded as garbage before; now refused.
+        .{ .depth = 16, .ct = 4 }, .{ .depth = 16, .ct = 6 },
+    };
+    for (cases) |c| {
+        const png = try testPng(1, 1, c.depth, c.ct, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+        defer std.testing.allocator.free(png);
+        try expectPngError(error.UnsupportedPngBitDepth, png);
+    }
+}
+
+test "PNG with zero width or height is rejected" {
+    const png = try testPng(0, 1, 8, 2, &.{0});
+    defer std.testing.allocator.free(png);
+    try expectPngError(error.InvalidPng, png);
+}
+
+test "PNG whose claimed size cannot come from its data is rejected before allocating" {
+    // 2^31 x 2^31 RGBA: height * (1 + scanline) overflowed usize.
+    const huge = try testPng(0x7FFF_FFFF, 0x7FFF_FFFF, 8, 6, &.{0});
+    defer std.testing.allocator.free(huge);
+    try expectPngError(error.InvalidPngData, huge);
+    // 60000 x 60000 RGBA (~14 GB) from a few bytes: beyond deflate's
+    // ~1032:1 maximum expansion, so refused without the allocation.
+    const big = try testPng(60000, 60000, 8, 6, &.{0});
+    defer std.testing.allocator.free(big);
+    try expectPngError(error.InvalidPngData, big);
+}
+
+test "JPEG segment extending past the end of the file is rejected" {
+    // APP2 claims 0x100 bytes but the file ends; data[i + 2 .. i + length]
+    // sliced out of bounds.
+    const jpeg = [_]u8{ 0xFF, 0xD8, 0xFF, 0xE2, 0x01, 0x00 } ++ "ICC_PROFILE\x00\x01\x01".*;
+    try expectPngError(error.InvalidJpeg, &jpeg);
 }
