@@ -6,6 +6,8 @@ Compares two PDFs based on visual content rather than internal structure:
 - Same text content
 - Similar positions (within tolerance)
 - Same fonts used per page (via qpdf)
+- With --compare-images: identical decoded image pixels and alpha masks
+  (via poppler's pdfimages; exact, no tolerance)
 
 Usage:
     python scripts/compare_pdfs.py expected.pdf actual.pdf [--tolerance=5.0]
@@ -20,6 +22,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -237,7 +240,156 @@ def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int,
     return diffs
 
 
-def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0, skip_fonts: bool = False) -> tuple[bool, list[str]]:
+def read_netpbm(path: Path) -> tuple[int, int, bytes]:
+    """Parse a P4/P5/P6 file (as written by pdfimages) into 8-bit RGB."""
+    data = path.read_bytes()
+    fields: list[bytes] = []
+    pos = 2
+    magic = data[:2]
+    need = 2 if magic == b"P4" else 3
+    while len(fields) < need:
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        if data[pos:pos + 1] == b"#":
+            pos = data.index(b"\n", pos) + 1
+            continue
+        end = pos
+        while not data[end:end + 1].isspace():
+            end += 1
+        fields.append(data[pos:end])
+        pos = end
+    pos += 1  # single whitespace before the raster
+    width, height = int(fields[0]), int(fields[1])
+    maxval = 1 if magic == b"P4" else int(fields[2])
+    raster = data[pos:]
+
+    if magic == b"P4":
+        row_bytes = (width + 7) // 8
+        gray = bytearray()
+        for y in range(height):
+            row = raster[y * row_bytes:(y + 1) * row_bytes]
+            for x in range(width):
+                bit = (row[x // 8] >> (7 - x % 8)) & 1
+                gray.append(0 if bit else 255)  # PBM: 1 = black
+        samples, channels = bytes(gray), 1
+    else:
+        channels = 1 if magic == b"P5" else 3
+        if maxval > 255:  # 16-bit big-endian samples: keep the high byte
+            samples = raster[0:width * height * channels * 2:2]
+        else:
+            samples = raster[:width * height * channels]
+            if maxval != 255:
+                samples = bytes(round(v * 255 / maxval) for v in samples)
+
+    if channels == 1:
+        samples = bytes(v for v in samples for _ in range(3))
+    return width, height, samples
+
+
+def extract_images(pdf_path: str, workdir: Path) -> list[tuple[str, Path]]:
+    """All image XObjects in page/drawing order as (type, netpbm path);
+    type is "image" or "smask" (an smask follows the image it masks)."""
+    listing = subprocess.run(["pdfimages", "-list", pdf_path], capture_output=True, text=True, check=True).stdout
+    types = [line.split()[2] for line in listing.splitlines()[2:] if line.strip()]
+    prefix = workdir / "img"
+    subprocess.run(["pdfimages", pdf_path, str(prefix)], check=True)
+    files = sorted(workdir.glob("img-*"))
+    if len(files) != len(types):
+        raise RuntimeError(f"pdfimages listed {len(types)} images but wrote {len(files)}")
+    return list(zip(types, files))
+
+
+def group_images(entries: list[tuple[str, Path]]) -> list[tuple[Path, Path | None]]:
+    groups: list[tuple[Path, Path | None]] = []
+    for kind, path in entries:
+        if kind == "smask" and groups and groups[-1][1] is None:
+            groups[-1] = (groups[-1][0], path)
+        else:
+            groups.append((path, None))
+    return groups
+
+
+def compare_images(expected_path: str, actual_path: str, skip_expected: set[int],
+                   skip_actual: set[int] | None = None) -> list[str]:
+    """Compare decoded images (and their soft masks) pixel for pixel.
+    `skip_expected` lists indices of images present only in the reference
+    (e.g. formats the generator does not support yet); `skip_actual` lists
+    actual images to leave out (e.g. ones the reference renders wrongly)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        exp_dir, act_dir = Path(tmp) / "e", Path(tmp) / "a"
+        exp_dir.mkdir()
+        act_dir.mkdir()
+        expected = [g for i, g in enumerate(group_images(extract_images(expected_path, exp_dir))) if i not in skip_expected]
+        actual = [g for i, g in enumerate(group_images(extract_images(actual_path, act_dir))) if i not in (skip_actual or set())]
+
+        if len(expected) != len(actual):
+            return [f"Image count differs: {len(expected)} vs {len(actual)} (after skipping {len(skip_expected)} expected, {len(skip_actual or ())} actual)"]
+
+        diffs = []
+        for n, ((e_img, e_mask), (a_img, a_mask)) in enumerate(zip(expected, actual)):
+            for what, e, a in (("image", e_img, a_img), ("mask", e_mask, a_mask)):
+                if e is None and a is None:
+                    continue
+                if e is None or a is None:
+                    diffs.append(f"Image {n + 1}: {what} only in {'actual' if e is None else 'expected'}")
+                    continue
+                ew, eh, ep = read_netpbm(e)
+                aw, ah, ap = read_netpbm(a)
+                if (ew, eh) != (aw, ah):
+                    diffs.append(f"Image {n + 1} {what}: size {ew}x{eh} vs {aw}x{ah}")
+                elif ep != ap:
+                    bad = sum(1 for i in range(0, len(ep), 3) if ep[i:i + 3] != ap[i:i + 3])
+                    diffs.append(f"Image {n + 1} {what}: {bad} of {ew * eh} pixels differ")
+        return diffs
+
+
+def read_truth(path: Path) -> tuple[int, int, bytes, bytes]:
+    """Truth file from scripts/gen_pngsuite_expected.py -> (w, h, rgb, alpha)."""
+    data = path.read_bytes()
+    width, height = int.from_bytes(data[0:4], "big"), int.from_bytes(data[4:8], "big")
+    rgba = data[8:]
+    rgb = bytes(b for i, b in enumerate(rgba) if i % 4 != 3)
+    return width, height, rgb, rgba[3::4]
+
+
+def compare_images_to_truth(actual_path: str, names: list[str], truth_dir: str, known_gaps: set[str]) -> list[str]:
+    """Compare each image in `actual_path` (drawn in `names` order) with its
+    truth file: RGB exactly, and the soft mask against the truth alpha (a
+    missing mask is a mismatch when the truth has any transparency).
+    `known_gaps` must mismatch - a listed file that now matches is reported
+    so the list cannot go stale."""
+    with tempfile.TemporaryDirectory() as tmp:
+        groups = group_images(extract_images(actual_path, Path(tmp)))
+        if len(groups) != len(names):
+            return [f"Truth: {len(groups)} images in PDF but {len(names)} names given"]
+        mismatches: dict[str, str] = {}
+        for name, (img, mask) in zip(names, groups):
+            tw, th, t_rgb, t_alpha = read_truth(Path(truth_dir) / (name[:-4] + ".rgba"))
+            aw, ah, a_rgb = read_netpbm(img)
+            if (aw, ah) != (tw, th):
+                mismatches[name] = f"size {aw}x{ah}, truth {tw}x{th}"
+                continue
+            if a_rgb != t_rgb:
+                bad = sum(1 for i in range(0, len(t_rgb), 3) if a_rgb[i:i + 3] != t_rgb[i:i + 3])
+                mismatches[name] = f"{bad} of {tw * th} pixels differ"
+                continue
+            if mask is None:
+                if any(a != 255 for a in t_alpha):
+                    mismatches[name] = "no transparency, truth has some"
+            else:
+                _, _, m = read_netpbm(mask)
+                if m[0::3] != t_alpha:
+                    bad = sum(1 for a, b in zip(m[0::3], t_alpha) if a != b)
+                    mismatches[name] = f"{bad} of {tw * th} alpha values differ"
+
+    diffs = [f"Truth {n}: {why}" for n, why in mismatches.items() if n not in known_gaps]
+    diffs += [f"Truth {n}: matches now - remove it from the known gaps" for n in sorted(known_gaps) if n not in mismatches]
+    return diffs
+
+
+def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0, skip_fonts: bool = False,
+                 images: bool = False, skip_expected_images: set[int] | None = None,
+                 skip_actual_images: set[int] | None = None) -> tuple[bool, list[str]]:
     """
     Compare two PDFs semantically.
 
@@ -261,6 +413,9 @@ def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0, s
         page_diffs = compare_pages(exp_page, act_page, tolerance, i + 1, skip_fonts)
         diffs.extend(page_diffs)
 
+    if images:
+        diffs.extend(compare_images(expected_path, actual_path, skip_expected_images or set(), skip_actual_images))
+
     return len(diffs) == 0, diffs
 
 
@@ -272,6 +427,18 @@ def main():
                         help="Position tolerance in points (default: 5.0)")
     parser.add_argument("--skip-fonts", action="store_true",
                         help="Skip font comparison (for SVG Form XObjects)")
+    parser.add_argument("--compare-images", action="store_true",
+                        help="Also compare decoded image pixels exactly (pdfimages)")
+    parser.add_argument("--skip-expected-images", default="",
+                        help="Comma-separated 0-based indices of reference images absent from actual")
+    parser.add_argument("--skip-actual-images", default="",
+                        help="Comma-separated 0-based indices of actual images to leave out")
+    parser.add_argument("--truth-dir", default="",
+                        help="Directory of .rgba truth files (scripts/gen_pngsuite_expected.py)")
+    parser.add_argument("--truth-names", default="",
+                        help="Comma-separated file names of the actual PDF's images, in drawing order")
+    parser.add_argument("--truth-known-gaps", default="",
+                        help="Comma-separated names expected to mismatch the truth (known gaps)")
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Only output on failure")
     args = parser.parse_args()
@@ -283,7 +450,16 @@ def main():
         print(f"Error: {args.actual} not found", file=sys.stderr)
         sys.exit(2)
 
-    match, diffs = compare_pdfs(args.expected, args.actual, args.tolerance, args.skip_fonts)
+    skip = {int(i) for i in args.skip_expected_images.split(",") if i}
+    skip_actual = {int(i) for i in args.skip_actual_images.split(",") if i}
+    match, diffs = compare_pdfs(args.expected, args.actual, args.tolerance, args.skip_fonts,
+                                args.compare_images, skip, skip_actual)
+    if args.truth_dir:
+        names = [n for n in args.truth_names.split(",") if n]
+        gaps = {n for n in args.truth_known_gaps.split(",") if n}
+        truth_diffs = compare_images_to_truth(args.actual, names, args.truth_dir, gaps)
+        diffs.extend(truth_diffs)
+        match = match and not truth_diffs
 
     if match:
         if not args.quiet:

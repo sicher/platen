@@ -284,6 +284,32 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - Text positions (within 1.0pt tolerance)
 - Page dimensions
 
+**Image pixels** (opt-in, `compare_images` in TestOptions): poppler's
+`pdfimages` extracts every image XObject and soft mask from both PDFs as
+netpbm; pixels are compared exactly after normalizing to 8-bit RGB / gray
+(16-bit samples by their high byte). Pure Python, no Pillow (the system
+`python3` that runs the comparator has none). Before this, *no* test
+looked at image content - `images` would have passed with noise.
+
+**Truth comparison** (`truth_dir`): for PngSuite the pixel authority is
+PngSuite itself, not fpdf2. `scripts/gen_pngsuite_expected.py` converts the
+suite's JSON pixels into `test/images/pngsuite/expected/*.rgba` (u32 BE
+width, u32 BE height, 8-bit RGBA). fpdf2 (Pillow) decodes 16-bit grayscale
+wrongly (clips to white), and shares platen's tRNS gap - agreement between
+two libraries is not correctness. The `pngsuite` integration test keeps
+three explicit lists, each enforced in both directions (a listed entry
+that starts working fails the test, so lists cannot go stale):
+`pngsuite_pending` (decode errors expected: Adam7 interlacing, 16-bit
+with alpha), `pngsuite_fpdf2_wrong` (skipped in the fpdf2 pixel
+comparison only), `pngsuite_truth_gaps` (tRNS color keys on gray/RGB
+not applied yet). Corrupt `x*` files are a unit test in images.zig.
+
+**Running one test**: `zig test --test-filter` only collects tests from
+files some matching test pulls in. To run a single test in a file that
+platen.zig does not import directly (e.g. opentype.zig), use that file as
+the root: `zig test -lc src/opentype.zig --test-filter "..."`. A filtered
+run reporting only `platen.test_0` ran nothing.
+
 **Does NOT compare:**
 - Internal object IDs/ordering
 - PDF version
@@ -309,7 +335,8 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - `optimal_breaks` - Knuth-Plass line breaking
 - `colored_text` - Text colors (grayscale, RGB, CMYK)
 - `shapes` - Drawing primitives (line, rect, circle, ellipse, polygon)
-- `images` - JPEG and PNG embedding
+- `images` - JPEG and PNG embedding (pixel-exact against fpdf2)
+- `pngsuite` - all 161 valid PngSuite images (pixels against PngSuite truth)
 - `svg` - SVG embedding (basic shapes, tiger.svg)
 - `svg_text` - SVG text elements
 - `svg_use_defs` - SVG `<use>` and `<defs>` elements

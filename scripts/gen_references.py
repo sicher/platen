@@ -1184,6 +1184,38 @@ def gen_shapes():
     print("  shapes.pdf")
 
 
+PNGSUITE_DIR = Path("test/images/pngsuite")
+
+
+def pngsuite_files() -> list[str]:
+    """Valid PngSuite images, sorted (x* files are deliberately corrupt)."""
+    return sorted(p.name for p in PNGSUITE_DIR.glob("*.png") if not p.name.startswith("x"))
+
+
+def gen_pngsuite():
+    """Every valid PngSuite image on a grid, filename captions below.
+
+    Layout must match generatePngSuitePdf in src/integration_tests.zig:
+    8 columns x 12 rows per A4 page, 40x40 pt images, 6 pt captions.
+    """
+    pdf = make_pdf()
+    files = pngsuite_files()
+    per_page = 8 * 12
+    for i, name in enumerate(files):
+        if i % per_page == 0:
+            pdf.add_page()
+            pdf.set_font("Helvetica", "B", size=12)
+            pdf.text(30, 28, "PngSuite")
+            pdf.set_font("Helvetica", size=6)
+        cell = i % per_page
+        x = 30 + (cell % 8) * 67
+        y = 40 + (cell // 8) * 62
+        pdf.image(str(PNGSUITE_DIR / name), x=x, y=y, w=40, h=40)
+        pdf.text(x, y + 49, name)
+    pdf.output(OUTPUT_DIR / "pngsuite.pdf")
+    print("  pngsuite.pdf")
+
+
 def gen_images():
     """Test image embedding: JPEG and PNG with various sizes and positions."""
     pdf = make_pdf()
@@ -2643,6 +2675,7 @@ GENERATORS = {
     "colored_text": gen_colored_text,
     "shapes": gen_shapes,
     "images": gen_images,
+    "pngsuite": gen_pngsuite,
     "svg": gen_svg,
     "svg_text": gen_svg_text,
     "svg_use_defs": gen_svg_use_defs,

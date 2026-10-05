@@ -42,7 +42,32 @@ pub const StructuralOptions = struct {
 pub const SemanticOptions = struct {
     /// Skip font comparison (useful for SVG Form XObjects)
     skip_fonts: bool = false,
+    /// Also compare every image's decoded pixels (and soft mask) exactly.
+    compare_images: bool = false,
+    /// 0-based indices of reference images that the actual PDF omits on
+    /// purpose (formats not supported yet); requires compare_images.
+    skip_expected_images: []const usize = &.{},
+    /// 0-based indices of actual images to leave out of the comparison
+    /// (e.g. ones the reference library renders wrongly).
+    skip_actual_images: []const usize = &.{},
+    /// Compare the actual PDF's images with independent truth files
+    /// (scripts/gen_pngsuite_expected.py), one name per image in drawing
+    /// order. `truth_known_gaps` must mismatch (and fail once they match).
+    truth_dir: ?[]const u8 = null,
+    truth_names: []const []const u8 = &.{},
+    truth_known_gaps: []const []const u8 = &.{},
 };
+
+/// "--flag=a,b,c" into `out` (cleared first).
+fn joinArg(out: *std.Io.Writer.Allocating, flag: []const u8, items: []const []const u8) ![]const u8 {
+    out.clearRetainingCapacity();
+    try out.writer.writeAll(flag);
+    for (items, 0..) |item, k| {
+        if (k > 0) try out.writer.writeByte(',');
+        try out.writer.writeAll(item);
+    }
+    return out.written();
+}
 
 /// Result of PDF comparison
 pub const CompareResult = struct {
@@ -370,12 +395,47 @@ fn comparePdfsSemanticWithOptions(io: std.Io, allocator: std.mem.Allocator, actu
 
     // Run semantic comparator
     // Tolerance of 1pt for minor floating-point rounding differences
-    const argv: []const []const u8 = if (options.skip_fonts)
-        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0", "--skip-fonts" }
-    else
-        &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" };
+    var argv: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" });
+    if (options.skip_fonts) try argv.append(allocator, "--skip-fonts");
+    if (options.compare_images) try argv.append(allocator, "--compare-images");
 
-    const result = std.process.run(allocator, io, .{ .argv = argv }) catch return error.ComparatorNotAvailable;
+    var skip_arg: std.Io.Writer.Allocating = .init(allocator);
+    defer skip_arg.deinit();
+    if (options.skip_expected_images.len > 0) {
+        try skip_arg.writer.writeAll("--skip-expected-images=");
+        for (options.skip_expected_images, 0..) |idx, k| {
+            if (k > 0) try skip_arg.writer.writeByte(',');
+            try skip_arg.writer.print("{d}", .{idx});
+        }
+        try argv.append(allocator, skip_arg.written());
+    }
+
+    var skip_actual_arg: std.Io.Writer.Allocating = .init(allocator);
+    defer skip_actual_arg.deinit();
+    if (options.skip_actual_images.len > 0) {
+        try skip_actual_arg.writer.writeAll("--skip-actual-images=");
+        for (options.skip_actual_images, 0..) |idx, k| {
+            if (k > 0) try skip_actual_arg.writer.writeByte(',');
+            try skip_actual_arg.writer.print("{d}", .{idx});
+        }
+        try argv.append(allocator, skip_actual_arg.written());
+    }
+
+    var truth_dir_arg: std.Io.Writer.Allocating = .init(allocator);
+    defer truth_dir_arg.deinit();
+    var names_arg: std.Io.Writer.Allocating = .init(allocator);
+    defer names_arg.deinit();
+    var gaps_arg: std.Io.Writer.Allocating = .init(allocator);
+    defer gaps_arg.deinit();
+    if (options.truth_dir) |dir| {
+        try argv.append(allocator, try joinArg(&truth_dir_arg, "--truth-dir=", &.{dir}));
+        try argv.append(allocator, try joinArg(&names_arg, "--truth-names=", options.truth_names));
+        try argv.append(allocator, try joinArg(&gaps_arg, "--truth-known-gaps=", options.truth_known_gaps));
+    }
+
+    const result = std.process.run(allocator, io, .{ .argv = argv.items }) catch return error.ComparatorNotAvailable;
     defer allocator.free(result.stderr);
 
     const exited = switch (result.term) {

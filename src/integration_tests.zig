@@ -48,6 +48,7 @@ const test_cases = [_]TestCase{
     .{ .name = "colored_text", .generate = generateColoredTextPdf },
     .{ .name = "shapes", .generate = generateShapesPdf },
     .{ .name = "images", .generate = generateImagesPdf },
+    .{ .name = "pngsuite", .generate = generatePngSuitePdf }, // all valid PngSuite images; pending formats caption-only
     .{ .name = "svg_embedding", .generate = generateSvgPdf },
     .{ .name = "svg_text", .generate = generateSvgTextPdf, .skip_fonts = true }, // Form XObject fonts
     .{ .name = "svg_use_defs", .generate = generateSvgUseDefsPdf },
@@ -1512,6 +1513,164 @@ fn generateImagesPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 200, .y = 190 }, "PNG h=100 (w auto):", header_10, .{});
     try doc.drawImage(png_img, .{ .x = 200, .y = 195, .width = 0, .height = 100 });
 
+    return doc.output();
+}
+
+// ============================================================================
+// PngSuite (test/images/pngsuite, (c) Willem van Schaik - see LICENSE there)
+// ============================================================================
+
+const pngsuite_dir = "test/images/pngsuite";
+
+/// Valid PngSuite images platen cannot decode yet, with the error each must
+/// return. Their reference images are skipped by the pixel comparison, and
+/// the test fails if a listed file starts decoding - delete entries as the
+/// formats land (Adam7 interlacing; 16-bit samples with alpha).
+const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
+    .{ .name = "basi0g01.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi0g02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi0g04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi0g08.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi0g16.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi2c08.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi2c16.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi3p01.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi3p02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi3p08.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi4a08.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi4a16.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi6a08.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basi6a16.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "bgai4a08.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "bgai4a16.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s01i3p01.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s02i3p01.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s03i3p01.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s04i3p01.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s05i3p02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s06i3p02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s07i3p02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s08i3p02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s09i3p02.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s32i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s33i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s34i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s35i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s36i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s37i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s38i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s39i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "s40i3p04.png", .err = error.InterlacedPngNotSupported },
+    .{ .name = "basn4a16.png", .err = error.UnsupportedPngBitDepth },
+    .{ .name = "basn6a16.png", .err = error.UnsupportedPngBitDepth },
+    .{ .name = "bgan6a16.png", .err = error.UnsupportedPngBitDepth },
+    .{ .name = "bggn4a16.png", .err = error.UnsupportedPngBitDepth },
+    .{ .name = "bgyn6a16.png", .err = error.UnsupportedPngBitDepth },
+};
+
+/// Files fpdf2 (via Pillow) decodes wrongly: 16-bit grayscale is clipped
+/// to near-white (checked against PngSuite's own pixel values). Skipped in
+/// the fpdf2 pixel comparison only; the truth comparison still covers them.
+const pngsuite_fpdf2_wrong = [_][]const u8{
+    "basn0g16.png", "g03n0g16.png", "g04n0g16.png", "g05n0g16.png",
+    "g07n0g16.png", "g10n0g16.png", "g25n0g16.png", "oi1n0g16.png",
+    "oi2n0g16.png", "oi4n0g16.png", "oi9n0g16.png", "tbwn0g16.png",
+};
+
+/// Files platen decodes but whose pixels do not match PngSuite's truth
+/// yet: tRNS color keys on grayscale/RGB images are ignored (drawn
+/// opaque). Delete entries when that lands - the comparator fails if a
+/// listed file starts matching.
+const pngsuite_truth_gaps = [_][]const u8{
+    "tbbn0g04.png", "tbbn2c16.png", "tbgn2c16.png", "tbrn2c08.png", "tbwn0g16.png",
+};
+
+fn inList(list: []const []const u8, name: []const u8) bool {
+    for (list) |item| {
+        if (std.mem.eql(u8, item, name)) return true;
+    }
+    return false;
+}
+
+fn pngsuitePending(name: []const u8) ?anyerror {
+    for (pngsuite_pending) |p| {
+        if (std.mem.eql(u8, p.name, name)) return p.err;
+    }
+    return null;
+}
+
+/// Valid suite files (x* are deliberately corrupt), sorted like the Python
+/// generator. Caller frees each name and the slice.
+fn pngsuiteFiles(allocator: std.mem.Allocator) ![][]const u8 {
+    var dir = try std.Io.Dir.cwd().openDir(app_io, pngsuite_dir, .{ .iterate = true });
+    defer dir.close(app_io);
+    var names: std.ArrayListUnmanaged([]const u8) = .empty;
+    errdefer {
+        for (names.items) |n| allocator.free(n);
+        names.deinit(allocator);
+    }
+    var it = dir.iterate();
+    while (try it.next(app_io)) |entry| {
+        if (!std.mem.endsWith(u8, entry.name, ".png") or entry.name[0] == 'x') continue;
+        try names.append(allocator, try allocator.dupe(u8, entry.name));
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+    return names.toOwnedSlice(allocator);
+}
+
+fn freePngsuiteFiles(allocator: std.mem.Allocator, files: [][]const u8) void {
+    for (files) |n| allocator.free(n);
+    allocator.free(files);
+}
+
+/// Mirrors gen_pngsuite in scripts/gen_references.py: 8 x 12 grid per A4
+/// page, 40x40 pt images, 6 pt filename captions. Pending files get their
+/// caption only (and must fail with their listed error).
+fn generatePngSuitePdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+
+    const title = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12, .bold = true };
+    const caption = platen.TextStyle{ .font = platen.Font.helvetica, .size = 6 };
+    const files = try pngsuiteFiles(allocator);
+    defer freePngsuiteFiles(allocator, files);
+    if (files.len != 161) return error.PngSuiteIncomplete;
+
+    const per_page = 8 * 12;
+    var path_buf: [128]u8 = undefined;
+    for (files, 0..) |name, i| {
+        if (i % per_page == 0) {
+            try doc.addPage(.{});
+            _ = try doc.writeAt(.{ .x = 30, .y = 28 }, "PngSuite", title, .{});
+        }
+        const cell = i % per_page;
+        const x: f64 = @floatFromInt(30 + (cell % 8) * 67);
+        const y: f64 = @floatFromInt(40 + (cell / 8) * 62);
+
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ pngsuite_dir, name });
+        if (doc.loadImage(path)) |img| {
+            if (pngsuitePending(name) != null) {
+                std.debug.print("pngsuite: {s} decodes now - remove it from pngsuite_pending\n", .{name});
+                return error.PendingPngNowDecodes;
+            }
+            try doc.drawImage(img, .{ .x = x, .y = y, .width = 40, .height = 40 });
+        } else |err| {
+            const expected = pngsuitePending(name) orelse {
+                std.debug.print("pngsuite: {s} failed: {t}\n", .{ name, err });
+                return err;
+            };
+            if (err != expected) {
+                std.debug.print("pngsuite: {s} expected {t}, got {t}\n", .{ name, expected, err });
+                return error.UnexpectedPngError;
+            }
+        }
+        _ = try doc.writeAt(.{ .x = x, .y = y + 49 }, name, caption, .{});
+    }
     return doc.output();
 }
 
@@ -3669,9 +3828,47 @@ test "integration: shapes PDF" {
     try runIntegrationTest("shapes", generateShapesPdf);
 }
 
+test "integration: PngSuite PDF (pixels against PngSuite truth and fpdf2)" {
+    // Text/layout against the fpdf2 reference (also for visual review);
+    // pixels against PngSuite's own expected values (test/images/pngsuite/
+    // expected), and against fpdf2 except where fpdf2 is known wrong.
+    const allocator = std.testing.allocator;
+    const files = try pngsuiteFiles(allocator);
+    defer freePngsuiteFiles(allocator, files);
+
+    var skip: std.ArrayListUnmanaged(usize) = .empty; // fpdf2 reference indices
+    defer skip.deinit(allocator);
+    var skip_actual: std.ArrayListUnmanaged(usize) = .empty; // platen image indices
+    defer skip_actual.deinit(allocator);
+    var drawn: std.ArrayListUnmanaged([]const u8) = .empty; // platen images, in order
+    defer drawn.deinit(allocator);
+    for (files, 0..) |name, i| {
+        const pending = pngsuitePending(name) != null;
+        const fpdf2_wrong = inList(&pngsuite_fpdf2_wrong, name);
+        if (pending or fpdf2_wrong) try skip.append(allocator, i);
+        if (!pending) {
+            // The platen PDF draws every non-pending file; the fpdf2-wrong
+            // ones leave the fpdf2 comparison on this side too.
+            if (fpdf2_wrong) try skip_actual.append(allocator, drawn.items.len);
+            try drawn.append(allocator, name);
+        }
+    }
+    try std.testing.expectEqual(pngsuite_pending.len + pngsuite_fpdf2_wrong.len, skip.items.len);
+    try std.testing.expectEqual(pngsuite_fpdf2_wrong.len, skip_actual.items.len);
+
+    try runIntegrationTestWithOptions("pngsuite", generatePngSuitePdf, .{
+        .compare_images = true,
+        .skip_expected_images = skip.items,
+        .skip_actual_images = skip_actual.items,
+        .truth_dir = "test/images/pngsuite/expected",
+        .truth_names = drawn.items,
+        .truth_known_gaps = &pngsuite_truth_gaps,
+    });
+}
+
 test "integration: images PDF" {
     // Tests image embedding: JPEG and PNG with various sizes and positions
-    try runIntegrationTest("images", generateImagesPdf);
+    try runIntegrationTestWithOptions("images", generateImagesPdf, .{ .compare_images = true });
 }
 
 test "integration: svg_embedding PDF" {
@@ -3837,6 +4034,12 @@ test "integration: color_svg PDF" {
 
 const TestOptions = struct {
     skip_fonts: bool = false,
+    compare_images: bool = false,
+    skip_expected_images: []const usize = &.{},
+    skip_actual_images: []const usize = &.{},
+    truth_dir: ?[]const u8 = null,
+    truth_names: []const []const u8 = &.{},
+    truth_known_gaps: []const []const u8 = &.{},
 };
 
 fn runIntegrationTest(
@@ -3875,7 +4078,15 @@ fn runIntegrationTestWithOptions(
     } else |_| {}
 
     // Compare against reference
-    var result = try testing.compareWithReferenceSemantic(app_io, allocator, pdf, ref_path, .{ .skip_fonts = options.skip_fonts });
+    var result = try testing.compareWithReferenceSemantic(app_io, allocator, pdf, ref_path, .{
+        .skip_fonts = options.skip_fonts,
+        .compare_images = options.compare_images,
+        .skip_expected_images = options.skip_expected_images,
+        .skip_actual_images = options.skip_actual_images,
+        .truth_dir = options.truth_dir,
+        .truth_names = options.truth_names,
+        .truth_known_gaps = options.truth_known_gaps,
+    });
     defer result.deinit();
 
     if (!result.equal) {

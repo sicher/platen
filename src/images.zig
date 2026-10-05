@@ -892,3 +892,54 @@ test "JPEG segment extending past the end of the file is rejected" {
     const jpeg = [_]u8{ 0xFF, 0xD8, 0xFF, 0xE2, 0x01, 0x00 } ++ "ICC_PROFILE\x00\x01\x01".*;
     try expectPngError(error.InvalidJpeg, &jpeg);
 }
+
+test "PngSuite corrupt files (x*) are rejected with specific errors" {
+    // test/images/pngsuite, (c) Willem van Schaik. The valid images are
+    // covered by the "pngsuite" integration test against PngSuite's truth.
+    const cases = [_]struct { name: []const u8, err: ?anyerror }{
+        .{ .name = "xc1n0g08.png", .err = error.UnsupportedPngColorType }, // color type 1
+        .{ .name = "xc9n2c08.png", .err = error.UnsupportedPngColorType }, // color type 9
+        .{ .name = "xcrn0g04.png", .err = error.UnknownImageFormat }, // signature: added CR
+        .{ .name = "xd0n2c08.png", .err = error.UnsupportedPngBitDepth }, // bit depth 0
+        .{ .name = "xd3n2c08.png", .err = error.UnsupportedPngBitDepth }, // bit depth 3
+        .{ .name = "xd9n2c08.png", .err = error.UnsupportedPngBitDepth }, // bit depth 99
+        .{ .name = "xdtn0g01.png", .err = error.NoPngImageData }, // missing IDAT
+        .{ .name = "xlfn0g04.png", .err = error.UnknownImageFormat }, // signature: added LF
+        .{ .name = "xs1n0g01.png", .err = error.UnknownImageFormat }, // signature byte 1
+        .{ .name = "xs2n0g01.png", .err = error.UnknownImageFormat }, // signature byte 2
+        .{ .name = "xs4n0g01.png", .err = error.UnknownImageFormat }, // signature byte 4
+        .{ .name = "xs7n0g01.png", .err = error.UnknownImageFormat }, // signature byte 7
+        // Accepted for now: chunk CRCs are not verified yet (planned). When
+        // they are, these must fail - move them to an error above.
+        .{ .name = "xcsn0g01.png", .err = null }, // bad IDAT checksum
+        .{ .name = "xhdn0g08.png", .err = null }, // bad IHDR checksum
+    };
+    const a = std.testing.allocator;
+    var path_buf: [64]u8 = undefined;
+    for (cases) |c| {
+        const path = try std.fmt.bufPrint(&path_buf, "test/images/pngsuite/{s}", .{c.name});
+        const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, a, .limited(1 << 20));
+        defer a.free(data);
+        if (Image.fromMemory(a, data)) |img| {
+            img.deinit();
+            if (c.err) |e| {
+                std.debug.print("{s}: decoded, expected {t}\n", .{ c.name, e });
+                return error.TestUnexpectedResult;
+            }
+        } else |err| {
+            if (c.err == null or c.err.? != err) {
+                std.debug.print("{s}: got {t}, expected {?t}\n", .{ c.name, err, c.err });
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
+    // Every x* file in the suite is listed.
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, "test/images/pngsuite", .{ .iterate = true });
+    defer dir.close(std.testing.io);
+    var it = dir.iterate();
+    var count: usize = 0;
+    while (try it.next(std.testing.io)) |e| {
+        if (e.name[0] == 'x' and std.mem.endsWith(u8, e.name, ".png")) count += 1;
+    }
+    try std.testing.expectEqual(cases.len, count);
+}
