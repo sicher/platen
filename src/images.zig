@@ -465,8 +465,11 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
         rgb_data = expanded.rgb;
         alpha_data = expanded.alpha;
     } else {
-        // RGB or grayscale without alpha - use data directly
+        // RGB or grayscale without alpha - use data directly; a tRNS color
+        // key becomes an 8-bit alpha mask (0 where a pixel matches it).
         rgb_data = try allocator.dupe(u8, unfiltered);
+        errdefer allocator.free(rgb_data);
+        if (trns) |key| alpha_data = try colorKeyAlpha(allocator, unfiltered, width, height, color_type, bit_depth, key);
     }
     errdefer allocator.free(rgb_data);
     errdefer if (alpha_data) |a| allocator.free(a);
@@ -557,6 +560,60 @@ fn expandIndexedPng(
         alpha = null;
     }
     return .{ .rgb = rgb, .alpha = alpha };
+}
+
+/// Alpha mask for a tRNS color key on a grayscale or RGB image: 0 where
+/// a pixel's samples equal the key (compared at the image's bit depth, as
+/// PNG specifies), 255 elsewhere. tRNS holds one u16 (gray) or three (r, g,
+/// b). A key too short for the color type is ignored like other malformed
+/// ancillary data (null: no mask).
+fn colorKeyAlpha(
+    allocator: std.mem.Allocator,
+    unfiltered: []const u8,
+    width: u32,
+    height: u32,
+    color_type: PngColorType,
+    bit_depth: u8,
+    trns: []const u8,
+) !?[]u8 {
+    const samples: usize = switch (color_type) {
+        .grayscale => 1,
+        .rgb => 3,
+        else => return null,
+    };
+    if (trns.len < samples * 2) return null;
+    var key: [3]u16 = undefined;
+    for (0..samples) |k| key[k] = std.mem.readInt(u16, trns[k * 2 ..][0..2], .big);
+
+    const scanline_width = calculateScanlineWidth(width, color_type, bit_depth);
+    const alpha = try allocator.alloc(u8, @as(usize, width) * height);
+    errdefer allocator.free(alpha);
+    const sample_mask: u16 = if (bit_depth >= 16) 0xFFFF else (@as(u16, 1) << @intCast(bit_depth)) - 1;
+
+    for (0..height) |y| {
+        const row = unfiltered[y * scanline_width ..][0..scanline_width];
+        for (0..width) |x| {
+            var matches = true;
+            for (0..samples) |k| {
+                const index = x * samples + k; // sample number within the row
+                const value: u16 = switch (bit_depth) {
+                    16 => std.mem.readInt(u16, row[index * 2 ..][0..2], .big),
+                    8 => row[index],
+                    else => blk: { // 1, 2, 4 (grayscale only): MSB-first packing
+                        const bit_pos = index * bit_depth;
+                        const shift: u3 = @intCast(8 - bit_depth - (bit_pos % 8));
+                        break :blk (row[bit_pos / 8] >> shift) & sample_mask;
+                    },
+                };
+                if (value != key[k]) {
+                    matches = false;
+                    break;
+                }
+            }
+            alpha[y * width + x] = if (matches) 0 else 255;
+        }
+    }
+    return alpha;
 }
 
 fn calculateScanlineWidth(width: u32, color_type: PngColorType, bit_depth: u8) usize {
@@ -967,5 +1024,48 @@ test "PNG chunk checksums are verified" {
         try expectPngError(error.PngChecksumMismatch, png);
         png[crc_at] ^= 1;
         pos = crc_at + 4;
+    }
+}
+
+test "PNG tRNS color key on grayscale and RGB becomes an alpha mask" {
+    // PNG: for color types 0 and 2, tRNS holds one sample value (gray, or
+    // r/g/b) that is fully transparent. It was ignored (drawn opaque).
+    const a = std.testing.allocator;
+    const zlib = @import("zlib.zig");
+    const Case = struct { depth: u8, ct: u8, raw: []const u8, key: []const u8, alpha: []const u8 };
+    const cases = [_]Case{
+        // gray 8: pixels 10, 20 - key 20
+        .{ .depth = 8, .ct = 0, .raw = &.{ 0, 10, 20 }, .key = &.{ 0, 20 }, .alpha = &.{ 255, 0 } },
+        // gray 4: pixels 3, 7 packed in one byte - key 7
+        .{ .depth = 4, .ct = 0, .raw = &.{ 0, 0x37 }, .key = &.{ 0, 7 }, .alpha = &.{ 255, 0 } },
+        // gray 16: pixels 0x1234, 0x5678 - key 0x1234
+        .{ .depth = 16, .ct = 0, .raw = &.{ 0, 0x12, 0x34, 0x56, 0x78 }, .key = &.{ 0x12, 0x34 }, .alpha = &.{ 0, 255 } },
+        // rgb 8: (1,2,3), (4,5,6) - key (4,5,6)
+        .{ .depth = 8, .ct = 2, .raw = &.{ 0, 1, 2, 3, 4, 5, 6 }, .key = &.{ 0, 4, 0, 5, 0, 6 }, .alpha = &.{ 255, 0 } },
+        // rgb 16: two pixels; key matches the first
+        .{ .depth = 16, .ct = 2, .raw = &.{ 0, 0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6 }, .key = &.{ 0, 1, 0, 2, 0, 3 }, .alpha = &.{ 0, 255 } },
+    };
+    for (cases) |c| {
+        const z = try zlib.compress(a, c.raw);
+        defer a.free(z);
+        var png: std.ArrayListUnmanaged(u8) = .empty;
+        defer png.deinit(a);
+        try png.appendSlice(a, &.{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' });
+        var ihdr: [13]u8 = @splat(0);
+        std.mem.writeInt(u32, ihdr[0..4], 2, .big); // width
+        std.mem.writeInt(u32, ihdr[4..8], 1, .big); // height
+        ihdr[8] = c.depth;
+        ihdr[9] = c.ct;
+        try testChunk(&png, a, "IHDR", &ihdr);
+        try testChunk(&png, a, "tRNS", c.key);
+        try testChunk(&png, a, "IDAT", z);
+        try testChunk(&png, a, "IEND", &.{});
+
+        const img = try Image.fromMemory(a, png.items);
+        defer img.deinit();
+        const compressed = img.alpha_data orelse return error.TestExpectedAlpha;
+        const alpha = try zlib.decompress(a, compressed, c.alpha.len);
+        defer a.free(alpha);
+        try std.testing.expectEqualSlices(u8, c.alpha, alpha);
     }
 }

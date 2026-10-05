@@ -1569,22 +1569,22 @@ const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
     .{ .name = "bgyn6a16.png", .err = error.UnsupportedPngBitDepth },
 };
 
-/// Files fpdf2 (via Pillow) decodes wrongly: 16-bit grayscale is clipped
-/// to near-white (checked against PngSuite's own pixel values). Skipped in
-/// the fpdf2 pixel comparison only; the truth comparison still covers them.
+/// Files fpdf2 (via Pillow) renders wrongly, checked against PngSuite's
+/// own pixel values. Skipped in the fpdf2 pixel comparison only; the truth
+/// comparison still covers them.
 const pngsuite_fpdf2_wrong = [_][]const u8{
+    // 16-bit grayscale clipped to near-white
     "basn0g16.png", "g03n0g16.png", "g04n0g16.png", "g05n0g16.png",
     "g07n0g16.png", "g10n0g16.png", "g25n0g16.png", "oi1n0g16.png",
     "oi2n0g16.png", "oi4n0g16.png", "oi9n0g16.png", "tbwn0g16.png",
+    // tRNS color key on grayscale/RGB ignored (drawn opaque)
+    "tbbn0g04.png", "tbbn2c16.png", "tbgn2c16.png", "tbrn2c08.png",
 };
 
 /// Files platen decodes but whose pixels do not match PngSuite's truth
-/// yet: tRNS color keys on grayscale/RGB images are ignored (drawn
-/// opaque). Delete entries when that lands - the comparator fails if a
+/// yet. Delete entries as they are fixed - the comparator fails if a
 /// listed file starts matching.
-const pngsuite_truth_gaps = [_][]const u8{
-    "tbbn0g04.png", "tbbn2c16.png", "tbgn2c16.png", "tbrn2c08.png", "tbwn0g16.png",
-};
+const pngsuite_truth_gaps = [_][]const u8{};
 
 fn inList(list: []const []const u8, name: []const u8) bool {
     for (list) |item| {
