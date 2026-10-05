@@ -35,6 +35,7 @@ pub fn parseCFFIndex(data: []const u8, offset: usize) ?CFFIndex {
     if (offset + 2 > data.len) return null;
     const count = readU16(data, offset);
     if (count == 0) return CFFIndex{ .count = 0, .off_size = 0, .offsets_start = 0, .data_start = 0, .data = data };
+    if (offset + 3 > data.len) return null; // truncated before offSize
 
     const off_size = data[offset + 2];
     const offsets_start = offset + 3;
@@ -67,6 +68,7 @@ pub fn skipCFFIndex(data: []const u8, offset: usize) usize {
     if (offset + 2 > data.len) return offset;
     const count = readU16(data, offset);
     if (count == 0) return offset + 2;
+    if (offset + 3 > data.len) return offset; // truncated before offSize
 
     const off_size = data[offset + 2];
     const offsets_end = offset + 3 + (@as(usize, count) + 1) * off_size;
@@ -101,6 +103,12 @@ pub const STANDARD_STRING_COUNT: u16 = 391;
 /// - 0: version, 1: Notice, 2: FullName, 3: FamilyName, 4: Weight
 /// - 12 0: Copyright, 12 21: PostScript, 12 22: BaseFontName
 /// - 12 30: ROS (first two operands are SIDs)
+/// A DICT operand as a SID, or null when the (hostile) value is not one:
+/// SIDs are u16, operands are i32.
+fn sidOperand(v: i32) ?u16 {
+    return std.math.cast(u16, v);
+}
+
 pub fn collectTopDictSIDs(
     allocator: std.mem.Allocator,
     cff_data: []const u8,
@@ -126,14 +134,14 @@ pub fn collectTopDictSIDs(
                 const b1 = dict_data[i + 1];
                 if (b1 == 0 or b1 == 21 or b1 == 22) {
                     // Copyright, PostScript, BaseFontName - single SID operand
-                    if (op_count >= 1 and operands[op_count - 1] >= 0) {
-                        try sids.append(allocator, @intCast(operands[op_count - 1]));
+                    if (op_count >= 1) {
+                        if (sidOperand(operands[op_count - 1])) |sid| try sids.append(allocator, sid);
                     }
                 } else if (b1 == 30) {
-                    // ROS - first two operands are SIDs (Registry, Ordering)
-                    if (op_count >= 2) {
-                        if (operands[op_count - 3] >= 0) try sids.append(allocator, @intCast(operands[op_count - 3]));
-                        if (operands[op_count - 2] >= 0) try sids.append(allocator, @intCast(operands[op_count - 2]));
+                    // ROS - Registry, Ordering (SIDs), Supplement: three operands
+                    if (op_count >= 3) {
+                        if (sidOperand(operands[op_count - 3])) |sid| try sids.append(allocator, sid);
+                        if (sidOperand(operands[op_count - 2])) |sid| try sids.append(allocator, sid);
                     }
                 }
             }
@@ -141,8 +149,8 @@ pub fn collectTopDictSIDs(
             op_count = 0;
         } else if (b0 <= 4) {
             // version, Notice, FullName, FamilyName, Weight - single SID operand
-            if (op_count >= 1 and operands[op_count - 1] >= 0) {
-                try sids.append(allocator, @intCast(operands[op_count - 1]));
+            if (op_count >= 1) {
+                if (sidOperand(operands[op_count - 1])) |sid| try sids.append(allocator, sid);
             }
             i += 1;
             op_count = 0;
@@ -405,7 +413,10 @@ pub fn parseCFFTopDictForPrivate(data: []const u8, topdict_index_start: usize) P
     // Parse for operator 18 (Private) which has two operands: size, offset
     const result = parseCFFDictOperator(dict_data, 18, 2);
     if (result.found) {
-        return .{ .size = @intCast(result.operands[0]), .offset = @intCast(result.operands[1]) };
+        // Negative operands (hostile) are not a Private DICT.
+        const size = std.math.cast(usize, result.operands[0]) orelse return .{ .size = 0, .offset = 0 };
+        const offset = std.math.cast(usize, result.operands[1]) orelse return .{ .size = 0, .offset = 0 };
+        return .{ .size = size, .offset = offset };
     }
     return .{ .size = 0, .offset = 0 };
 }
@@ -413,7 +424,7 @@ pub fn parseCFFTopDictForPrivate(data: []const u8, topdict_index_start: usize) P
 pub fn parseCFFDictForOperator(dict_data: []const u8, target_op: u8) ?usize {
     const result = parseCFFDictOperator(dict_data, target_op, 1);
     if (result.found) {
-        return @intCast(result.operands[0]);
+        return std.math.cast(usize, result.operands[0]); // negative: absent
     }
     return null;
 }
@@ -427,13 +438,15 @@ pub fn parseCFFDictForOperator(dict_data: []const u8, target_op: u8) ?usize {
 fn searchCharsetRange(cff_data: []const u8, charset_offset: usize, glyph_idx: u16, nleft_size: u8) ?u16 {
     const entry_size: usize = 2 + nleft_size;
     var pos = charset_offset + 1;
-    var current_gid: u16 = 1;
+    // u32: current_gid + nLeft and firstSID + delta both pass u16 on
+    // hostile ranges; a SID that does not fit u16 is absent.
+    var current_gid: u32 = 1;
     while (pos + entry_size - 1 < cff_data.len) {
-        const first_sid = readU16(cff_data, pos);
-        const nleft: u16 = if (nleft_size == 1) cff_data[pos + 2] else readU16(cff_data, pos + 2);
+        const first_sid: u32 = readU16(cff_data, pos);
+        const nleft: u32 = if (nleft_size == 1) cff_data[pos + 2] else readU16(cff_data, pos + 2);
         const range_end = current_gid + nleft;
         if (glyph_idx <= range_end) {
-            return first_sid + (glyph_idx - current_gid);
+            return std.math.cast(u16, first_sid + (glyph_idx - current_gid));
         }
         current_gid = range_end + 1;
         pos += entry_size;
@@ -444,6 +457,7 @@ fn searchCharsetRange(cff_data: []const u8, charset_offset: usize, glyph_idx: u1
 /// Get the SID (String ID) for a glyph index from a CFF charset
 pub fn getCharsetSID(cff_data: []const u8, charset_offset: usize, glyph_idx: u16) ?u16 {
     if (glyph_idx == 0) return 0; // .notdef always has SID 0
+    if (charset_offset >= cff_data.len) return null;
 
     const format = cff_data[charset_offset];
 
@@ -505,6 +519,7 @@ pub fn buildUpdatedTopDict(
             i += 1;
             operand_start = i;
         } else if (b0 == 12) {
+            if (i + 2 > dict_data.len) break; // truncated two-byte operator
             try output.appendSlice(allocator, dict_data[operand_start .. i + 2]);
             i += 2;
             operand_start = i;
@@ -568,31 +583,36 @@ pub fn buildUpdatedTopDictWithSIDRemap(
             i += 1;
             op_count = 0;
         } else if (b0 <= 4) {
-            // version, Notice, FullName, FamilyName, Weight - remap SID
-            if (op_count >= 1 and operand_is_int[op_count - 1] and operand_values[op_count - 1] >= 0) {
-                const old_sid: u16 = @intCast(operand_values[op_count - 1]);
-                const new_sid = remapSID(old_sid, sid_remap);
-                try encodeCFFInt(allocator, output, @intCast(new_sid));
+            // version, Notice, FullName, FamilyName, Weight - remap SID.
+            // Without a representable SID the entry is dropped (an operator
+            // with no operand would be a malformed DICT).
+            if (op_count >= 1 and operand_is_int[op_count - 1]) {
+                if (sidOperand(operand_values[op_count - 1])) |old_sid| {
+                    try encodeCFFInt(allocator, output, @intCast(remapSID(old_sid, sid_remap)));
+                    try output.append(allocator, b0);
+                }
             }
-            try output.append(allocator, b0);
             i += 1;
             op_count = 0;
         } else if (b0 == 12) {
             if (i + 1 < dict_data.len) {
                 const b1 = dict_data[i + 1];
                 if (b1 == 0 or b1 == 21 or b1 == 22) {
-                    // Copyright, PostScript, BaseFontName - remap SID
-                    if (op_count >= 1 and operand_is_int[op_count - 1] and operand_values[op_count - 1] >= 0) {
-                        const old_sid: u16 = @intCast(operand_values[op_count - 1]);
-                        const new_sid = remapSID(old_sid, sid_remap);
-                        try encodeCFFInt(allocator, output, @intCast(new_sid));
+                    // Copyright, PostScript, BaseFontName - remap SID (dropped
+                    // without a representable SID, as above)
+                    if (op_count >= 1 and operand_is_int[op_count - 1]) {
+                        if (sidOperand(operand_values[op_count - 1])) |old_sid| {
+                            try encodeCFFInt(allocator, output, @intCast(remapSID(old_sid, sid_remap)));
+                            try output.appendSlice(allocator, &[_]u8{ 12, b1 });
+                        }
                     }
-                    try output.appendSlice(allocator, &[_]u8{ 12, b1 });
                 } else if (b1 == 30) {
                     // ROS - remap first two SIDs (Registry, Ordering), keep Supplement
                     if (op_count >= 3 and operand_is_int[op_count - 3] and operand_is_int[op_count - 2]) {
-                        const reg_sid: u16 = if (operand_values[op_count - 3] >= 0) @intCast(operand_values[op_count - 3]) else 0;
-                        const ord_sid: u16 = if (operand_values[op_count - 2] >= 0) @intCast(operand_values[op_count - 2]) else 0;
+                        // ROS is required for CID fonts, so it is kept; an
+                        // unrepresentable SID maps to 0 like a negative one.
+                        const reg_sid: u16 = sidOperand(operand_values[op_count - 3]) orelse 0;
+                        const ord_sid: u16 = sidOperand(operand_values[op_count - 2]) orelse 0;
                         try encodeCFFInt(allocator, output, @intCast(remapSID(reg_sid, sid_remap)));
                         try encodeCFFInt(allocator, output, @intCast(remapSID(ord_sid, sid_remap)));
                         // Copy supplement verbatim
@@ -1084,4 +1104,88 @@ test "collectTopDictSIDs basic" {
     try std.testing.expectEqual(@as(usize, 2), sids.items.len);
     try std.testing.expectEqual(@as(u16, 500), sids.items[0]);
     try std.testing.expectEqual(@as(u16, 501), sids.items[1]);
+}
+
+// ----------------------------------------------------------------------------
+// Hostile-input regression tests (2026-10-05 audit): each panicked before.
+// ----------------------------------------------------------------------------
+
+/// Wrap `dict` in a one-entry CFF INDEX (count 1, offSize 1) at offset 0.
+fn testTopDictIndex(buf: []u8, dict: []const u8) []const u8 {
+    buf[0] = 0;
+    buf[1] = 1; // count
+    buf[2] = 1; // offSize
+    buf[3] = 1;
+    buf[4] = @intCast(1 + dict.len);
+    @memcpy(buf[5..][0..dict.len], dict);
+    return buf[0 .. 5 + dict.len];
+}
+
+test "ROS with fewer than three operands does not underflow" {
+    var buf: [32]u8 = undefined;
+    // 0 0 ROS  (operands encoded as 139 = 0)
+    const cff = testTopDictIndex(&buf, &.{ 139, 139, 12, 30 });
+    var sids = try collectTopDictSIDs(std.testing.allocator, cff, 0);
+    defer sids.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), sids.items.len);
+}
+
+test "SID operands beyond u16 are not collected" {
+    var buf: [32]u8 = undefined;
+    // 70000 FullName; 70000 70000 0 ROS
+    const cff = testTopDictIndex(&buf, &.{ 29, 0, 1, 0x11, 0x70, 2, 29, 0, 1, 0x11, 0x70, 29, 0, 1, 0x11, 0x70, 139, 12, 30 });
+    var sids = try collectTopDictSIDs(std.testing.allocator, cff, 0);
+    defer sids.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), sids.items.len);
+}
+
+test "SID remap skips SIDs beyond u16" {
+    var buf: [32]u8 = undefined;
+    const cff = testTopDictIndex(&buf, &.{ 29, 0, 1, 0x11, 0x70, 2, 29, 0, 1, 0x11, 0x70, 29, 0, 1, 0x11, 0x70, 139, 12, 30 });
+    var remap: std.AutoHashMapUnmanaged(u16, u16) = .empty;
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(std.testing.allocator);
+    try buildUpdatedTopDictWithSIDRemap(std.testing.allocator, cff, 0, &out, .{ .charset = 0, .charstrings = 0, .private_size = 0, .private_offset = 0 }, &remap);
+    // The FullName operator (2) is dropped with its unrepresentable SID.
+    try std.testing.expect(std.mem.indexOfScalar(u8, out.items, 2) == null);
+}
+
+test "negative Private and CharStrings operands are absent" {
+    var buf: [32]u8 = undefined;
+    // -1 -1 Private; -1 CharStrings  (138 encodes -1)
+    const cff = testTopDictIndex(&buf, &.{ 138, 138, 18, 138, 17 });
+    const priv = parseCFFTopDictForPrivate(cff, 0);
+    try std.testing.expectEqual(@as(usize, 0), priv.size);
+    try std.testing.expectEqual(@as(usize, 0), priv.offset);
+    try std.testing.expectEqual(@as(?usize, null), parseCFFTopDictForCharStrings(cff, 0));
+}
+
+test "charset format 2 ranges near u16 max do not overflow" {
+    // firstSID 0xFFFF, nLeft 1: glyph 2 would map to SID 0x10000.
+    const data = [_]u8{ 2, 0xFF, 0xFF, 0x00, 0x01 };
+    try std.testing.expectEqual(@as(?u16, 0xFFFF), getCharsetSID(&data, 0, 1));
+    try std.testing.expectEqual(@as(?u16, null), getCharsetSID(&data, 0, 2));
+    // nLeft 0xFFFF: the range end (current_gid + nLeft) passes u16.
+    const wide = [_]u8{ 2, 0x00, 0x10, 0xFF, 0xFF };
+    try std.testing.expectEqual(@as(?u16, 0x14), getCharsetSID(&wide, 0, 5));
+}
+
+test "charset offset beyond the data is absent" {
+    const data = [_]u8{ 0, 0, 1 };
+    try std.testing.expectEqual(@as(?u16, null), getCharsetSID(&data, 3, 1));
+    try std.testing.expectEqual(@as(?u16, null), getCharsetSID(&data, 100, 1));
+}
+
+test "INDEX header truncated before offSize" {
+    const data = [_]u8{ 0, 1 }; // count 1, no offSize byte
+    try std.testing.expect(parseCFFIndex(&data, 0) == null);
+    try std.testing.expectEqual(@as(usize, 0), skipCFFIndex(&data, 0));
+}
+
+test "Top DICT ending in a lone escape byte" {
+    var buf: [32]u8 = undefined;
+    const cff = testTopDictIndex(&buf, &.{ 139, 12 });
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(std.testing.allocator);
+    try buildUpdatedTopDict(std.testing.allocator, cff, 0, &out, .{ .charset = 0, .charstrings = 0, .private_size = 0, .private_offset = 0 });
 }
