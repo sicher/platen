@@ -122,13 +122,14 @@ Add platen as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .platen = .{
-        .url = "https://git.urverk.org/urverk/platen/archive/main.tar.gz",
+        .url = "https://git.urverk.org/urverk/platen/archive/v0.10.0.tar.gz",
         .hash = "...",
     },
 },
 ```
 
-Versioned release tags will return with 1.0.0; until then, track `main`.
+Or run `zig fetch --save https://git.urverk.org/urverk/platen/archive/v0.10.0.tar.gz`
+to fill in the hash. Releases are tagged on `main`; see [CHANGELOG.md](CHANGELOG.md).
 
 Then in your `build.zig`:
 
@@ -1019,7 +1020,7 @@ Known gaps, documented so you don't discover them the hard way:
 
 ## Requirements
 
-- Zig 0.17+
+- Zig 0.17
 - No dependencies — compression uses `std.compress.flate`
 
 ## License
