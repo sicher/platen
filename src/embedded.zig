@@ -1531,12 +1531,17 @@ fn decodeFontName(raw: []const u8) []const u8 {
 }
 
 /// Append a loca table entry in the correct format (short or long).
-fn appendLocaEntry(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, offset: u32, loca_format: i16) !void {
+/// Append a loca entry for a subset glyf offset. error.InvalidFont when it
+/// is not representable: short loca stores offset / 2 in u16 (glyf up to
+/// 0x1FFFE bytes), long loca a u32. A subset can only outgrow its source
+/// font through hostile, overlapping glyph ranges.
+fn appendLocaEntry(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, offset: usize, loca_format: i16) !void {
     if (loca_format == 0) {
-        // Short format: offset / 2
-        try binary.appendBE16(list, allocator, @intCast(offset / 2));
+        const half = std.math.cast(u16, offset / 2) orelse return error.InvalidFont;
+        try binary.appendBE16(list, allocator, half);
     } else {
-        try binary.appendBE32(list, allocator, offset);
+        const off = std.math.cast(u32, offset) orelse return error.InvalidFont;
+        try binary.appendBE32(list, allocator, off);
     }
 }
 
@@ -1551,7 +1556,11 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
     defer glyph_set.deinit(allocator);
 
-    // Always include glyph 0 (.notdef)
+    // Always include glyph 0 (.notdef). Glyph IDs at or past numGlyphs
+    // (reachable via a hostile cmap) do not exist: they stay out of the
+    // subset and render as .notdef (remap lookups fall back to 0), which
+    // also keeps the subset's glyph count within u16.
+    const font_glyphs = font.maxp.?.num_glyphs;
     try glyph_set.put(allocator, 0, {});
 
     // Collect from WinAnsi mode (used_chars)
@@ -1559,7 +1568,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         if (emb.used_chars[i]) {
             const unicode = win_ansi_to_unicode[i];
             if (font.getGlyphId(unicode)) |gid| {
-                try glyph_set.put(allocator, gid, {});
+                if (gid < font_glyphs) try glyph_set.put(allocator, gid, {});
             }
         }
     }
@@ -1567,7 +1576,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     // Collect from CID mode (cid_used_glyphs)
     var cid_iter = emb.cid_used_glyphs.iterator();
     while (cid_iter.next()) |entry| {
-        try glyph_set.put(allocator, entry.value_ptr.*, {});
+        if (entry.value_ptr.* < font_glyphs) try glyph_set.put(allocator, entry.value_ptr.*, {});
     }
 
     // Sort glyph IDs and create old→new mapping
@@ -1608,8 +1617,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
     for (glyph_ids) |old_gid| {
         // Record offset in new loca
-        const offset: u32 = @intCast(new_glyf.items.len);
-        try appendLocaEntry(&new_loca, allocator, offset, loca_format);
+        try appendLocaEntry(&new_loca, allocator, new_glyf.items.len, loca_format);
 
         // Get glyph bounds from original loca
         const glyph_start = getLocaOffset(orig_loca, old_gid, loca_format);
@@ -1622,8 +1630,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     }
 
     // Final loca entry (end of last glyph)
-    const final_offset: u32 = @intCast(new_glyf.items.len);
-    try appendLocaEntry(&new_loca, allocator, final_offset, loca_format);
+    try appendLocaEntry(&new_loca, allocator, new_glyf.items.len, loca_format);
 
     // Build new hmtx (horizontal metrics)
     const new_hmtx = try buildHmtxForGlyphs(allocator, orig_hmtx, hhea.num_of_long_hor_metrics, glyph_ids);
@@ -1751,7 +1758,11 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         const unicode = win_ansi_to_unicode[i];
         const orig_gid = font.getGlyphId(unicode) orelse 0;
         const new_gid = gid_map.get(orig_gid) orelse 0;
-        try new_cmap.append(allocator, @intCast(new_gid));
+        // Format 0 holds one-byte glyph IDs; a subset past 256 glyphs (only
+        // when CID glyphs join the WinAnsi ones - WinAnsi alone has 252
+        // distinct codepoints) maps the rest to .notdef here. The format 4
+        // subtable below carries the full mapping.
+        try new_cmap.append(allocator, std.math.cast(u8, new_gid) orelse 0);
     }
 
     // Append Format 4 subtable
@@ -1809,8 +1820,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     var gid: u16 = 0;
     while (gid <= max_gid) : (gid += 1) {
         // Record offset in new loca
-        const offset: u32 = @intCast(new_glyf.items.len);
-        try appendLocaEntry(&new_loca, allocator, offset, tables.loca_format);
+        try appendLocaEntry(&new_loca, allocator, new_glyf.items.len, tables.loca_format);
 
         // Only include glyph data if this glyph is used
         if (glyph_set.contains(gid)) {
@@ -1826,8 +1836,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
     }
 
     // Final loca entry (end of last glyph)
-    const final_offset: u32 = @intCast(new_glyf.items.len);
-    try appendLocaEntry(&new_loca, allocator, final_offset, tables.loca_format);
+    try appendLocaEntry(&new_loca, allocator, new_glyf.items.len, tables.loca_format);
 
     // Build new hmtx (horizontal metrics) for all glyphs 0..max_gid
     var new_hmtx = std.ArrayListUnmanaged(u8).empty;
@@ -1908,9 +1917,10 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     try glyph_list.append(allocator, 0); // .notdef always first
 
+    // Glyph IDs at or past numGlyphs do not exist (see createSubsetTTF).
     var key_iter = glyph_set.keyIterator();
     while (key_iter.next()) |gid| {
-        if (gid.* != 0) {
+        if (gid.* != 0 and gid.* < tables.maxp.num_glyphs) {
             try glyph_list.append(allocator, gid.*);
         }
     }
@@ -1936,8 +1946,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     // Process glyphs in new order
     for (glyph_list.items) |orig_gid| {
         // Record offset
-        const offset: u32 = @intCast(new_glyf.items.len);
-        try appendLocaEntry(&new_loca, allocator, offset, tables.loca_format);
+        try appendLocaEntry(&new_loca, allocator, new_glyf.items.len, tables.loca_format);
 
         // Get original glyph data
         if (orig_gid < tables.maxp.num_glyphs) {
@@ -1964,8 +1973,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     // Final loca entry
-    const final_offset: u32 = @intCast(new_glyf.items.len);
-    try appendLocaEntry(&new_loca, allocator, final_offset, tables.loca_format);
+    try appendLocaEntry(&new_loca, allocator, new_glyf.items.len, tables.loca_format);
 
     // Build compact hmtx
     const new_hmtx = try buildHmtxForGlyphs(allocator, tables.hmtx, tables.hhea.num_of_long_hor_metrics, glyph_list.items);
@@ -2030,7 +2038,8 @@ const CFFLayout = struct {
     gsubr_start: usize,
     gsubr_end: usize,
 
-    fn parse(cff_data: []const u8) CFFLayout {
+    fn parse(cff_data: []const u8) error{InvalidCFF}!CFFLayout {
+        if (cff_data.len < 4) return error.InvalidCFF; // header: major, minor, hdrSize, offSize
         const hdr_size: usize = cff_data[2];
         const name_end = skipCFFIndex(cff_data, hdr_size);
         const topdict_end = skipCFFIndex(cff_data, name_end);
@@ -2049,15 +2058,29 @@ const CFFLayout = struct {
     }
 };
 
-/// Append a CFF offset value with the specified size (1, 2, or 3 bytes).
+/// Smallest CFF offSize (1-4 bytes) that holds `max_offset` - for an
+/// INDEX, the last offset, data.len + 1 (comparing data.len < 256 was off
+/// by one: 255 bytes need offset 256).
+fn cffOffSize(max_offset: usize) error{InvalidCFF}!u8 {
+    if (max_offset <= 0xFF) return 1;
+    if (max_offset <= 0xFFFF) return 2;
+    if (max_offset <= 0xFF_FFFF) return 3;
+    if (max_offset <= 0xFFFF_FFFF) return 4;
+    return error.InvalidCFF;
+}
+
+/// Append a CFF offset value with the specified size (1-4 bytes); `off`
+/// must fit (see cffOffSize).
 fn appendCffOffset(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, off: u32, off_size: u8) !void {
     switch (off_size) {
         1 => try list.append(allocator, @intCast(off)),
         2 => try binary.appendBE16(list, allocator, @intCast(off)),
         3 => {
+            std.debug.assert(off <= 0xFF_FFFF);
             const off_bytes = std.mem.toBytes(std.mem.nativeToBig(u32, off));
             try list.appendSlice(allocator, off_bytes[1..4]);
         },
+        4 => try binary.appendBE32(list, allocator, off),
         else => unreachable,
     }
 }
@@ -2068,11 +2091,9 @@ fn appendCffSingleItemIndex(list: *std.ArrayListUnmanaged(u8), allocator: std.me
     // Count = 1 (big-endian u16)
     try binary.appendBE16(list, allocator, 1);
 
-    // Determine offset size (1 byte if data fits, 2 bytes otherwise)
-    const off_size: u8 = if (data.len < 256) 1 else 2;
-    try list.append(allocator, off_size);
-
     // Offsets: first offset is always 1, second is data.len + 1
+    const off_size = try cffOffSize(data.len + 1);
+    try list.append(allocator, off_size);
     try appendCffOffset(list, allocator, 1, off_size);
     try appendCffOffset(list, allocator, @intCast(data.len + 1), off_size);
 
@@ -2337,6 +2358,16 @@ fn createSubsetCFF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]const u8 {
     const cff_data = emb.font.getCFFTable() orelse return error.MissingTable;
 
+    // Parse the CFF structure first: the CharStrings count bounds which glyph
+    // IDs exist. All INDEX reads go through the bounds-checked CFFIndex.
+    const cff = try CFFLayout.parse(cff_data);
+    const global_subrs = parseCFFIndex(cff_data, cff.gsubr_start);
+    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, cff.topdict_start) orelse
+        return error.InvalidCFF;
+    const charstrings = parseCFFIndex(cff_data, charstrings_offset) orelse return error.InvalidCFF;
+    const cs_count = charstrings.count;
+    if (cs_count == 0) return error.InvalidCFF;
+
     // Collect used glyph IDs into sorted list
     var glyph_list = std.ArrayListUnmanaged(u16).empty;
     defer glyph_list.deinit(allocator);
@@ -2347,10 +2378,12 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     var glyph_set = std.AutoHashMapUnmanaged(u16, void){};
     defer glyph_set.deinit(allocator);
 
+    // Glyph IDs at or past the CharStrings count do not exist: they stay out
+    // of the subset (rendering as .notdef) and keep its count within u16.
     var cid_iter = emb.cid_used_glyphs.iterator();
     while (cid_iter.next()) |entry| {
         const gid = entry.value_ptr.*;
-        if (gid != 0) {
+        if (gid != 0 and gid < cs_count) {
             try glyph_set.put(allocator, gid, {});
         }
     }
@@ -2359,7 +2392,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     var lig_iter = emb.ligature_codepoints.iterator();
     while (lig_iter.next()) |entry| {
         const lig_gid = entry.key_ptr.*;
-        if (lig_gid != 0) {
+        if (lig_gid != 0 and lig_gid < cs_count) {
             try glyph_set.put(allocator, lig_gid, {});
         }
     }
@@ -2379,24 +2412,7 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
         try emb.gid_remap.put(emb.allocator, orig_gid, @intCast(new_gid));
     }
 
-    const num_glyphs: u16 = @intCast(glyph_list.items.len);
-
-    // Parse CFF structure
-    const cff = CFFLayout.parse(cff_data);
-
-    // Parse Global Subrs INDEX
-    const global_subrs = parseCFFIndex(cff_data, cff.gsubr_start);
-
-    // Parse CharStrings INDEX location
-    const charstrings_offset = parseCFFTopDictForCharStrings(cff_data, cff.topdict_start) orelse
-        return error.InvalidCFF;
-
-    const cs_count = readU16(cff_data, charstrings_offset);
-    if (cs_count == 0) return error.InvalidCFF;
-
-    const cs_off_size = cff_data[charstrings_offset + 2];
-    const cs_offsets_start = charstrings_offset + 3;
-    const cs_data_start = cs_offsets_start + (@as(usize, cs_count) + 1) * cs_off_size;
+    const num_glyphs: u16 = @intCast(glyph_list.items.len); // <= cs_count
 
     // Get Private DICT info to find Local Subrs
     const private_info = parseCFFTopDictForPrivate(cff_data, cff.topdict_start);
@@ -2427,27 +2443,23 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
 
     const use_desubroutinization = true; // Set to true to enable desubroutinization
     for (glyph_list.items) |orig_gid| {
-        if (orig_gid < cs_count) {
-            const orig_start = readCFFOffset(cff_data, cs_offsets_start, orig_gid, cs_off_size);
-            const orig_end = readCFFOffset(cff_data, cs_offsets_start, orig_gid + 1, cs_off_size);
-            if (orig_end > orig_start) {
-                const orig_charstring = cff_data[cs_data_start + orig_start - 1 .. cs_data_start + orig_end - 1];
-                if (use_desubroutinization) {
-                    // Desubroutinize the charstring
-                    const desubr_cs = try desubroutinizeCharString(allocator, orig_charstring, global_subrs, local_subrs, 0);
-                    try desubr_charstrings.append(allocator, desubr_cs);
-                    try cs_data_buf.appendSlice(allocator, desubr_cs);
-                } else {
-                    // Keep original charstring (requires keeping Subrs)
-                    try cs_data_buf.appendSlice(allocator, orig_charstring);
-                }
+        // getEntry is null for empty, inverted or out-of-bounds entries.
+        if (charstrings.getEntry(orig_gid)) |orig_charstring| {
+            if (use_desubroutinization) {
+                // Desubroutinize the charstring
+                const desubr_cs = try desubroutinizeCharString(allocator, orig_charstring, global_subrs, local_subrs, 0);
+                try desubr_charstrings.append(allocator, desubr_cs);
+                try cs_data_buf.appendSlice(allocator, desubr_cs);
+            } else {
+                // Keep original charstring (requires keeping Subrs)
+                try cs_data_buf.appendSlice(allocator, orig_charstring);
             }
         }
-        try cs_offsets.append(allocator, @intCast(cs_data_buf.items.len + 1));
+        try cs_offsets.append(allocator, std.math.cast(u32, cs_data_buf.items.len + 1) orelse return error.InvalidCFF);
     }
 
-    // Determine offset size for compact CharStrings
-    const new_cs_off_size: u8 = if (cs_data_buf.items.len < 256) 1 else if (cs_data_buf.items.len < 65536) 2 else 3;
+    // Offset size for compact CharStrings: must hold the last offset
+    const new_cs_off_size = try cffOffSize(cs_data_buf.items.len + 1);
 
     // Build CharStrings INDEX
     var new_charstrings = std.ArrayListUnmanaged(u8).empty;
@@ -2466,11 +2478,10 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     var new_charset = std.ArrayListUnmanaged(u8).empty;
     defer new_charset.deinit(allocator);
 
-    // Get original charset offset
-    const orig_charset_offset = parseCFFDictForOperator(
-        cff_data[cff.topdict_start + 3 + 2 * cff_data[cff.topdict_start + 2] ..][0 .. readCFFOffset(cff_data, cff.topdict_start + 3, 1, cff_data[cff.topdict_start + 2]) - 1],
-        15,
-    ) orelse return error.InvalidCFF;
+    // Get original charset offset (Top DICT via the bounds-checked INDEX)
+    const top_dict = (parseCFFIndex(cff_data, cff.topdict_start) orelse return error.InvalidCFF).getEntry(0) orelse
+        return error.InvalidCFF;
+    const orig_charset_offset = parseCFFDictForOperator(top_dict, 15) orelse return error.InvalidCFF;
 
     // Collect all SIDs used in the new charset
     var charset_sids = std.ArrayListUnmanaged(u16).empty;
@@ -3457,3 +3468,19 @@ pub const FontFace = struct {
         self.prototype.deinit();
     }
 };
+
+test "CFF single-item INDEX picks an offset size that holds data.len + 1" {
+    // Off-by-one (any font): 255 bytes need offset 256, which does not fit
+    // offSize 1; >= 65,535 bytes overflowed offSize 2 (e.g. a hostile Top
+    // DICT with a very long real operand).
+    for ([_]usize{ 254, 255, 256, 65_534, 65_535, 70_000 }) |len| {
+        const data = try std.testing.allocator.alloc(u8, len);
+        defer std.testing.allocator.free(data);
+        @memset(data, 0xAB);
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        defer out.deinit(std.testing.allocator);
+        try appendCffSingleItemIndex(&out, std.testing.allocator, data);
+        const index = cff_subset.parseCFFIndex(out.items, 0).?;
+        try std.testing.expectEqualSlices(u8, data, index.getEntry(0).?);
+    }
+}
