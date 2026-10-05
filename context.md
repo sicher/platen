@@ -4,15 +4,14 @@
 **Hardening pass done (session #27, 2026-10-04/05); nothing pushed yet.**
 Main is at 0.9.0, held pre-1.0 by user decision (1.0 ceremony: bump
 build.zig.zon + version.zig, tag, push tag, restore README tarball URL).
-Zig **0.17**, zero dependencies, 499 tests, silent clean runs.
+Zig **0.17**, zero dependencies, 503 tests, silent clean runs; PDF/A
+output veraPDF-validated in the suite.
 
 ## What's Next
 - **Push** - check the CI runner (`zig-arm64`, `.forgejo/workflows`) has
   Zig 0.17 first; the code no longer builds with 0.16.
 - Longer fuzz runs: `--fuzz` works again with 0.17's stock runner (needs
   `mkdir -p .zig-cache/tmp` after a cache wipe - Zig fuzzer bug).
-- veraPDF is not installed locally; README claims "VeraPDF validated" -
-  re-validate PDF/A output after today's image rules.
 - TODO.md: opt-in 16-bit -> 8-bit downsampling flag for PDF/A-1b; the
   post-1.0 roadmap (bidi/CJK, Tr modes, Form XObjects, parallel pages,
   document.zig split).
@@ -42,6 +41,10 @@ Zig **0.17**, zero dependencies, 499 tests, silent clean runs.
   tRNS color keys, 16-bit alpha, Adam7 - all 161 valid images match truth.
 - **PDF/A-1b images**: soft masks -> TransparencyNotAllowed, 16-bit ->
   BitDepthNotAllowed (no silent conversion, user decision).
+- **veraPDF** (now installed, in the suite; skips if absent) found: every
+  PDF/A file failed since the 0.17 migration (signed year printed "+2026"
+  - fixed, all width-formatted ints audited); links lacked /F 4; standard
+  fonts silently produced non-embedded "PDF/A" (now FontNotEmbedded).
 - **Tests**: compare_pdfs.py --compare-images (pixel-exact via pdfimages;
   before, no test looked at image content); test runs are silent; weak
   tests that only printed now assert.
