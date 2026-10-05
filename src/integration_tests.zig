@@ -1607,6 +1607,8 @@ fn generatePngSuitePdf(allocator: std.mem.Allocator) ![]u8 {
         if (i % per_page == 0) {
             try doc.addPage(.{});
             _ = try doc.writeAt(.{ .x = 30, .y = 28 }, "PngSuite", title, .{});
+            // Same text as the reference, whose frames mark fpdf2's errors.
+            _ = try doc.writeAt(.{ .x = 100, .y = 28 }, "Red frame: fpdf2 renders this image wrongly", caption, .{});
         }
         const cell = i % per_page;
         const x: f64 = @floatFromInt(30 + (cell % 8) * 67);

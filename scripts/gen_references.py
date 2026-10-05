@@ -1192,14 +1192,26 @@ def pngsuite_files() -> list[str]:
     return sorted(p.name for p in PNGSUITE_DIR.glob("*.png") if not p.name.startswith("x"))
 
 
+def pngsuite_fpdf2_wrong() -> set[str]:
+    """Images fpdf2 renders wrongly - read from pngsuite_fpdf2_wrong in
+    src/integration_tests.zig, the single source of the list."""
+    import re
+    src = Path("src/integration_tests.zig").read_text()
+    start = src.index("const pngsuite_fpdf2_wrong")
+    return set(re.findall(r'"([^"]+\.png)"', src[start:src.index("};", start)]))
+
+
 def gen_pngsuite():
     """Every valid PngSuite image on a grid, filename captions below.
 
     Layout must match generatePngSuitePdf in src/integration_tests.zig:
     8 columns x 12 rows per A4 page, 40x40 pt images, 6 pt captions.
+    Cells fpdf2 renders wrongly (checked against PngSuite's own pixels)
+    get a red frame - graphics are not compared, so the text stays equal.
     """
     pdf = make_pdf()
     files = pngsuite_files()
+    wrong = pngsuite_fpdf2_wrong()
     per_page = 8 * 12
     for i, name in enumerate(files):
         if i % per_page == 0:
@@ -1207,10 +1219,15 @@ def gen_pngsuite():
             pdf.set_font("Helvetica", "B", size=12)
             pdf.text(30, 28, "PngSuite")
             pdf.set_font("Helvetica", size=6)
+            pdf.text(100, 28, "Red frame: fpdf2 renders this image wrongly")
         cell = i % per_page
         x = 30 + (cell % 8) * 67
         y = 40 + (cell // 8) * 62
         pdf.image(str(PNGSUITE_DIR / name), x=x, y=y, w=40, h=40)
+        if name in wrong:
+            pdf.set_draw_color(220, 0, 0)
+            pdf.set_line_width(1.5)
+            pdf.rect(x - 2, y - 2, 44, 44)
         pdf.text(x, y + 49, name)
     pdf.output(OUTPUT_DIR / "pngsuite.pdf")
     print("  pngsuite.pdf")
