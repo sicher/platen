@@ -905,9 +905,8 @@ PDF/A is the ISO standard for long-term archival of electronic documents.
 ```zig
 pub const Conformance = enum {
     none,      // Default - no restrictions
-    pdfa_1b,   // PDF 1.4, no transparency, all fonts embedded
-    pdfa_2b,   // PDF 1.7, transparency allowed
-    pdfa_3b,   // PDF 1.7, embedded files allowed
+    pdfa_1b,   // PDF 1.4: no transparency, no 16-bit images
+    pdfa_2b,   // PDF 1.7: transparency and 16-bit images allowed
 };
 ```
 
@@ -915,17 +914,26 @@ pub const Conformance = enum {
 
 ```zig
 var doc = Document.init(allocator, io);
-doc.setConformance(.pdfa_1b);  // Enable PDF/A-1b
+doc.setConformance(.pdfa_1b);  // before adding content
 
 // For full compliance, use embedded fonts
-const font = try doc.loadFont("path/to/font.ttf", null);
+const font = try doc.loadFont("path/to/font.ttf", .identity);
 const style = TextStyle{ .font = font, .size = 12 };
-_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", style);
+_ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", style, .{});
 
 // Transparency rejected for PDF/A-1b
-try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 }});
+try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 } });
 // Returns error.TransparencyNotAllowed
 ```
+
+### Validation rules (PDF/A-1b only; enforced, nothing converted silently)
+
+- Opacity < 1.0 on shapes/text -> `error.TransparencyNotAllowed`.
+- Images, checked in `drawImage` (`pdfa.validateImage`): a soft mask (PNG
+  alpha or tRNS) -> `error.TransparencyNotAllowed`; 16-bit samples ->
+  `error.BitDepthNotAllowed` (caller downsamples; user decision
+  2026-10-05, opt-in flag on TODO.md).
+- Color fonts are skipped under any PDF/A (monochrome outline fallback).
 
 ### PDF/A Output Structures
 
