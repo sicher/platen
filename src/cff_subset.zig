@@ -771,8 +771,39 @@ pub fn desubroutinizeCharString(
     local_subrs: ?CFFIndex,
     depth: u8,
 ) ![]const u8 {
-    // Prevent infinite recursion
-    if (depth > 10) return allocator.dupe(u8, charstring);
+    var budget: DesubrBudget = .{};
+    return desubroutinize(allocator, charstring, global_subrs, local_subrs, depth, &budget);
+}
+
+/// Type 2 charstring implementation limits (Adobe TN #5177, Appendix B):
+/// subroutine nesting depth and charstring length.
+const max_subr_depth = 10;
+const max_charstring_len = 65535;
+/// Work bound per glyph: bytes scanned across all inlined calls. Calls are
+/// re-expanded without memoization, so without it subroutines that expand
+/// to nothing could still demand 32^10 calls. Real glyphs scan < 2 KB
+/// (largest fully expanded glyph in Inter/Satoshi: 466 bytes).
+const max_desubr_work: usize = 1 << 20;
+
+const DesubrBudget = struct {
+    scanned: usize = 0,
+};
+
+/// Inline all subroutine calls; error.InvalidCFF when the font exceeds the
+/// Type 2 limits (nesting > 10, expanded glyph > 65535 bytes) or the work
+/// bound. Exceeding the depth used to return the charstring unexpanded -
+/// still calling subroutines the subset no longer contains.
+fn desubroutinize(
+    allocator: std.mem.Allocator,
+    charstring: []const u8,
+    global_subrs: ?CFFIndex,
+    local_subrs: ?CFFIndex,
+    depth: u8,
+    budget: *DesubrBudget,
+) ![]const u8 {
+    if (depth > max_subr_depth) return error.InvalidCFF;
+    budget.scanned += charstring.len;
+    if (budget.scanned > max_desubr_work) return error.InvalidCFF;
 
     var result = std.ArrayListUnmanaged(u8).empty;
     errdefer result.deinit(allocator);
@@ -822,13 +853,14 @@ pub fn desubroutinizeCharString(
                 const subr_idx = stack[stack_top] + lsubr_bias;
                 if (subr_idx >= 0) {
                     if (local_subrs.?.getEntry(@intCast(subr_idx))) |subr_data| {
-                        const expanded = try desubroutinizeCharString(allocator, subr_data, global_subrs, local_subrs, depth + 1);
+                        const expanded = try desubroutinize(allocator, subr_data, global_subrs, local_subrs, depth + 1, budget);
                         defer allocator.free(expanded);
                         const inline_len = if (expanded.len > 0 and expanded[expanded.len - 1] == 11)
                             expanded.len - 1
                         else
                             expanded.len;
                         try result.appendSlice(allocator, expanded[0..inline_len]);
+                        if (result.items.len > max_charstring_len) return error.InvalidCFF;
                     }
                 }
             }
@@ -843,13 +875,14 @@ pub fn desubroutinizeCharString(
                 const subr_idx = stack[stack_top] + gsubr_bias;
                 if (subr_idx >= 0) {
                     if (global_subrs.?.getEntry(@intCast(subr_idx))) |subr_data| {
-                        const expanded = try desubroutinizeCharString(allocator, subr_data, global_subrs, local_subrs, depth + 1);
+                        const expanded = try desubroutinize(allocator, subr_data, global_subrs, local_subrs, depth + 1, budget);
                         defer allocator.free(expanded);
                         const inline_len = if (expanded.len > 0 and expanded[expanded.len - 1] == 11)
                             expanded.len - 1
                         else
                             expanded.len;
                         try result.appendSlice(allocator, expanded[0..inline_len]);
+                        if (result.items.len > max_charstring_len) return error.InvalidCFF;
                     }
                 }
             }
@@ -931,6 +964,8 @@ pub fn desubroutinizeCharString(
         try result.append(allocator, 14);
     }
 
+    // Also covers a single oversized charstring with no calls.
+    if (result.items.len > max_charstring_len) return error.InvalidCFF;
     return result.toOwnedSlice(allocator);
 }
 
@@ -1188,4 +1223,89 @@ test "Top DICT ending in a lone escape byte" {
     var out: std.ArrayListUnmanaged(u8) = .empty;
     defer out.deinit(std.testing.allocator);
     try buildUpdatedTopDict(std.testing.allocator, cff, 0, &out, .{ .charset = 0, .charstrings = 0, .private_size = 0, .private_offset = 0 });
+}
+
+// ----------------------------------------------------------------------------
+// Desubroutinization bounds (2026-10-05). Inlining re-expands every call with
+// no memoization, so a few hundred bytes of subroutines could demand 10^10
+// bytes of output or as many calls; depth overflow returned the charstring
+// unexpanded (still calling subroutines the subset no longer has).
+// ----------------------------------------------------------------------------
+
+/// CFF INDEX (offSize 2) holding `items`, for tests.
+fn testIndex(a: std.mem.Allocator, items: []const []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(a);
+    try binary.appendBE16(&out, a, @intCast(items.len));
+    try out.append(a, 2);
+    var off: usize = 1;
+    try binary.appendBE16(&out, a, @intCast(off));
+    for (items) |it| {
+        off += it.len;
+        try binary.appendBE16(&out, a, @intCast(off));
+    }
+    for (items) |it| try out.appendSlice(a, it);
+    return out.toOwnedSlice(a);
+}
+
+/// Local subrs where subr k calls subr k+1 `fan_out` times and the last
+/// subr is `leaf`. (Bias is 107 for < 1240 subrs: index i encodes as byte
+/// i - 107 + 139 = i + 32.)
+fn testSubrChain(a: std.mem.Allocator, levels: usize, fan_out: usize, leaf: []const u8) ![]u8 {
+    var bodies: std.ArrayListUnmanaged([]u8) = .empty;
+    defer {
+        for (bodies.items) |b| a.free(b);
+        bodies.deinit(a);
+    }
+    for (0..levels) |k| {
+        const body = try a.alloc(u8, fan_out * 2 + 1);
+        for (0..fan_out) |j| {
+            body[j * 2] = @intCast(k + 1 + 32); // operand: next subr index
+            body[j * 2 + 1] = 10; // callsubr
+        }
+        body[fan_out * 2] = 11; // return
+        try bodies.append(a, body);
+    }
+    try bodies.append(a, try a.dupe(u8, leaf));
+    return testIndex(a, bodies.items);
+}
+
+fn expectDesubrError(levels: usize, fan_out: usize, leaf: []const u8) !void {
+    const a = std.testing.allocator;
+    const subrs = try testSubrChain(a, levels, fan_out, leaf);
+    defer a.free(subrs);
+    const local = parseCFFIndex(subrs, 0).?;
+    const glyph = [_]u8{ 32, 10, 14 }; // callsubr 0, endchar
+    if (desubroutinizeCharString(a, &glyph, null, local, 0)) |out| {
+        defer a.free(out);
+        std.debug.print("expanded to {d} bytes instead of failing\n", .{out.len});
+        return error.TestUnexpectedResult;
+    } else |err| try std.testing.expectEqual(error.InvalidCFF, err);
+}
+
+test "desubroutinizing rejects output beyond the Type 2 charstring limit" {
+    // 8 calls per level, 6 levels, 4-byte leaf: 8^6 * 4 = 1 MiB of output.
+    try expectDesubrError(6, 8, &.{ 139, 139, 5, 11 }); // 0 0 rlineto return
+}
+
+test "desubroutinizing rejects call bombs that expand to nothing" {
+    // 32 calls per level to an empty subr: 32^4 = 1M calls, zero output.
+    try expectDesubrError(4, 32, &.{11});
+}
+
+test "desubroutinizing rejects nesting deeper than the Type 2 limit" {
+    // One call per level, 11 levels deep (limit: 10).
+    try expectDesubrError(11, 1, &.{ 139, 139, 5, 11 });
+}
+
+test "desubroutinizing inlines a legitimate chain" {
+    const a = std.testing.allocator;
+    const subrs = try testSubrChain(a, 3, 2, &.{ 139, 139, 5, 11 });
+    defer a.free(subrs);
+    const glyph = [_]u8{ 32, 10, 14 };
+    const out = try desubroutinizeCharString(a, &glyph, null, parseCFFIndex(subrs, 0).?, 0);
+    defer a.free(out);
+    // 2^3 = 8 copies of "0 0 rlineto", then endchar.
+    try std.testing.expectEqual(@as(usize, 8 * 3 + 1), out.len);
+    try std.testing.expectEqual(@as(u8, 14), out[out.len - 1]);
 }
