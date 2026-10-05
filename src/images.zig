@@ -344,7 +344,7 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
     // Validate
     if (compression != 0) return error.UnsupportedPngCompression;
     if (filter != 0) return error.UnsupportedPngFilter;
-    if (interlace != 0) return error.InterlacedPngNotSupported;
+    if (interlace > 1) return error.InvalidPng; // 0 = none, 1 = Adam7
 
     const color_type = std.enums.fromInt(PngColorType, color_type_byte) orelse {
         return error.UnsupportedPngColorType;
@@ -413,9 +413,8 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
     }
 
     // Calculate expected decompressed size
-    // Each scanline has: 1 filter byte + scanline_width pixels
-    const scanline_width = calculateScanlineWidth(width, color_type, bit_depth);
-    const expected_raw_len = std.math.mul(usize, height, 1 + scanline_width) catch
+    // Each scanline (of the image, or of each Adam7 pass) has 1 filter byte
+    const expected_raw_len = rawDataLen(width, height, color_type, bit_depth, interlace == 1) catch
         return error.InvalidPngData;
     // zlib.decompress allocates expected_raw_len up front, and the header
     // is attacker-controlled. Deflate expands at most ~1032:1, so a larger
@@ -449,7 +448,10 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
     }
 
     // Unfilter the image data
-    const unfiltered = try unfilterPng(allocator, raw_data, width, height, color_type, bit_depth);
+    const unfiltered = if (interlace == 1)
+        try deinterlaceAdam7(allocator, raw_data, width, height, color_type, bit_depth)
+    else
+        try unfilterPng(allocator, raw_data, width, height, color_type, bit_depth);
     defer allocator.free(unfiltered);
 
     // Separate RGB and alpha channels, compress each
@@ -618,6 +620,92 @@ fn colorKeyAlpha(
         }
     }
     return alpha;
+}
+
+/// Adam7 passes: start x/y and step x/y within the full image.
+const adam7_passes = [7][4]u32{
+    .{ 0, 0, 8, 8 }, .{ 4, 0, 8, 8 }, .{ 0, 4, 4, 8 }, .{ 2, 0, 4, 4 },
+    .{ 0, 2, 2, 4 }, .{ 1, 0, 2, 2 }, .{ 0, 1, 1, 2 },
+};
+
+/// Size of one Adam7 pass's reduced image (0 x n or n x 0 when empty).
+fn adam7PassSize(width: u32, height: u32, pass: [4]u32) struct { w: u32, h: u32 } {
+    const w = if (width > pass[0]) (width - pass[0] + pass[2] - 1) / pass[2] else 0;
+    const h = if (height > pass[1]) (height - pass[1] + pass[3] - 1) / pass[3] else 0;
+    return .{ .w = w, .h = h };
+}
+
+/// Decompressed size of the image data: one filter byte per scanline plus
+/// the scanlines - of the whole image, or of each non-empty Adam7 pass.
+fn rawDataLen(width: u32, height: u32, color_type: PngColorType, bit_depth: u8, interlaced: bool) error{Overflow}!usize {
+    if (!interlaced) {
+        return std.math.mul(usize, height, 1 + calculateScanlineWidth(width, color_type, bit_depth));
+    }
+    var total: usize = 0;
+    for (adam7_passes) |pass| {
+        const size = adam7PassSize(width, height, pass);
+        if (size.w == 0 or size.h == 0) continue;
+        const pass_len = try std.math.mul(usize, size.h, 1 + calculateScanlineWidth(size.w, color_type, bit_depth));
+        total = try std.math.add(usize, total, pass_len);
+    }
+    return total;
+}
+
+/// Unfilter each Adam7 pass (its own reduced image with its own filtered
+/// scanlines) and scatter its pixels into a full, non-interlaced image in
+/// the same packed layout unfilterPng produces.
+fn deinterlaceAdam7(
+    allocator: std.mem.Allocator,
+    raw_data: []const u8,
+    width: u32,
+    height: u32,
+    color_type: PngColorType,
+    bit_depth: u8,
+) ![]u8 {
+    const scanline_width = calculateScanlineWidth(width, color_type, bit_depth);
+    const output = try allocator.alloc(u8, @as(usize, height) * scanline_width);
+    errdefer allocator.free(output);
+    @memset(output, 0); // sub-byte pixels are OR-ed in
+
+    const samples: usize = switch (color_type) {
+        .grayscale, .indexed => 1,
+        .grayscale_alpha => 2,
+        .rgb => 3,
+        .rgba => 4,
+    };
+    const bits_per_pixel = samples * bit_depth;
+
+    var raw_pos: usize = 0;
+    for (adam7_passes) |pass| {
+        const size = adam7PassSize(width, height, pass);
+        if (size.w == 0 or size.h == 0) continue;
+        const pass_scanline = calculateScanlineWidth(size.w, color_type, bit_depth);
+        const pass_len = @as(usize, size.h) * (1 + pass_scanline);
+        const pixels = try unfilterPng(allocator, raw_data[raw_pos..][0..pass_len], size.w, size.h, color_type, bit_depth);
+        defer allocator.free(pixels);
+        raw_pos += pass_len;
+
+        for (0..size.h) |py| {
+            const src_row = pixels[py * pass_scanline ..][0..pass_scanline];
+            const y = pass[1] + py * pass[3];
+            const dst_row = output[y * scanline_width ..][0..scanline_width];
+            for (0..size.w) |px| {
+                const x = pass[0] + px * pass[2];
+                if (bits_per_pixel >= 8) {
+                    const bpp = bits_per_pixel / 8;
+                    @memcpy(dst_row[x * bpp ..][0..bpp], src_row[px * bpp ..][0..bpp]);
+                } else { // 1, 2, 4 bits (gray or indexed): MSB-first packing
+                    const bits: u3 = @intCast(bits_per_pixel);
+                    const mask: u8 = @intCast((@as(u16, 1) << bits) - 1);
+                    const src_bit = px * bits_per_pixel;
+                    const value = (src_row[src_bit / 8] >> @intCast(8 - bits_per_pixel - src_bit % 8)) & mask;
+                    const dst_bit = x * bits_per_pixel;
+                    dst_row[dst_bit / 8] |= value << @intCast(8 - bits_per_pixel - dst_bit % 8);
+                }
+            }
+        }
+    }
+    return output;
 }
 
 fn calculateScanlineWidth(width: u32, color_type: PngColorType, bit_depth: u8) usize {
@@ -883,6 +971,10 @@ fn testChunk(out: *std.ArrayListUnmanaged(u8), a: std.mem.Allocator, chunk_type:
 
 /// Minimal PNG: signature, IHDR, one IDAT holding zlib(`raw`), IEND.
 fn testPng(width: u32, height: u32, bit_depth: u8, color_type: u8, raw: []const u8) ![]u8 {
+    return testPngInterlace(width, height, bit_depth, color_type, 0, raw);
+}
+
+fn testPngInterlace(width: u32, height: u32, bit_depth: u8, color_type: u8, interlace: u8, raw: []const u8) ![]u8 {
     const zlib = @import("zlib.zig");
     const a = std.testing.allocator;
     const z = try zlib.compress(a, raw);
@@ -895,6 +987,7 @@ fn testPng(width: u32, height: u32, bit_depth: u8, color_type: u8, raw: []const 
     std.mem.writeInt(u32, ihdr[4..8], height, .big);
     ihdr[8] = bit_depth;
     ihdr[9] = color_type;
+    ihdr[12] = interlace;
     try testChunk(&out, a, "IHDR", &ihdr);
     try testChunk(&out, a, "IDAT", z);
     try testChunk(&out, a, "IEND", &.{});
@@ -1093,4 +1186,84 @@ test "PNG 16-bit with alpha keeps 16-bit color and a 16-bit soft mask" {
     const a2 = try zlib.decompress(a, img2.alpha_data.?, 2);
     defer a.free(a2);
     try std.testing.expectEqualSlices(u8, &.{ 0x80, 0 }, a2);
+}
+
+/// Test-side Adam7 encoder for 1-sample images (gray) at `bit_depth`:
+/// `pixels` holds one value per pixel, row-major. Returns the raw
+/// (filter type 0) pass data an interlaced PNG's IDAT decompresses to.
+fn testAdam7Raw(a: std.mem.Allocator, pixels: []const u8, width: usize, height: usize, bit_depth: u8) ![]u8 {
+    const passes = [7][4]usize{ .{ 0, 0, 8, 8 }, .{ 4, 0, 8, 8 }, .{ 0, 4, 4, 8 }, .{ 2, 0, 4, 4 }, .{ 0, 2, 2, 4 }, .{ 1, 0, 2, 2 }, .{ 0, 1, 1, 2 } };
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(a);
+    for (passes) |ps| {
+        if (width <= ps[0] or height <= ps[1]) continue;
+        const pw = (width - ps[0] + ps[2] - 1) / ps[2];
+        const ph = (height - ps[1] + ps[3] - 1) / ps[3];
+        const row_bytes = (pw * bit_depth + 7) / 8;
+        for (0..ph) |py| {
+            try out.append(a, 0); // filter: none
+            const row = try out.addManyAsSlice(a, row_bytes);
+            @memset(row, 0);
+            for (0..pw) |px| {
+                const v = pixels[(ps[1] + py * ps[3]) * width + ps[0] + px * ps[2]];
+                const bit = px * bit_depth;
+                row[bit / 8] |= @intCast((@as(u16, v) << @intCast(8 - bit_depth - bit % 8)) & 0xFF);
+            }
+        }
+    }
+    return out.toOwnedSlice(a);
+}
+
+/// The same pixels as non-interlaced raw scanlines (filter type 0).
+fn testPlainRaw(a: std.mem.Allocator, pixels: []const u8, width: usize, height: usize, bit_depth: u8) ![]u8 {
+    const row_bytes = (width * bit_depth + 7) / 8;
+    const out = try a.alloc(u8, height * (1 + row_bytes));
+    @memset(out, 0);
+    for (0..height) |y| {
+        const row = out[y * (1 + row_bytes) + 1 ..][0..row_bytes];
+        for (0..width) |x| {
+            const bit = x * bit_depth;
+            row[bit / 8] |= @intCast((@as(u16, pixels[y * width + x]) << @intCast(8 - bit_depth - bit % 8)) & 0xFF);
+        }
+    }
+    return out;
+}
+
+test "Adam7 interlaced PNG decodes to the same image as non-interlaced" {
+    const a = std.testing.allocator;
+    const zlib = @import("zlib.zig");
+    // Odd sizes exercise empty passes and partial bytes at sub-byte depths.
+    const Case = struct { w: usize, h: usize, depth: u8 };
+    for ([_]Case{ .{ .w = 5, .h = 5, .depth = 8 }, .{ .w = 11, .h = 3, .depth = 1 }, .{ .w = 9, .h = 10, .depth = 4 }, .{ .w = 1, .h = 1, .depth = 8 } }) |c| {
+        const pixels = try a.alloc(u8, c.w * c.h);
+        defer a.free(pixels);
+        const max: usize = (@as(usize, 1) << @intCast(c.depth)) - 1;
+        for (pixels, 0..) |*v, i| v.* = @intCast((i * 7 + 3) % (max + 1));
+
+        const plain_raw = try testPlainRaw(a, pixels, c.w, c.h, c.depth);
+        defer a.free(plain_raw);
+        const adam_raw = try testAdam7Raw(a, pixels, c.w, c.h, c.depth);
+        defer a.free(adam_raw);
+        const plain_png = try testPng(@intCast(c.w), @intCast(c.h), c.depth, 0, plain_raw);
+        defer a.free(plain_png);
+        const adam_png = try testPngInterlace(@intCast(c.w), @intCast(c.h), c.depth, 0, 1, adam_raw);
+        defer a.free(adam_png);
+
+        const plain = try Image.fromMemory(a, plain_png);
+        defer plain.deinit();
+        const adam = try Image.fromMemory(a, adam_png);
+        defer adam.deinit();
+        const size = c.h * ((c.w * c.depth + 7) / 8);
+        const want = try zlib.decompress(a, plain.data, size);
+        defer a.free(want);
+        const got = try zlib.decompress(a, adam.data, size);
+        defer a.free(got);
+        try std.testing.expectEqualSlices(u8, want, got);
+    }
+}
+
+test "PNG interlace method other than 0 or 1 is rejected" {
+    const png = try testPngInterlace(1, 1, 8, 0, 2, &.{ 0, 0 });
+    defer std.testing.allocator.free(png);
+    try expectPngError(error.InvalidPng, png);
 }

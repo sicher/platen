@@ -1527,41 +1527,6 @@ const pngsuite_dir = "test/images/pngsuite";
 /// the test fails if a listed file starts decoding - delete entries as the
 /// formats land (Adam7 interlacing).
 const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
-    .{ .name = "basi0g01.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi0g02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi0g04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi0g08.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi0g16.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi2c08.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi2c16.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi3p01.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi3p02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi3p08.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi4a08.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi4a16.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi6a08.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basi6a16.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "bgai4a08.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "bgai4a16.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s01i3p01.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s02i3p01.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s03i3p01.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s04i3p01.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s05i3p02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s06i3p02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s07i3p02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s08i3p02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s09i3p02.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s32i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s33i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s34i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s35i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s36i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s37i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s38i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s39i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "s40i3p04.png", .err = error.InterlacedPngNotSupported },
 };
 
 /// Files fpdf2 (via Pillow) renders wrongly, checked against PngSuite's
@@ -1569,7 +1534,7 @@ const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
 /// comparison still covers them.
 const pngsuite_fpdf2_wrong = [_][]const u8{
     // 16-bit grayscale clipped to near-white
-    "basn0g16.png", "g03n0g16.png", "g04n0g16.png", "g05n0g16.png",
+    "basi0g16.png", "basn0g16.png", "g03n0g16.png", "g04n0g16.png", "g05n0g16.png",
     "g07n0g16.png", "g10n0g16.png", "g25n0g16.png", "oi1n0g16.png",
     "oi2n0g16.png", "oi4n0g16.png", "oi9n0g16.png", "tbwn0g16.png",
     // tRNS color key on grayscale/RGB ignored (drawn opaque)
