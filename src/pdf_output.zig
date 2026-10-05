@@ -81,7 +81,9 @@ pub const OutputTiming = struct {
 
 /// Date/time components for formatting.
 const DateTime = struct {
-    year: i32,
+    /// Unsigned on purpose: Zig 0.17 formats a signed integer with a width
+    /// ({d:0>4}) with a leading "+", which broke every PDF/XMP date.
+    year: u16,
     month: u8,
     day: u8,
     hour: u8,
@@ -112,10 +114,9 @@ const DateTime = struct {
 /// Returns a slice into the provided buffer.
 pub fn formatPdfDate(buf: *[24]u8) []const u8 {
     const dt = DateTime.now();
-    _ = std.fmt.bufPrint(buf, "D:{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}Z", .{
+    return std.fmt.bufPrint(buf, "D:{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}Z", .{
         dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
     }) catch unreachable;
-    return buf[0..17];
 }
 
 /// Format current UTC time as ISO 8601 date string: YYYY-MM-DDTHH:mm:ssZ
@@ -123,10 +124,9 @@ pub fn formatPdfDate(buf: *[24]u8) []const u8 {
 /// Returns a slice into the provided buffer.
 pub fn formatIsoDate(buf: *[21]u8) []const u8 {
     const dt = DateTime.now();
-    _ = std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
+    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
         dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
     }) catch unreachable;
-    return buf[0..20];
 }
 
 // ============================================================================
@@ -211,4 +211,23 @@ pub fn writeToUnicodeStream(
     defer tounicode_dict.deinit();
     try w.writeStreamCompressed(&tounicode_dict, tounicode_cmap);
     try w.endObject();
+}
+
+test "PDF and XMP dates have exact formats (no sign, nothing truncated)" {
+    // Zig 0.17 prints "+2026" for a signed year with a width ({d:0>4});
+    // with a hard-coded slice length that dropped the trailing "Z" too,
+    // and veraPDF rejected every PDF/A file (XMP dates not dates).
+    var pdf_buf: [24]u8 = undefined;
+    const pdf = formatPdfDate(&pdf_buf);
+    try std.testing.expectEqual(@as(usize, 17), pdf.len); // D:YYYYMMDDHHmmSSZ
+    try std.testing.expectEqualStrings("D:", pdf[0..2]);
+    for (pdf[2..16]) |c| try std.testing.expect(std.ascii.isDigit(c));
+    try std.testing.expectEqual(@as(u8, 'Z'), pdf[16]);
+
+    var iso_buf: [21]u8 = undefined;
+    const iso = formatIsoDate(&iso_buf);
+    try std.testing.expectEqual(@as(usize, 20), iso.len); // YYYY-MM-DDTHH:mm:ssZ
+    for (iso, "dddd-dd-ddTdd:dd:ddZ") |c, pattern| {
+        if (pattern == 'd') try std.testing.expect(std.ascii.isDigit(c)) else try std.testing.expectEqual(pattern, c);
+    }
 }
