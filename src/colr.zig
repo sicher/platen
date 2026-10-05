@@ -612,7 +612,7 @@ pub const Colr = struct {
 
     /// Format byte of the Paint at an absolute offset.
     pub fn paintFormat(self: Colr, abs: usize) PaintFormat {
-        return @enumFromInt(readU8(self.data, abs));
+        return @fromBackingInt(@intCast(readU8(self.data, abs)));
     }
 };
 
@@ -1020,7 +1020,7 @@ pub const PaintInterp = struct {
         // PaintSweepGradient: format(u8), colorLineOffset(Offset24),
         // centerX/centerY(FWORD), startAngle/endAngle(F2Dot14, biased).
         const color_line_abs = abs + readU24(self.colr.data, abs + 1);
-        const extend: Extend = @enumFromInt(readU8(self.colr.data, color_line_abs));
+        const extend: Extend = @fromBackingInt(@intCast(readU8(self.colr.data, color_line_abs)));
         const stops = try self.readColorLine(color_line_abs);
         if (stops.len < 2) return;
 

@@ -548,7 +548,7 @@ test "readU16 basic" {
 }
 
 test "readU16 out of bounds" {
-    const data = [_]u8{ 0x12 };
+    const data = [_]u8{0x12};
     try std.testing.expectEqual(@as(u16, 0), readU16(&data, 0));
 }
 
@@ -622,9 +622,15 @@ test "buildMinimalNameTable extracts essential entries" {
         0x00, 0x08, // length = 8 bytes
         0x00, 0x08, // offset = 8
         // String data: "Test" (UTF-16BE)
-        0x00, 'T', 0x00, 'e', 0x00, 's', 0x00, 't',
+        0x00, 'T',
+        0x00, 'e',
+        0x00, 's',
+        0x00, 't',
         // String data: "Font" (UTF-16BE)
-        0x00, 'F', 0x00, 'o', 0x00, 'n', 0x00, 't',
+        0x00, 'F',
+        0x00, 'o',
+        0x00, 'n',
+        0x00, 't',
     };
 
     const min_name = try buildMinimalNameTable(allocator, &name_data);

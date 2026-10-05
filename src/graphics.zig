@@ -103,11 +103,11 @@ pub fn writeShapeGraphicsState(style: ShapeStyle, buf: []u8) usize {
         }
 
         // Line cap and join
-        buf[len] = @intCast(@intFromEnum(s.cap) + '0');
+        buf[len] = @intCast(@backingInt(s.cap) + '0');
         len += 1;
         @memcpy(buf[len..][0..3], " J ");
         len += 3;
-        buf[len] = @intCast(@intFromEnum(s.join) + '0');
+        buf[len] = @intCast(@backingInt(s.join) + '0');
         len += 1;
         @memcpy(buf[len..][0..3], " j\n");
         len += 3;

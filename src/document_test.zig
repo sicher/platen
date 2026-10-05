@@ -1275,7 +1275,6 @@ test "mark positioning with Tm absolute coordinates" {
         }
     }
 
-
     // Should have at least 2 Tm operations (base + mark)
     try std.testing.expect(tm_count >= 2);
 

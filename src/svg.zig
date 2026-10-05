@@ -48,7 +48,7 @@ pub const LineCap = enum {
     square, // 2
 
     pub fn toPdfValue(self: LineCap) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -59,7 +59,7 @@ pub const LineJoin = enum {
     bevel, // 2
 
     pub fn toPdfValue(self: LineJoin) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 

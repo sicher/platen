@@ -1594,11 +1594,11 @@ pub const Document = struct {
             }
 
             // Set line cap and join
-            buf[len] = @intCast(@intFromEnum(s.cap) + '0');
+            buf[len] = @intCast(@backingInt(s.cap) + '0');
             len += 1;
             @memcpy(buf[len..][0..3], " J ");
             len += 3;
-            buf[len] = @intCast(@intFromEnum(s.join) + '0');
+            buf[len] = @intCast(@backingInt(s.join) + '0');
             len += 1;
             @memcpy(buf[len..][0..3], " j\n");
             len += 3;
@@ -3800,7 +3800,7 @@ pub const Document = struct {
 
             try page_dict.put("Contents", Value.ref(.{ .id = content_id }));
             if (page.rotation != .none) {
-                try page_dict.put("Rotate", Value.int(@intFromEnum(page.rotation)));
+                try page_dict.put("Rotate", Value.int(@backingInt(page.rotation)));
             }
 
             // Font resources (must stay in scope until writeDict completes)

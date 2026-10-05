@@ -1012,9 +1012,9 @@ test "PNG bit depth 0 with a huge width is rejected (no overflow)" {
 
 test "PNG bit depth must be valid for the color type" {
     const cases = [_]struct { depth: u8, ct: u8 }{
-        .{ .depth = 3, .ct = 0 }, .{ .depth = 4, .ct = 2 }, .{ .depth = 16, .ct = 3 },
-        .{ .depth = 2, .ct = 4 }, .{ .depth = 1, .ct = 6 },
-        .{ .depth = 4, .ct = 6 }, .{ .depth = 16, .ct = 3 },
+        .{ .depth = 3, .ct = 0 },  .{ .depth = 4, .ct = 2 }, .{ .depth = 16, .ct = 3 },
+        .{ .depth = 2, .ct = 4 },  .{ .depth = 1, .ct = 6 }, .{ .depth = 4, .ct = 6 },
+        .{ .depth = 16, .ct = 3 },
     };
     for (cases) |c| {
         const png = try testPng(1, 1, c.depth, c.ct, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0 });

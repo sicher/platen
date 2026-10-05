@@ -1526,8 +1526,7 @@ const pngsuite_dir = "test/images/pngsuite";
 /// return. Their reference images are skipped by the pixel comparison, and
 /// the test fails if a listed file starts decoding - delete entries as the
 /// formats land (Adam7 interlacing).
-const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
-};
+const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{};
 
 /// Files fpdf2 (via Pillow) renders wrongly, checked against PngSuite's
 /// own pixel values. Skipped in the fpdf2 pixel comparison only; the truth
@@ -1535,10 +1534,11 @@ const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
 const pngsuite_fpdf2_wrong = [_][]const u8{
     // 16-bit grayscale clipped to near-white
     "basi0g16.png", "basn0g16.png", "g03n0g16.png", "g04n0g16.png", "g05n0g16.png",
-    "g07n0g16.png", "g10n0g16.png", "g25n0g16.png", "oi1n0g16.png",
-    "oi2n0g16.png", "oi4n0g16.png", "oi9n0g16.png", "tbwn0g16.png",
+    "g07n0g16.png", "g10n0g16.png", "g25n0g16.png", "oi1n0g16.png", "oi2n0g16.png",
+    "oi4n0g16.png", "oi9n0g16.png", "tbwn0g16.png",
     // tRNS color key on grayscale/RGB ignored (drawn opaque)
-    "tbbn0g04.png", "tbbn2c16.png", "tbgn2c16.png", "tbrn2c08.png",
+    "tbbn0g04.png", "tbbn2c16.png",
+    "tbgn2c16.png", "tbrn2c08.png",
 };
 
 /// Files platen decodes but whose pixels do not match PngSuite's truth

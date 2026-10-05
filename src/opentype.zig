@@ -46,26 +46,105 @@ pub const Feature = enum(u32) {
     ss19 = tag("ss19"),
     ss20 = tag("ss20"),
     // Character Variants 1-99
-    cv01 = tag("cv01"), cv02 = tag("cv02"), cv03 = tag("cv03"), cv04 = tag("cv04"), cv05 = tag("cv05"),
-    cv06 = tag("cv06"), cv07 = tag("cv07"), cv08 = tag("cv08"), cv09 = tag("cv09"), cv10 = tag("cv10"),
-    cv11 = tag("cv11"), cv12 = tag("cv12"), cv13 = tag("cv13"), cv14 = tag("cv14"), cv15 = tag("cv15"),
-    cv16 = tag("cv16"), cv17 = tag("cv17"), cv18 = tag("cv18"), cv19 = tag("cv19"), cv20 = tag("cv20"),
-    cv21 = tag("cv21"), cv22 = tag("cv22"), cv23 = tag("cv23"), cv24 = tag("cv24"), cv25 = tag("cv25"),
-    cv26 = tag("cv26"), cv27 = tag("cv27"), cv28 = tag("cv28"), cv29 = tag("cv29"), cv30 = tag("cv30"),
-    cv31 = tag("cv31"), cv32 = tag("cv32"), cv33 = tag("cv33"), cv34 = tag("cv34"), cv35 = tag("cv35"),
-    cv36 = tag("cv36"), cv37 = tag("cv37"), cv38 = tag("cv38"), cv39 = tag("cv39"), cv40 = tag("cv40"),
-    cv41 = tag("cv41"), cv42 = tag("cv42"), cv43 = tag("cv43"), cv44 = tag("cv44"), cv45 = tag("cv45"),
-    cv46 = tag("cv46"), cv47 = tag("cv47"), cv48 = tag("cv48"), cv49 = tag("cv49"), cv50 = tag("cv50"),
-    cv51 = tag("cv51"), cv52 = tag("cv52"), cv53 = tag("cv53"), cv54 = tag("cv54"), cv55 = tag("cv55"),
-    cv56 = tag("cv56"), cv57 = tag("cv57"), cv58 = tag("cv58"), cv59 = tag("cv59"), cv60 = tag("cv60"),
-    cv61 = tag("cv61"), cv62 = tag("cv62"), cv63 = tag("cv63"), cv64 = tag("cv64"), cv65 = tag("cv65"),
-    cv66 = tag("cv66"), cv67 = tag("cv67"), cv68 = tag("cv68"), cv69 = tag("cv69"), cv70 = tag("cv70"),
-    cv71 = tag("cv71"), cv72 = tag("cv72"), cv73 = tag("cv73"), cv74 = tag("cv74"), cv75 = tag("cv75"),
-    cv76 = tag("cv76"), cv77 = tag("cv77"), cv78 = tag("cv78"), cv79 = tag("cv79"), cv80 = tag("cv80"),
-    cv81 = tag("cv81"), cv82 = tag("cv82"), cv83 = tag("cv83"), cv84 = tag("cv84"), cv85 = tag("cv85"),
-    cv86 = tag("cv86"), cv87 = tag("cv87"), cv88 = tag("cv88"), cv89 = tag("cv89"), cv90 = tag("cv90"),
-    cv91 = tag("cv91"), cv92 = tag("cv92"), cv93 = tag("cv93"), cv94 = tag("cv94"), cv95 = tag("cv95"),
-    cv96 = tag("cv96"), cv97 = tag("cv97"), cv98 = tag("cv98"), cv99 = tag("cv99"),
+    cv01 = tag("cv01"),
+    cv02 = tag("cv02"),
+    cv03 = tag("cv03"),
+    cv04 = tag("cv04"),
+    cv05 = tag("cv05"),
+    cv06 = tag("cv06"),
+    cv07 = tag("cv07"),
+    cv08 = tag("cv08"),
+    cv09 = tag("cv09"),
+    cv10 = tag("cv10"),
+    cv11 = tag("cv11"),
+    cv12 = tag("cv12"),
+    cv13 = tag("cv13"),
+    cv14 = tag("cv14"),
+    cv15 = tag("cv15"),
+    cv16 = tag("cv16"),
+    cv17 = tag("cv17"),
+    cv18 = tag("cv18"),
+    cv19 = tag("cv19"),
+    cv20 = tag("cv20"),
+    cv21 = tag("cv21"),
+    cv22 = tag("cv22"),
+    cv23 = tag("cv23"),
+    cv24 = tag("cv24"),
+    cv25 = tag("cv25"),
+    cv26 = tag("cv26"),
+    cv27 = tag("cv27"),
+    cv28 = tag("cv28"),
+    cv29 = tag("cv29"),
+    cv30 = tag("cv30"),
+    cv31 = tag("cv31"),
+    cv32 = tag("cv32"),
+    cv33 = tag("cv33"),
+    cv34 = tag("cv34"),
+    cv35 = tag("cv35"),
+    cv36 = tag("cv36"),
+    cv37 = tag("cv37"),
+    cv38 = tag("cv38"),
+    cv39 = tag("cv39"),
+    cv40 = tag("cv40"),
+    cv41 = tag("cv41"),
+    cv42 = tag("cv42"),
+    cv43 = tag("cv43"),
+    cv44 = tag("cv44"),
+    cv45 = tag("cv45"),
+    cv46 = tag("cv46"),
+    cv47 = tag("cv47"),
+    cv48 = tag("cv48"),
+    cv49 = tag("cv49"),
+    cv50 = tag("cv50"),
+    cv51 = tag("cv51"),
+    cv52 = tag("cv52"),
+    cv53 = tag("cv53"),
+    cv54 = tag("cv54"),
+    cv55 = tag("cv55"),
+    cv56 = tag("cv56"),
+    cv57 = tag("cv57"),
+    cv58 = tag("cv58"),
+    cv59 = tag("cv59"),
+    cv60 = tag("cv60"),
+    cv61 = tag("cv61"),
+    cv62 = tag("cv62"),
+    cv63 = tag("cv63"),
+    cv64 = tag("cv64"),
+    cv65 = tag("cv65"),
+    cv66 = tag("cv66"),
+    cv67 = tag("cv67"),
+    cv68 = tag("cv68"),
+    cv69 = tag("cv69"),
+    cv70 = tag("cv70"),
+    cv71 = tag("cv71"),
+    cv72 = tag("cv72"),
+    cv73 = tag("cv73"),
+    cv74 = tag("cv74"),
+    cv75 = tag("cv75"),
+    cv76 = tag("cv76"),
+    cv77 = tag("cv77"),
+    cv78 = tag("cv78"),
+    cv79 = tag("cv79"),
+    cv80 = tag("cv80"),
+    cv81 = tag("cv81"),
+    cv82 = tag("cv82"),
+    cv83 = tag("cv83"),
+    cv84 = tag("cv84"),
+    cv85 = tag("cv85"),
+    cv86 = tag("cv86"),
+    cv87 = tag("cv87"),
+    cv88 = tag("cv88"),
+    cv89 = tag("cv89"),
+    cv90 = tag("cv90"),
+    cv91 = tag("cv91"),
+    cv92 = tag("cv92"),
+    cv93 = tag("cv93"),
+    cv94 = tag("cv94"),
+    cv95 = tag("cv95"),
+    cv96 = tag("cv96"),
+    cv97 = tag("cv97"),
+    cv98 = tag("cv98"),
+    cv99 = tag("cv99"),
 
     fn tag(comptime s: *const [4]u8) u32 {
         return std.mem.readInt(u32, s, .big);
@@ -121,26 +200,105 @@ pub const Feature = enum(u32) {
     /// Returns the character variant index (0-98) if this is a cv feature, null otherwise
     pub fn cvIndex(self: Feature) ?usize {
         return switch (self) {
-            .cv01 => 0, .cv02 => 1, .cv03 => 2, .cv04 => 3, .cv05 => 4,
-            .cv06 => 5, .cv07 => 6, .cv08 => 7, .cv09 => 8, .cv10 => 9,
-            .cv11 => 10, .cv12 => 11, .cv13 => 12, .cv14 => 13, .cv15 => 14,
-            .cv16 => 15, .cv17 => 16, .cv18 => 17, .cv19 => 18, .cv20 => 19,
-            .cv21 => 20, .cv22 => 21, .cv23 => 22, .cv24 => 23, .cv25 => 24,
-            .cv26 => 25, .cv27 => 26, .cv28 => 27, .cv29 => 28, .cv30 => 29,
-            .cv31 => 30, .cv32 => 31, .cv33 => 32, .cv34 => 33, .cv35 => 34,
-            .cv36 => 35, .cv37 => 36, .cv38 => 37, .cv39 => 38, .cv40 => 39,
-            .cv41 => 40, .cv42 => 41, .cv43 => 42, .cv44 => 43, .cv45 => 44,
-            .cv46 => 45, .cv47 => 46, .cv48 => 47, .cv49 => 48, .cv50 => 49,
-            .cv51 => 50, .cv52 => 51, .cv53 => 52, .cv54 => 53, .cv55 => 54,
-            .cv56 => 55, .cv57 => 56, .cv58 => 57, .cv59 => 58, .cv60 => 59,
-            .cv61 => 60, .cv62 => 61, .cv63 => 62, .cv64 => 63, .cv65 => 64,
-            .cv66 => 65, .cv67 => 66, .cv68 => 67, .cv69 => 68, .cv70 => 69,
-            .cv71 => 70, .cv72 => 71, .cv73 => 72, .cv74 => 73, .cv75 => 74,
-            .cv76 => 75, .cv77 => 76, .cv78 => 77, .cv79 => 78, .cv80 => 79,
-            .cv81 => 80, .cv82 => 81, .cv83 => 82, .cv84 => 83, .cv85 => 84,
-            .cv86 => 85, .cv87 => 86, .cv88 => 87, .cv89 => 88, .cv90 => 89,
-            .cv91 => 90, .cv92 => 91, .cv93 => 92, .cv94 => 93, .cv95 => 94,
-            .cv96 => 95, .cv97 => 96, .cv98 => 97, .cv99 => 98,
+            .cv01 => 0,
+            .cv02 => 1,
+            .cv03 => 2,
+            .cv04 => 3,
+            .cv05 => 4,
+            .cv06 => 5,
+            .cv07 => 6,
+            .cv08 => 7,
+            .cv09 => 8,
+            .cv10 => 9,
+            .cv11 => 10,
+            .cv12 => 11,
+            .cv13 => 12,
+            .cv14 => 13,
+            .cv15 => 14,
+            .cv16 => 15,
+            .cv17 => 16,
+            .cv18 => 17,
+            .cv19 => 18,
+            .cv20 => 19,
+            .cv21 => 20,
+            .cv22 => 21,
+            .cv23 => 22,
+            .cv24 => 23,
+            .cv25 => 24,
+            .cv26 => 25,
+            .cv27 => 26,
+            .cv28 => 27,
+            .cv29 => 28,
+            .cv30 => 29,
+            .cv31 => 30,
+            .cv32 => 31,
+            .cv33 => 32,
+            .cv34 => 33,
+            .cv35 => 34,
+            .cv36 => 35,
+            .cv37 => 36,
+            .cv38 => 37,
+            .cv39 => 38,
+            .cv40 => 39,
+            .cv41 => 40,
+            .cv42 => 41,
+            .cv43 => 42,
+            .cv44 => 43,
+            .cv45 => 44,
+            .cv46 => 45,
+            .cv47 => 46,
+            .cv48 => 47,
+            .cv49 => 48,
+            .cv50 => 49,
+            .cv51 => 50,
+            .cv52 => 51,
+            .cv53 => 52,
+            .cv54 => 53,
+            .cv55 => 54,
+            .cv56 => 55,
+            .cv57 => 56,
+            .cv58 => 57,
+            .cv59 => 58,
+            .cv60 => 59,
+            .cv61 => 60,
+            .cv62 => 61,
+            .cv63 => 62,
+            .cv64 => 63,
+            .cv65 => 64,
+            .cv66 => 65,
+            .cv67 => 66,
+            .cv68 => 67,
+            .cv69 => 68,
+            .cv70 => 69,
+            .cv71 => 70,
+            .cv72 => 71,
+            .cv73 => 72,
+            .cv74 => 73,
+            .cv75 => 74,
+            .cv76 => 75,
+            .cv77 => 76,
+            .cv78 => 77,
+            .cv79 => 78,
+            .cv80 => 79,
+            .cv81 => 80,
+            .cv82 => 81,
+            .cv83 => 82,
+            .cv84 => 83,
+            .cv85 => 84,
+            .cv86 => 85,
+            .cv87 => 86,
+            .cv88 => 87,
+            .cv89 => 88,
+            .cv90 => 89,
+            .cv91 => 90,
+            .cv92 => 91,
+            .cv93 => 92,
+            .cv94 => 93,
+            .cv95 => 94,
+            .cv96 => 95,
+            .cv97 => 96,
+            .cv98 => 97,
+            .cv99 => 98,
             else => null,
         };
     }
@@ -190,7 +348,7 @@ pub const FeatureFlags = struct {
 
     /// Map a runtime Feature to its flags-array index via binary search.
     fn featureIndex(feature: Feature) usize {
-        const value = @intFromEnum(feature);
+        const value = @backingInt(feature);
         var lo: usize = 0;
         var hi: usize = sorted_entries.len;
         while (lo < hi) {
@@ -209,7 +367,7 @@ pub const FeatureFlags = struct {
         @setEvalBranchQuota(100_000);
         const values = @typeInfo(Feature).@"enum".field_values;
         inline for (values, 0..) |v, i| {
-            if (@intFromEnum(feature) == v) return i;
+            if (@backingInt(feature) == v) return i;
         }
         unreachable;
     }
@@ -231,7 +389,7 @@ pub const FeatureFlags = struct {
         var f: FeatureFlags = .{ .flags = @splat(false) };
         const values = @typeInfo(Feature).@"enum".field_values;
         inline for (values, 0..) |v, i| {
-            const feat: Feature = @enumFromInt(v);
+            const feat: Feature = @fromBackingInt(@intCast(v));
             f.flags[i] = feat.defaultEnabled();
         }
         return f;
@@ -1470,7 +1628,7 @@ pub const OpenTypeFeatures = struct {
             if (feat_record_offset + 4 > data.len) continue;
 
             const feat_tag = readU32(data, feat_record_offset);
-            if (feat_tag == @intFromEnum(target_feature)) {
+            if (feat_tag == @backingInt(target_feature)) {
                 try indices.append(self.allocator, feat_idx);
             }
         }
@@ -2767,8 +2925,8 @@ fn readU32(data: []const u8, offset: usize) u32 {
 // ============================================================================
 
 test "Feature tag conversion" {
-    try std.testing.expectEqual(@as(u32, 0x6C696761), @intFromEnum(Feature.liga));
-    try std.testing.expectEqual(@as(u32, 0x6B65726E), @intFromEnum(Feature.kern));
+    try std.testing.expectEqual(@as(u32, 0x6C696761), @backingInt(Feature.liga));
+    try std.testing.expectEqual(@as(u32, 0x6B65726E), @backingInt(Feature.kern));
 
     try std.testing.expectEqual(Feature.liga, Feature.fromTag(0x6C696761).?);
     try std.testing.expectEqual(Feature.kern, Feature.fromTag(0x6B65726E).?);
@@ -3000,12 +3158,10 @@ test "Parse Satoshi GSUB ligatures" {
     const glyph_l = font.getGlyphId('l') orelse 0;
     const glyph_t = font.getGlyphId('t') orelse 0;
 
-
     // Test fi ligature
     const fi_glyphs = [_]u16{ glyph_f, glyph_i };
     const fi_result = try features.applyLigatures(&fi_glyphs);
     defer std.testing.allocator.free(fi_result);
-
 
     // Should have 1 glyph (the fi ligature)
     try std.testing.expectEqual(@as(usize, 1), fi_result.len);
@@ -3018,14 +3174,12 @@ test "Parse Satoshi GSUB ligatures" {
     const fl_result = try features.applyLigatures(&fl_glyphs);
     defer std.testing.allocator.free(fl_result);
 
-
     try std.testing.expectEqual(@as(usize, 1), fl_result.len);
 
     // Test ft ligature
     const ft_glyphs = [_]u16{ glyph_f, glyph_t };
     const ft_result = try features.applyLigatures(&ft_glyphs);
     defer std.testing.allocator.free(ft_result);
-
 
     try std.testing.expectEqual(@as(usize, 1), ft_result.len);
 
@@ -3083,7 +3237,6 @@ test "Parse Inter mark/mkmk features (GPOS Type 4 and 6)" {
     defer features.deinit();
 
     try features.parseGPOS(gpos_data);
-
 
     // Inter should have mark positioning for diacritics
     try std.testing.expect(features.mark_base_lookups.items.len > 0);
@@ -3249,10 +3402,8 @@ test "calt should not corrupt regular text" {
         }
     }
 
-
     const calt_result = try features.applyCalt(glyphs_latin.items);
     defer std.testing.allocator.free(calt_result);
-
 
     // Check for any mismatches
     var mismatches: usize = 0;
@@ -3279,10 +3430,8 @@ test "calt should not corrupt regular text" {
         }
     }
 
-
     const calt_result2 = try features.applyCalt(glyphs_arrow.items);
     defer std.testing.allocator.free(calt_result2);
-
 
     // "A -> B Latin": the two glyphs of "->" become one arrow glyph (output
     // one glyph shorter); everything before and after is unchanged.

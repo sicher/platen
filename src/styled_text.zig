@@ -599,7 +599,7 @@ test "StyledText detects soft-hyphens during prepare" {
     // Word with soft-hyphens: "in­com­pre­hen­si­ble" (U+00AD = 0xC2 0xAD in UTF-8)
     try st.append("in\xC2\xADcom\xC2\xADpre\xC2\xADhen\xC2\xADsi\xC2\xADble", .{});
 
-    try st.prepare(testMeasure, @constCast(@ptrCast(&@as(u8, 0))));
+    try st.prepare(testMeasure, @ptrCast(@constCast(&@as(u8, 0))));
 
     // Should have one word
     try std.testing.expectEqual(@as(usize, 1), st.words.items.len);
@@ -623,7 +623,7 @@ test "StyledText word without soft-hyphens has no break points" {
     defer st.deinit();
 
     try st.append("hello world", .{});
-    try st.prepare(testMeasure, @constCast(@ptrCast(&@as(u8, 0))));
+    try st.prepare(testMeasure, @ptrCast(@constCast(&@as(u8, 0))));
 
     // Should have two words
     try std.testing.expectEqual(@as(usize, 2), st.words.items.len);
@@ -640,7 +640,7 @@ test "StyledText break point widths are measured correctly" {
 
     // "ab­cd" - soft-hyphen after "ab"
     try st.append("ab\xC2\xADcd", .{});
-    try st.prepare(testMeasure, @constCast(@ptrCast(&@as(u8, 0))));
+    try st.prepare(testMeasure, @ptrCast(@constCast(&@as(u8, 0))));
 
     try std.testing.expectEqual(@as(usize, 1), st.words.items.len);
 
