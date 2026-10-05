@@ -353,6 +353,14 @@ Hardening invariants the fuzzers enforce (added after real findings):
 - `colr.PaintInterp` bounds work per render with `ops_budget` (65536 paint
   visits) in addition to the recursion depth cap: depth alone lets cyclic
   ColrLayers/ColrGlyph graphs expand combinatorially.
+- **Offsets and lengths read from files widen to usize at the read**
+  (`const off: usize = readU16(...)`), never added in their on-disk
+  u16/u32 width: `u16 + u16` overflows (panic in safe builds, wrong
+  bounds in release). Bounds checks use the subtraction form
+  (`off > len or n > len - off`) when operands may be full-width.
+  Values that must narrow (glyph IDs) go through std.math.cast and an
+  out-of-range result means "absent", not a crash. (2026-10-05 audit:
+  ~45 sites across the parsers.)
 - Any parser loop over hostile input must provably advance its cursor
   (regression tests: xml.zig unterminated attribute quote, svg.zig
   path-data garbage after Z).

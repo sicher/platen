@@ -183,7 +183,9 @@ pub const Font = struct {
     /// Get table data by tag
     pub fn getTable(self: *const Font, tag: [4]u8) ?[]const u8 {
         const entry = self.tables.find(tag) orelse return null;
-        if (entry.offset + entry.length > self.data.len) return null;
+        // Subtraction form: offset + length is attacker-controlled u32
+        // arithmetic and can wrap.
+        if (entry.offset > self.data.len or entry.length > self.data.len - entry.offset) return null;
         return self.data[entry.offset..][0..entry.length];
     }
 
@@ -355,7 +357,9 @@ pub const Font = struct {
         if (name_data.len < 6) return null;
 
         const count = readU16(name_data, 2);
-        const string_offset = readU16(name_data, 4);
+        // Offsets/lengths widen to usize at the read: summing u16 file
+        // values in u16 overflows on hostile input.
+        const string_offset: usize = readU16(name_data, 4);
 
         var i: usize = 0;
         while (i < count) : (i += 1) {
@@ -365,8 +369,8 @@ pub const Font = struct {
             const platform_id = readU16(name_data, record_offset);
             const encoding_id = readU16(name_data, record_offset + 2);
             const record_name_id = readU16(name_data, record_offset + 6);
-            const length = readU16(name_data, record_offset + 8);
-            const offset = readU16(name_data, record_offset + 10);
+            const length: usize = readU16(name_data, record_offset + 8);
+            const offset: usize = readU16(name_data, record_offset + 10);
 
             if (record_name_id == name_id) {
                 // Prefer platform 3 (Windows), encoding 1 (Unicode BMP)
@@ -559,7 +563,7 @@ fn parseCmapFormat4(data: []const u8, codepoint: u21) ?u16 {
         return @bitCast(@as(i16, @bitCast(cp)) +% delta);
     } else {
         // Indexed lookup
-        const idx_offset = offsets_offset + seg * 2 + range_offset + (cp - start_code) * 2;
+        const idx_offset = offsets_offset + seg * 2 + @as(usize, range_offset) + @as(usize, cp - start_code) * 2;
         if (idx_offset + 2 > data.len) return null;
         const glyph_id = readU16(data, idx_offset);
         if (glyph_id == 0) return 0;
@@ -591,8 +595,9 @@ fn parseCmapFormat12(data: []const u8, codepoint: u21) ?u16 {
             lo = mid + 1;
         } else {
             // Found
-            const start_glyph = readU32(data, group_offset + 8);
-            return @intCast(start_glyph + (codepoint - start_code));
+            // A glyph ID beyond u16 cannot exist; treat it as unmapped.
+            const start_glyph: u64 = readU32(data, group_offset + 8);
+            return std.math.cast(u16, start_glyph + (codepoint - start_code));
         }
     }
 
@@ -650,4 +655,68 @@ test "read big-endian" {
     try std.testing.expectEqual(@as(u16, 0x0001), readU16(&data, 0));
     try std.testing.expectEqual(@as(u16, 0x0102), readU16(&data, 1));
     try std.testing.expectEqual(@as(u32, 0x00010203), readU32(&data, 0));
+}
+
+test "table record whose offset + length overflows u32 is rejected" {
+    // Found by `zig build test --fuzz`: getTable computed entry.offset +
+    // entry.length in u32, which overflowed (panic) for hostile records.
+    var data: [28]u8 = @splat(0);
+    std.mem.writeInt(u32, data[0..4], 0x00010000, .big); // sfnt version
+    std.mem.writeInt(u16, data[4..6], 1, .big); // numTables
+    @memcpy(data[12..16], "head");
+    std.mem.writeInt(u32, data[20..24], 0xFFFF_FF00, .big); // offset
+    std.mem.writeInt(u32, data[24..28], 0x0000_0200, .big); // length (sum wraps)
+
+    const font = try Font.parse(&data);
+    try std.testing.expect(font.head == null);
+    try std.testing.expect(font.getTable("head".*) == null);
+}
+
+test "cmap format 12 group mapping beyond u16 glyph IDs is unmapped" {
+    // Found by audit: start_glyph + delta was u32 arithmetic, then
+    // @intCast to u16 - reached from Font.parse via the ASCII cache.
+    var data: [28]u8 = @splat(0);
+    std.mem.writeInt(u32, data[12..16], 1, .big); // numGroups
+    std.mem.writeInt(u32, data[16..20], 0, .big); // startCharCode
+    std.mem.writeInt(u32, data[20..24], 0x7F, .big); // endCharCode
+    std.mem.writeInt(u32, data[24..28], 0x10000, .big); // startGlyphID
+    try std.testing.expectEqual(@as(?u16, null), parseCmapFormat12(&data, 'A'));
+
+    std.mem.writeInt(u32, data[24..28], 0xFFFF_FFFF, .big); // sum wraps u32
+    try std.testing.expectEqual(@as(?u16, null), parseCmapFormat12(&data, 'A'));
+
+    std.mem.writeInt(u32, data[24..28], 0xFFBE, .big); // 'A' (0x41) -> 0xFFFF fits
+    try std.testing.expectEqual(@as(?u16, 0xFFFF), parseCmapFormat12(&data, 'A'));
+}
+
+test "cmap format 4 indexed lookup with a wide segment does not overflow" {
+    // Found by audit: (cp - start_code) * 2 was computed in u16.
+    var data: [24]u8 = @splat(0);
+    std.mem.writeInt(u16, data[6..8], 2, .big); // segCountX2 = 2 (one segment)
+    std.mem.writeInt(u16, data[14..16], 0xFFFF, .big); // endCode
+    std.mem.writeInt(u16, data[18..20], 0, .big); // startCode
+    std.mem.writeInt(u16, data[22..24], 2, .big); // idRangeOffset (indexed)
+    try std.testing.expectEqual(@as(?u16, null), parseCmapFormat4(&data, 0x8000));
+}
+
+test "name record whose string offset + length overflows u16 is ignored" {
+    // Found by audit: string_offset + offset and str_start + length were
+    // u16 arithmetic on file values.
+    var data: [52]u8 = @splat(0);
+    std.mem.writeInt(u32, data[0..4], 0x00010000, .big);
+    std.mem.writeInt(u16, data[4..6], 1, .big); // numTables
+    @memcpy(data[12..16], "name");
+    std.mem.writeInt(u32, data[20..24], 28, .big); // table offset
+    std.mem.writeInt(u32, data[24..28], 24, .big); // table length
+    const name = data[28..];
+    std.mem.writeInt(u16, name[2..4], 1, .big); // count
+    std.mem.writeInt(u16, name[4..6], 0xFFFF, .big); // stringOffset
+    std.mem.writeInt(u16, name[6..8], 3, .big); // platformID (Windows)
+    std.mem.writeInt(u16, name[8..10], 1, .big); // encodingID (Unicode BMP)
+    std.mem.writeInt(u16, name[12..14], 6, .big); // nameID (PostScript)
+    std.mem.writeInt(u16, name[14..16], 0x20, .big); // length
+    std.mem.writeInt(u16, name[16..18], 1, .big); // offset
+
+    const font = try Font.parse(&data);
+    try std.testing.expectEqual(@as(?[]const u8, null), font.getNameEntry(6));
 }
