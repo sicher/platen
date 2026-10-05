@@ -4,14 +4,17 @@
 **Hardening pass done (session #27, 2026-10-04/05); nothing pushed yet.**
 Main is at 0.9.0, held pre-1.0 by user decision (1.0 ceremony: bump
 build.zig.zon + version.zig, tag, push tag, restore README tarball URL).
-Zig **0.17**, zero dependencies, 503 tests, silent clean runs; PDF/A
+Zig **0.17**, zero dependencies, 507 tests, silent clean runs; PDF/A
 output veraPDF-validated in the suite.
 
 ## What's Next
 - **Push** - check the CI runner (`zig-arm64`, `.forgejo/workflows`) has
   Zig 0.17 first; the code no longer builds with 0.16.
-- Longer fuzz runs: `--fuzz` works again with 0.17's stock runner (needs
-  `mkdir -p .zig-cache/tmp` after a cache wipe - Zig fuzzer bug).
+- Fuzzing: a 1-hour run (8 workers, ReleaseSafe, machine under load)
+  found no crashes after the audit fixes. Run it with its own cache dir -
+  `zig build --cache-dir <dir> test --fuzz` - concurrent builds in the
+  shared cache delete its tmp/ and kill the run (not a platen bug); the
+  `zig build` web server stays alive after a failure, so stop it.
 - TODO.md: opt-in 16-bit -> 8-bit downsampling flag for PDF/A-1b; the
   post-1.0 roadmap (bidi/CJK, Tr modes, Form XObjects, parallel pages,
   document.zig split).
@@ -45,6 +48,10 @@ output veraPDF-validated in the suite.
   PDF/A file failed since the 0.17 migration (signed year printed "+2026"
   - fixed, all width-formatted ints audited); links lacked /F 4; standard
   fonts silently produced non-embedded "PDF/A" (now FontNotEmbedded).
+- **CFF desubroutinization bounded**: nesting > 10, expanded glyph >
+  65535 B (Type 2 limits) or > 1 MiB scanned -> InvalidCFF (hostile subrs
+  could demand ~10^10 bytes/calls; deep nesting returned broken glyphs).
+- **zig fmt** clean (0.17 builtin renames; Feature enum order verified).
 - **Tests**: compare_pdfs.py --compare-images (pixel-exact via pdfimages;
   before, no test looked at image content); test runs are silent; weak
   tests that only printed now assert.
