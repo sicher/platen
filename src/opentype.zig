@@ -314,28 +314,30 @@ pub const CoverageTable = struct {
             } else if (glyph_id > end_glyph) {
                 lo = mid + 1;
             } else {
-                return start_index + (glyph_id - start_glyph);
+                return std.math.cast(u16, @as(u32, start_index) + (glyph_id - start_glyph));
             }
         }
         return null;
     }
 
     /// Get the number of glyphs in this coverage
-    pub fn getGlyphCount(self: CoverageTable) u16 {
+    /// usize: a coverage may list all 65,536 glyph IDs.
+    pub fn getGlyphCount(self: CoverageTable) usize {
         if (self.data.len < 4) return 0;
         return switch (self.format) {
             1 => readU16(self.data, 2), // Format 1: glyph count at offset 2
             2 => blk: {
                 // Format 2: sum of all range sizes
                 const range_count = readU16(self.data, 2);
-                var total: u16 = 0;
+                var total: usize = 0;
                 var i: u16 = 0;
                 while (i < range_count) : (i += 1) {
                     const offset = 4 + @as(usize, i) * 6;
                     if (offset + 6 > self.data.len) break;
                     const start_glyph = readU16(self.data, offset);
                     const end_glyph = readU16(self.data, offset + 2);
-                    total += end_glyph - start_glyph + 1;
+                    if (end_glyph < start_glyph) continue; // malformed: empty
+                    total += @as(usize, end_glyph - start_glyph) + 1;
                 }
                 break :blk total;
             },
@@ -344,7 +346,7 @@ pub const CoverageTable = struct {
     }
 
     /// Get glyph ID at a given coverage index
-    pub fn getGlyphAt(self: CoverageTable, index: u16) ?u16 {
+    pub fn getGlyphAt(self: CoverageTable, index: usize) ?u16 {
         if (self.data.len < 4) return null;
         return switch (self.format) {
             1 => blk: {
@@ -358,16 +360,18 @@ pub const CoverageTable = struct {
             2 => blk: {
                 // Format 2: iterate through ranges
                 const range_count = readU16(self.data, 2);
-                var current_index: u16 = 0;
+                var current_index: usize = 0;
                 var i: u16 = 0;
                 while (i < range_count) : (i += 1) {
                     const offset = 4 + @as(usize, i) * 6;
                     if (offset + 6 > self.data.len) break :blk null;
                     const start_glyph = readU16(self.data, offset);
                     const end_glyph = readU16(self.data, offset + 2);
-                    const range_size = end_glyph - start_glyph + 1;
+                    if (end_glyph < start_glyph) continue; // malformed: empty
+                    const range_size = @as(usize, end_glyph - start_glyph) + 1;
                     if (index < current_index + range_size) {
-                        break :blk start_glyph + (index - current_index);
+                        // <= end_glyph, so it fits u16
+                        break :blk @intCast(start_glyph + (index - current_index));
                     }
                     current_index += range_size;
                 }
@@ -541,7 +545,7 @@ pub const ClassDef = struct {
         const start_glyph = readU16(self.data, 2);
         const glyph_count = readU16(self.data, 4);
 
-        if (glyph_id < start_glyph or glyph_id >= start_glyph + glyph_count) return 0;
+        if (glyph_id < start_glyph or glyph_id >= @as(u32, start_glyph) + glyph_count) return 0;
 
         const offset = 6 + @as(usize, glyph_id - start_glyph) * 2;
         if (offset + 2 > self.data.len) return 0;
@@ -614,7 +618,7 @@ pub const PairPosLookup = struct {
         // Get pair set offset
         const offset_pos = 10 + @as(usize, cov_index) * 2;
         if (offset_pos + 2 > self.data.len) return 0;
-        const pair_set_offset = readU16(self.data, offset_pos);
+        const pair_set_offset: usize = readU16(self.data, offset_pos);
 
         // Parse pair set
         if (pair_set_offset + 2 > self.data.len) return 0;
@@ -686,8 +690,9 @@ pub const MarkRecord = struct {
 
 /// Mark positioning offset in design units
 pub const MarkOffset = struct {
-    dx: i16,
-    dy: i16,
+    // i32: the difference of two i16 anchors can exceed i16.
+    dx: i32,
+    dy: i32,
 };
 
 /// Mark-to-Base Attachment lookup (GPOS Lookup Type 4)
@@ -732,8 +737,8 @@ pub const MarkBasePos = struct {
 
         // Offset = base anchor - mark anchor
         return .{
-            .dx = base_anchor.x - mark_rec.anchor.x,
-            .dy = base_anchor.y - mark_rec.anchor.y,
+            .dx = @as(i32, base_anchor.x) - mark_rec.anchor.x,
+            .dy = @as(i32, base_anchor.y) - mark_rec.anchor.y,
         };
     }
 };
@@ -777,8 +782,8 @@ pub const MarkMarkPos = struct {
         };
 
         return .{
-            .dx = mark2_anchor.x - mark1_rec.anchor.x,
-            .dy = mark2_anchor.y - mark1_rec.anchor.y,
+            .dx = @as(i32, mark2_anchor.x) - mark1_rec.anchor.x,
+            .dy = @as(i32, mark2_anchor.y) - mark1_rec.anchor.y,
         };
     }
 };
@@ -1015,7 +1020,7 @@ pub const OpenTypeFeatures = struct {
             const glyph_count = first_coverage.getGlyphCount();
 
             // Add this rule index to each glyph's list
-            var i: u16 = 0;
+            var i: usize = 0;
             while (i < glyph_count) : (i += 1) {
                 if (first_coverage.getGlyphAt(i)) |glyph_id| {
                     const gop = try temp_map.getOrPut(self.allocator, glyph_id);
@@ -1047,7 +1052,7 @@ pub const OpenTypeFeatures = struct {
     fn parseAllGSUBLookups(self: *OpenTypeFeatures, data: []const u8) !void {
         if (data.len < 10) return;
 
-        const lookup_list_offset = readU16(data, 8);
+        const lookup_list_offset: usize = readU16(data, 8);
         if (lookup_list_offset + 2 > data.len) return;
 
         const lookup_count = readU16(data, lookup_list_offset);
@@ -1072,9 +1077,9 @@ pub const OpenTypeFeatures = struct {
         if (data.len < 10) return;
 
         // GSUB header: version, scriptListOffset, featureListOffset, lookupListOffset
-        const script_list_offset = readU16(data, 4);
-        const feature_list_offset = readU16(data, 6);
-        const lookup_list_offset = readU16(data, 8);
+        const script_list_offset: usize = readU16(data, 4);
+        const feature_list_offset: usize = readU16(data, 6);
+        const lookup_list_offset: usize = readU16(data, 8);
 
         // Find feature in FeatureList
         const feature_indices = try self.findFeatureIndices(data, script_list_offset, feature_list_offset, feature);
@@ -1090,7 +1095,7 @@ pub const OpenTypeFeatures = struct {
             const feat_record_offset = feature_list_offset + 2 + @as(usize, feat_idx) * 6;
             if (feat_record_offset + 6 > data.len) continue;
 
-            const feat_offset = readU16(data, feat_record_offset + 4);
+            const feat_offset: usize = readU16(data, feat_record_offset + 4);
             const feat_table_offset = feature_list_offset + feat_offset;
 
             if (feat_table_offset + 4 > data.len) continue;
@@ -1119,7 +1124,7 @@ pub const OpenTypeFeatures = struct {
         }
     }
 
-    fn parseGSUBLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16, feature: ?Feature) !void {
+    fn parseGSUBLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: usize, lookup_index: u16, feature: ?Feature) !void {
         // Skip if already parsed this lookup
         if (self.gsub_lookup_map.contains(lookup_index)) return;
 
@@ -1130,7 +1135,7 @@ pub const OpenTypeFeatures = struct {
 
         const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
         if (lookup_offset_pos + 2 > data.len) return;
-        const lookup_offset = readU16(data, lookup_offset_pos);
+        const lookup_offset: usize = readU16(data, lookup_offset_pos);
         const lookup_table_offset = lookup_list_offset + lookup_offset;
 
         if (lookup_table_offset + 6 > data.len) return;
@@ -1166,7 +1171,7 @@ pub const OpenTypeFeatures = struct {
             const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
             if (st_offset_pos + 2 > data.len) break;
 
-            const subtable_offset = readU16(data, st_offset_pos);
+            const subtable_offset: usize = readU16(data, st_offset_pos);
             const subtable_addr = lookup_table_offset + subtable_offset;
 
             switch (lookup_type) {
@@ -1331,9 +1336,9 @@ pub const OpenTypeFeatures = struct {
     fn parseGPOSFeature(self: *OpenTypeFeatures, data: []const u8, feature: Feature) !void {
         if (data.len < 10) return;
 
-        const script_list_offset = readU16(data, 4);
-        const feature_list_offset = readU16(data, 6);
-        const lookup_list_offset = readU16(data, 8);
+        const script_list_offset: usize = readU16(data, 4);
+        const feature_list_offset: usize = readU16(data, 6);
+        const lookup_list_offset: usize = readU16(data, 8);
 
         const feature_indices = try self.findFeatureIndices(data, script_list_offset, feature_list_offset, feature);
         defer self.allocator.free(feature_indices);
@@ -1347,7 +1352,7 @@ pub const OpenTypeFeatures = struct {
             const feat_record_offset = feature_list_offset + 2 + @as(usize, feat_idx) * 6;
             if (feat_record_offset + 6 > data.len) continue;
 
-            const feat_offset = readU16(data, feat_record_offset + 4);
+            const feat_offset: usize = readU16(data, feat_record_offset + 4);
             const feat_table_offset = feature_list_offset + feat_offset;
 
             if (feat_table_offset + 4 > data.len) continue;
@@ -1364,14 +1369,14 @@ pub const OpenTypeFeatures = struct {
         }
     }
 
-    fn parseGPOSLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: u16, lookup_index: u16, feature: Feature) !void {
+    fn parseGPOSLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: usize, lookup_index: u16, feature: Feature) !void {
         if (lookup_list_offset + 2 > data.len) return;
         const lookup_count = readU16(data, lookup_list_offset);
         if (lookup_index >= lookup_count) return;
 
         const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
         if (lookup_offset_pos + 2 > data.len) return;
-        const lookup_offset = readU16(data, lookup_offset_pos);
+        const lookup_offset: usize = readU16(data, lookup_offset_pos);
         const lookup_table_offset = lookup_list_offset + lookup_offset;
 
         if (lookup_table_offset + 6 > data.len) return;
@@ -1384,7 +1389,7 @@ pub const OpenTypeFeatures = struct {
             const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
             if (st_offset_pos + 2 > data.len) break;
 
-            const subtable_offset = readU16(data, st_offset_pos);
+            const subtable_offset: usize = readU16(data, st_offset_pos);
             const subtable_addr = lookup_table_offset + subtable_offset;
 
             switch (lookup_type) {
@@ -1402,7 +1407,7 @@ pub const OpenTypeFeatures = struct {
                     const ext_format = readU16(data, subtable_addr);
                     if (ext_format != 1) continue;
                     const ext_lookup_type = readU16(data, subtable_addr + 2);
-                    const ext_offset = readU32(data, subtable_addr + 4);
+                    const ext_offset: usize = readU32(data, subtable_addr + 4);
                     const actual_subtable_addr = subtable_addr + ext_offset;
 
                     // Parse the actual subtable based on the extended type
@@ -1424,7 +1429,7 @@ pub const OpenTypeFeatures = struct {
         }
     }
 
-    fn findFeatureIndices(self: *OpenTypeFeatures, data: []const u8, script_list_offset: u16, feature_list_offset: u16, target_feature: Feature) ![]u16 {
+    fn findFeatureIndices(self: *OpenTypeFeatures, data: []const u8, script_list_offset: usize, feature_list_offset: usize, target_feature: Feature) ![]u16 {
         var indices = std.ArrayListUnmanaged(u16).empty;
         errdefer indices.deinit(self.allocator);
 
@@ -1473,7 +1478,7 @@ pub const OpenTypeFeatures = struct {
         return indices.toOwnedSlice(self.allocator);
     }
 
-    fn findScriptOffset(self: *OpenTypeFeatures, data: []const u8, script_list_offset: u16) ?usize {
+    fn findScriptOffset(self: *OpenTypeFeatures, data: []const u8, script_list_offset: usize) ?usize {
         _ = self;
         if (script_list_offset + 2 > data.len) return null;
         const script_count = readU16(data, script_list_offset);
@@ -1488,7 +1493,7 @@ pub const OpenTypeFeatures = struct {
             if (record_offset + 6 > data.len) break;
 
             const script_tag = readU32(data, record_offset);
-            const offset = readU16(data, record_offset + 4);
+            const offset: usize = readU16(data, record_offset + 4);
 
             if (script_tag == 0x44464C54) { // DFLT
                 dflt_offset = script_list_offset + offset;
@@ -3441,4 +3446,196 @@ test "dlig/clig/hlig separate parsing" {
     // Both should complete without error (results may or may not differ depending on font)
     try std.testing.expect(result1.len >= 1);
     try std.testing.expect(result2.len >= 1);
+}
+
+// ----------------------------------------------------------------------------
+// Overflow regression tests (2026-10-05 audit): offsets read as u16/u32 were
+// added in their on-disk width. Each case panicked before the fix.
+// ----------------------------------------------------------------------------
+
+fn putU16(buf: []u8, off: usize, v: u16) void {
+    std.mem.writeInt(u16, buf[off..][0..2], v, .big);
+}
+
+fn putU32(buf: []u8, off: usize, v: u32) void {
+    std.mem.writeInt(u32, buf[off..][0..4], v, .big);
+}
+
+fn parseBoth(data: []const u8) !void {
+    var gsub = OpenTypeFeatures.init(std.testing.allocator);
+    defer gsub.deinit();
+    try gsub.parseGSUB(data);
+    var gpos = OpenTypeFeatures.init(std.testing.allocator);
+    defer gpos.deinit();
+    try gpos.parseGPOS(data);
+}
+
+test "GSUB/GPOS header offsets near u16 max do not overflow" {
+    for ([_]usize{ 4, 6, 8 }) |field| {
+        for ([_]u16{ 0xFFFC, 0xFFFE, 0xFFFF }) |v| {
+            var small: [10]u8 = @splat(0);
+            putU16(&small, field, v);
+            try parseBoth(&small);
+        }
+    }
+}
+
+test "GSUB/GPOS list offset + inner offset overflowing u16 does not panic" {
+    const big = try std.testing.allocator.alloc(u8, 0x8100);
+    defer std.testing.allocator.free(big);
+
+    // ScriptList at 0x8000 whose DFLT script offset is 0x8000.
+    @memset(big, 0);
+    putU16(big, 4, 0x8000);
+    putU16(big, 0x8000, 1); // scriptCount
+    @memcpy(big[0x8002..0x8006], "DFLT");
+    putU16(big, 0x8006, 0x8000);
+    try parseBoth(big);
+
+    // FeatureList at 0x8000 whose first feature table offset is 0x8000;
+    // ScriptList at 0x10 points its default LangSys at feature index 0.
+    @memset(big, 0);
+    putU16(big, 4, 0x10);
+    putU16(big, 6, 0x8000);
+    putU16(big, 0x10, 1);
+    @memcpy(big[0x12..0x16], "DFLT");
+    putU16(big, 0x16, 0x08); // script table at 0x18
+    putU16(big, 0x18, 4); // default LangSys at 0x1C
+    putU16(big, 0x1C + 4, 1); // featureIndexCount
+    putU16(big, 0x1C + 6, 0); // feature index 0
+    putU16(big, 0x8000, 1); // featureCount
+    @memcpy(big[0x8002..0x8006], "kern");
+    putU16(big, 0x8006, 0x8000);
+    try parseBoth(big);
+    @memcpy(big[0x8002..0x8006], "liga");
+    try parseBoth(big);
+
+    // LookupList at 0x8000 whose lookup offset is 0x8000.
+    @memset(big, 0);
+    putU16(big, 8, 0x8000);
+    putU16(big, 0x8000, 1); // lookupCount
+    putU16(big, 0x8002, 0x8000);
+    try parseBoth(big);
+
+    // Lookup at 0x8000+0x10 whose subtable offset is 0x8000.
+    putU16(big, 0x8002, 0x10);
+    putU16(big, 0x8010, 9); // extension lookup type (GPOS)
+    putU16(big, 0x8014, 1); // subTableCount
+    putU16(big, 0x8016, 0x8000);
+    try parseBoth(big);
+}
+
+test "GPOS extension offset near u32 max does not overflow" {
+    var data: [64]u8 = @splat(0);
+    putU16(&data, 4, 0x0A); // empty ScriptList
+    putU16(&data, 6, 0x0C); // FeatureList with one kern feature
+    putU16(&data, 8, 0x20); // LookupList
+    putU16(&data, 0x0A, 1);
+    putU16(&data, 0x0C, 1);
+    @memcpy(data[0x0E..0x12], "kern");
+    putU16(&data, 0x12, 0x08); // feature table at 0x14
+    putU16(&data, 0x16, 1); // lookupIndexCount
+    putU16(&data, 0x18, 0); // lookup 0
+    putU16(&data, 0x20, 1); // lookupCount
+    putU16(&data, 0x22, 0x04); // lookup at 0x24
+    putU16(&data, 0x24, 9); // Extension positioning
+    putU16(&data, 0x28, 1); // subTableCount
+    putU16(&data, 0x2A, 0x08); // subtable at 0x2C
+    putU16(&data, 0x2C, 1); // extension format
+    putU16(&data, 0x2E, 2); // extension lookup type
+    putU32(&data, 0x30, 0xFFFF_FFFF);
+
+    var ot = OpenTypeFeatures.init(std.testing.allocator);
+    defer ot.deinit();
+    try ot.parseGPOSLookup(&data, 0x20, 0, .kern);
+}
+
+test "coverage format 2 arithmetic on hostile ranges" {
+    var data: [10]u8 = @splat(0);
+    putU16(&data, 0, 2);
+    putU16(&data, 2, 1); // rangeCount
+    putU16(&data, 4, 0x10); // start
+    putU16(&data, 6, 0x20); // end
+    putU16(&data, 8, 0xFFFF); // startCoverageIndex
+    const cov = CoverageTable{ .format = 2, .data = &data };
+    try std.testing.expectEqual(@as(?u16, 0xFFFF), cov.getCoverageIndex(0x10));
+    try std.testing.expectEqual(@as(?u16, null), cov.getCoverageIndex(0x11)); // index > u16
+
+    // end < start: an empty (malformed) range, not an underflow.
+    putU16(&data, 4, 0x20);
+    putU16(&data, 6, 0x10);
+    try std.testing.expectEqual(@as(usize, 0), cov.getGlyphCount());
+    try std.testing.expectEqual(@as(?u16, null), cov.getGlyphAt(0));
+
+    // 0..0xFFFF covers all 65,536 glyphs.
+    putU16(&data, 4, 0);
+    putU16(&data, 6, 0xFFFF);
+    try std.testing.expectEqual(@as(usize, 0x10000), cov.getGlyphCount());
+    try std.testing.expectEqual(@as(?u16, 0xFFFF), cov.getGlyphAt(0xFFFF));
+    try std.testing.expectEqual(@as(?u16, null), cov.getGlyphAt(0x10000));
+}
+
+test "class def format 1 range ending past u16" {
+    var data: [8]u8 = @splat(0);
+    putU16(&data, 0, 1);
+    putU16(&data, 2, 0x8000); // startGlyph
+    putU16(&data, 4, 0x8000); // glyphCount (ends at 0x10000)
+    putU16(&data, 6, 7); // class of 0x8000
+    const cd = ClassDef{ .format = 1, .data = &data };
+    try std.testing.expectEqual(@as(u16, 7), cd.getClass(0x8000));
+    try std.testing.expectEqual(@as(u16, 0), cd.getClass(0x9000)); // past data
+}
+
+test "pair set offset near u16 max" {
+    var cov_data: [6]u8 = @splat(0);
+    putU16(&cov_data, 0, 1);
+    putU16(&cov_data, 2, 1);
+    putU16(&cov_data, 4, 5); // covers glyph 5
+    var data: [12]u8 = @splat(0);
+    putU16(&data, 8, 1); // pairSetCount
+    putU16(&data, 10, 0xFFFF); // pairSetOffset
+    const pp = PairPosLookup{ .format = 1, .coverage = .{ .format = 1, .data = &cov_data }, .data = &data };
+    try std.testing.expectEqual(@as(i16, 0), pp.getKerning(5, 6));
+}
+
+test "mark attachment with extreme anchors does not overflow" {
+    var mark_cov: [6]u8 = @splat(0);
+    putU16(&mark_cov, 0, 1);
+    putU16(&mark_cov, 2, 1);
+    putU16(&mark_cov, 4, 1);
+    var base_cov: [6]u8 = @splat(0);
+    putU16(&base_cov, 0, 1);
+    putU16(&base_cov, 2, 1);
+    putU16(&base_cov, 4, 2);
+    var anchors: [10]u8 = @splat(0);
+    putU16(&anchors, 0, 1); // baseCount
+    putU16(&anchors, 2, 4); // anchor offset for class 0
+    putU16(&anchors, 4, 1); // anchor format
+    putU16(&anchors, 6, 0x7FFF); // x = 32767
+    putU16(&anchors, 8, 0x7FFF); // y = 32767
+    const records = [_]MarkRecord{.{ .mark_class = 0, .anchor = .{ .x = -32768, .y = -32768 } }};
+
+    const mb = MarkBasePos{
+        .mark_coverage = .{ .format = 1, .data = &mark_cov },
+        .base_coverage = .{ .format = 1, .data = &base_cov },
+        .mark_class_count = 1,
+        .mark_records = &records,
+        .base_anchors_data = &anchors,
+        .base_count = 1,
+        .base_array_offset = 0,
+    };
+    const off = mb.getAttachment(1, 2).?;
+    try std.testing.expectEqual(@as(i32, 65535), off.dx);
+    try std.testing.expectEqual(@as(i32, 65535), off.dy);
+
+    const mm = MarkMarkPos{
+        .mark1_coverage = .{ .format = 1, .data = &mark_cov },
+        .mark2_coverage = .{ .format = 1, .data = &base_cov },
+        .mark_class_count = 1,
+        .mark1_records = &records,
+        .mark2_anchors_data = &anchors,
+        .mark2_count = 1,
+        .mark2_array_offset = 0,
+    };
+    try std.testing.expectEqual(@as(i32, 65535), mm.getAttachment(1, 2).?.dx);
 }
