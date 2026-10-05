@@ -373,6 +373,11 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
         const ctype = std.mem.readInt(u32, data[pos + 4 ..][0..4], .big);
 
         if (pos + 12 + len > data.len) break;
+        // CRC-32 over chunk type + data (every chunk walked, IHDR included).
+        const stored_crc = std.mem.readInt(u32, data[pos + 8 + len ..][0..4], .big);
+        if (std.hash.Crc32.hash(data[pos + 4 .. pos + 8 + len]) != stored_crc) {
+            return error.PngChecksumMismatch;
+        }
 
         if (ctype == PngChunk.IDAT) {
             try idat_chunks.append(allocator, data[pos + 8 .. pos + 8 + len]);
@@ -810,31 +815,38 @@ test "Paeth predictor" {
 // Hostile-header regression tests (2026-10-05 audit)
 // ----------------------------------------------------------------------------
 
+/// Append one PNG chunk (length, type, data, CRC-32 over type + data).
+fn testChunk(out: *std.ArrayListUnmanaged(u8), a: std.mem.Allocator, chunk_type: *const [4]u8, data: []const u8) !void {
+    var len: [4]u8 = undefined;
+    std.mem.writeInt(u32, &len, @intCast(data.len), .big);
+    try out.appendSlice(a, &len);
+    try out.appendSlice(a, chunk_type);
+    try out.appendSlice(a, data);
+    var crc = std.hash.Crc32.init();
+    crc.update(chunk_type);
+    crc.update(data);
+    var crc_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &crc_bytes, crc.final(), .big);
+    try out.appendSlice(a, &crc_bytes);
+}
+
 /// Minimal PNG: signature, IHDR, one IDAT holding zlib(`raw`), IEND.
-/// CRCs are left zero (the decoder does not check them).
 fn testPng(width: u32, height: u32, bit_depth: u8, color_type: u8, raw: []const u8) ![]u8 {
     const zlib = @import("zlib.zig");
-    const z = try zlib.compress(std.testing.allocator, raw);
-    defer std.testing.allocator.free(z);
-    var out: std.ArrayListUnmanaged(u8) = .empty;
-    errdefer out.deinit(std.testing.allocator);
     const a = std.testing.allocator;
+    const z = try zlib.compress(a, raw);
+    defer a.free(z);
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(a);
     try out.appendSlice(a, &.{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' });
-    var ihdr: [25]u8 = @splat(0);
-    std.mem.writeInt(u32, ihdr[0..4], 13, .big);
-    @memcpy(ihdr[4..8], "IHDR");
-    std.mem.writeInt(u32, ihdr[8..12], width, .big);
-    std.mem.writeInt(u32, ihdr[12..16], height, .big);
-    ihdr[16] = bit_depth;
-    ihdr[17] = color_type;
-    try out.appendSlice(a, &ihdr);
-    var hdr: [8]u8 = undefined;
-    std.mem.writeInt(u32, hdr[0..4], @intCast(z.len), .big);
-    @memcpy(hdr[4..8], "IDAT");
-    try out.appendSlice(a, &hdr);
-    try out.appendSlice(a, z);
-    try out.appendSlice(a, &.{ 0, 0, 0, 0 }); // CRC
-    try out.appendSlice(a, &.{ 0, 0, 0, 0, 'I', 'E', 'N', 'D', 0, 0, 0, 0 });
+    var ihdr: [13]u8 = @splat(0);
+    std.mem.writeInt(u32, ihdr[0..4], width, .big);
+    std.mem.writeInt(u32, ihdr[4..8], height, .big);
+    ihdr[8] = bit_depth;
+    ihdr[9] = color_type;
+    try testChunk(&out, a, "IHDR", &ihdr);
+    try testChunk(&out, a, "IDAT", z);
+    try testChunk(&out, a, "IEND", &.{});
     return out.toOwnedSlice(a);
 }
 
@@ -896,7 +908,7 @@ test "JPEG segment extending past the end of the file is rejected" {
 test "PngSuite corrupt files (x*) are rejected with specific errors" {
     // test/images/pngsuite, (c) Willem van Schaik. The valid images are
     // covered by the "pngsuite" integration test against PngSuite's truth.
-    const cases = [_]struct { name: []const u8, err: ?anyerror }{
+    const cases = [_]struct { name: []const u8, err: anyerror }{
         .{ .name = "xc1n0g08.png", .err = error.UnsupportedPngColorType }, // color type 1
         .{ .name = "xc9n2c08.png", .err = error.UnsupportedPngColorType }, // color type 9
         .{ .name = "xcrn0g04.png", .err = error.UnknownImageFormat }, // signature: added CR
@@ -909,10 +921,8 @@ test "PngSuite corrupt files (x*) are rejected with specific errors" {
         .{ .name = "xs2n0g01.png", .err = error.UnknownImageFormat }, // signature byte 2
         .{ .name = "xs4n0g01.png", .err = error.UnknownImageFormat }, // signature byte 4
         .{ .name = "xs7n0g01.png", .err = error.UnknownImageFormat }, // signature byte 7
-        // Accepted for now: chunk CRCs are not verified yet (planned). When
-        // they are, these must fail - move them to an error above.
-        .{ .name = "xcsn0g01.png", .err = null }, // bad IDAT checksum
-        .{ .name = "xhdn0g08.png", .err = null }, // bad IHDR checksum
+        .{ .name = "xcsn0g01.png", .err = error.PngChecksumMismatch }, // bad IDAT checksum
+        .{ .name = "xhdn0g08.png", .err = error.PngChecksumMismatch }, // bad IHDR checksum
     };
     const a = std.testing.allocator;
     var path_buf: [64]u8 = undefined;
@@ -922,13 +932,11 @@ test "PngSuite corrupt files (x*) are rejected with specific errors" {
         defer a.free(data);
         if (Image.fromMemory(a, data)) |img| {
             img.deinit();
-            if (c.err) |e| {
-                std.debug.print("{s}: decoded, expected {t}\n", .{ c.name, e });
-                return error.TestUnexpectedResult;
-            }
+            std.debug.print("{s}: decoded, expected {t}\n", .{ c.name, c.err });
+            return error.TestUnexpectedResult;
         } else |err| {
-            if (c.err == null or c.err.? != err) {
-                std.debug.print("{s}: got {t}, expected {?t}\n", .{ c.name, err, c.err });
+            if (c.err != err) {
+                std.debug.print("{s}: got {t}, expected {t}\n", .{ c.name, err, c.err });
                 return error.TestUnexpectedResult;
             }
         }
@@ -942,4 +950,22 @@ test "PngSuite corrupt files (x*) are rejected with specific errors" {
         if (e.name[0] == 'x' and std.mem.endsWith(u8, e.name, ".png")) count += 1;
     }
     try std.testing.expectEqual(cases.len, count);
+}
+
+test "PNG chunk checksums are verified" {
+    const png = try testPng(1, 1, 8, 0, &.{ 0, 0x80 });
+    defer std.testing.allocator.free(png);
+    const good = try Image.fromMemory(std.testing.allocator, png);
+    good.deinit(); // valid CRCs decode
+
+    // Flip one bit in each chunk's CRC in turn (IHDR, IDAT, IEND).
+    var pos: usize = 8;
+    while (pos + 12 <= png.len) {
+        const len = std.mem.readInt(u32, png[pos..][0..4], .big);
+        const crc_at = pos + 8 + len;
+        png[crc_at] ^= 1;
+        try expectPngError(error.PngChecksumMismatch, png);
+        png[crc_at] ^= 1;
+        pos = crc_at + 4;
+    }
 }
