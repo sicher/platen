@@ -3933,6 +3933,81 @@ test "integration: gentium_family PDF" {
     try runIntegrationTest("gentium_family", generateGentiumFamilyPdf);
 }
 
+/// A PDF/A document using every feature allowed at its level: text with an
+/// embedded font, a link, opaque 8-bit/indexed/gray PNGs, a JPEG, SVG, a
+/// gradient, an outline and page labels; PDF/A-2b adds a 16-bit image with
+/// alpha and a transparent shape.
+fn generatePdfaBroad(allocator: std.mem.Allocator, conformance: platen.Conformance) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+    doc.setConformance(conformance);
+    doc.setMetadata(.{ .title = "PDF/A feature coverage", .author = "platen" });
+    try doc.addPage(.{});
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const style = platen.TextStyle{ .font = inter, .size = 12 };
+    const link = try doc.writeAt(.{ .x = 50, .y = 50 }, "Text, link, images, SVG, gradient", style, .{});
+    try doc.addExternalLink(link, "https://example.com");
+    for ([_][]const u8{ "basn2c08.png", "basn3p04.png", "basn0g08.png" }, 0..) |name, i| {
+        var buf: [64]u8 = undefined;
+        const img = try doc.loadImage(try std.fmt.bufPrint(&buf, "test/images/pngsuite/{s}", .{name}));
+        try doc.drawImage(img, .{ .x = 50 + @as(f64, @floatFromInt(i)) * 60, .y = 80, .width = 50, .height = 50 });
+    }
+    const jpg = try doc.loadImage("test/images/madonna_and_child_1939.1.256.jpg");
+    try doc.drawImage(jpg, .{ .x = 250, .y = 80, .width = 50 });
+    if (conformance == .pdfa_2b) {
+        const alpha16 = try doc.loadImage("test/images/pngsuite/basn6a16.png");
+        try doc.drawImage(alpha16, .{ .x = 320, .y = 80, .width = 50, .height = 50 });
+        try doc.drawRect(.{ .x = 50, .y = 300, .width = 80, .height = 40 }, .{ .fill = .{ .color = platen.Color.red, .opacity = 0.5 } });
+    }
+    const svg = try doc.loadSvg("test/images/test.svg");
+    try doc.drawSvg(svg, .{ .x = 50, .y = 150, .width = 100, .height = 100 });
+    const stops = [_]platen.ColorStop{ .{ .offset = 0, .color = platen.Color.red }, .{ .offset = 1, .color = platen.Color.blue } };
+    const gradient = try doc.addLinearGradient(.{ .x0 = 200, .y0 = 0, .x1 = 300, .y1 = 0, .stops = &stops });
+    try doc.fillRectGradient(.{ .x = 200, .y = 150, .width = 100, .height = 50 }, gradient);
+    try doc.addPage(.{});
+    var outline = doc.createOutline();
+    _ = try outline.add("Page 1", .{ .page_index = 0, .y = 0 });
+    doc.setOutline(&outline);
+    try doc.setPageLabel(0, .{ .style = .roman_lower });
+    return doc.output();
+}
+
+fn generatePdfa1bBroad(allocator: std.mem.Allocator) ![]u8 {
+    return generatePdfaBroad(allocator, .pdfa_1b);
+}
+
+fn generatePdfa2bBroad(allocator: std.mem.Allocator) ![]u8 {
+    return generatePdfaBroad(allocator, .pdfa_2b);
+}
+
+test "integration: PDF/A output passes veraPDF" {
+    // Skips when veraPDF is not installed. It was the only check that
+    // would have caught the Zig 0.17 date regression (signed "+2026").
+    const allocator = std.testing.allocator;
+    const PdfaCase = struct { name: []const u8, flavour: []const u8, generate: *const fn (std.mem.Allocator) anyerror![]u8 };
+    const pdfa_cases = [_]PdfaCase{
+        .{ .name = "pdfa", .flavour = "1b", .generate = generatePdfaPdf },
+        .{ .name = "pdfa_2b", .flavour = "2b", .generate = generatePdfa2bPdf },
+        .{ .name = "pdfa_1b_broad", .flavour = "1b", .generate = generatePdfa1bBroad },
+        .{ .name = "pdfa_2b_broad", .flavour = "2b", .generate = generatePdfa2bBroad },
+    };
+    var failures: usize = 0;
+    for (pdfa_cases) |c| {
+        const pdf = try c.generate(allocator);
+        defer allocator.free(pdf);
+        switch (try testing.veraPdfCheck(app_io, allocator, pdf, c.flavour)) {
+            .unavailable => return error.SkipZigTest,
+            .compliant => {},
+            .failed => |report| {
+                defer allocator.free(report);
+                std.debug.print("veraPDF PDF/A-{s}: {s} is not compliant:\n{s}", .{ c.flavour, c.name, report });
+                failures += 1;
+            },
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), failures);
+}
+
 test "integration: pdfa PDF" {
     // Tests PDF/A-1b conformance output
     try runIntegrationTestWithOptions("pdfa", generatePdfaPdf, .{ .skip_fonts = true });

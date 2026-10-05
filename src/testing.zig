@@ -207,6 +207,63 @@ pub const EncCheck = struct {
 /// correct password must decrypt+check cleanly, and a wrong password must
 /// be refused. Returns error.QpdfNotAvailable if qpdf is not installed
 /// (callers skip, matching the reference-comparison tests).
+/// Result of validating a PDF with veraPDF.
+pub const VeraPdfResult = union(enum) {
+    /// veraPDF is not installed (tests skip).
+    unavailable,
+    compliant,
+    /// The failed rules, one per line ("clause-test (Nx): description").
+    /// Caller frees.
+    failed: []u8,
+};
+
+/// Validate `pdf` against a PDF/A flavour ("1b", "2b") with veraPDF.
+pub fn veraPdfCheck(io: std.Io, allocator: std.mem.Allocator, pdf: []const u8, flavour: []const u8) !VeraPdfResult {
+    var tmp = try createTempFile(io, allocator, "pdfa_", ".pdf", pdf);
+    defer tmp.cleanup(io, allocator);
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "verapdf", "--flavour", flavour, "--format", "mrr", tmp.path },
+        .stdout_limit = .limited(64 * 1024 * 1024),
+    }) catch return .unavailable;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    const out = result.stdout;
+    if (std.mem.indexOf(u8, out, "isCompliant=\"true\"") != null) return .compliant;
+    if (std.mem.indexOf(u8, out, "isCompliant=\"false\"") == null) {
+        return .{ .failed = try std.fmt.allocPrint(allocator, "no veraPDF verdict:\n{s}{s}", .{ out, result.stderr }) };
+    }
+
+    // Collect <rule ... status="failed" clause="" testNumber="" failedChecks="">
+    // and their <description>.
+    var report: std.Io.Writer.Allocating = .init(allocator);
+    errdefer report.deinit();
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, out, pos, "<rule ")) |start| {
+        const tag_end = std.mem.indexOfScalarPos(u8, out, start, '>') orelse break;
+        const tag = out[start..tag_end];
+        pos = tag_end;
+        if (std.mem.indexOf(u8, tag, "status=\"failed\"") == null) continue;
+        const desc = blk: {
+            const d0 = std.mem.indexOfPos(u8, out, tag_end, "<description>") orelse break :blk "";
+            const d1 = std.mem.indexOfPos(u8, out, d0, "</description>") orelse break :blk "";
+            break :blk out[d0 + "<description>".len .. d1];
+        };
+        try report.writer.print("{s}-{s} ({s}x): {s}\n", .{
+            xmlAttr(tag, "clause"), xmlAttr(tag, "testNumber"), xmlAttr(tag, "failedChecks"), desc[0..@min(desc.len, 160)],
+        });
+    }
+    return .{ .failed = try report.toOwnedSlice() };
+}
+
+fn xmlAttr(tag: []const u8, name: []const u8) []const u8 {
+    var buf: [64]u8 = undefined;
+    const key = std.fmt.bufPrint(&buf, " {s}=\"", .{name}) catch return "?";
+    const i = std.mem.indexOf(u8, tag, key) orelse return "?";
+    const v = tag[i + key.len ..];
+    return v[0 .. std.mem.indexOfScalar(u8, v, '"') orelse v.len];
+}
+
 pub fn qpdfCheckEncrypted(io: std.Io, allocator: std.mem.Allocator, pdf: []const u8, password: []const u8) !EncCheck {
     var tmp = try createTempFile(io, allocator, "enc_", ".pdf", pdf);
     defer tmp.cleanup(io, allocator);

@@ -4005,6 +4005,10 @@ pub const Document = struct {
 
                 try annot_dict.put("Type", Value.name("Annot"));
                 try annot_dict.put("Subtype", Value.name("Link"));
+                // F 4 = Print (hidden/invisible/noview clear): required on
+                // every annotation by PDF/A (ISO 19005-1 6.5.3, -2 6.3.2),
+                // and the normal setting for links anyway.
+                try annot_dict.put("F", Value.int(4));
 
                 // Rect: [x1 y1 x2 y2] in PDF coordinates (y from bottom)
                 const rect = switch (annot) {
