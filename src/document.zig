@@ -190,11 +190,17 @@ fn valignBaseline(region: *Region, line_height: f64, fm: metrics.FontMetrics, va
 
 // Resource naming functions are in pdf_output.zig
 const fontResourceName = pdf_output.fontResourceName;
-const embeddedFontResourceName = pdf_output.embeddedFontResourceName;
-const imageResourceName = pdf_output.imageResourceName;
-const svgResourceName = pdf_output.svgResourceName;
-const extgstateResourceName = pdf_output.extgstateResourceName;
-const shadingResourceName = pdf_output.shadingResourceName;
+
+/// A resource name (see pdf_output.resourceName) that outlives the
+/// dictionary it keys: Dict.put borrows keys, so the name is kept in
+/// `keep` and freed with it.
+fn ownedResourceName(allocator: std.mem.Allocator, keep: *std.ArrayListUnmanaged([]u8), prefix: []const u8, idx: usize) ![]const u8 {
+    var buf: [24]u8 = undefined;
+    const name = try allocator.dupe(u8, pdf_output.resourceName(&buf, prefix, idx));
+    errdefer allocator.free(name);
+    try keep.append(allocator, name);
+    return name;
+}
 
 /// Stored gradient definition
 pub const GradientDef = union(enum) {
@@ -776,12 +782,12 @@ pub const Document = struct {
         const scale_y = display_h / s.height;
 
         var buf: [256]u8 = undefined;
-        const content = std.fmt.bufPrint(&buf, "q\n{d:.4} 0 0 {d:.4} {d:.2} {d:.2} cm\n/{s} Do\nQ\n", .{
+        const content = std.fmt.bufPrint(&buf, "q\n{d:.4} 0 0 {d:.4} {d:.2} {d:.2} cm\n/Sv{d} Do\nQ\n", .{
             scale_x,
             scale_y,
             rect.x,
             pdf_y,
-            svgResourceName(svg_idx),
+            svg_idx + 1,
         }) catch unreachable;
 
         const raw_copy = try page.pageAllocator().dupe(u8, content);
@@ -2811,7 +2817,7 @@ pub const Document = struct {
         @memcpy(buf[len..][0..2], "q\n");
         len += 2;
         len += format.writeCoord4Suffix(buf[len..], rect.x, pdf_y, rect.width, rect.height, " re W n\n");
-        len += (std.fmt.bufPrint(buf[len..], "/{s} sh\n", .{shadingResourceName(gradient_idx)}) catch unreachable).len;
+        len += (std.fmt.bufPrint(buf[len..], "/Sh{d} sh\n", .{gradient_idx + 1}) catch unreachable).len;
         len += (std.fmt.bufPrint(buf[len..], "Q\n", .{}) catch unreachable).len;
 
         const raw_copy = try page.pageAllocator().dupe(u8, buf[0..len]);
@@ -3690,6 +3696,11 @@ pub const Document = struct {
                     for (gs_dicts) |*d| d.deinit();
                     if (gs_dicts.len > 0) self.allocator.free(gs_dicts);
                 }
+                var gs_names: std.ArrayListUnmanaged([]u8) = .empty; // keys of `extgstate`
+                defer {
+                    for (gs_names.items) |name| self.allocator.free(name);
+                    gs_names.deinit(self.allocator);
+                }
 
                 if (has_transparency) {
                     gs_dicts = try self.allocator.alloc(Dict, opacity_states.items.len);
@@ -3698,7 +3709,7 @@ pub const Document = struct {
                         try gs_dicts[idx].put("Type", Value.name("ExtGState"));
                         try gs_dicts[idx].put("ca", Value.real(state.fill_opacity));
                         try gs_dicts[idx].put("CA", Value.real(state.stroke_opacity));
-                        try extgstate.put(extgstateResourceName(idx), .{ .dict_val = &gs_dicts[idx] });
+                        try extgstate.put(try ownedResourceName(self.allocator, &gs_names, "GS", idx), .{ .dict_val = &gs_dicts[idx] });
                     }
                     try resources.put("ExtGState", .{ .dict_val = &extgstate });
                 }
@@ -3813,7 +3824,7 @@ pub const Document = struct {
                     if (doc_font == emb_font) {
                         // Use pre-calculated base ID for this font
                         const font_obj_id = ids.emb_font_base_ids.items[idx];
-                        const res_name = embeddedFontResourceName(idx);
+                        const res_name = try ownedResourceName(self.allocator, &shading_strs, "E", idx);
                         try font_res.put(res_name, Value.ref(.{ .id = font_obj_id }));
                         has_fonts = true;
                         break;
@@ -3841,7 +3852,7 @@ pub const Document = struct {
                 for (self.loaded_images.items, 0..) |doc_img, idx| {
                     if (doc_img == img) {
                         const img_obj_id = ids.image_base_ids.items[idx];
-                        try xobject_res.put(imageResourceName(idx), Value.ref(.{ .id = img_obj_id }));
+                        try xobject_res.put(try ownedResourceName(self.allocator, &shading_strs, "Im", idx), Value.ref(.{ .id = img_obj_id }));
                         has_xobjects = true;
                         break;
                     }
@@ -3854,7 +3865,7 @@ pub const Document = struct {
                 for (self.loaded_svgs.items, 0..) |doc_svg, idx| {
                     if (doc_svg == s) {
                         const svg_obj_id = ids.svg_base_ids.items[idx];
-                        try xobject_res.put(svgResourceName(idx), Value.ref(.{ .id = svg_obj_id }));
+                        try xobject_res.put(try ownedResourceName(self.allocator, &shading_strs, "Sv", idx), Value.ref(.{ .id = svg_obj_id }));
                         has_xobjects = true;
                         break;
                     }
@@ -3889,7 +3900,7 @@ pub const Document = struct {
                         try gs_writer.writeAll(" >>");
                         const gs_str = try self.allocator.dupe(u8, gs_fbs.buffered());
                         try shading_strs.append(self.allocator, gs_str); // Reuse cleanup list
-                        try extgstate_res.put(extgstateResourceName(idx), Value.literal(gs_str));
+                        try extgstate_res.put(try ownedResourceName(self.allocator, &shading_strs, "GS", idx), Value.literal(gs_str));
                     }
                     try resources.put("ExtGState", .{ .dict_val = &extgstate_res });
                 }
@@ -3951,7 +3962,7 @@ pub const Document = struct {
                                 },
                             }
 
-                            const shading_name = shadingResourceName(grad_idx);
+                            const shading_name = try ownedResourceName(self.allocator, &shading_strs, "Sh", grad_idx);
                             // Dupe string since stack buffer goes out of scope
                             const shading_str = try self.allocator.dupe(u8, shading_fbs.buffered());
                             try shading_strs.append(self.allocator, shading_str);

@@ -53,44 +53,13 @@ pub fn fontResourceName(font: StandardFont) []const u8 {
     };
 }
 
-/// Generate resource names at comptime.
-fn makeResourceNames(comptime prefix: []const u8, comptime count: usize) [count][]const u8 {
-    @setEvalBranchQuota(10000);
-    var names: [count][]const u8 = undefined;
-    for (0..count) |i| {
-        names[i] = std.fmt.comptimePrint("{s}{d}", .{ prefix, i + 1 });
-    }
-    return names;
-}
-
-fn getResourceName(comptime names: []const []const u8, idx: usize, comptime fallback: []const u8) []const u8 {
-    return if (idx < names.len) names[idx] else fallback;
-}
-
-const embedded_font_names = makeResourceNames("E", 32);
-const image_names = makeResourceNames("Im", 32);
-const svg_names = makeResourceNames("Sv", 32);
-const extgstate_names = makeResourceNames("GS", 32);
-const shading_names = makeResourceNames("Sh", 16);
-
-pub fn embeddedFontResourceName(idx: usize) []const u8 {
-    return getResourceName(&embedded_font_names, idx, "E99");
-}
-
-pub fn imageResourceName(idx: usize) []const u8 {
-    return getResourceName(&image_names, idx, "Im99");
-}
-
-pub fn svgResourceName(idx: usize) []const u8 {
-    return getResourceName(&svg_names, idx, "Sv99");
-}
-
-pub fn extgstateResourceName(idx: usize) []const u8 {
-    return getResourceName(&extgstate_names, idx, "GS99");
-}
-
-pub fn shadingResourceName(idx: usize) []const u8 {
-    return getResourceName(&shading_names, idx, "Sh99");
+/// Resource name for a 0-based index: prefix + (idx + 1), e.g. "Im1",
+/// "GS12" - the names content streams reference ("/Im{d} Do", "/GS{d} gs",
+/// "/E{d} Tf", "/Sh{d} sh", "/Sv{d} Do"). Generated, not tabled: the old
+/// comptime tables (32 entries, 16 for shadings) gave every later resource
+/// the same fallback name ("Im99"), breaking documents with >32 images.
+pub fn resourceName(buf: *[24]u8, prefix: []const u8, idx: usize) []const u8 {
+    return std.fmt.bufPrint(buf, "{s}{d}", .{ prefix, idx + 1 }) catch unreachable;
 }
 
 // ============================================================================

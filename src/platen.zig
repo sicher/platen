@@ -162,6 +162,7 @@ test {
     _ = @import("document_test.zig");
     _ = @import("invalid_number_test.zig");
     _ = @import("embedded_hostile_test.zig");
+    _ = @import("resource_names_test.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");

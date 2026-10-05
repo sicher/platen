@@ -80,16 +80,14 @@ pub const Writer = struct {
 
     /// Write a dictionary as the object content
     pub fn writeDict(self: *Writer, dict: Dict) !void {
-        try self.output.ensureUnusedCapacity(self.allocator, 4096);
-        var w = std.Io.Writer.fixed(self.output.unusedCapacitySlice());
-        dict.format(&w) catch {
-            // Need more space, expand and retry
-            try self.output.ensureUnusedCapacity(self.allocator, 8192);
-            w = std.Io.Writer.fixed(self.output.unusedCapacitySlice());
-            try dict.format(&w);
-        };
-        self.output.items.len += w.end;
-        try self.output.append(self.allocator, '\n');
+        // Format straight into the growing output. A fixed window (formerly
+        // 4 KiB with a single 8 KiB retry) failed with WriteFailed on large
+        // dictionaries, e.g. a page with dozens of inline shadings.
+        var aw: std.Io.Writer.Allocating = .fromArrayList(self.allocator, &self.output);
+        defer self.output = aw.toArrayList();
+        // The only way an allocating writer fails is running out of memory.
+        dict.format(&aw.writer) catch return error.OutOfMemory;
+        aw.writer.writeByte('\n') catch return error.OutOfMemory;
     }
 
     /// Write a stream object (dictionary + stream data). Encrypts the body
@@ -290,4 +288,18 @@ test "Writer object" {
 
     try std.testing.expect(std.mem.indexOf(u8, w.output.items, "1 0 obj") != null);
     try std.testing.expect(std.mem.indexOf(u8, w.output.items, "endobj") != null);
+}
+
+test "writeDict handles dictionaries larger than any fixed window" {
+    // writeDict used a 4 KiB fixed window with one 8 KiB retry; a page
+    // with dozens of inline shadings failed output() with WriteFailed.
+    var w = Writer.init(std.testing.allocator);
+    defer w.deinit();
+    var dict = Dict.init(std.testing.allocator);
+    defer dict.deinit();
+    const big: [40_000]u8 = @splat('x');
+    try dict.put("Big", Value.literal(&big));
+    try w.writeDict(dict);
+    try std.testing.expect(w.output.items.len > big.len);
+    try std.testing.expect(std.mem.endsWith(u8, w.output.items, ">>\n"));
 }
