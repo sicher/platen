@@ -642,6 +642,15 @@ pub const Document = struct {
         return null;
     }
 
+    /// PDF/A requires embedded fonts: standard fonts error under conformance.
+    fn checkFontConformance(self: *const Document, style: TextStyle) pdfa.ConformanceError!void {
+        const standard = switch (style.font) {
+            .standard, .symbol, .zapf_dingbats => true,
+            else => false,
+        };
+        try pdfa.validateFont(self.conformance, standard);
+    }
+
     /// Draw an image at the specified position.
     /// If width or height is 0, the original dimension is used (maintaining aspect ratio if one is specified).
     /// Coordinates are from top-left origin.
@@ -737,6 +746,8 @@ pub const Document = struct {
     /// Coordinates are from top-left origin.
     pub fn drawSvg(self: *Document, s: *Svg, rect: Rect) !void {
         try validate.check(rect);
+        // SVG <text> renders in standard fonts (in the Form XObject).
+        if (s.used_fonts.items.len > 0) try pdfa.validateFont(self.conformance, true);
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];
@@ -968,6 +979,7 @@ pub const Document = struct {
     /// (ascender-to-descender, from real font metrics).
     pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle, opts: WriteAtOptions) !Rect {
         try validate.check(.{ pos, style });
+        try self.checkFontConformance(style);
         const width = try self.writeTextStyled(pos, str, style, 0);
 
         // Anchoring: writeTextStyled shapes the text (which is where the
@@ -1133,6 +1145,7 @@ pub const Document = struct {
     /// - line_height: Line height multiplier (default 1.0)
     pub fn write(self: *Document, region: *Region, str: []const u8, style_in: TextStyle, opts: WriteOptions) !WriteResult {
         try validate.check(.{ region.*, style_in, opts });
+        try self.checkFontConformance(style_in);
         // Resolve .face/.family up front so measure_only paths error on
         // invalid styles (e.g. bold on a single face) exactly like rendering
         const style = try self.normalizeStyle(style_in);
@@ -1842,6 +1855,7 @@ pub const Document = struct {
     pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style_in: TextStyle, opts: ParagraphOptions) !WriteResult {
         try validate.check(.{ region.*, style_in, opts });
         try validate.checkEach(text.spans.items);
+        try self.checkFontConformance(style_in);
         if (self.pages.items.len == 0) return error.NoPage;
         const style = try self.normalizeStyle(style_in);
 

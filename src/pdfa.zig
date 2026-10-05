@@ -58,6 +58,9 @@ pub const ConformanceError = error{
     /// 16-bit image samples (PDF 1.5+) are not allowed in PDF/A-1b, which
     /// is based on PDF 1.4. Not converted silently: the caller decides.
     BitDepthNotAllowed,
+    /// PDF/A (every level) requires all fonts to be embedded; the standard
+    /// 14 fonts have no font program to embed. Use a TTF/OTF font.
+    FontNotEmbedded,
 };
 
 /// Validate opacity values against conformance requirements.
@@ -78,6 +81,12 @@ pub fn validateImage(conformance: Conformance, has_soft_mask: bool, bits_per_com
     if (conformance != .pdfa_1b) return;
     if (has_soft_mask) return ConformanceError.TransparencyNotAllowed;
     if (bits_per_component > 8 or alpha_bits_per_component > 8) return ConformanceError.BitDepthNotAllowed;
+}
+
+/// Validate a font against conformance requirements: under any PDF/A
+/// level, standard (non-embedded) fonts are not allowed.
+pub fn validateFont(conformance: Conformance, is_standard_font: bool) ConformanceError!void {
+    if (conformance != .none and is_standard_font) return ConformanceError.FontNotEmbedded;
 }
 
 /// Validate a single opacity value against conformance requirements.

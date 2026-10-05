@@ -2894,7 +2894,9 @@ test "PDF/A-1b rejects transparent text" {
 
     doc.setConformance(.pdfa_1b);
     try doc.addPage(.{});
-    const style = TextStyle{ .font = Font.helvetica, .size = 24, .opacity = 0.5 };
+    // Embedded font: a standard font would be rejected first (FontNotEmbedded).
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    const style = TextStyle{ .font = inter, .size = 24, .opacity = 0.5 };
     try std.testing.expectError(
         error.TransparencyNotAllowed,
         doc.writeAt(.{ .x = 50, .y = 50 }, "No transparency", style, .{}),

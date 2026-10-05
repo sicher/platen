@@ -934,6 +934,10 @@ try doc.drawRect(rect, .{ .fill = .{ .opacity = 0.5 } });
   `error.BitDepthNotAllowed` (caller downsamples; user decision
   2026-10-05, opt-in flag on TODO.md).
 - Color fonts are skipped under any PDF/A (monochrome outline fallback).
+- Any PDF/A level: standard (non-embedded) fonts in text calls, and SVGs
+  with `<text>` (rendered in standard fonts), -> `error.FontNotEmbedded`.
+- veraPDF validates PDF/A output in the suite ("integration: PDF/A output
+  passes veraPDF", skipped when veraPDF is absent).
 
 ### PDF/A Output Structures
 

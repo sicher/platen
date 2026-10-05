@@ -554,9 +554,11 @@ doc.setMetadata(.{
     .author = "Organization Name",
 });
 
-// Add content as usual
+// Add content as usual - with embedded fonts: PDF/A requires them, and
+// the standard fonts (Font.helvetica, ...) return error.FontNotEmbedded
 try doc.addPage(.{});
-const style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 12 };
+const font = try doc.loadFont("fonts/MyFont.ttf", .identity);
+const style = platen.TextStyle{ .font = font, .size = 12 };
 _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "This document conforms to PDF/A-1b.", style, .{});
 
 // Output includes XMP metadata, ICC color profile, and PDF/A identification
@@ -567,7 +569,11 @@ Available conformance levels:
 - `.pdfa_1b` - PDF/A-1b (ISO 19005-1): No transparency, all fonts embedded
 - `.pdfa_2b` - PDF/A-2b (ISO 19005-2): Allows transparency, JPEG2000, layers
 
-Note: PDF/A-1b (based on PDF 1.4) rejects, in `drawImage` and the drawing
+Every PDF/A level requires embedded fonts: text in a standard font, and
+SVGs containing `<text>` (rendered in standard fonts), return
+`error.FontNotEmbedded`.
+
+PDF/A-1b (based on PDF 1.4) also rejects, in `drawImage` and the drawing
 calls, what it cannot represent - nothing is converted silently:
 - transparency: opacity < 1.0, and images with an alpha channel or PNG
   `tRNS` transparency → `error.TransparencyNotAllowed`
