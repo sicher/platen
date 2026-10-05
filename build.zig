@@ -1,8 +1,15 @@
 const std = @import("std");
+const manifest = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // The version lives in ONE place, build.zig.zon: `devkit release X.Y.Z`
+    // sets it there, and src/version.zig reads it from this option.
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", manifest.version);
+    const build_options_mod = build_options.createModule();
 
     // Library module. addModule (not createModule) so DEPENDENTS can reach it
     // as `b.dependency("platen", ...).module("platen")` — the form the README
@@ -20,6 +27,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+        .imports = &.{.{ .name = "build_options", .module = build_options_mod }},
     });
 
     // CLI executable. cli.zig imports the library source relatively (same
@@ -32,8 +40,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             // Roots at the source directly rather than importing the
-            // module, so it does not inherit the module's `link_libc`.
+            // module, so it does not inherit the module's `link_libc` (or
+            // its imports).
             .link_libc = true,
+            .imports = &.{.{ .name = "build_options", .module = build_options_mod }},
         }),
     });
 
@@ -55,6 +65,7 @@ pub fn build(b: *std.Build) void {
         // A separate module instance over the same source, so it needs the
         // declaration of its own — `link_libc` is per module, not per file.
         .link_libc = true,
+        .imports = &.{.{ .name = "build_options", .module = build_options_mod }},
     });
     const lib_tests = b.addTest(.{
         .root_module = test_mod,

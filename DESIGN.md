@@ -308,7 +308,13 @@ not applied yet). Corrupt `x*` files are a unit test in images.zig.
 files some matching test pulls in. To run a single test in a file that
 platen.zig does not import directly (e.g. opentype.zig), use that file as
 the root: `zig test -lc src/opentype.zig --test-filter "..."`. A filtered
-run reporting only `platen.test_0` ran nothing.
+run reporting only `platen.test_0` ran nothing. Files that import
+document.zig (via version.zig) also need the version build option, which
+only `zig build` provides - use `zig build test` for those.
+
+**Version** is single-sourced from build.zig.zon: build.zig passes it as
+the `build_options` module and src/version.zig re-exports it, so
+`devkit release X.Y.Z` (which edits only the manifest) stays correct.
 
 **Does NOT compare:**
 - Internal object IDs/ordering
