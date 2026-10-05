@@ -1608,11 +1608,20 @@ fn generatePngSuitePdf(allocator: std.mem.Allocator) ![]u8 {
             try doc.addPage(.{});
             _ = try doc.writeAt(.{ .x = 30, .y = 28 }, "PngSuite", title, .{});
             // Same text as the reference, whose frames mark fpdf2's errors.
-            _ = try doc.writeAt(.{ .x = 100, .y = 28 }, "Red frame: fpdf2 renders this image wrongly", caption, .{});
+            _ = try doc.writeAt(.{ .x = 100, .y = 28 }, "Red frame: fpdf2 renders this image wrongly. Checkerboard: transparency", caption, .{});
         }
         const cell = i % per_page;
         const x: f64 = @floatFromInt(30 + (cell % 8) * 67);
         const y: f64 = @floatFromInt(40 + (cell / 8) * 62);
+
+        // Checkerboard behind the image, as in the reference, so
+        // transparency is visible on review (not compared: graphics).
+        for (0..25) |sq| {
+            if ((sq / 5 + sq % 5) % 2 != 0) continue;
+            const sx = x + @as(f64, @floatFromInt(sq % 5)) * 8;
+            const sy = y + @as(f64, @floatFromInt(sq / 5)) * 8;
+            try doc.drawRect(.{ .x = sx, .y = sy, .width = 8, .height = 8 }, .{ .fill = .{ .color = platen.Color.rgb(204, 204, 204) } });
+        }
 
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ pngsuite_dir, name });
         if (doc.loadImage(path)) |img| {

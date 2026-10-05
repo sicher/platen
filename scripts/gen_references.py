@@ -1208,6 +1208,8 @@ def gen_pngsuite():
     8 columns x 12 rows per A4 page, 40x40 pt images, 6 pt captions.
     Cells fpdf2 renders wrongly (checked against PngSuite's own pixels)
     get a red frame - graphics are not compared, so the text stays equal.
+    Each image sits on a checkerboard so transparency is visible (several
+    tRNS keys are white: on a white page, ignoring them looks correct).
     """
     pdf = make_pdf()
     files = pngsuite_files()
@@ -1219,10 +1221,14 @@ def gen_pngsuite():
             pdf.set_font("Helvetica", "B", size=12)
             pdf.text(30, 28, "PngSuite")
             pdf.set_font("Helvetica", size=6)
-            pdf.text(100, 28, "Red frame: fpdf2 renders this image wrongly")
+            pdf.text(100, 28, "Red frame: fpdf2 renders this image wrongly. Checkerboard: transparency")
         cell = i % per_page
         x = 30 + (cell % 8) * 67
         y = 40 + (cell // 8) * 62
+        pdf.set_fill_color(204, 204, 204)
+        for sq in range(25):  # 5 x 5 squares of 8 pt, gray on the white page
+            if (sq // 5 + sq % 5) % 2 == 0:
+                pdf.rect(x + (sq % 5) * 8, y + (sq // 5) * 8, 8, 8, style="F")
         pdf.image(str(PNGSUITE_DIR / name), x=x, y=y, w=40, h=40)
         if name in wrong:
             pdf.set_draw_color(220, 0, 0)
