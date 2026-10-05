@@ -1596,7 +1596,7 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
 
         // Get glyph bounds from original loca
         const glyph_start = getLocaOffset(orig_loca, old_gid, loca_format);
-        const glyph_end = getLocaOffset(orig_loca, old_gid + 1, loca_format);
+        const glyph_end = getLocaOffset(orig_loca, @as(usize, old_gid) + 1, loca_format);
 
         if (glyph_end > glyph_start and glyph_end <= orig_glyf.len) {
             const glyph_data = orig_glyf[glyph_start..glyph_end];
@@ -1798,7 +1798,7 @@ fn createSubsetTTF_CID(allocator: std.mem.Allocator, emb: *const EmbeddedFont) !
         // Only include glyph data if this glyph is used
         if (glyph_set.contains(gid)) {
             const glyph_start = getLocaOffset(tables.loca, gid, tables.loca_format);
-            const glyph_end = getLocaOffset(tables.loca, gid + 1, tables.loca_format);
+            const glyph_end = getLocaOffset(tables.loca, @as(usize, gid) + 1, tables.loca_format);
 
             if (glyph_end > glyph_start and glyph_end <= tables.glyf.len) {
                 const glyph_data = tables.glyf[glyph_start..glyph_end];
@@ -1925,7 +1925,7 @@ fn createSubsetTTF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
         // Get original glyph data
         if (orig_gid < tables.maxp.num_glyphs) {
             const glyph_start = getLocaOffset(tables.loca, orig_gid, tables.loca_format);
-            const glyph_end = getLocaOffset(tables.loca, orig_gid + 1, tables.loca_format);
+            const glyph_end = getLocaOffset(tables.loca, @as(usize, orig_gid) + 1, tables.loca_format);
 
             if (glyph_end > glyph_start and glyph_end <= tables.glyf.len) {
                 var glyph_data = try allocator.alloc(u8, glyph_end - glyph_start);

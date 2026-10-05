@@ -49,13 +49,15 @@ pub fn writeTableEntry(output: []u8, dir_offset: *usize, tag: *const [4]u8, chec
     dir_offset.* += 16;
 }
 
-pub fn getLocaOffset(loca: []const u8, glyph_id: u16, format: i16) usize {
+/// glyph_id is usize so callers can ask for `gid + 1` (the end of glyph
+/// 0xFFFF) without wrapping u16.
+pub fn getLocaOffset(loca: []const u8, glyph_id: usize, format: i16) usize {
     if (format == 0) {
-        const off = @as(usize, glyph_id) * 2;
+        const off = glyph_id * 2;
         if (off + 2 > loca.len) return 0;
         return @as(usize, readU16(loca, off)) * 2;
     } else {
-        const off = @as(usize, glyph_id) * 4;
+        const off = glyph_id * 4;
         if (off + 4 > loca.len) return 0;
         return readU32(loca, off);
     }
@@ -182,6 +184,7 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
     var entries = std.ArrayListUnmanaged(NameEntry).empty;
     defer entries.deinit(allocator);
 
+    var next_start: usize = 0; // start offset of the next kept string
     var i: usize = 0;
     while (i < num_records) : (i += 1) {
         const record_offset = 6 + i * 12;
@@ -216,9 +219,14 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
         }
         if (duplicate) continue;
 
-        // Extract string data
+        // Extract string data. The rebuilt record stores the string's start
+        // as a u16 offset, so an entry that would start past 0xFFFF cannot
+        // be represented and is dropped (hostile tables only: real names
+        // are a few dozen bytes).
+        if (next_start > 0xFFFF) continue;
         const abs_str_offset = @as(usize, storage_offset) + @as(usize, str_offset);
         if (abs_str_offset + str_length <= name_data.len) {
+            next_start += str_length;
             try entries.append(allocator, .{
                 .name_id = name_id,
                 .string_data = name_data[abs_str_offset..][0..str_length],
@@ -236,7 +244,7 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
     try binary.appendBE16(&new_name, allocator, header_size); // storage offset
 
     // Calculate string offsets and write records
-    var str_offset: u16 = 0;
+    var str_offset: usize = 0; // <= 0xFFFF for every kept entry (see above)
     for (entries.items) |entry| {
         // Platform 3 (Windows), Encoding 1 (Unicode BMP), Language 0x0409 (English)
         try binary.appendBE16(&new_name, allocator, 3); // platformID
@@ -244,8 +252,8 @@ pub fn buildMinimalNameTable(allocator: std.mem.Allocator, orig_name: ?[]const u
         try binary.appendBE16(&new_name, allocator, 0x0409); // languageID
         try binary.appendBE16(&new_name, allocator, entry.name_id);
         try binary.appendBE16(&new_name, allocator, @intCast(entry.string_data.len));
-        try binary.appendBE16(&new_name, allocator, str_offset);
-        str_offset += @intCast(entry.string_data.len);
+        try binary.appendBE16(&new_name, allocator, @intCast(str_offset));
+        str_offset += entry.string_data.len;
     }
 
     // Write string data
@@ -412,7 +420,7 @@ pub fn getCompositeComponents(glyf: []const u8, loca: []const u8, loca_format: i
     var comp_idx: usize = 0;
 
     const glyph_offset = getLocaOffset(loca, glyph_id, loca_format);
-    const next_offset = getLocaOffset(loca, glyph_id + 1, loca_format);
+    const next_offset = getLocaOffset(loca, @as(usize, glyph_id) + 1, loca_format);
 
     if (next_offset <= glyph_offset) return components;
     const glyph_len = next_offset - glyph_offset;
@@ -647,4 +655,58 @@ test "rewriteCompositeGlyphIDs remaps component references" {
 
     const new_gid = std.mem.readInt(u16, glyph_data[12..14], .big);
     try std.testing.expectEqual(@as(u16, 5), new_gid);
+}
+
+// Overflow regression tests (2026-10-05 audit): each panicked before the fix.
+
+test "composite lookup for gid 0xFFFF does not overflow" {
+    const loca: [8]u8 = @splat(0);
+    const comps = getCompositeComponents(&.{}, &loca, 1, 0xFFFF);
+    for (comps) |c| try std.testing.expectEqual(@as(u16, 0), c);
+}
+
+test "minimal name table drops names whose offsets would exceed u16" {
+    // Two kept records (IDs 1 and 6), each 0x8000 bytes long, sharing one
+    // storage area: the rebuilt string offset (u16) would pass 0xFFFF.
+    const allocator = std.testing.allocator;
+    const header = 6 + 2 * 12;
+    const name_data = try allocator.alloc(u8, header + 0x8000);
+    defer allocator.free(name_data);
+    @memset(name_data, 0);
+    std.mem.writeInt(u16, name_data[2..4], 2, .big); // numRecords
+    std.mem.writeInt(u16, name_data[4..6], header, .big); // storageOffset
+    for ([_]u16{ 1, 6 }, 0..) |id, k| {
+        const r = name_data[6 + k * 12 ..][0..12];
+        std.mem.writeInt(u16, r[0..2], 3, .big); // platform
+        std.mem.writeInt(u16, r[2..4], 1, .big); // encoding
+        std.mem.writeInt(u16, r[6..8], id, .big); // nameID
+        std.mem.writeInt(u16, r[8..10], 0x8000, .big); // length
+    }
+
+    const min_name = try buildMinimalNameTable(allocator, name_data);
+    defer allocator.free(min_name);
+    // Both fit (offsets 0 and 0x8000); a third would not.
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, min_name[2..4], .big));
+}
+
+test "minimal name table caps total string storage at u16 offsets" {
+    const allocator = std.testing.allocator;
+    const header = 6 + 3 * 12;
+    const name_data = try allocator.alloc(u8, header + 0xFFFF);
+    defer allocator.free(name_data);
+    @memset(name_data, 0);
+    std.mem.writeInt(u16, name_data[2..4], 3, .big);
+    std.mem.writeInt(u16, name_data[4..6], header, .big);
+    for ([_]u16{ 1, 4, 6 }, 0..) |id, k| {
+        const r = name_data[6 + k * 12 ..][0..12];
+        std.mem.writeInt(u16, r[0..2], 3, .big);
+        std.mem.writeInt(u16, r[2..4], 1, .big);
+        std.mem.writeInt(u16, r[6..8], id, .big);
+        std.mem.writeInt(u16, r[8..10], 0xFFFF, .big);
+    }
+    const min_name = try buildMinimalNameTable(allocator, name_data);
+    defer allocator.free(min_name);
+    // Record starts are 0, 0xFFFF, 0x1FFFE: only the first two are
+    // representable (the offset field holds where a string starts).
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, min_name[2..4], .big));
 }
