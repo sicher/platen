@@ -1,0 +1,66 @@
+# Changelog
+
+## 0.10.0 — 2026-10-06
+
+First tagged release; earlier history is in git. **Requires Zig 0.17.**
+
+### Behavior changes — callers may need to adapt
+
+Invalid input is now an error, never silently clamped or converted.
+
+- **Numbers:** every `Document` drawing/text/layout call rejects NaN,
+  infinities and magnitudes above `platen.max_value` (1,000,000) with
+  `error.InvalidNumber`, before changing the document. (A huge
+  `drawCircle` radius used to crash.)
+- **Fonts:** `unitsPerEm` outside 16–16,384, or metrics that do not fit
+  once scaled, are `error.InvalidFont` at load. Glyph IDs a font does not
+  have are left out of subsets (they render as .notdef).
+- **SVG:** numbers that are not finite or exceed ±1e9 are invalid (treated
+  like any unparseable value); transforms that compose past that bound are
+  `error.InvalidSvg`.
+- **CFF fonts:** subroutine nesting over 10, expanded glyphs over 65,535
+  bytes, or runaway expansion are `error.InvalidCFF` when subsetting.
+- **PNG:** chunk CRCs are verified (`error.PngChecksumMismatch`); bit depths
+  invalid for the color type, zero sizes, and sizes the data cannot hold
+  are rejected before any allocation.
+- **PDF/A:** standard (non-embedded) fonts, and SVGs containing `<text>`,
+  are `error.FontNotEmbedded` at every level. Under PDF/A-1b, images with
+  transparency are `error.TransparencyNotAllowed` and 16-bit images
+  `error.BitDepthNotAllowed` (downsample, or use PDF/A-2b).
+- **API types:** `opentype.MarkOffset` fields are `i32`;
+  `CoverageTable.getGlyphCount` returns `usize` and `getGlyphAt` takes one.
+- Link annotations carry `/F 4` (print), as PDF/A requires.
+- The `zig build docs` step (broken since the generated docs were
+  removed) is gone.
+
+### Added
+
+- PNG: Adam7 interlacing, 16-bit images with alpha (16-bit soft mask),
+  and `tRNS` color-key transparency on grayscale and RGB images. All 161
+  valid PngSuite images now decode to PngSuite's own expected pixels.
+
+### Fixed
+
+- Documents with more than 32 images, embedded fonts, SVGs or opacity
+  states (or more than 16 gradients) produced broken PDFs: resource names
+  collided.
+- `output()` could fail with `WriteFailed` on large page dictionaries.
+- Crashes on hostile input, found by fuzzing and an audit of ~50 sites:
+  integer overflows and out-of-bounds reads in the TrueType, OpenType
+  (GSUB/GPOS), COLR, sbix, CBLC and SVG-table parsers, the PNG/JPEG
+  decoders and the TrueType/CFF subsetters.
+- CFF offset sizes were off by one: a 255-byte (or 65,535-byte) item
+  crashed subsetting — reachable with ordinary fonts.
+- SVG: non-finite numbers were written into the PDF as `inf`; elements
+  leaked on errors, in `<defs>` without an id, and on duplicate ids.
+- PDF/A output failed veraPDF: invalid dates (a Zig 0.17 formatting
+  change), link annotations without the print flag, and standard fonts.
+- README examples that no longer compiled.
+
+### Internal
+
+- Zig 0.17 migration; the version is single-sourced from `build.zig.zon`.
+- Tests: exact pixel comparison of images (none before), PngSuite against
+  its own pixel truth, veraPDF validation of PDF/A output, and silent
+  passing runs. 508 tests.
+- Releases follow the urverk devkit main/dev model (`.devkit.conf`).
