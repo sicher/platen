@@ -1242,7 +1242,6 @@ test "mark positioning with Tm absolute coordinates" {
     doc.allocator.free(pdf);
     const page = &doc.pages.items[0];
     const content = page.content.items;
-    std.debug.print("\n=== Mark positioning test content for 'À' ===\n{s}\n=== End content ===\n", .{content});
 
     // Parse Tm coordinates: "1 0 0 1 x y Tm"
     // We expect 2 Tm commands: one for base A, one for grave mark
@@ -1272,19 +1271,16 @@ test "mark positioning with Tm absolute coordinates" {
                 } else if (tm_count == 2) {
                     mark_y = y;
                 }
-                std.debug.print("  Tm #{d}: y={d:.2}\n", .{ tm_count, y });
             }
         }
     }
 
-    std.debug.print("Final: {d} Tm ops\n", .{tm_count});
 
     // Should have at least 2 Tm operations (base + mark)
     try std.testing.expect(tm_count >= 2);
 
     // Mark Y should be higher than base Y (mark is above the base glyph)
     if (base_y != null and mark_y != null) {
-        std.debug.print("Base Y: {d:.2}, Mark Y: {d:.2}\n", .{ base_y.?, mark_y.? });
         try std.testing.expect(mark_y.? > base_y.?);
     }
 }

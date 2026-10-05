@@ -4075,30 +4075,31 @@ fn runIntegrationTestWithOptions(
 pub const cases = test_cases;
 pub const Case = TestCase;
 
-test "debug: font metrics" {
+test "font metrics match the font tables" {
+    // Expected values derived independently: Helvetica from its AFM
+    // (Ascender/CapHeight 718/1000 em), Inter and Gentium from fontTools
+    // (hhea.ascent, head.yMax, OS/2.sCapHeight; both 2048 units/em).
+    // Platen stores metrics as integers on a 1000-unit em, so values agree
+    // to within half a unit: 0.5 / 1000 em.
     const allocator = std.testing.allocator;
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
+    const size = 11.0;
+    const tol = 0.5 / 1000.0 * size;
 
-    // Built-in font
-    const helvetica_style = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11 };
-    const hm = doc.getFontMetricsStyled(helvetica_style);
-    std.debug.print("\nHelvetica 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ hm.ascender, hm.y_max, hm.cap_height });
+    const hm = doc.getFontMetricsStyled(.{ .font = platen.Font.helvetica, .size = size });
+    try std.testing.expectApproxEqAbs(718.0 / 1000.0 * size, hm.ascender, tol);
+    try std.testing.expectApproxEqAbs(718.0 / 1000.0 * size, hm.cap_height, tol);
 
-    // Embedded fonts
-    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
-    const inter_style = platen.TextStyle{ .font = inter, .size = 11 };
-    const im = doc.getFontMetricsStyled(inter_style);
-    std.debug.print("Inter 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ im.ascender, im.y_max, im.cap_height });
-
-    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
-    const gentium_style = platen.TextStyle{ .font = gentium, .size = 11 };
-    const gm = doc.getFontMetricsStyled(gentium_style);
-    std.debug.print("Gentium 11pt: ascender={d:.2}, y_max={d:.2}, cap_height={d:.2}\n", .{ gm.ascender, gm.y_max, gm.cap_height });
-
-    // What y position would .top valign give?
-    // region.y=60, padding.top=8, cursor_y=0
-    const top_y_helvetica = 60 + 8 + 0 + hm.ascender;
-    const top_y_inter = 60 + 8 + 0 + im.ascender;
-    std.debug.print("Top valign baseline y: Helvetica={d:.2}, Inter={d:.2}\n", .{ top_y_helvetica, top_y_inter });
+    const Expected = struct { path: []const u8, ascent: f64, y_max: f64, cap: f64 };
+    for ([_]Expected{
+        .{ .path = "test/fonts/Inter/Inter-Regular.ttf", .ascent = 1984, .y_max = 2269, .cap = 1490 },
+        .{ .path = "test/fonts/Gentium/Gentium-Regular.ttf", .ascent = 1940, .y_max = 2600, .cap = 1260 },
+    }) |e| {
+        const font = try doc.loadFont(e.path, .identity);
+        const m = doc.getFontMetricsStyled(.{ .font = font, .size = size });
+        try std.testing.expectApproxEqAbs(e.ascent / 2048.0 * size, m.ascender, tol);
+        try std.testing.expectApproxEqAbs(e.y_max / 2048.0 * size, m.y_max, tol);
+        try std.testing.expectApproxEqAbs(e.cap / 2048.0 * size, m.cap_height, tol);
+    }
 }

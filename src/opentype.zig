@@ -3000,14 +3000,12 @@ test "Parse Satoshi GSUB ligatures" {
     const glyph_l = font.getGlyphId('l') orelse 0;
     const glyph_t = font.getGlyphId('t') orelse 0;
 
-    std.debug.print("\nGlyph IDs: f={d} i={d} l={d} t={d}\n", .{ glyph_f, glyph_i, glyph_l, glyph_t });
 
     // Test fi ligature
     const fi_glyphs = [_]u16{ glyph_f, glyph_i };
     const fi_result = try features.applyLigatures(&fi_glyphs);
     defer std.testing.allocator.free(fi_result);
 
-    std.debug.print("fi input: [{d}, {d}] -> output: {any}\n", .{ glyph_f, glyph_i, fi_result });
 
     // Should have 1 glyph (the fi ligature)
     try std.testing.expectEqual(@as(usize, 1), fi_result.len);
@@ -3020,7 +3018,6 @@ test "Parse Satoshi GSUB ligatures" {
     const fl_result = try features.applyLigatures(&fl_glyphs);
     defer std.testing.allocator.free(fl_result);
 
-    std.debug.print("fl input: [{d}, {d}] -> output: {any}\n", .{ glyph_f, glyph_l, fl_result });
 
     try std.testing.expectEqual(@as(usize, 1), fl_result.len);
 
@@ -3029,7 +3026,6 @@ test "Parse Satoshi GSUB ligatures" {
     const ft_result = try features.applyLigatures(&ft_glyphs);
     defer std.testing.allocator.free(ft_result);
 
-    std.debug.print("ft input: [{d}, {d}] -> output: {any}\n", .{ glyph_f, glyph_t, ft_result });
 
     try std.testing.expectEqual(@as(usize, 1), ft_result.len);
 
@@ -3060,29 +3056,6 @@ test "Parse Inter calt feature (Type 1 and Type 6)" {
 
     try features.parseGSUB(gsub_data);
 
-    // Inter should have calt feature which uses Type 1 and Type 6 lookups
-    std.debug.print("\nInter GSUB parsed:\n", .{});
-    std.debug.print("  Single substitution lookups: {d}\n", .{features.single_lookups.items.len});
-    std.debug.print("  Chaining context lookups: {d}\n", .{features.chain_context_lookups.items.len});
-    std.debug.print("  Liga lookups: {d}\n", .{features.liga_lookups.items.len});
-    std.debug.print("  Dlig lookups: {d}\n", .{features.dlig_lookups.items.len});
-    std.debug.print("  Clig lookups: {d}\n", .{features.clig_lookups.items.len});
-    std.debug.print("  Hlig lookups: {d}\n", .{features.hlig_lookups.items.len});
-    std.debug.print("  Zero lookups: {d}\n", .{features.zero_lookups.items.len});
-    std.debug.print("  Case lookups: {d}\n", .{features.case_lookups.items.len});
-    // Print stylistic sets with non-zero lookups
-    for (features.ss_lookups, 1..) |ss, i| {
-        if (ss.items.len > 0) {
-            std.debug.print("  SS{d:0>2} lookups: {d}\n", .{ i, ss.items.len });
-        }
-    }
-    // Print character variants with non-zero lookups
-    for (features.cv_lookups, 1..) |cv, i| {
-        if (cv.items.len > 0) {
-            std.debug.print("  CV{d:0>2} lookups: {d}\n", .{ i, cv.items.len });
-        }
-    }
-
     // Inter has extensive calt feature with arrow ligatures etc.
     // We should have some Type 1 or Type 6 lookups
     const has_calt_lookups = features.single_lookups.items.len > 0 or
@@ -3111,10 +3084,6 @@ test "Parse Inter mark/mkmk features (GPOS Type 4 and 6)" {
 
     try features.parseGPOS(gpos_data);
 
-    std.debug.print("\nInter GPOS parsed:\n", .{});
-    std.debug.print("  Kerning lookups: {d}\n", .{features.kern_lookups.items.len});
-    std.debug.print("  Mark-to-Base lookups: {d}\n", .{features.mark_base_lookups.items.len});
-    std.debug.print("  Mark-to-Mark lookups: {d}\n", .{features.mark_mark_lookups.items.len});
 
     // Inter should have mark positioning for diacritics
     try std.testing.expect(features.mark_base_lookups.items.len > 0);
@@ -3221,13 +3190,11 @@ test "applyCalt with Inter font" {
     try features.parseGSUB(gsub_data);
 
     // Verify lookup map is populated
-    std.debug.print("\nLookup map entries: {d}\n", .{features.gsub_lookup_map.count()});
     try std.testing.expect(features.gsub_lookup_map.count() > 0);
 
     // Get test glyph IDs
     const glyph_minus = font.getGlyphId('-') orelse 0;
     const glyph_gt = font.getGlyphId('>') orelse 0;
-    std.debug.print("Glyph IDs: - = {d}, > = {d}\n", .{ glyph_minus, glyph_gt });
 
     // Inter's arrow ligatures (-> etc) are in the 'calt' feature
     // Inter does NOT have a 'liga' feature at all
@@ -3237,7 +3204,6 @@ test "applyCalt with Inter font" {
     // applyLigatures should NOT transform -> (no liga feature in Inter)
     const liga_result = try features.applyLigatures(&test_glyphs);
     defer std.testing.allocator.free(liga_result);
-    std.debug.print("applyLigatures: [{d}, {d}] -> {any}\n", .{ glyph_minus, glyph_gt, liga_result });
 
     // Should be unchanged - no liga lookups
     try std.testing.expectEqual(@as(usize, 2), liga_result.len);
@@ -3245,7 +3211,6 @@ test "applyCalt with Inter font" {
     // applyCalt SHOULD transform -> to arrow
     const calt_result = try features.applyCalt(&test_glyphs);
     defer std.testing.allocator.free(calt_result);
-    std.debug.print("applyCalt: [{d}, {d}] -> {any}\n", .{ glyph_minus, glyph_gt, calt_result });
 
     // The arrow ligature should produce a single glyph
     try std.testing.expectEqual(@as(usize, 1), calt_result.len);
@@ -3284,13 +3249,10 @@ test "calt should not corrupt regular text" {
         }
     }
 
-    std.debug.print("\nTesting calt on '{s}':\n", .{test_str});
-    std.debug.print("  Input glyphs: {any}\n", .{glyphs_latin.items});
 
     const calt_result = try features.applyCalt(glyphs_latin.items);
     defer std.testing.allocator.free(calt_result);
 
-    std.debug.print("  Output glyphs: {any}\n", .{calt_result});
 
     // Check for any mismatches
     var mismatches: usize = 0;
@@ -3317,17 +3279,19 @@ test "calt should not corrupt regular text" {
         }
     }
 
-    std.debug.print("\nTesting calt on '{s}':\n", .{test_str2});
-    std.debug.print("  Input glyphs: {any}\n", .{glyphs_arrow.items});
 
     const calt_result2 = try features.applyCalt(glyphs_arrow.items);
     defer std.testing.allocator.free(calt_result2);
 
-    std.debug.print("  Output glyphs: {any}\n", .{calt_result2});
 
-    // The arrow should be transformed, but text before/after should remain unchanged
-    // Expected: A [space] [arrow] [space] B [space] L a t i n
-    // The -> becomes a single arrow glyph, so output should be 2 shorter
+    // "A -> B Latin": the two glyphs of "->" become one arrow glyph (output
+    // one glyph shorter); everything before and after is unchanged.
+    const arrow_at = std.mem.indexOf(u8, test_str2, "->").?;
+    try std.testing.expectEqual(glyphs_arrow.items.len - 1, calt_result2.len);
+    try std.testing.expectEqualSlices(u16, glyphs_arrow.items[0..arrow_at], calt_result2[0..arrow_at]);
+    try std.testing.expect(calt_result2[arrow_at] != glyphs_arrow.items[arrow_at]); // not the hyphen
+    try std.testing.expect(calt_result2[arrow_at] != glyphs_arrow.items[arrow_at + 1]); // not the '>'
+    try std.testing.expectEqualSlices(u16, glyphs_arrow.items[arrow_at + 2 ..], calt_result2[arrow_at + 1 ..]);
 }
 
 test "applyGSUB combines calt and liga" {
@@ -3359,48 +3323,31 @@ test "Inter mark positioning for combining diacritics" {
     const ttf = @import("ttf.zig");
 
     // Load Inter font
-    const data = std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(10 * 1024 * 1024)) catch return;
+    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(10 * 1024 * 1024));
     defer allocator.free(data);
 
-    const font = ttf.Font.parse(data) catch return;
+    const font = try ttf.Font.parse(data);
 
     // Initialize OpenType features
     var ot = OpenTypeFeatures.init(allocator);
     defer ot.deinit();
 
     // Parse GPOS for mark positioning
-    if (font.getTable("GPOS".*)) |gpos_data| {
-        try ot.parseGPOS(gpos_data);
-    } else {
-        return; // No GPOS table
-    }
+    try ot.parseGPOS(font.getTable("GPOS".*) orelse return error.TestExpectedGpos);
 
     // Get glyph IDs for test characters
-    const base_a = font.getGlyphId('A') orelse return;
-    const base_e = font.getGlyphId('e') orelse return;
-    const combining_grave = font.getGlyphId(0x0300) orelse return; // COMBINING GRAVE ACCENT
-    const combining_acute = font.getGlyphId(0x0301) orelse return; // COMBINING ACUTE ACCENT
+    const base_a = font.getGlyphId('A') orelse return error.TestExpectedGlyph;
+    const base_e = font.getGlyphId('e') orelse return error.TestExpectedGlyph;
+    const combining_grave = font.getGlyphId(0x0300) orelse return error.TestExpectedGlyph; // COMBINING GRAVE ACCENT
+    const combining_acute = font.getGlyphId(0x0301) orelse return error.TestExpectedGlyph; // COMBINING ACUTE ACCENT
+    try std.testing.expect(ot.mark_base_lookups.items.len > 0);
 
-    std.debug.print("\nInter mark positioning test:\n", .{});
-    std.debug.print("  'A' glyph: {}, combining grave (0300): {}\n", .{ base_a, combining_grave });
-    std.debug.print("  'e' glyph: {}, combining acute (0301): {}\n", .{ base_e, combining_acute });
-    std.debug.print("  Mark-to-Base lookups: {}\n", .{ot.mark_base_lookups.items.len});
-
-    // Check if Inter has mark positioning data for these combinations
-    if (ot.getMarkOffset(base_a, combining_grave)) |offset| {
-        std.debug.print("  A + grave offset: dx={}, dy={}\n", .{ offset.dx, offset.dy });
-        // Mark offset should have non-zero values
-        try std.testing.expect(offset.dx != 0 or offset.dy != 0);
-    } else {
-        std.debug.print("  No mark offset for A + grave\n", .{});
-    }
-
-    if (ot.getMarkOffset(base_e, combining_acute)) |offset| {
-        std.debug.print("  e + acute offset: dx={}, dy={}\n", .{ offset.dx, offset.dy });
-        try std.testing.expect(offset.dx != 0 or offset.dy != 0);
-    } else {
-        std.debug.print("  No mark offset for e + acute\n", .{});
-    }
+    // Inter's GPOS anchors (design units). Required, not optional: a missing
+    // offset used to print "No mark offset" and pass.
+    const a_grave = ot.getMarkOffset(base_a, combining_grave) orelse return error.TestExpectedMarkOffset;
+    try std.testing.expectEqual(MarkOffset{ .dx = 292, .dy = 372 }, a_grave);
+    const e_acute = ot.getMarkOffset(base_e, combining_acute) orelse return error.TestExpectedMarkOffset;
+    try std.testing.expectEqual(MarkOffset{ .dx = 356, .dy = 0 }, e_acute);
 }
 
 test "dlig/clig/hlig separate parsing" {

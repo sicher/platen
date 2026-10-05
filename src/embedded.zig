@@ -3018,25 +3018,11 @@ test "Satoshi ligature codepoint tracking" {
     const glyphs_ligas = try font.markUnicodeCharsUsed("fi fl ft", null);
     font.allocator.free(glyphs_ligas);
 
-    // Check ligature codepoints were tracked
-    std.debug.print("\nLigature codepoints tracked: {d}\n", .{font.ligature_codepoints.count()});
-
-    var iter = font.ligature_codepoints.iterator();
-    while (iter.next()) |entry| {
-        const lig_gid = entry.key_ptr.*;
-        const codepoints = entry.value_ptr.*;
-        std.debug.print("  Ligature glyph {d} -> codepoints: ", .{lig_gid});
-        for (codepoints) |cp| {
-            std.debug.print("{c}({d}) ", .{ @as(u8, @intCast(cp)), cp });
-        }
-        std.debug.print("\n", .{});
-    }
-
     // Should have tracked fi, fl, ft ligatures (3 different glyph IDs)
     try std.testing.expect(font.ligature_codepoints.count() >= 3);
 
     // Check that each ligature has 2 codepoints
-    iter = font.ligature_codepoints.iterator();
+    var iter = font.ligature_codepoints.iterator();
     while (iter.next()) |entry| {
         try std.testing.expectEqual(@as(usize, 2), entry.value_ptr.*.len);
     }
