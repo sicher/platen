@@ -168,6 +168,14 @@ pub const FontFlags = packed struct(u32) {
 };
 
 /// Embedded TrueType font for PDF
+/// Scale a font-unit metric to 1000 units. A value that does not fit i16
+/// (only reachable with hostile metrics) makes the font invalid.
+fn scaledI16(v: i16, scale: f64) error{InvalidFont}!i16 {
+    const r = @round(@as(f64, @floatFromInt(v)) * scale);
+    if (r < std.math.minInt(i16) or r > std.math.maxInt(i16)) return error.InvalidFont;
+    return @intFromFloat(r);
+}
+
 pub const EmbeddedFont = struct {
     name: []const u8, // PostScript name for PDF
     data: []const u8, // Raw TTF data (for FontFile2)
@@ -275,11 +283,20 @@ pub const EmbeddedFont = struct {
         const head = font.head orelse return error.MissingTable;
         const hhea = font.hhea orelse return error.MissingTable;
 
+        // OpenType allows unitsPerEm 16..16384. Outside it the 1000-unit
+        // scale (up to 62.5x) overflows the u16/i16 metrics below.
         const units_per_em = head.units_per_em;
-        if (units_per_em == 0) return error.InvalidFont;
+        if (units_per_em < 16 or units_per_em > 16384) return error.InvalidFont;
 
         // Scale factor: convert from font units to 1000 units
         const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(units_per_em));
+
+        // Every advance getGlyphWidth can return must fit u16 once scaled.
+        // Checked once here, so the per-glyph conversions (WinAnsi widths,
+        // CID widths, getGlyphWidth) cannot overflow later.
+        if (@round(@as(f64, @floatFromInt(font.maxAdvanceWidth())) * scale) > std.math.maxInt(u16)) {
+            return error.InvalidFont;
+        }
 
         // Build widths array for WinAnsiEncoding
         var widths: [256]u16 = undefined;
@@ -295,13 +312,13 @@ pub const EmbeddedFont = struct {
         }
 
         // Scale metrics (round to nearest integer)
-        const ascent: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(hhea.ascent)) * scale));
-        const descent: i16 = @intFromFloat(@round(@as(f64, @floatFromInt(hhea.descent)) * scale));
+        const ascent = try scaledI16(hhea.ascent, scale);
+        const descent = try scaledI16(hhea.descent, scale);
 
         // Get CapHeight from OS/2 table if available, otherwise estimate as 70% of ascent
         const cap_height: i16 = if (font.os2) |os2| blk: {
             if (os2.cap_height > 0) {
-                break :blk @intFromFloat(@round(@as(f64, @floatFromInt(os2.cap_height)) * scale));
+                break :blk try scaledI16(os2.cap_height, scale);
             } else {
                 break :blk @intFromFloat(@round(@as(f64, @floatFromInt(ascent)) * 0.7));
             }
@@ -309,10 +326,10 @@ pub const EmbeddedFont = struct {
 
         // Scale bounding box
         const bbox: [4]i16 = .{
-            @intFromFloat(@round(@as(f64, @floatFromInt(head.x_min)) * scale)),
-            @intFromFloat(@round(@as(f64, @floatFromInt(head.y_min)) * scale)),
-            @intFromFloat(@round(@as(f64, @floatFromInt(head.x_max)) * scale)),
-            @intFromFloat(@round(@as(f64, @floatFromInt(head.y_max)) * scale)),
+            try scaledI16(head.x_min, scale),
+            try scaledI16(head.y_min, scale),
+            try scaledI16(head.x_max, scale),
+            try scaledI16(head.y_max, scale),
         };
 
         // Estimate StemV (vertical stem width) - typically 80 for normal, higher for bold
@@ -321,23 +338,23 @@ pub const EmbeddedFont = struct {
 
         // Get underline metrics from POST table (defaults based on fpdf2)
         const underline_position: i16 = if (font.post) |post|
-            @intFromFloat(@round(@as(f64, @floatFromInt(post.underline_position)) * scale))
+            try scaledI16(post.underline_position, scale)
         else
             -100; // Default from fpdf2 core fonts
 
         const underline_thickness: i16 = if (font.post) |post|
-            @intFromFloat(@round(@as(f64, @floatFromInt(post.underline_thickness)) * scale))
+            try scaledI16(post.underline_thickness, scale)
         else
             50; // Default from fpdf2 core fonts
 
         // Get strikeout metrics from OS/2 table (defaults based on fpdf2)
         const strikeout_position: i16 = if (font.os2) |os2|
-            @intFromFloat(@round(@as(f64, @floatFromInt(os2.strikeout_position)) * scale))
+            try scaledI16(os2.strikeout_position, scale)
         else
             250; // Default: roughly middle of x-height
 
         const strikeout_size: i16 = if (font.os2) |os2|
-            @intFromFloat(@round(@as(f64, @floatFromInt(os2.strikeout_size)) * scale))
+            try scaledI16(os2.strikeout_size, scale)
         else
             50; // Default from fpdf2 core fonts
 
@@ -1098,7 +1115,7 @@ pub const EmbeddedFont = struct {
 
         if (self.encoding != .identity) {
             // WinAnsi encoding: use byte-indexed width table
-            var total: u32 = 0;
+            var total: u64 = 0; // u32 overflows past ~65K maximal glyphs
             for (text) |c| {
                 total += self.widths[c];
             }
@@ -1126,11 +1143,11 @@ pub const EmbeddedFont = struct {
     /// plus kerning. Exact when the font has no active substitutions.
     fn measureUnshaped(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64) f64 {
         const units_per_em = self.font.head.?.units_per_em;
-        const em: i32 = @intCast(units_per_em);
+        const em: i64 = units_per_em;
         const has_ascii_widths = self.font.has_ascii_widths;
         const do_kerning = self.feature_flags.isEnabled(.kern) and self.has_kern_data and self.ot_features != null;
 
-        var total: i32 = 0;
+        var total: i64 = 0; // i32 overflows past ~32K maximal glyphs
         var glyph_count: usize = 0;
         var prev_gid: u16 = 0;
         var has_prev: bool = false;
@@ -1168,13 +1185,13 @@ pub const EmbeddedFont = struct {
             }
 
             // Add glyph width (scaled to 1/1000 em)
-            total += @divTrunc(@as(i32, @intCast(width)) * 1000, em);
+            total += @divTrunc(@as(i64, width) * 1000, em);
             glyph_count += 1;
 
             // Add kerning from previous glyph
             if (do_kerning and has_prev) {
                 const kern = self.ot_features.?.getKerning(prev_gid, gid);
-                total += @divTrunc(@as(i32, kern) * 1000, em);
+                total += @divTrunc(@as(i64, kern) * 1000, em);
             }
 
             prev_gid = gid;
@@ -1226,17 +1243,17 @@ pub const EmbeddedFont = struct {
     /// kerning + char_spacing). Used by measureShaped and by writeAt, which
     /// already has the shaped run and must not shape a second time.
     pub fn glyphSequenceWidth(self: *EmbeddedFont, glyphs: []const u16, size: f64, char_spacing: f64) f64 {
-        const em: i32 = @intCast(self.font.head.?.units_per_em);
+        const em: i64 = self.font.head.?.units_per_em;
         const do_kerning = self.feature_flags.isEnabled(.kern) and self.has_kern_data and self.ot_features != null;
 
-        var total: i32 = 0;
+        var total: i64 = 0; // i32 overflows past ~32K maximal glyphs
         var prev_gid: u16 = 0;
         var has_prev: bool = false;
         for (glyphs) |gid| {
             const width = self.font.getGlyphWidth(gid) orelse 0;
-            total += @divTrunc(@as(i32, @intCast(width)) * 1000, em);
+            total += @divTrunc(@as(i64, width) * 1000, em);
             if (do_kerning and has_prev) {
-                total += @divTrunc(@as(i32, self.ot_features.?.getKerning(prev_gid, gid)) * 1000, em);
+                total += @divTrunc(@as(i64, self.ot_features.?.getKerning(prev_gid, gid)) * 1000, em);
             }
             prev_gid = gid;
             has_prev = true;

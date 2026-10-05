@@ -292,6 +292,20 @@ pub const Font = struct {
     }
 
     /// Get glyph width with ASCII fast path (in font units)
+    /// Largest advance width getGlyphWidth can return (the longHorMetric
+    /// entries; trailing glyphs reuse the last one).
+    pub fn maxAdvanceWidth(self: *const Font) u16 {
+        const hhea = self.hhea orelse return 0;
+        const hmtx_data = self.hmtx_data orelse return 0;
+        var max: u16 = 0;
+        for (0..hhea.num_of_long_hor_metrics) |i| {
+            const offset = i * 4;
+            if (offset + 2 > hmtx_data.len) break;
+            max = @max(max, readU16(hmtx_data, offset));
+        }
+        return max;
+    }
+
     pub fn getGlyphWidthFast(self: *const Font, glyph_id: u16, codepoint: u21) ?u16 {
         // ASCII fast path: use cached width
         if (self.has_ascii_widths and codepoint < 128) {
