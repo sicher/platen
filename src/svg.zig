@@ -609,7 +609,7 @@ pub const Svg = struct {
                 while (attrs.next()) |attr| {
                     if (std.mem.eql(u8, attr.name, "transform")) {
                         const t = parseTransform(attr.value);
-                        group_transform = group_transform.multiply(t);
+                        group_transform = try composeTransform(group_transform, t);
                     } else {
                         parseStyleAttribute(attr.name, attr.value, &group_style);
                     }
@@ -667,12 +667,23 @@ pub const Svg = struct {
     ) !void {
         if (defs) |d| {
             if (id) |elem_id| {
-                // Store in defs by id (duplicate key for owned storage)
-                const owned_id = try self.allocator.dupe(u8, elem_id);
-                errdefer self.allocator.free(owned_id);
-                try d.put(self.allocator, owned_id, element);
+                // Store in defs by id; a duplicate id replaces the earlier
+                // definition (freeing it - put alone leaked it).
+                const gop = try d.getOrPut(self.allocator, elem_id);
+                if (gop.found_existing) {
+                    gop.value_ptr.deinit(self.allocator);
+                } else {
+                    gop.key_ptr.* = self.allocator.dupe(u8, elem_id) catch |err| {
+                        d.removeByPtr(gop.key_ptr);
+                        return err;
+                    };
+                }
+                gop.value_ptr.* = element;
+            } else {
+                // No id: it can never be referenced, so it is dropped.
+                var dropped = element;
+                dropped.deinit(self.allocator);
             }
-            // If no id, element is discarded (can't be referenced)
         } else {
             try self.elements.append(self.allocator, element);
         }
@@ -708,7 +719,7 @@ pub const Svg = struct {
         }
 
         rect.rect.style = parent_style.merge(local_style);
-        rect.rect.transform = parent_transform.multiply(local_transform);
+        rect.rect.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(rect, id, defs);
     }
 
@@ -736,7 +747,7 @@ pub const Svg = struct {
         }
 
         circle.circle.style = parent_style.merge(local_style);
-        circle.circle.transform = parent_transform.multiply(local_transform);
+        circle.circle.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(circle, id, defs);
     }
 
@@ -766,7 +777,7 @@ pub const Svg = struct {
         }
 
         ellipse.ellipse.style = parent_style.merge(local_style);
-        ellipse.ellipse.transform = parent_transform.multiply(local_transform);
+        ellipse.ellipse.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(ellipse, id, defs);
     }
 
@@ -796,12 +807,13 @@ pub const Svg = struct {
         }
 
         line.line.style = parent_style.merge(local_style);
-        line.line.transform = parent_transform.multiply(local_transform);
+        line.line.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(line, id, defs);
     }
 
     fn parsePolyline(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var polyline = SvgElement{ .polyline = .{ .points = .empty } };
+        errdefer polyline.deinit(self.allocator); // until storeElement owns it
         var local_transform = Transform.identity;
         var local_style = Style{};
         var id: ?[]const u8 = null;
@@ -820,12 +832,13 @@ pub const Svg = struct {
         }
 
         polyline.polyline.style = parent_style.merge(local_style);
-        polyline.polyline.transform = parent_transform.multiply(local_transform);
+        polyline.polyline.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(polyline, id, defs);
     }
 
     fn parsePolygon(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var polygon = SvgElement{ .polygon = .{ .points = .empty } };
+        errdefer polygon.deinit(self.allocator); // until storeElement owns it
         var local_transform = Transform.identity;
         var local_style = Style{};
         var id: ?[]const u8 = null;
@@ -844,12 +857,13 @@ pub const Svg = struct {
         }
 
         polygon.polygon.style = parent_style.merge(local_style);
-        polygon.polygon.transform = parent_transform.multiply(local_transform);
+        polygon.polygon.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(polygon, id, defs);
     }
 
     fn parsePath(self: *Svg, elem: xml.Element, parent_style: Style, parent_transform: Transform, defs: ?*std.StringHashMapUnmanaged(SvgElement)) !void {
         var path = SvgElement{ .path = .{ .commands = .empty } };
+        errdefer path.deinit(self.allocator); // until storeElement owns it
         var local_transform = Transform.identity;
         var local_style = Style{};
         var id: ?[]const u8 = null;
@@ -868,12 +882,13 @@ pub const Svg = struct {
         }
 
         path.path.style = parent_style.merge(local_style);
-        path.path.transform = parent_transform.multiply(local_transform);
+        path.path.transform = try composeTransform(parent_transform, local_transform);
         try self.storeElement(path, id, defs);
     }
 
     fn parseText(self: *Svg, parser: *xml.XmlParser, elem: xml.Element, parent_style: Style, parent_transform: Transform) !void {
         var text_elem = SvgElement{ .text = .{ .content = "" } };
+        errdefer text_elem.deinit(self.allocator); // until appended
         var local_transform = Transform.identity;
         var local_style = Style{};
 
@@ -917,7 +932,7 @@ pub const Svg = struct {
         _ = try self.getOrAddFont(font);
 
         text_elem.text.style = parent_style.merge(local_style);
-        text_elem.text.transform = parent_transform.multiply(local_transform);
+        text_elem.text.transform = try composeTransform(parent_transform, local_transform);
         try self.elements.append(self.allocator, text_elem);
     }
 
@@ -965,53 +980,53 @@ pub const Svg = struct {
         // In matrix terms: parent * translate(x,y) * local_transform
         var use_transform = parent_transform;
         if (x != 0 or y != 0) {
-            use_transform = use_transform.multiply(Transform.translate(x, y));
+            use_transform = try composeTransform(use_transform, Transform.translate(x, y));
         }
-        use_transform = use_transform.multiply(local_transform);
+        use_transform = try composeTransform(use_transform, local_transform);
 
         // Apply transform and style to the cloned element
-        applyTransformAndStyle(&cloned, use_transform, parent_style.merge(local_style));
+        try applyTransformAndStyle(&cloned, use_transform, parent_style.merge(local_style));
 
         try self.elements.append(self.allocator, cloned);
     }
 
     /// Apply transform and style to an element (for use element processing)
-    fn applyTransformAndStyle(element: *SvgElement, transform: Transform, style: Style) void {
+    fn applyTransformAndStyle(element: *SvgElement, transform: Transform, style: Style) error{InvalidSvg}!void {
         switch (element.*) {
             .rect => |*r| {
-                r.transform = transform.multiply(r.transform);
+                r.transform = try composeTransform(transform, r.transform);
                 r.style = style.merge(r.style);
             },
             .circle => |*c| {
-                c.transform = transform.multiply(c.transform);
+                c.transform = try composeTransform(transform, c.transform);
                 c.style = style.merge(c.style);
             },
             .ellipse => |*e| {
-                e.transform = transform.multiply(e.transform);
+                e.transform = try composeTransform(transform, e.transform);
                 e.style = style.merge(e.style);
             },
             .line => |*l| {
-                l.transform = transform.multiply(l.transform);
+                l.transform = try composeTransform(transform, l.transform);
                 l.style = style.merge(l.style);
             },
             .polyline => |*p| {
-                p.transform = transform.multiply(p.transform);
+                p.transform = try composeTransform(transform, p.transform);
                 p.style = style.merge(p.style);
             },
             .polygon => |*p| {
-                p.transform = transform.multiply(p.transform);
+                p.transform = try composeTransform(transform, p.transform);
                 p.style = style.merge(p.style);
             },
             .path => |*p| {
-                p.transform = transform.multiply(p.transform);
+                p.transform = try composeTransform(transform, p.transform);
                 p.style = style.merge(p.style);
             },
             .group => |*g| {
-                g.transform = transform.multiply(g.transform);
+                g.transform = try composeTransform(transform, g.transform);
                 g.style = style.merge(g.style);
             },
             .text => |*t| {
-                t.transform = transform.multiply(t.transform);
+                t.transform = try composeTransform(transform, t.transform);
                 t.style = style.merge(t.style);
             },
         }
@@ -1694,9 +1709,28 @@ fn parseTextAnchor(value: []const u8) TextAnchor {
     return .start;
 }
 
-/// Parse a float value
+/// Largest magnitude accepted for an SVG number or composed transform
+/// component. Bounded inputs keep every number the content writer prints
+/// finite (products of two stay far inside f64).
+const max_magnitude: f64 = 1e9;
+
+/// Parse a float value. std.fmt.parseFloat also accepts "inf", "nan" and
+/// overflowing literals ("1e999" -> inf), none of which are SVG numbers;
+/// they - and finite values past max_magnitude - are invalid like any
+/// unparseable value (0).
 fn parseFloat(str: []const u8) f64 {
-    return std.fmt.parseFloat(f64, str) catch 0;
+    const v = std.fmt.parseFloat(f64, str) catch return 0;
+    return if (@abs(v) <= max_magnitude) v else 0; // NaN fails the comparison
+}
+
+/// parent * local, rejected when a component is not finite or exceeds
+/// max_magnitude (finite factors can overflow: scale(1e5) twice, skewX(90)).
+fn composeTransform(parent: Transform, local: Transform) error{InvalidSvg}!Transform {
+    const t = parent.multiply(local);
+    inline for (.{ t.a, t.b, t.c, t.d, t.e, t.f }) |v| {
+        if (!(@abs(v) <= max_magnitude)) return error.InvalidSvg;
+    }
+    return t;
 }
 
 /// Parse a length value (with optional units)
@@ -2425,4 +2459,75 @@ test "parse MathJax equation SVG with xlink:href" {
     const content = try svg.toPdfContent(allocator, &states);
     defer allocator.free(content);
     try std.testing.expect(content.len > 0);
+}
+
+// Non-finite / oversized numbers (2026-10-05): std.fmt.parseFloat accepts
+// "inf", "nan" and overflowing literals, and composed transforms could
+// overflow; the content writer then printed "inf" into the PDF.
+
+test "SVG numbers that are not finite or exceed the bound are invalid" {
+    try std.testing.expectEqual(@as(f64, 12.5), parseFloat("12.5"));
+    try std.testing.expectEqual(@as(f64, -1e9), parseFloat("-1e9"));
+    for ([_][]const u8{ "inf", "-inf", "nan", "1e999", "1e300", "1e10" }) |s| {
+        try std.testing.expectEqual(@as(f64, 0), parseFloat(s));
+    }
+}
+
+test "hostile SVG numbers never reach the PDF content as nan/inf" {
+    const a = std.testing.allocator;
+    const cases = [_][]const u8{
+        "<svg width=\"10\" height=\"10\"><rect width=\"1e999\" height=\"5\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><rect x=\"inf\" width=\"5\" height=\"5\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><path d=\"M 0 0 L 1e999 5 Z\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><rect width=\"5\" height=\"5\" stroke=\"red\" stroke-width=\"inf\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><circle r=\"nan\" fill-opacity=\"nan\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><rect width=\"1e300\" height=\"1e300\"/></svg>",
+    };
+    for (cases) |text| {
+        const svg = try Svg.fromMemory(a, text);
+        defer svg.deinit();
+        var states: std.ArrayListUnmanaged(OpacityState) = .empty;
+        defer states.deinit(a);
+        const content = try svg.toPdfContent(a, &states);
+        defer a.free(content);
+        if (std.mem.indexOf(u8, content, "nan") != null or std.mem.indexOf(u8, content, "inf") != null) {
+            std.debug.print("non-finite number in content for {s}:\n{s}\n", .{ text, content });
+            return error.TestUnexpectedResult;
+        }
+    }
+}
+
+test "SVG transforms that compose past the bound are an invalid SVG" {
+    const a = std.testing.allocator;
+    const cases = [_][]const u8{
+        // Each factor is finite; the product overflowed to inf.
+        "<svg width=\"10\" height=\"10\"><g transform=\"scale(1e5)\"><g transform=\"scale(1e5)\"><rect width=\"5\" height=\"5\"/></g></g></svg>",
+        "<svg width=\"10\" height=\"10\"><rect width=\"5\" height=\"5\" transform=\"skewX(90)\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><g transform=\"translate(1e9)\"><path d=\"M0 0L1 1\" transform=\"scale(1e9) translate(1e9)\"/></g></svg>",
+    };
+    for (cases) |text| {
+        try std.testing.expectError(error.InvalidSvg, Svg.fromMemory(a, text));
+    }
+}
+
+test "SVG elements are freed on every path: defs without id, duplicate ids, errors" {
+    // std.testing.allocator fails the test on any leak.
+    const a = std.testing.allocator;
+    const ok = [_][]const u8{
+        // An element in <defs> without an id cannot be referenced: dropped.
+        "<svg width=\"10\" height=\"10\"><defs><path d=\"M0 0L1 1\"/><polygon points=\"0,0 1,1 2,0\"/></defs></svg>",
+        // A duplicate id replaces the earlier definition.
+        "<svg width=\"10\" height=\"10\"><defs><path id=\"p\" d=\"M0 0L1 1\"/><path id=\"p\" d=\"M0 0L2 2\"/></defs><use href=\"#p\"/></svg>",
+    };
+    for (ok) |text| {
+        const svg = try Svg.fromMemory(a, text);
+        svg.deinit();
+    }
+    const bad = [_][]const u8{
+        "<svg width=\"10\" height=\"10\"><path d=\"M0 0L1 1\" transform=\"scale(1e9) scale(1e9)\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><polyline points=\"0,0 1,1\" transform=\"skewY(90)\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><polygon points=\"0,0 1,1 2,0\" transform=\"skewX(90)\"/></svg>",
+        "<svg width=\"10\" height=\"10\"><text transform=\"scale(1e9) scale(1e9)\">hi</text></svg>",
+    };
+    for (bad) |text| try std.testing.expectError(error.InvalidSvg, Svg.fromMemory(a, text));
 }

@@ -388,6 +388,14 @@ Hardening invariants the fuzzers enforce (added after real findings):
   Values that must narrow (glyph IDs) go through std.math.cast and an
   out-of-range result means "absent", not a crash. (2026-10-05 audit:
   ~45 sites across the parsers.)
+- **SVG numbers are bounded at parse** (svg.zig `parseFloat`): finite and
+  within ±1e9, else invalid like any unparseable value (0) - parseFloat
+  alone accepts "inf"/"nan"/"1e999", which the content writer printed
+  into the PDF. Composed transforms go through `composeTransform`, which
+  rejects non-finite/oversized components with error.InvalidSvg (finite
+  factors overflow: nested scale(1e5), skewX(90)). Every SvgElement is
+  owned by exactly one place: errdefer until stored; storeElement frees
+  elements it drops (defs without id) or replaces (duplicate id).
 - Any parser loop over hostile input must provably advance its cursor
   (regression tests: xml.zig unterminated attribute quote, svg.zig
   path-data garbage after Z).
