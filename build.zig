@@ -103,9 +103,4 @@ pub fn build(b: *std.Build) void {
 
     const invoice_bench_step = b.step("bench-invoice", "Run invoice throughput benchmark (use -Doptimize=ReleaseFast)");
     invoice_bench_step.dependOn(&run_invoice_bench.step);
-
-    // Documentation (using zigmarkdoc via shell script)
-    const docs_cmd = b.addSystemCommand(&.{ "scripts/gen_docs.sh" });
-    const docs_step = b.step("docs", "Generate API documentation (Markdown)");
-    docs_step.dependOn(&docs_cmd.step);
 }
