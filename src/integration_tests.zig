@@ -1525,7 +1525,7 @@ const pngsuite_dir = "test/images/pngsuite";
 /// Valid PngSuite images platen cannot decode yet, with the error each must
 /// return. Their reference images are skipped by the pixel comparison, and
 /// the test fails if a listed file starts decoding - delete entries as the
-/// formats land (Adam7 interlacing; 16-bit samples with alpha).
+/// formats land (Adam7 interlacing).
 const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
     .{ .name = "basi0g01.png", .err = error.InterlacedPngNotSupported },
     .{ .name = "basi0g02.png", .err = error.InterlacedPngNotSupported },
@@ -1562,11 +1562,6 @@ const pngsuite_pending = [_]struct { name: []const u8, err: anyerror }{
     .{ .name = "s38i3p04.png", .err = error.InterlacedPngNotSupported },
     .{ .name = "s39i3p04.png", .err = error.InterlacedPngNotSupported },
     .{ .name = "s40i3p04.png", .err = error.InterlacedPngNotSupported },
-    .{ .name = "basn4a16.png", .err = error.UnsupportedPngBitDepth },
-    .{ .name = "basn6a16.png", .err = error.UnsupportedPngBitDepth },
-    .{ .name = "bgan6a16.png", .err = error.UnsupportedPngBitDepth },
-    .{ .name = "bggn4a16.png", .err = error.UnsupportedPngBitDepth },
-    .{ .name = "bgyn6a16.png", .err = error.UnsupportedPngBitDepth },
 };
 
 /// Files fpdf2 (via Pillow) renders wrongly, checked against PngSuite's

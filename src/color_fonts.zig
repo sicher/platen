@@ -384,7 +384,7 @@ fn writePlanImage(doc: *Document, w: *Writer, plan_image: PlanImage, img_id: Obj
         try smask_dict.put("Width", Value.int(@intCast(image.width)));
         try smask_dict.put("Height", Value.int(@intCast(image.height)));
         try smask_dict.put("ColorSpace", Value.name("DeviceGray"));
-        try smask_dict.put("BitsPerComponent", Value.int(8));
+        try smask_dict.put("BitsPerComponent", Value.int(image.alpha_bits_per_component));
         try smask_dict.put("Filter", Value.name("FlateDecode")); // alpha is pre-compressed
         try w.writeStream(&smask_dict, image.alpha_data.?);
         try w.endObject();

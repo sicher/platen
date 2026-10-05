@@ -47,6 +47,9 @@ pub const Image = struct {
     data: []const u8,
     /// Separate alpha channel for PNG with transparency (zlib compressed)
     alpha_data: ?[]const u8,
+    /// Bit depth of `alpha_data` (the SMask): 16 for 16-bit PNG alpha,
+    /// otherwise 8 (8-bit alpha, and masks built from tRNS).
+    alpha_bits_per_component: u8 = 8,
     /// ICC color profile data (extracted from JPEG APP2 markers)
     icc_profile: ?[]const u8,
     /// Whether data/alpha_data/icc_profile are owned by this struct
@@ -350,14 +353,12 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
 
     // Bit depth must be one the PNG spec allows for the color type (an
     // unchecked 0 made scanlines 0 bytes wide and let a 60-byte file reach
-    // the pixel loops with a 2^31-pixel width). 16-bit with alpha is valid
-    // PNG but separateAlphaChannel only handles 8-bit samples, so it is
-    // refused rather than decoded as garbage.
+    // the pixel loops with a 2^31-pixel width).
     const depth_ok = switch (color_type) {
         .grayscale => bit_depth == 1 or bit_depth == 2 or bit_depth == 4 or bit_depth == 8 or bit_depth == 16,
         .indexed => bit_depth == 1 or bit_depth == 2 or bit_depth == 4 or bit_depth == 8,
         .rgb => bit_depth == 8 or bit_depth == 16,
-        .grayscale_alpha, .rgba => bit_depth == 8,
+        .grayscale_alpha, .rgba => bit_depth == 8 or bit_depth == 16,
     };
     if (!depth_ok) return error.UnsupportedPngBitDepth;
 
@@ -456,7 +457,7 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
     var alpha_data: ?[]u8 = null;
 
     if (has_alpha) {
-        const separated = try separateAlphaChannel(allocator, unfiltered, width, height, color_type);
+        const separated = try separateAlphaChannel(allocator, unfiltered, width, height, color_type, bit_depth);
         rgb_data = separated.rgb;
         alpha_data = separated.alpha;
     } else if (color_type == .indexed) {
@@ -503,6 +504,9 @@ fn parsePng(allocator: std.mem.Allocator, data: []const u8, owns_data: bool, lev
         .format = .png,
         .data = compressed_rgb,
         .alpha_data = compressed_alpha,
+        // Separated PNG alpha keeps the image's depth (8 or 16); indexed
+        // and tRNS masks are built at 8 bits.
+        .alpha_bits_per_component = if (has_alpha) bit_depth else 8,
         .icc_profile = null, // PNG ICC profile extraction not yet implemented
         .owns_data = true, // We created the compressed data
     };
@@ -726,46 +730,36 @@ const SeparatedChannels = struct {
     alpha: []u8,
 };
 
+/// Split gray+alpha / RGBA samples into color and alpha planes, keeping
+/// the sample size (8- or 16-bit, big-endian) for both.
 fn separateAlphaChannel(
     allocator: std.mem.Allocator,
     data: []const u8,
     width: u32,
     height: u32,
     color_type: PngColorType,
+    bit_depth: u8,
 ) !SeparatedChannels {
     const pixel_count = @as(usize, width) * height;
-
-    switch (color_type) {
-        .rgba => {
-            // RGBA -> RGB + A
-            const rgb = try allocator.alloc(u8, pixel_count * 3);
-            errdefer allocator.free(rgb);
-            const alpha = try allocator.alloc(u8, pixel_count);
-
-            for (0..pixel_count) |i| {
-                rgb[i * 3 + 0] = data[i * 4 + 0]; // R
-                rgb[i * 3 + 1] = data[i * 4 + 1]; // G
-                rgb[i * 3 + 2] = data[i * 4 + 2]; // B
-                alpha[i] = data[i * 4 + 3]; // A
-            }
-
-            return .{ .rgb = rgb, .alpha = alpha };
-        },
-        .grayscale_alpha => {
-            // GA -> G + A
-            const gray = try allocator.alloc(u8, pixel_count);
-            errdefer allocator.free(gray);
-            const alpha = try allocator.alloc(u8, pixel_count);
-
-            for (0..pixel_count) |i| {
-                gray[i] = data[i * 2 + 0]; // G
-                alpha[i] = data[i * 2 + 1]; // A
-            }
-
-            return .{ .rgb = gray, .alpha = alpha };
-        },
+    const bps: usize = bit_depth / 8; // bytes per sample: 1 or 2
+    const color_samples: usize = switch (color_type) {
+        .rgba => 3,
+        .grayscale_alpha => 1,
         else => return error.NoAlphaChannel,
+    };
+    const color_bytes = color_samples * bps;
+    const pixel_bytes = color_bytes + bps;
+
+    const rgb = try allocator.alloc(u8, pixel_count * color_bytes);
+    errdefer allocator.free(rgb);
+    const alpha = try allocator.alloc(u8, pixel_count * bps);
+
+    for (0..pixel_count) |i| {
+        const px = data[i * pixel_bytes ..][0..pixel_bytes];
+        @memcpy(rgb[i * color_bytes ..][0..color_bytes], px[0..color_bytes]);
+        @memcpy(alpha[i * bps ..][0..bps], px[color_bytes..]);
     }
+    return .{ .rgb = rgb, .alpha = alpha };
 }
 
 // ============================================================================
@@ -927,8 +921,7 @@ test "PNG bit depth must be valid for the color type" {
     const cases = [_]struct { depth: u8, ct: u8 }{
         .{ .depth = 3, .ct = 0 }, .{ .depth = 4, .ct = 2 }, .{ .depth = 16, .ct = 3 },
         .{ .depth = 2, .ct = 4 }, .{ .depth = 1, .ct = 6 },
-        // 16-bit with alpha decoded as garbage before; now refused.
-        .{ .depth = 16, .ct = 4 }, .{ .depth = 16, .ct = 6 },
+        .{ .depth = 4, .ct = 6 }, .{ .depth = 16, .ct = 3 },
     };
     for (cases) |c| {
         const png = try testPng(1, 1, c.depth, c.ct, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 0 });
@@ -1068,4 +1061,36 @@ test "PNG tRNS color key on grayscale and RGB becomes an alpha mask" {
         defer a.free(alpha);
         try std.testing.expectEqualSlices(u8, c.alpha, alpha);
     }
+}
+
+test "PNG 16-bit with alpha keeps 16-bit color and a 16-bit soft mask" {
+    // Refused before (and earlier decoded as garbage: the alpha split
+    // assumed 8-bit samples).
+    const a = std.testing.allocator;
+    const zlib = @import("zlib.zig");
+    // Gray+alpha 16: (0x1234, 0xFFFF), (0xABCD, 0x0102)
+    const ga = try testPng(2, 1, 16, 4, &.{ 0, 0x12, 0x34, 0xFF, 0xFF, 0xAB, 0xCD, 0x01, 0x02 });
+    defer a.free(ga);
+    const img = try Image.fromMemory(a, ga);
+    defer img.deinit();
+    try std.testing.expectEqual(@as(u8, 16), img.bits_per_component);
+    try std.testing.expectEqual(@as(u8, 16), img.alpha_bits_per_component);
+    const color = try zlib.decompress(a, img.data, 4);
+    defer a.free(color);
+    try std.testing.expectEqualSlices(u8, &.{ 0x12, 0x34, 0xAB, 0xCD }, color);
+    const alpha = try zlib.decompress(a, img.alpha_data.?, 4);
+    defer a.free(alpha);
+    try std.testing.expectEqualSlices(u8, &.{ 0xFF, 0xFF, 0x01, 0x02 }, alpha);
+
+    // RGBA 16: one pixel (1, 2, 3, 0x8000)
+    const rgba = try testPng(1, 1, 16, 6, &.{ 0, 0, 1, 0, 2, 0, 3, 0x80, 0 });
+    defer a.free(rgba);
+    const img2 = try Image.fromMemory(a, rgba);
+    defer img2.deinit();
+    const c2 = try zlib.decompress(a, img2.data, 6);
+    defer a.free(c2);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 0, 2, 0, 3 }, c2);
+    const a2 = try zlib.decompress(a, img2.alpha_data.?, 2);
+    defer a.free(a2);
+    try std.testing.expectEqualSlices(u8, &.{ 0x80, 0 }, a2);
 }
