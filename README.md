@@ -567,7 +567,12 @@ Available conformance levels:
 - `.pdfa_1b` - PDF/A-1b (ISO 19005-1): No transparency, all fonts embedded
 - `.pdfa_2b` - PDF/A-2b (ISO 19005-2): Allows transparency, JPEG2000, layers
 
-Note: PDF/A-1b rejects transparency (opacity < 1.0) with `error.TransparencyNotAllowed`.
+Note: PDF/A-1b (based on PDF 1.4) rejects, in `drawImage` and the drawing
+calls, what it cannot represent - nothing is converted silently:
+- transparency: opacity < 1.0, and images with an alpha channel or PNG
+  `tRNS` transparency → `error.TransparencyNotAllowed`
+- 16-bit images → `error.BitDepthNotAllowed`: downsample to 8-bit first
+  (or use PDF/A-2b, which allows both)
 
 ### Encryption
 

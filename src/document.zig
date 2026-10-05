@@ -647,6 +647,7 @@ pub const Document = struct {
     /// Coordinates are from top-left origin.
     pub fn drawImage(self: *Document, image: *Image, rect: Rect) !void {
         try validate.check(rect);
+        try pdfa.validateImage(self.conformance, image.alpha_data != null, image.bits_per_component, image.alpha_bits_per_component);
         if (self.pages.items.len == 0) return error.NoPage;
 
         var page = &self.pages.items[self.current_page];

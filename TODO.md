@@ -141,4 +141,8 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 - [ ] Blend modes (Normal, Multiply, Screen, etc.) — partially used by COLR
   composite paints
 - [ ] Additional PDF/A levels (2a, 3a for tagged PDF)
+- [ ] Opt-in automatic downsampling of 16-bit images to 8-bit under
+  PDF/A-1b (a Document flag; today drawImage returns
+  error.BitDepthNotAllowed and the caller converts - user decision
+  2026-10-05: no silent conversion by default)
 - [ ] OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
