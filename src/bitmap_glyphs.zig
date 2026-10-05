@@ -95,7 +95,7 @@ pub const Sbix = struct {
         var best_off: usize = 0;
         var best_ppem: u16 = 0;
         for (0..num_strikes) |i| {
-            const off = readU32(data, 8 + i * 4);
+            const off: usize = readU32(data, 8 + i * 4);
             if (off + 4 > data.len) continue;
             // Strike: u16 ppem, u16 ppi, u32 glyphDataOffsets[numGlyphs+1].
             const ppem = readU16(data, off);
@@ -218,7 +218,8 @@ pub const Cbdt = struct {
         // (from the start of CBDT).
         const index_format = readU16(self.cblc, sub);
         const image_format = readU16(self.cblc, sub + 2);
-        const image_data_off = readU32(self.cblc, sub + 4);
+        // usize at the read: image_data_off + offset must not wrap in u32.
+        const image_data_off: usize = readU32(self.cblc, sub + 4);
         const rel: usize = gid - first;
 
         var glyph_off: usize = 0;
@@ -226,8 +227,8 @@ pub const Cbdt = struct {
         var index_metrics: ?BigMetrics = null;
         switch (index_format) {
             1 => { // u32 offsets, one per glyph in [first, last] plus a sentinel
-                const o0 = readU32(self.cblc, sub + 8 + rel * 4);
-                const o1 = readU32(self.cblc, sub + 8 + (rel + 1) * 4);
+                const o0: usize = readU32(self.cblc, sub + 8 + rel * 4);
+                const o1: usize = readU32(self.cblc, sub + 8 + (rel + 1) * 4);
                 if (o1 <= o0) return null; // no bitmap for this glyph
                 glyph_off = image_data_off + o0;
                 glyph_end = image_data_off + o1;
@@ -640,4 +641,38 @@ test "EBDT image formats 6 and 7 (big metrics, byte/bit-aligned mono)" {
 test "pngDimensions rejects non-PNG data" {
     try testing.expect(pngDimensions("not a png at all, sorry") == null);
     try testing.expect(pngDimensions("") == null);
+}
+
+// Overflow regression tests (2026-10-05 audit): each panicked before the fix.
+
+test "sbix strike offset near u32 max does not overflow" {
+    var data: [12]u8 = @splat(0);
+    std.mem.writeInt(u32, data[4..8], 1, .big); // numStrikes
+    std.mem.writeInt(u32, data[8..12], 0xFFFF_FFFC, .big); // strikeOffset
+    _ = Sbix.parse(&data, 1) catch {};
+}
+
+test "CBLC index format 1 and 3 offsets near u32 max do not overflow" {
+    var cblc: [24]u8 = @splat(0);
+    const cbdt: [16]u8 = @splat(0);
+    std.mem.writeInt(u16, cblc[0..2], 1, .big); // indexFormat 1
+    std.mem.writeInt(u16, cblc[2..4], 17, .big); // imageFormat
+    std.mem.writeInt(u32, cblc[4..8], 0xFFFF_FFFF, .big); // imageDataOffset
+    std.mem.writeInt(u32, cblc[8..12], 0, .big); // offset[0]
+    std.mem.writeInt(u32, cblc[12..16], 1, .big); // offset[1]
+    const c = Cbdt{ .cblc = &cblc, .cbdt = &cbdt, .index_array_off = 0, .num_subtables = 1, .strike_ppem = 16, .bit_depth = 32 };
+    try std.testing.expect(c.lookupInSubtable(0, 0, 0) == null);
+
+    std.mem.writeInt(u16, cblc[0..2], 3, .big); // indexFormat 3 (u16 offsets)
+    std.mem.writeInt(u32, cblc[4..8], 0xFFFF_0000, .big);
+    std.mem.writeInt(u16, cblc[8..10], 0, .big);
+    std.mem.writeInt(u16, cblc[10..12], 0xFFFF, .big);
+    try std.testing.expect(c.lookupInSubtable(0, 0, 0) == null);
+
+    std.mem.writeInt(u16, cblc[0..2], 4, .big); // indexFormat 4 (sparse pairs)
+    std.mem.writeInt(u32, cblc[8..12], 1, .big); // numGlyphs
+    std.mem.writeInt(u16, cblc[12..14], 0, .big); // gid 0
+    std.mem.writeInt(u16, cblc[14..16], 0, .big);
+    std.mem.writeInt(u16, cblc[18..20], 0xFFFF, .big); // sentinel offset
+    try std.testing.expect(c.lookupInSubtable(0, 0, 0) == null);
 }

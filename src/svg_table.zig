@@ -24,7 +24,7 @@ pub const SvgTable = struct {
     pub fn parse(data: []const u8) !SvgTable {
         // Header: u16 version, Offset32 svgDocumentListOffset, u32 reserved.
         if (data.len < 10) return error.InvalidSvgTable;
-        const doc_list_off = readU32(data, 2);
+        const doc_list_off: usize = readU32(data, 2);
         if (doc_list_off + 2 > data.len) return error.InvalidSvgTable;
         // SVGDocumentList: u16 numEntries, then SVGDocumentRecord[numEntries].
         // Clamped to what fits in the table (see DESIGN.md hardening rules).
@@ -109,4 +109,11 @@ test "SVG table fallback cases (SvgTest fixture)" {
     // Multi-glyph-range documents are unsupported (both covered gids).
     try testing.expect(table.docForGlyph(4) == null);
     try testing.expect(table.docForGlyph(5) == null);
+}
+
+test "SVG document list offset near u32 max does not overflow" {
+    // Overflow regression (2026-10-05 audit): panicked before the fix.
+    var data: [10]u8 = @splat(0);
+    std.mem.writeInt(u32, data[2..6], 0xFFFF_FFFE, .big);
+    try std.testing.expectError(error.InvalidSvgTable, SvgTable.parse(&data));
 }

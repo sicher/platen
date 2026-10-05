@@ -134,19 +134,19 @@ pub const GlyfContext = struct {
 
     fn glyphSlice(self: GlyfContext, gid: u16) ?[]const u8 {
         const start = getLocaOffset(self.loca, gid, self.loca_format);
-        const end = getLocaOffset(self.loca, gid + 1, self.loca_format);
+        const end = getLocaOffset(self.loca, @as(usize, gid) + 1, self.loca_format);
         if (end <= start or end > self.glyf.len) return null;
         return self.glyf[start..end];
     }
 };
 
-fn getLocaOffset(loca: []const u8, gid: u16, fmt: i16) usize {
+fn getLocaOffset(loca: []const u8, gid: usize, fmt: i16) usize {
     if (fmt == 0) {
-        const off = @as(usize, gid) * 2;
+        const off = gid * 2;
         if (off + 2 > loca.len) return 0;
         return @as(usize, readU16(loca, off)) * 2;
     } else {
-        const off = @as(usize, gid) * 4;
+        const off = gid * 4;
         if (off + 4 > loca.len) return 0;
         return readU32(loca, off);
     }
@@ -183,7 +183,7 @@ fn collectContours(
     const num_points: usize = @as(usize, end_pts[nc - 1]) + 1;
 
     // Skip instructions
-    const instr_len = readU16(g, pos);
+    const instr_len: usize = readU16(g, pos);
     pos += 2 + instr_len;
 
     // Read flags (with repeat)
@@ -604,9 +604,9 @@ pub const Colr = struct {
     }
 
     /// Absolute offset of the Paint for a LayerList entry.
-    pub fn layerPaint(self: Colr, index: u32) ?usize {
+    pub fn layerPaint(self: Colr, index: usize) ?usize {
         if (self.layer_list == 0 or index >= self.num_layers) return null;
-        const paint_off = readU32(self.data, self.layer_list + 4 + @as(usize, index) * 4);
+        const paint_off = readU32(self.data, self.layer_list + 4 + index * 4);
         return self.layer_list + paint_off;
     }
 
@@ -712,9 +712,9 @@ pub const PaintInterp = struct {
         switch (self.colr.paintFormat(abs)) {
             .colr_layers => {
                 const n = readU8(self.colr.data, abs + 1);
-                const first = readU32(self.colr.data, abs + 2);
+                const first: usize = readU32(self.colr.data, abs + 2);
                 for (0..n) |i| {
-                    const lp = self.colr.layerPaint(first + @as(u32, @intCast(i))) orelse continue;
+                    const lp = self.colr.layerPaint(first + i) orelse continue;
                     try self.renderPaint(lp, depth + 1);
                 }
             },
@@ -1554,4 +1554,40 @@ test "COLR v0 paint interpreter fills layers with palette colors (Bungee)" {
     // Exactly two fills, no gradients (v0 is flat solid layers only).
     try testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "f\n"));
     try testing.expectEqual(@as(usize, 0), fx.res.shadings.items.len);
+}
+
+// Overflow regression tests (2026-10-05 audit): each panicked before the fix.
+
+test "glyf slice for gid 0xFFFF does not overflow" {
+    const loca: [8]u8 = @splat(0);
+    const ctx = GlyfContext{ .glyf = &.{}, .loca = &loca, .loca_format = 1 };
+    try testing.expectEqual(@as(?[]const u8, null), ctx.glyphSlice(0xFFFF));
+}
+
+test "glyf instruction length near u16 max does not overflow" {
+    // One simple glyph: 1 contour ending at point 0, instructionLength 0xFFFF.
+    var glyf: [14]u8 = @splat(0);
+    std.mem.writeInt(i16, glyf[0..2], 1, .big);
+    std.mem.writeInt(u16, glyf[12..14], 0xFFFF, .big);
+    var loca: [8]u8 = @splat(0);
+    std.mem.writeInt(u32, loca[4..8], glyf.len, .big);
+    const ctx = GlyfContext{ .glyf = &glyf, .loca = &loca, .loca_format = 1 };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var out: std.ArrayListUnmanaged([]Pt) = .empty;
+    try collectContours(arena.allocator(), ctx, 0, Transform.identity, 0, &out);
+}
+
+test "PaintColrLayers with firstLayerIndex near u32 max does not overflow" {
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
+    // PaintColrLayers: format 1, numLayers 2, firstLayerIndex 0xFFFFFFFF.
+    const paint = [_]u8{ 1, 2, 0xFF, 0xFF, 0xFF, 0xFF };
+    var interp = fx.interp();
+    interp.colr = std.mem.zeroes(Colr);
+    interp.colr.data = &paint;
+    interp.colr.layer_list = 1;
+    interp.colr.num_layers = 0xFFFF_FFFF;
+    try interp.renderPaint(0, 0);
 }
