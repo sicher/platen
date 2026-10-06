@@ -299,10 +299,22 @@ wrongly (clips to white), and shares platen's tRNS gap - agreement between
 two libraries is not correctness. The `pngsuite` integration test keeps
 three explicit lists, each enforced in both directions (a listed entry
 that starts working fails the test, so lists cannot go stale):
-`pngsuite_pending` (decode errors expected: Adam7 interlacing, 16-bit
-with alpha), `pngsuite_fpdf2_wrong` (skipped in the fpdf2 pixel
-comparison only), `pngsuite_truth_gaps` (tRNS color keys on gray/RGB
-not applied yet). Corrupt `x*` files are a unit test in images.zig.
+`pngsuite_pending` (expected decode errors), `pngsuite_fpdf2_wrong`
+(skipped in the fpdf2 pixel comparison only) and `pngsuite_truth_gaps`.
+Since 0.10.0 pending and truth gaps are empty: all 161 files match the
+truth. Corrupt `x*` files are a unit test in images.zig.
+
+**The comparator is tested too**: `scripts/test_compare_pdfs.py` runs as
+part of `zig build test` (via testing.zig). It decides whether every
+reference test passes, so a blind spot there hides failures - it used to
+compare fonts only when both pages had some, and read a qpdf failure as
+"no fonts".
+
+**Test-run inputs**: build.zig declares every file under test/ (except
+test/output) and the comparator scripts as file inputs of the test run
+(`addFileInputsUnder`), so the build cache re-runs tests when a reference
+PDF, fixture or script changes. Without that, a corrupted reference
+passed from cache.
 
 **Running one test**: `zig test --test-filter` only collects tests from
 files some matching test pulls in. To run a single test in a file that
@@ -311,6 +323,11 @@ the root: `zig test -lc src/opentype.zig --test-filter "..."`. A filtered
 run reporting only `platen.test_0` ran nothing. Files that import
 document.zig (via version.zig) also need the version build option, which
 only `zig build` provides - use `zig build test` for those.
+
+**Package contents**: build.zig.zon `.paths` lists what a dependent
+fetches (sources, build files, license, docs) and `.gitattributes`
+export-ignore keeps tests, fixtures and tools out of release archives:
+0.4 MB fetched instead of 45 MB.
 
 **Version** is single-sourced from build.zig.zon: build.zig passes it as
 the `build_options` module and src/version.zig re-exports it, so
@@ -416,7 +433,7 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 |----------|---------|
 | `write(str)` | Write at cursor position |
 | `writeAt(x, y, str)` | Write at specific position |
-| `writeStyled(&region, *StyledText, opts)` | Styled text in region, returns overflow |
+| `writeStyled(&region, *StyledText, style, opts)` | Styled text in region, returns overflow |
 | `write(&region, str, .{ .measure_only = true })` | Measure layout without rendering |
 
 ### Text Opacity
@@ -610,12 +627,30 @@ const FlowOptions = struct {
 ```zig
 fn write(self: *Document, text: []const u8) !void
 fn writeAt(self: *Document, x: f64, y: f64, text: []const u8) !void
-fn writeStyled(self: *Document, box: *Region, text: *StyledText, opts: ParagraphOptions) !WriteResult
+fn writeStyled(self: *Document, region: *Region, text: *StyledText, style: TextStyle, opts: ParagraphOptions) !WriteResult
 fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 
 /// Draw text box's border/fill (without text)
 fn drawTextBox(self: *Document, box: *const TextBox) !void
 ```
+
+### StyledText span overrides (0.11.0)
+
+`StyledText.append(text, TextStyleOptions)`: every span field is an
+optional override of the base `TextStyle` passed to `writeStyled`
+(color, decoration, bold, italic); null inherits. `TextStyleOptions.resolve(base)`
+is the one place that merges them. Before, spans carried a full color
+(default black) and decoration (default none), so the base color and
+underline never reached the page.
+
+- The base style is kept *raw* (not normalized to a variant font) so a
+  span's bold/italic resolves through the base font's family, exactly as
+  `TextStyle.bold/.italic` do; `.bold = false` turns an inherited bold off.
+- Widths are measured per resolved span (bold is wider), so line breaking
+  sees the real font.
+- `Document.checkVariant` validates every span's variant up front:
+  `error.FontVariantNotLoaded` comes before any command is emitted or the
+  region cursor moves.
 
 ### Usage Patterns
 
@@ -648,7 +683,7 @@ var st = doc.createStyledText();
 defer st.deinit();
 try st.append(text, .{});
 
-const result = try doc.writeStyled(&box, &st, .{});
+const result = try doc.writeStyled(&box, &st, style, .{});
 if (result.overflow != null) {
     try doc.addPage(null);
     box = doc.getPageTextBox();
@@ -666,7 +701,7 @@ defer st.deinit();
 try st.append(text, .{});
 
 for ([_]*TextBox{ &left, &right }) |box| {
-    const result = try doc.writeStyled(box, &st, .{});
+    const result = try doc.writeStyled(box, &st, style, .{});
     if (result.overflow == null) break;
 }
 // result.overflow still has text? Add page, repeat...
@@ -1145,8 +1180,8 @@ Use structs with sensible defaults for optional parameters:
 var st = doc.createStyledText();
 defer st.deinit();
 try st.append(text, .{});
-_ = try doc.writeStyled(&box, &st, .{});  // all defaults
-_ = try doc.writeStyled(&box, &st, .{ .alignment = .justify });
+_ = try doc.writeStyled(&box, &st, style, .{});  // all defaults
+_ = try doc.writeStyled(&box, &st, style, .{ .alignment = .justify });
 ```
 
 ## Zig Compatibility Notes
