@@ -28,7 +28,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 
 ## Performance
 
-Two benchmarks on Apple Silicon (release build), measuring different workloads: one large document, and many small documents.
+Two benchmarks on an Apple M1 Pro (8 cores, release build; medians of 3 runs, measured 2026-10-06), measuring different workloads: one large document, and many small documents.
 
 ### One large document
 
@@ -38,15 +38,15 @@ Two benchmarks on Apple Silicon (release build), measuring different workloads: 
 |-----------|------|
 | Font loading | <1ms |
 | Simple text | 2ms |
-| OpenType shaping | 12ms |
-| Unicode/marks | 6ms |
+| OpenType shaping | 11ms |
+| Unicode/marks | 4ms |
 | Text flow | 2ms |
 | Drawing shapes | 13ms |
-| Color emoji | 4ms |
+| Color emoji | 3ms |
 | PDF output | 33ms |
-| **Total** | **74ms** (~1500 pages/sec) |
+| **Total** | **70ms** (~1570 pages/sec) |
 
-Setting `doc.compress_threads = 8` compresses streams (page contents, font subsets) on worker threads during `output()`: PDF output drops to 19ms and the total to ~59ms on the same hardware, with byte-identical output. Requires a thread-safe allocator.
+Setting `doc.compress_threads = 8` compresses streams (page contents, font subsets) on worker threads during `output()`: PDF output drops to 18ms and the total to ~54ms on the same hardware, with byte-identical output. Requires a thread-safe allocator.
 
 ### Many small documents (invoice throughput)
 
@@ -54,11 +54,11 @@ Setting `doc.compress_threads = 8` compresses streams (page contents, font subse
 
 | Mode | Latency | Throughput |
 |------|---------|------------|
-| Uncompressed, 1 thread | 0.50ms | ~2000 PDFs/sec |
-| Uncompressed, 1 thread, shared assets | 0.32ms | ~3100 PDFs/sec |
-| Uncompressed, 8 threads | 0.11ms | ~9100 PDFs/sec |
-| Uncompressed, 8 threads, shared assets | 0.05ms | **~19000 PDFs/sec** |
-| Compressed (level 1), 1 thread | 0.94ms | ~1060 PDFs/sec |
+| Uncompressed, 1 thread | 0.48ms | ~2,060 PDFs/sec |
+| Uncompressed, 1 thread, shared assets | 0.30ms | ~3,350 PDFs/sec |
+| Uncompressed, 8 threads | 0.11ms | ~9,500 PDFs/sec |
+| Uncompressed, 8 threads, shared assets | 0.06ms | **~17,700 PDFs/sec** |
+| Compressed (level 1), 1 thread | 0.90ms | ~1,100 PDFs/sec |
 
 By default every document pays the full stateless cost: fonts are re-parsed, shaped, and subset per PDF, and the SVG is re-parsed per PDF. **Shared assets** (`--shared` in the benchmark) parse fonts and SVGs once via caller-owned `FontFace`/`Svg` and reuse them across documents and threads — output stays byte-identical.
 

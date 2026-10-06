@@ -142,8 +142,10 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   re-runs the suite instead of serving a cached pass.
 - [x] **StyledText: bold/italic per span** (done 2026-10-06): optional
   TextStyleOptions.bold/.italic, inheriting like color/decoration.
-- [ ] **Re-measure threaded benchmarks** (README 8-thread figures are from
-  July; 2026-10 runs were on a loaded machine).
+- [x] **Benchmarks re-measured** (2026-10-06, M1 Pro, medians of 3): all
+  modes match or beat July except 8 threads + shared assets, ~17,700/s
+  (runs 16-18k) vs the README's old ~19,000 - partly background load;
+  the README now states what was measured.
 - [x] **veraPDF stays off the CI runner** (user decision 2026-10-06): the
   PDF/A test skips in CI and runs locally where veraPDF is installed.
 - [x] **"Test gaps" closed by analysis** (2026-10-06): both paths are
