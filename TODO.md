@@ -146,9 +146,14 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   July; 2026-10 runs were on a loaded machine).
 - [x] **veraPDF stays off the CI runner** (user decision 2026-10-06): the
   PDF/A test skips in CI and runs locally where veraPDF is installed.
-- [ ] **Test gaps:** the three embedded.zig getLocaOffset(gid + 1) call
-  sites have no dedicated crafted-font test (shared function is tested);
-  the WinAnsi format-0 cmap one-byte guard is unreachable with real fonts.
+- [x] **"Test gaps" closed by analysis** (2026-10-06): both paths are
+  unreachable through the public API, so a test would only exercise
+  hand-set internal state. embedded.zig getLocaOffset(gid + 1): every
+  subsetter drops gid >= numGlyphs (<= 65535) first, so gid + 1 <= 0xFFFF;
+  the usize widening stays as defense (the shared function and the
+  ttf_subset/colr sites are tested with 0xFFFF). WinAnsi format-0 cmap
+  guard: WinAnsi text only reaches markCharsUsed (cid_used_glyphs is
+  identity-only), so the subset is <= 253 glyphs.
 
 ## Code health
 
