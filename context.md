@@ -30,6 +30,12 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   actions/runs` (+ `/{id}/logs` as zip), token URVERK_TOKEN or keychain
   `urverk-token`. No re-run API: re-run in the web UI. Runner has
   poppler + qpdf; veraPDF stays off it (user decision).
+- Runner Zig cache grows unbounded (Zig never evicts). Decided: keep CI
+  warm (cache is content-keyed; cold runs add nothing); later, pin
+  ZIG_LOCAL/GLOBAL_CACHE_DIR on the runner host + a scheduled wipe when
+  idle. Deferred by the user.
+- Other urverk projects need the 0.17 migration: DESIGN.md "Zig
+  Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
 
 ## What We Did (Session 2026-10-06 #28 - releases, devkit, spans)
 - **Releases 0.10.0, 0.10.1, 0.11.0.** Adopted the devkit main/dev model;
