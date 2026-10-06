@@ -1988,10 +1988,7 @@ pub const Document = struct {
                         const span = text.spans.items[big_word.start_span];
                         const fm = self.getFontMetricsStyled(style);
 
-                        // Apply span color to style for rendering
-                        var render_style = style;
-                        render_style.color = span.style.color;
-                        render_style.decoration = span.style.decoration;
+                        const render_style = span.style.resolve(style);
 
                         // Recursively break at soft-hyphens until the remaining fits
                         var remaining_start: u16 = big_word.start_offset;
@@ -2077,10 +2074,7 @@ pub const Document = struct {
                         const fm = self.getFontMetricsStyled(style);
                         const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
 
-                        // Apply span color to style for rendering
-                        var render_style = style;
-                        render_style.color = span.style.color;
-                        render_style.decoration = span.style.decoration;
+                        const render_style = span.style.resolve(style);
 
                         const x_pos = region.x + region.padding.left;
                         _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
@@ -2110,10 +2104,7 @@ pub const Document = struct {
                     const fm = self.getFontMetricsStyled(style);
                     var did_break = false;
 
-                    // Apply span color to style for rendering
-                    var render_style = style;
-                    render_style.color = span.style.color;
-                    render_style.decoration = span.style.decoration;
+                    const render_style = span.style.resolve(style);
 
                     while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
                         const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
@@ -2364,9 +2355,10 @@ pub const Document = struct {
         // This allows rendering as one string with word_spacing
         const first_word = text.words.items[line_start];
         const first_span = text.spans.items[first_word.start_span];
+        const first_style = first_span.style.resolve(base_style);
         var is_single_style = first_word.start_span == first_word.end_span and
-            !first_span.style.decoration.underline and
-            !first_span.style.decoration.strikethrough;
+            !first_style.decoration.underline and
+            !first_style.decoration.strikethrough;
 
         if (is_single_style and line_end > line_start + 1) {
             // Check all words have same span
@@ -2384,11 +2376,7 @@ pub const Document = struct {
             const last_word = text.words.items[line_end - 1];
             const line_text = first_span.text[first_word.start_offset..last_word.end_offset];
 
-            // Apply span color to base style
-            var render_style = base_style;
-            render_style.color = first_span.style.color;
-            render_style.decoration = first_span.style.decoration;
-            try self.writeWithWordSpacingStyled(x_start, y_pos, line_text, extra_word_spacing, render_style);
+            try self.writeWithWordSpacingStyled(x_start, y_pos, line_text, extra_word_spacing, first_style);
 
             region.cursor_y += line_height;
             return;
@@ -2449,8 +2437,9 @@ pub const Document = struct {
 
                 if (seg_end > seg_start) {
                     const segment = span.text[seg_start..seg_end];
-                    const seg_underline = span.style.decoration.underline;
-                    const seg_strike = span.style.decoration.strikethrough;
+                    const seg_style = span.style.resolve(base_style);
+                    const seg_underline = seg_style.decoration.underline;
+                    const seg_strike = seg_style.decoration.strikethrough;
 
                     // Check if decoration state changed
                     if (seg_underline != in_underline or seg_strike != in_strikethrough) {
@@ -2461,16 +2450,15 @@ pub const Document = struct {
                         // Start new run if needed
                         if (seg_underline or seg_strike) {
                             deco_start_x = current_x;
-                            deco_color = span.style.color;
+                            deco_color = seg_style.color;
                         }
                         in_underline = seg_underline;
                         in_strikethrough = seg_strike;
                     }
 
-                    // Apply span style to base style (no decoration - handled separately)
-                    var render_style = base_style;
-                    render_style.color = span.style.color;
-                    render_style.decoration = .none; // Don't draw per-segment
+                    // Decoration is drawn per run below, not per segment.
+                    var render_style = seg_style;
+                    render_style.decoration = .none;
 
                     // Get segment width and render using writeAt
                     const seg_width = self.getTextWidthStyled(segment, base_style);

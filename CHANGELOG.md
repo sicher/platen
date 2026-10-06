@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `writeBlock`, and `writeStyled` with plain spans, ignored the base
+  style's `color` and `decoration` (text came out black, without
+  underline). `TextStyleOptions` fields are now optional overrides: `null`
+  inherits from the base style. Existing calls such as
+  `.{ .color = platen.Color.blue }` compile unchanged.
+
+### Internal
+
+- The PDF comparator behind the reference tests compares fonts whenever
+  either page has any (a page that lost all its fonts used to pass) and
+  treats qpdf failures as errors; it has its own tests in the suite.
+
 ## 0.10.1 — 2026-10-06
 
 ### Fixed
