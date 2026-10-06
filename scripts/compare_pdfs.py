@@ -88,14 +88,15 @@ def extract_fonts_qpdf(pdf_path: str) -> list[set[str]]:
         capture_output=True,
         text=True,
     )
-    # Exit code 0 = success, 3 = success with warnings
+    # Exit code 0 = success, 3 = success with warnings. Anything else is an
+    # error: returning "no fonts" here silently disabled the font check.
     if result.returncode not in (0, 3):
-        return []  # qpdf not available or failed
+        raise RuntimeError(f"qpdf failed on {pdf_path} (exit {result.returncode}): {result.stderr.strip()[:300]}")
 
     try:
         data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"qpdf --json output for {pdf_path} is not JSON: {e}")
 
     # Build mapping from object ref to font BaseFont name
     font_names = {}  # "obj:X 0 R" -> normalized font name
@@ -215,8 +216,10 @@ def compare_pages(expected: Page, actual: Page, tolerance: float, page_num: int,
     if abs(expected.height - actual.height) > 0.01:
         diffs.append(f"Page {page_num}: height differs ({expected.height} vs {actual.height})")
 
-    # Compare fonts used on this page (skip if fonts are in Form XObjects)
-    if not skip_fonts and expected.fonts and actual.fonts:
+    # Compare fonts used on this page (skip if fonts are in Form XObjects).
+    # Whenever EITHER side has fonts: a page that lost all of them is a
+    # difference, not a reason to skip the check.
+    if not skip_fonts and (expected.fonts or actual.fonts):
         missing = expected.fonts - actual.fonts
         extra = actual.fonts - expected.fonts
         if missing:

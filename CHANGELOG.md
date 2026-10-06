@@ -1,13 +1,46 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 — 2026-10-06
+
+### Added
+
+- **Bold and italic per span:** `StyledText` spans take `.bold` and
+  `.italic` (`st.append("word", .{ .bold = true })`), resolved through the
+  base font's family like `TextStyle.bold`/`.italic`; widths use each
+  span's variant, so wrapping and justification stay exact. A variant the
+  family lacks is `error.FontVariantNotLoaded`, before anything is drawn.
+
+### Fixed
+
+- `writeBlock`, and `writeStyled` with plain spans, ignored the base
+  style's `color` and `decoration` (text came out black, without
+  underline). `TextStyleOptions` fields are now optional overrides: `null`
+  inherits from the base style. Existing calls such as
+  `.{ .color = platen.Color.blue }` compile unchanged.
+
+### Internal
+
+- The PDF comparator behind the reference tests compares fonts whenever
+  either page has any (a page that lost all its fonts used to pass) and
+  treats qpdf failures as errors; it has its own tests in the suite.
+- `zig build test` re-runs when a reference PDF, fixture or comparator
+  script changes (they are declared inputs); before, a regenerated or even
+  corrupted reference could be served a cached pass.
+
+## 0.10.1 — 2026-10-06
+
+### Fixed
 
 - **Package size:** dependents fetch ~0.4 MB instead of 45 MB and cache
   ~1.8 MB instead of ~100 MB. `build.zig.zon` `.paths` lists only the
   library (build files, `src/`, README, LICENSE, CHANGELOG), and
   `.gitattributes` keeps tests, fixtures, examples and dev scripts out of
   the forge's source archives. Clones are unchanged. The package hash
-  changes with this release.
+  differs from 0.10.0.
+
+### Internal
+
+- CI prints the test summary, so runs show test counts and skips.
 
 ## 0.10.0 — 2026-10-06
 

@@ -107,7 +107,7 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 - [ ] Interactive forms (AcroForm), digital signatures, file attachments —
   each large and additive; explicitly out of 1.0 scope.
 - [ ] Tables stay out of scope: platen is a low-level library; regions +
-  writeLine compose into tables (see invoice benchmark).
+  writeBlock compose into tables (see invoice benchmark).
 
 ## Watch items
 
@@ -128,6 +128,34 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   rendering mutates shared `EmbeddedFont` state (kern cache, glyph
   tracking); needs per-thread or frozen font caches first. Payoff ~10-15ms
   on the 110-page bench after parallel stream compression (done).
+
+## Open after session #27 (2026-10-06)
+
+- [x] **Comparator font check had silent gaps** (fixed 2026-10-06). A
+  missing qpdf already failed loudly; the real gaps: fonts were compared
+  only when BOTH pages had some (a page that lost all its fonts passed),
+  and a qpdf failure on a file became "no fonts". Both are now
+  differences/errors; scripts/test_compare_pdfs.py covers them and runs in
+  `zig build test`. The scripts are declared inputs of the test run step,
+  so editing them re-runs the tests. Since 2026-10-06 so are all files
+  under test/ (except test/output): a changed reference or fixture
+  re-runs the suite instead of serving a cached pass.
+- [x] **StyledText: bold/italic per span** (done 2026-10-06): optional
+  TextStyleOptions.bold/.italic, inheriting like color/decoration.
+- [x] **Benchmarks re-measured** (2026-10-06, M1 Pro, medians of 3): all
+  modes match or beat July except 8 threads + shared assets, ~17,700/s
+  (runs 16-18k) vs the README's old ~19,000 - partly background load;
+  the README now states what was measured.
+- [x] **veraPDF stays off the CI runner** (user decision 2026-10-06): the
+  PDF/A test skips in CI and runs locally where veraPDF is installed.
+- [x] **"Test gaps" closed by analysis** (2026-10-06): both paths are
+  unreachable through the public API, so a test would only exercise
+  hand-set internal state. embedded.zig getLocaOffset(gid + 1): every
+  subsetter drops gid >= numGlyphs (<= 65535) first, so gid + 1 <= 0xFFFF;
+  the usize widening stays as defense (the shared function and the
+  ttf_subset/colr sites are tested with 0xFFFF). WinAnsi format-0 cmap
+  guard: WinAnsi text only reaches markCharsUsed (cid_used_glyphs is
+  identity-only), so the subset is <= 253 glyphs.
 
 ## Code health
 

@@ -72,6 +72,16 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);
+    // The reference tests shell out to these scripts; declare them as
+    // inputs so editing a script re-runs the tests instead of serving a
+    // cached pass that never exercised the change.
+    for ([_][]const u8{ "scripts/compare_pdfs.py", "scripts/test_compare_pdfs.py" }) |script| {
+        run_lib_tests.addFileInput(b.path(script));
+    }
+    // Same for the fixtures the tests read at runtime (reference PDFs,
+    // fonts, images, PngSuite truth): without this, regenerating or
+    // corrupting a reference still produced a cached "pass".
+    addFileInputsUnder(b, run_lib_tests, "test");
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_tests.step);
 
@@ -114,4 +124,21 @@ pub fn build(b: *std.Build) void {
 
     const invoice_bench_step = b.step("bench-invoice", "Run invoice throughput benchmark (use -Doptimize=ReleaseFast)");
     invoice_bench_step.dependOn(&run_invoice_bench.step);
+}
+
+/// Declare every file under `dir` (relative to the build root) as an input
+/// of `run`, except test/output, which the tests themselves write (as an
+/// input it would invalidate the cache on every run).
+fn addFileInputsUnder(b: *std.Build, run: *std.Build.Step.Run, dir: []const u8) void {
+    const io = b.graph.io;
+    var root = b.root.root_dir.handle.openDir(io, b.pathJoin(&.{ b.root.sub_path, dir }), .{ .iterate = true }) catch |err|
+        std.debug.panic("cannot open {s}/ to declare test inputs: {t}", .{ dir, err });
+    defer root.close(io);
+    var walker = root.walk(b.allocator) catch @panic("OOM");
+    defer walker.deinit();
+    while (walker.next(io) catch |err| std.debug.panic("walking {s}/: {t}", .{ dir, err })) |entry| {
+        if (std.mem.startsWith(u8, entry.path, "output")) continue;
+        if (entry.kind != .file) continue;
+        run.addFileInput(b.path(b.pathJoin(&.{ dir, entry.path })));
+    }
 }

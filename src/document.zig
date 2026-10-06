@@ -1842,12 +1842,22 @@ pub const Document = struct {
         style: TextStyle,
     };
 
-    /// Measure function adapter for StyledText.prepare()
+    /// Measure function adapter for StyledText.prepare(). Each span is
+    /// measured in its own resolved style: bold/italic change widths.
     fn styledTextMeasure(text: []const u8, span_style: TextStyleOptions, ctx: *anyopaque) f64 {
         const measure_ctx: *MeasureContext = @ptrCast(@alignCast(ctx));
-        // Text width doesn't depend on color/decoration, just the font
-        _ = span_style;
-        return measure_ctx.doc.getTextWidthStyled(text, measure_ctx.style);
+        return measure_ctx.doc.getTextWidthStyled(text, span_style.resolve(measure_ctx.style));
+    }
+
+    /// error.FontVariantNotLoaded when `style` asks for a bold/italic variant
+    /// its font does not have (the same rule writeAt enforces).
+    fn checkVariant(self: *Document, style: TextStyle) !void {
+        const normalized = try self.normalizeStyle(style);
+        switch (normalized.font) {
+            .embedded => if (normalized.bold or normalized.italic) return error.FontVariantNotLoaded,
+            .embedded_family => _ = try normalized.resolveEmbeddedFont(),
+            else => {},
+        }
     }
 
     /// Write styled text into a region with alignment support.
@@ -1857,7 +1867,13 @@ pub const Document = struct {
         try validate.checkEach(text.spans.items);
         try self.checkFontConformance(style_in);
         if (self.pages.items.len == 0) return error.NoPage;
-        const style = try self.normalizeStyle(style_in);
+        // The base stays un-normalized: span bold/italic overrides need the
+        // font FAMILY to pick a variant, which normalizing would resolve away.
+        // Every consumer below (metrics, width, writeAt) normalizes itself.
+        // Base and every span variant are validated before anything changes.
+        const style = style_in;
+        try self.checkVariant(style);
+        for (text.spans.items) |span| try self.checkVariant(span.style.resolve(style));
 
         const line_height = style.size * opts.line_height;
         const line_width = region.contentWidth();
@@ -1972,7 +1988,7 @@ pub const Document = struct {
 
                 // Try to break at soft-hyphen if available
                 if (big_word.break_points) |break_points| {
-                    const hyphen_width = self.getTextWidthStyled("-", style);
+                    const hyphen_width = self.getTextWidthStyled("-", text.spans.items[big_word.start_span].style.resolve(style));
 
                     // Find best break point that fits
                     var best_bp: ?styled_text.BreakPoint = null;
@@ -1988,10 +2004,7 @@ pub const Document = struct {
                         const span = text.spans.items[big_word.start_span];
                         const fm = self.getFontMetricsStyled(style);
 
-                        // Apply span color to style for rendering
-                        var render_style = style;
-                        render_style.color = span.style.color;
-                        render_style.decoration = span.style.decoration;
+                        const render_style = span.style.resolve(style);
 
                         // Recursively break at soft-hyphens until the remaining fits
                         var remaining_start: u16 = big_word.start_offset;
@@ -2000,7 +2013,7 @@ pub const Document = struct {
                             const remaining = span.text[remaining_start..big_word.end_offset];
                             var remaining_buf: [512]u8 = undefined;
                             const clean_remaining = stripSoftHyphensTo(remaining, &remaining_buf);
-                            const remaining_width = self.getTextWidthStyled(clean_remaining, style);
+                            const remaining_width = self.getTextWidthStyled(clean_remaining, span.style.resolve(style));
 
                             // If remaining fits on one line, render it and we're done
                             if (remaining_width <= line_width + 0.01) {
@@ -2021,7 +2034,7 @@ pub const Document = struct {
                                 const segment = span.text[remaining_start..bp.offset];
                                 var seg_buf: [512]u8 = undefined;
                                 const clean_seg = stripSoftHyphensTo(segment, &seg_buf);
-                                const seg_width = self.getTextWidthStyled(clean_seg, style);
+                                const seg_width = self.getTextWidthStyled(clean_seg, span.style.resolve(style));
                                 if (seg_width + hyphen_width <= line_width + 0.01) {
                                     best_break_offset = bp.offset;
                                 } else {
@@ -2034,7 +2047,7 @@ pub const Document = struct {
                                 const prefix = span.text[remaining_start..break_offset];
                                 var prefix_buf: [512]u8 = undefined;
                                 const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
-                                const prefix_width = self.getTextWidthStyled(clean_prefix, style);
+                                const prefix_width = self.getTextWidthStyled(clean_prefix, span.style.resolve(style));
 
                                 const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                                 const x_pos = region.x + region.padding.left;
@@ -2077,10 +2090,7 @@ pub const Document = struct {
                         const fm = self.getFontMetricsStyled(style);
                         const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
 
-                        // Apply span color to style for rendering
-                        var render_style = style;
-                        render_style.color = span.style.color;
-                        render_style.decoration = span.style.decoration;
+                        const render_style = span.style.resolve(style);
 
                         const x_pos = region.x + region.padding.left;
                         _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
@@ -2110,17 +2120,14 @@ pub const Document = struct {
                     const fm = self.getFontMetricsStyled(style);
                     var did_break = false;
 
-                    // Apply span color to style for rendering
-                    var render_style = style;
-                    render_style.color = span.style.color;
-                    render_style.decoration = span.style.decoration;
+                    const render_style = span.style.resolve(style);
 
                     while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
                         const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
                         const x_pos = region.x + region.padding.left;
 
                         // Check if remaining text fits on line
-                        const remaining_width = self.getTextWidthStyled(remaining_text, style);
+                        const remaining_width = self.getTextWidthStyled(remaining_text, render_style);
                         if (remaining_width <= line_width + 0.01) {
                             // Fits - render it and we're done
                             _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
@@ -2221,7 +2228,7 @@ pub const Document = struct {
             if (line_end == line_start and line_start < n) {
                 const big_word = text.words.items[line_start];
                 if (big_word.break_points) |break_points| {
-                    const hyphen_width = self.getTextWidthStyled("-", base_style);
+                    const hyphen_width = self.getTextWidthStyled("-", text.spans.items[big_word.start_span].style.resolve(base_style));
 
                     // Count actual lines needed for recursive soft-hyphen breaking
                     const span = text.spans.items[big_word.start_span];
@@ -2232,7 +2239,7 @@ pub const Document = struct {
                         const remaining = span.text[remaining_start..big_word.end_offset];
                         var remaining_buf: [512]u8 = undefined;
                         const clean_remaining = stripSoftHyphensTo(remaining, &remaining_buf);
-                        const remaining_width = self.getTextWidthStyled(clean_remaining, base_style);
+                        const remaining_width = self.getTextWidthStyled(clean_remaining, span.style.resolve(base_style));
 
                         // If remaining fits on one line, count it and we're done
                         if (remaining_width <= line_width + 0.01) {
@@ -2247,7 +2254,7 @@ pub const Document = struct {
                             const segment = span.text[remaining_start..bp.offset];
                             var seg_buf: [512]u8 = undefined;
                             const clean_seg = stripSoftHyphensTo(segment, &seg_buf);
-                            const seg_width = self.getTextWidthStyled(clean_seg, base_style);
+                            const seg_width = self.getTextWidthStyled(clean_seg, span.style.resolve(base_style));
                             if (seg_width + hyphen_width <= line_width + 0.01) {
                                 best_break_offset = bp.offset;
                             } else {
@@ -2279,7 +2286,7 @@ pub const Document = struct {
                     var char_break_lines: usize = 0;
 
                     while (remaining_text.len > 0) {
-                        const remaining_width = self.getTextWidthStyled(remaining_text, base_style);
+                        const remaining_width = self.getTextWidthStyled(remaining_text, span.style.resolve(base_style));
                         if (remaining_width <= line_width + 0.01) {
                             char_break_lines += 1;
                             break;
@@ -2364,9 +2371,10 @@ pub const Document = struct {
         // This allows rendering as one string with word_spacing
         const first_word = text.words.items[line_start];
         const first_span = text.spans.items[first_word.start_span];
+        const first_style = first_span.style.resolve(base_style);
         var is_single_style = first_word.start_span == first_word.end_span and
-            !first_span.style.decoration.underline and
-            !first_span.style.decoration.strikethrough;
+            !first_style.decoration.underline and
+            !first_style.decoration.strikethrough;
 
         if (is_single_style and line_end > line_start + 1) {
             // Check all words have same span
@@ -2384,11 +2392,7 @@ pub const Document = struct {
             const last_word = text.words.items[line_end - 1];
             const line_text = first_span.text[first_word.start_offset..last_word.end_offset];
 
-            // Apply span color to base style
-            var render_style = base_style;
-            render_style.color = first_span.style.color;
-            render_style.decoration = first_span.style.decoration;
-            try self.writeWithWordSpacingStyled(x_start, y_pos, line_text, extra_word_spacing, render_style);
+            try self.writeWithWordSpacingStyled(x_start, y_pos, line_text, extra_word_spacing, first_style);
 
             region.cursor_y += line_height;
             return;
@@ -2449,8 +2453,9 @@ pub const Document = struct {
 
                 if (seg_end > seg_start) {
                     const segment = span.text[seg_start..seg_end];
-                    const seg_underline = span.style.decoration.underline;
-                    const seg_strike = span.style.decoration.strikethrough;
+                    const seg_style = span.style.resolve(base_style);
+                    const seg_underline = seg_style.decoration.underline;
+                    const seg_strike = seg_style.decoration.strikethrough;
 
                     // Check if decoration state changed
                     if (seg_underline != in_underline or seg_strike != in_strikethrough) {
@@ -2461,19 +2466,18 @@ pub const Document = struct {
                         // Start new run if needed
                         if (seg_underline or seg_strike) {
                             deco_start_x = current_x;
-                            deco_color = span.style.color;
+                            deco_color = seg_style.color;
                         }
                         in_underline = seg_underline;
                         in_strikethrough = seg_strike;
                     }
 
-                    // Apply span style to base style (no decoration - handled separately)
-                    var render_style = base_style;
-                    render_style.color = span.style.color;
-                    render_style.decoration = .none; // Don't draw per-segment
+                    // Decoration is drawn per run below, not per segment.
+                    var render_style = seg_style;
+                    render_style.decoration = .none;
 
                     // Get segment width and render using writeAt
-                    const seg_width = self.getTextWidthStyled(segment, base_style);
+                    const seg_width = self.getTextWidthStyled(segment, seg_style);
                     _ = try self.writeAt(.{ .x = current_x, .y = y_pos }, segment, render_style, .{});
                     current_x += seg_width;
                 }

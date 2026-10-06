@@ -652,3 +652,22 @@ test "structural comparison with valid PDFs" {
     try std.testing.expect(result.equal);
     try std.testing.expectEqual(CompareMode.structural, result.mode_used);
 }
+
+test "PDF comparator self-tests (scripts/test_compare_pdfs.py)" {
+    // The comparator decides every reference test; its own blind spots
+    // (fonts compared only when both pages had some, qpdf failures read
+    // as "no fonts") passed silently until it had tests of its own.
+    const result = std.process.run(std.testing.allocator, std.testing.io, .{
+        .argv = &.{ "python3", "scripts/test_compare_pdfs.py" },
+    }) catch return error.SkipZigTest; // python3 not installed
+    defer std.testing.allocator.free(result.stdout);
+    defer std.testing.allocator.free(result.stderr);
+    const ok = switch (result.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+    if (!ok) {
+        std.debug.print("comparator self-tests failed:\n{s}{s}\n", .{ result.stdout, result.stderr });
+        return error.TestFailed;
+    }
+}

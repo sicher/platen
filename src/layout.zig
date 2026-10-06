@@ -216,11 +216,29 @@ pub const TextDecoration = struct {
 
 /// Options for text styling (color, decoration).
 /// Per-span style for StyledText.append() (font and size come from the base style).
+/// Per-span style for StyledText.append(): each field is an override of
+/// the base TextStyle passed to writeStyled/writeBlock, and null inherits.
+/// (Spans used to carry a full color/decoration defaulting to black/none,
+/// which silently replaced the base style's.)
 pub const TextStyleOptions = struct {
-    /// Text color.
-    color: Color = Color.black,
-    /// Text decoration (underline, strikethrough).
-    decoration: TextDecoration = .none,
+    /// Text color; null inherits the base style's.
+    color: ?Color = null,
+    /// Underline/strikethrough; null inherits the base style's.
+    decoration: ?TextDecoration = null,
+    /// Bold/italic, with the same meaning as TextStyle.bold/.italic (the
+    /// variant is resolved through the base font's family); null inherits.
+    bold: ?bool = null,
+    italic: ?bool = null,
+
+    /// The base style with this span's overrides applied.
+    pub fn resolve(self: TextStyleOptions, base: TextStyle) TextStyle {
+        var resolved = base;
+        if (self.color) |c| resolved.color = c;
+        if (self.decoration) |d| resolved.decoration = d;
+        if (self.bold) |b| resolved.bold = b;
+        if (self.italic) |i| resolved.italic = i;
+        return resolved;
+    }
 };
 
 /// Document margins in points.

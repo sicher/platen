@@ -1,12 +1,16 @@
 # platen Context
 
 ## Current Focus
-**0.10.0 released (2026-10-06)** - tag v0.10.0 on main, CHANGELOG.md,
-forge release. 1.0.0 still held by user decision.
+**0.10.1 released (2026-10-06)** (0.10.0 the same day) - tags on main,
+CHANGELOG.md, forge releases with notes. 1.0.0 still held by user decision.
 **Branch model (devkit, adopted 2026-10-06): work on `dev`.** `main` moves
 only via `.tools/devkit/devkit release X.Y.Z` (merge dev, set version in
 build.zig.zon, test, tag) or `devkit promote`; then push main + tag, and
 `devkit sync-dev` on dev. Never commit to main directly.
+**Release notes are required** (devkit CHANGELOG option, 2026-10-06): write
+them under `## Unreleased` in CHANGELOG.md on dev as work lands; `devkit
+release` dates the section (refuses without it), and after pushing,
+`.tools/devkit/devkit publish` creates the forge release with that text.
 Zig **0.17**, zero dependencies, 508 tests, silent clean runs; PDF/A
 output veraPDF-validated in the suite.
 

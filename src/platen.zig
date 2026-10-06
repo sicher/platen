@@ -164,6 +164,7 @@ test {
     _ = @import("embedded_hostile_test.zig");
     _ = @import("resource_names_test.zig");
     _ = @import("pdfa_conformance_test.zig");
+    _ = @import("styled_span_test.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");
