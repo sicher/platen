@@ -137,8 +137,9 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   and a qpdf failure on a file became "no fonts". Both are now
   differences/errors; scripts/test_compare_pdfs.py covers them and runs in
   `zig build test`. The scripts are declared inputs of the test run step,
-  so editing them re-runs the tests (reference PDFs and fixtures are
-  not yet - a regenerated reference can still be served a cached pass).
+  so editing them re-runs the tests. Since 2026-10-06 so are all files
+  under test/ (except test/output): a changed reference or fixture
+  re-runs the suite instead of serving a cached pass.
 - [x] **StyledText: bold/italic per span** (done 2026-10-06): optional
   TextStyleOptions.bold/.italic, inheriting like color/decoration.
 - [ ] **Re-measure threaded benchmarks** (README 8-thread figures are from

@@ -23,6 +23,9 @@
 - The PDF comparator behind the reference tests compares fonts whenever
   either page has any (a page that lost all its fonts used to pass) and
   treats qpdf failures as errors; it has its own tests in the suite.
+- `zig build test` re-runs when a reference PDF, fixture or comparator
+  script changes (they are declared inputs); before, a regenerated or even
+  corrupted reference could be served a cached pass.
 
 ## 0.10.1 — 2026-10-06
 
