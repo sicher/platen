@@ -107,7 +107,7 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 - [ ] Interactive forms (AcroForm), digital signatures, file attachments —
   each large and additive; explicitly out of 1.0 scope.
 - [ ] Tables stay out of scope: platen is a low-level library; regions +
-  writeLine compose into tables (see invoice benchmark).
+  writeBlock compose into tables (see invoice benchmark).
 
 ## Watch items
 
@@ -128,6 +128,21 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   rendering mutates shared `EmbeddedFont` state (kern cache, glyph
   tracking); needs per-thread or frozen font caches first. Payoff ~10-15ms
   on the 110-page bench after parallel stream compression (done).
+
+## Open after session #27 (2026-10-06)
+
+- [ ] **Silent test gap: no qpdf -> fonts not compared.** compare_pdfs.py's
+  extract_fonts_qpdf returns [] when qpdf is missing, so reference tests
+  pass without checking fonts. Make it a visible skip/failure.
+- [ ] **StyledText: bold/italic per span.** Spans carry only color and
+  decoration (TextStyleOptions); a word cannot be bold mid-paragraph.
+  Likely the most user-visible gap.
+- [ ] **Re-measure threaded benchmarks** (README 8-thread figures are from
+  July; 2026-10 runs were on a loaded machine).
+- [ ] **veraPDF on the CI runner** (optional) - the PDF/A test skips there.
+- [ ] **Test gaps:** the three embedded.zig getLocaOffset(gid + 1) call
+  sites have no dedicated crafted-font test (shared function is tested);
+  the WinAnsi format-0 cmap one-byte guard is unreachable with real fonts.
 
 ## Code health
 
