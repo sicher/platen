@@ -131,9 +131,14 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
 
 ## Open after session #27 (2026-10-06)
 
-- [ ] **Silent test gap: no qpdf -> fonts not compared.** compare_pdfs.py's
-  extract_fonts_qpdf returns [] when qpdf is missing, so reference tests
-  pass without checking fonts. Make it a visible skip/failure.
+- [x] **Comparator font check had silent gaps** (fixed 2026-10-06). A
+  missing qpdf already failed loudly; the real gaps: fonts were compared
+  only when BOTH pages had some (a page that lost all its fonts passed),
+  and a qpdf failure on a file became "no fonts". Both are now
+  differences/errors; scripts/test_compare_pdfs.py covers them and runs in
+  `zig build test`. The scripts are declared inputs of the test run step,
+  so editing them re-runs the tests (reference PDFs and fixtures are
+  not yet - a regenerated reference can still be served a cached pass).
 - [ ] **StyledText: bold/italic per span.** Spans carry only color and
   decoration (TextStyleOptions); a word cannot be bold mid-paragraph.
   Likely the most user-visible gap.

@@ -72,6 +72,12 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);
+    // The reference tests shell out to these scripts; declare them as
+    // inputs so editing a script re-runs the tests instead of serving a
+    // cached pass that never exercised the change.
+    for ([_][]const u8{ "scripts/compare_pdfs.py", "scripts/test_compare_pdfs.py" }) |script| {
+        run_lib_tests.addFileInput(b.path(script));
+    }
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_tests.step);
 
