@@ -143,7 +143,8 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   TextStyleOptions.bold/.italic, inheriting like color/decoration.
 - [ ] **Re-measure threaded benchmarks** (README 8-thread figures are from
   July; 2026-10 runs were on a loaded machine).
-- [ ] **veraPDF on the CI runner** (optional) - the PDF/A test skips there.
+- [x] **veraPDF stays off the CI runner** (user decision 2026-10-06): the
+  PDF/A test skips in CI and runs locally where veraPDF is installed.
 - [ ] **Test gaps:** the three embedded.zig getLocaOffset(gid + 1) call
   sites have no dedicated crafted-font test (shared function is tested);
   the WinAnsi format-0 cmap one-byte guard is unreachable with real fonts.
