@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Package size:** dependents fetch ~0.4 MB instead of 45 MB and cache
+  ~1.8 MB instead of ~100 MB. `build.zig.zon` `.paths` lists only the
+  library (build files, `src/`, README, LICENSE, CHANGELOG), and
+  `.gitattributes` keeps tests, fixtures, examples and dev scripts out of
+  the forge's source archives. Clones are unchanged. The package hash
+  changes with this release.
+
 ## 0.10.0 — 2026-10-06
 
 First tagged release; earlier history is in git. **Requires Zig 0.17.**

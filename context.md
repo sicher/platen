@@ -1,15 +1,16 @@
 # platen Context
 
 ## Current Focus
-**Hardening pass done (session #27, 2026-10-04/05); nothing pushed yet.**
-Main is at 0.9.0, held pre-1.0 by user decision (1.0 ceremony: bump
-build.zig.zon + version.zig, tag, push tag, restore README tarball URL).
-Zig **0.17**, zero dependencies, 507 tests, silent clean runs; PDF/A
+**0.10.0 released (2026-10-06)** - tag v0.10.0 on main, CHANGELOG.md,
+forge release. 1.0.0 still held by user decision.
+**Branch model (devkit, adopted 2026-10-06): work on `dev`.** `main` moves
+only via `.tools/devkit/devkit release X.Y.Z` (merge dev, set version in
+build.zig.zon, test, tag) or `devkit promote`; then push main + tag, and
+`devkit sync-dev` on dev. Never commit to main directly.
+Zig **0.17**, zero dependencies, 508 tests, silent clean runs; PDF/A
 output veraPDF-validated in the suite.
 
 ## What's Next
-- **Push** - check the CI runner (`zig-arm64`, `.forgejo/workflows`) has
-  Zig 0.17 first; the code no longer builds with 0.16.
 - Fuzzing: a 1-hour run (8 workers, ReleaseSafe, machine under load)
   found no crashes after the audit fixes. Run it with its own cache dir -
   `zig build --cache-dir <dir> test --fuzz` - concurrent builds in the
@@ -18,6 +19,8 @@ output veraPDF-validated in the suite.
 - TODO.md: opt-in 16-bit -> 8-bit downsampling flag for PDF/A-1b; the
   post-1.0 roadmap (bidi/CJK, Tr modes, Form XObjects, parallel pages,
   document.zig split).
+- CI: Forgejo Actions (`/api/v1/repos/urverk/platen/actions/runs`, token
+  URVERK_TOKEN or keychain `urverk-token`), runner label zig-arm64.
 
 ## What We Did (Session 2026-10-04/05 #27 - Zig 0.17, hardening, PngSuite)
 - **Tooling**: setup-tools clones devkit/simgrep/zigmap into .tools/;

@@ -1,6 +1,6 @@
 .{
     .name = .platen,
-    .version = "0.10.0",
+    .version = "0.10.1",
     .dependencies = .{},
     .paths = .{""},
     .fingerprint = 0x84c0b5791b44e68e,

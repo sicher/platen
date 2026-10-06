@@ -1,0 +1,11 @@
+# Source archives (the forge's release tarballs, which `zig fetch` downloads)
+# carry the library, not the development tree. Cloning is unaffected.
+# Keep in sync with .paths in build.zig.zon.
+test/ export-ignore
+examples/ export-ignore
+scripts/ export-ignore
+.forgejo/ export-ignore
+.devkit.conf export-ignore
+CLAUDE.md export-ignore
+context.md export-ignore
+TODO.md export-ignore
