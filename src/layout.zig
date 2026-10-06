@@ -225,12 +225,18 @@ pub const TextStyleOptions = struct {
     color: ?Color = null,
     /// Underline/strikethrough; null inherits the base style's.
     decoration: ?TextDecoration = null,
+    /// Bold/italic, with the same meaning as TextStyle.bold/.italic (the
+    /// variant is resolved through the base font's family); null inherits.
+    bold: ?bool = null,
+    italic: ?bool = null,
 
     /// The base style with this span's overrides applied.
     pub fn resolve(self: TextStyleOptions, base: TextStyle) TextStyle {
         var resolved = base;
         if (self.color) |c| resolved.color = c;
         if (self.decoration) |d| resolved.decoration = d;
+        if (self.bold) |b| resolved.bold = b;
+        if (self.italic) |i| resolved.italic = i;
         return resolved;
     }
 };

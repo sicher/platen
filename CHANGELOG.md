@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- **Bold and italic per span:** `StyledText` spans take `.bold` and
+  `.italic` (`st.append("word", .{ .bold = true })`), resolved through the
+  base font's family like `TextStyle.bold`/`.italic`; widths use each
+  span's variant, so wrapping and justification stay exact. A variant the
+  family lacks is `error.FontVariantNotLoaded`, before anything is drawn.
+
 ### Fixed
 
 - `writeBlock`, and `writeStyled` with plain spans, ignored the base

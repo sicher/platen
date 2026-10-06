@@ -237,11 +237,12 @@ if (result.overflow) |_| {
 _ = try doc.writeBlock(&region, "Centered heading", style, .{ .alignment = .center });
 _ = try doc.writeBlock(&region, "Right-aligned text", style, .{ .alignment = .right });
 
-// Styled text for mixed color/decoration within a paragraph
-// (spans share the base style's font, size, and weight)
+// Styled text for mixed styles within a paragraph: each span overrides
+// the base style passed to writeStyled (unset fields inherit)
 var st = doc.createStyledText();
 defer st.deinit();
 try st.append("Normal text ", .{});
+try st.append("bold text ", .{ .bold = true });
 try st.append("underlined text ", .{ .decoration = .{ .underline = true } });
 try st.append("colored text", .{ .color = platen.Color.blue });
 
@@ -752,7 +753,7 @@ document. For fonts shared across documents, see
 | `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Incremental write with word wrapping (cursor advances) |
 | `writeBlock(*Region, str, TextStyle, BlockOptions) -> WriteResult` | Wrapped block with alignment (cursor to next line) |
 | `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping and alignment |
-| `createStyledText() -> StyledText` | Create builder for mixed colors/decorations within a paragraph |
+| `createStyledText() -> StyledText` | Create builder for mixed styles within a paragraph |
 
 ### Text Measurement
 
@@ -785,14 +786,18 @@ decorations, using the same transparency mechanism as shapes. Values below `1.0`
 require transparency support and are rejected by PDF/A-1b
 (`error.TransparencyNotAllowed`).
 
-For mixed colors and decorations within a paragraph, use `StyledText`.
-Spans carry `TextStyleOptions` (color, decoration); font, size, and
-bold/italic come from the base style passed to `writeStyled`:
+For mixed styles within a paragraph, use `StyledText`. Each span's
+`TextStyleOptions` (`color`, `decoration`, `bold`, `italic`) overrides the
+base style passed to `writeStyled`; fields left unset inherit it. Bold and
+italic pick the variant through the base font's family, as `TextStyle`
+does (a variant the family lacks is `error.FontVariantNotLoaded`):
 
 ```zig
 var st = doc.createStyledText();
 defer st.deinit();
 try st.append("Normal ", .{});
+try st.append("bold ", .{ .bold = true });
+try st.append("italic ", .{ .italic = true });
 try st.append("underlined ", .{ .decoration = .{ .underline = true } });
 try st.append("red", .{ .color = platen.Color.red });
 ```
@@ -940,7 +945,7 @@ platen.pt_per_cm    // 28.34...
 - `TextDecoration` - Flags struct: `.{ .underline = true }`, `.{ .strikethrough = true }`, or both; `TextDecoration.none`
 - `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
 - `WriteAtOptions` / `WriteOptions` / `BlockOptions` / `ParagraphOptions` - Options for `writeAt` / `write` / `writeBlock` / `writeStyled`
-- `TextStyleOptions` - Per-span style in `StyledText` (color, decoration)
+- `TextStyleOptions` - Per-span overrides in `StyledText` (`color`, `decoration`, `bold`, `italic`; unset fields inherit the base style)
 - `WriteResult` - Result with lines_written, overflow text, and bounding rect
 - `TextMetrics` / `FontMetrics` - Measurement results
 

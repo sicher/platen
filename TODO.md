@@ -139,9 +139,8 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   `zig build test`. The scripts are declared inputs of the test run step,
   so editing them re-runs the tests (reference PDFs and fixtures are
   not yet - a regenerated reference can still be served a cached pass).
-- [ ] **StyledText: bold/italic per span.** Spans carry only color and
-  decoration (TextStyleOptions); a word cannot be bold mid-paragraph.
-  Likely the most user-visible gap.
+- [x] **StyledText: bold/italic per span** (done 2026-10-06): optional
+  TextStyleOptions.bold/.italic, inheriting like color/decoration.
 - [ ] **Re-measure threaded benchmarks** (README 8-thread figures are from
   July; 2026-10 runs were on a loaded machine).
 - [ ] **veraPDF on the CI runner** (optional) - the PDF/A test skips there.
