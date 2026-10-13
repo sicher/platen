@@ -37,6 +37,20 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 - Other urverk projects need the 0.17 migration: DESIGN.md "Zig
   Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
 
+## What We Did (Session 2026-10-13 #29 - font collections, system fonts)
+- **Requested by fdxview** (a peer session; fdxview uses platen as a path
+  dependency): .ttc/.otc support (`font_collection.zig`) and system font
+  lookup (`system_fonts.zig`) that returns standalone sfnt bytes;
+  `Document.loadFontFromCollection`; CLI font-faces/extract-face/
+  find-font. Commit 13b2ec4 on dev (not pushed); API sent to fdxview,
+  which will drop its own src/sysfonts.zig. See DESIGN.md.
+- **Fixed** (47b4a06): `.win_ansi` TrueType subsets dropped composite
+  glyphs (Inter i/j/:/; came out blank).
+- **Open:** the reference comparator never caught that bug. The semantic
+  mode (pdftotext) can't see blank glyphs, so a render/pixel check is
+  needed. Kerning (kern format 0 / GPOS pairs) exposed for measuring is
+  fdxview's "nice to have", not started.
+
 ## What We Did (Session 2026-10-06 #28 - releases, devkit, spans)
 - **Releases 0.10.0, 0.10.1, 0.11.0.** Adopted the devkit main/dev model;
   version single-sourced from build.zig.zon (build option -> version.zig).
