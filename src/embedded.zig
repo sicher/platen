@@ -1579,6 +1579,16 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         if (entry.value_ptr.* < font_glyphs) try glyph_set.put(allocator, entry.value_ptr.*, {});
     }
 
+    // Get original table data
+    const orig_glyf = font.getTable("glyf".*) orelse return error.MissingTable;
+    const orig_loca = font.getTable("loca".*) orelse return error.MissingTable;
+    const orig_hmtx = font.getTable("hmtx".*) orelse return error.MissingTable;
+
+    const loca_format = head.index_to_loc_format; // 0=short, 1=long
+
+    // Composites (e.g. i = dotlessi + dot) need their components too.
+    try expandCompositeGlyphs(allocator, &glyph_set, orig_glyf, orig_loca, loca_format, font_glyphs);
+
     // Sort glyph IDs and create old→new mapping
     var glyph_ids = try allocator.alloc(u16, glyph_set.count());
     defer allocator.free(glyph_ids);
@@ -1592,20 +1602,13 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
     std.mem.sort(u16, glyph_ids, {}, std.sort.asc(u16));
 
     // Create old_gid → new_gid mapping
-    var gid_map = std.AutoHashMapUnmanaged(u16, u16){};
+    var gid_map: std.AutoArrayHashMapUnmanaged(u16, u16) = .empty;
     defer gid_map.deinit(allocator);
     for (glyph_ids, 0..) |old_gid, new_gid| {
         try gid_map.put(allocator, old_gid, @intCast(new_gid));
     }
 
     const num_glyphs: u16 = @intCast(glyph_ids.len);
-
-    // Get original table data
-    const orig_glyf = font.getTable("glyf".*) orelse return error.MissingTable;
-    const orig_loca = font.getTable("loca".*) orelse return error.MissingTable;
-    const orig_hmtx = font.getTable("hmtx".*) orelse return error.MissingTable;
-
-    const loca_format = head.index_to_loc_format; // 0=short, 1=long
 
     // Build new glyf data
     var new_glyf = std.ArrayListUnmanaged(u8).empty;
@@ -1624,8 +1627,12 @@ fn createSubsetTTF(allocator: std.mem.Allocator, emb: *const EmbeddedFont) ![]co
         const glyph_end = getLocaOffset(orig_loca, @as(usize, old_gid) + 1, loca_format);
 
         if (glyph_end > glyph_start and glyph_end <= orig_glyf.len) {
-            const glyph_data = orig_glyf[glyph_start..glyph_end];
-            try new_glyf.appendSlice(allocator, glyph_data);
+            const start = new_glyf.items.len;
+            try new_glyf.appendSlice(allocator, orig_glyf[glyph_start..glyph_end]);
+            const glyph_data = new_glyf.items[start..];
+            if (glyph_data.len >= 2 and std.mem.readInt(i16, glyph_data[0..2], .big) < 0) {
+                try rewriteCompositeGlyphIDs(glyph_data, &gid_map);
+            }
         }
     }
 
@@ -2389,6 +2396,39 @@ test "font subsetting" {
 
     // Subset should be significantly smaller (< 50% of original for small char sets)
     try std.testing.expect(subset.len < emb.data.len / 2);
+}
+
+test "WinAnsi subset keeps composite glyph components" {
+    // Inter's i, j, colon and semicolon are composites (e.g. i = dotlessi +
+    // dot). The WinAnsi subsetter copied the composites without their
+    // components, so they rendered blank.
+    const allocator = std.testing.allocator;
+    const emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer emb.deinit();
+    emb.encoding = .win_ansi;
+    emb.markCharsUsed("ij:;");
+    try emb.generateSubset();
+
+    const sub = try ttf.Font.parse(emb.getFontData());
+    const glyf = sub.getTable("glyf".*).?;
+    const loca = sub.getTable("loca".*).?;
+    const loca_format = sub.head.?.index_to_loc_format;
+    const num_glyphs = sub.maxp.?.num_glyphs;
+    var composites: usize = 0;
+    for ("ij:;") |c| {
+        const gid = sub.getGlyphId(c).?;
+        const comps = ttf_subset.getCompositeComponents(glyf, loca, loca_format, gid);
+        if (comps[0] == 0) continue; // simple glyph
+        composites += 1;
+        for (comps) |comp| {
+            if (comp == 0) break;
+            try std.testing.expect(comp < num_glyphs);
+            const start = getLocaOffset(loca, comp, loca_format);
+            const end = getLocaOffset(loca, @as(usize, comp) + 1, loca_format);
+            try std.testing.expect(end > start); // has an outline
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 4), composites);
 }
 
 test "subset is valid TTF" {

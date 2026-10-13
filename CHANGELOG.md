@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `.win_ansi` TrueType fonts dropped composite glyphs: the WinAnsi
+  subsetter copied a composite (e.g. Inter's i, j, colon = base + dot)
+  without its components and kept the original component IDs, so those
+  characters rendered blank. Components are now included and remapped, as
+  the `.identity` path already did.
+
 ## 0.11.0 — 2026-10-06
 
 ### Added
