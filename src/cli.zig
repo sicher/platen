@@ -3,6 +3,7 @@
 const std = @import("std");
 const platen = @import("platen.zig");
 const integration_tests = @import("integration_tests.zig");
+const cli_fonts = @import("cli_fonts.zig");
 
 var stdout_buffer: [4096]u8 = undefined;
 var stdout_writer: std.Io.File.Writer = undefined;
@@ -60,6 +61,12 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
         try showFontInfo(allocator, args[2]);
+    } else if (std.mem.eql(u8, cmd, "font-faces")) {
+        try cli_fonts.fontFaces(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "extract-face")) {
+        try cli_fonts.extractFace(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "find-font")) {
+        try cli_fonts.findFont(init.io, allocator, stdout, args[2..], init.environ_map.get("HOME"));
     } else if (std.mem.eql(u8, cmd, "embed-test")) {
         // Generate a PDF with embedded font
         const font_path = if (args.len > 2) args[2] else "test/fonts/Courier Prime/Courier Prime.ttf";
@@ -143,6 +150,10 @@ fn printUsage() !void {
         \\                         --semantic    Use pdftotext semantic comparison
         \\                         (default: auto - structural first, then semantic)
         \\  font-info <ttf>      Show TrueType font information
+        \\  font-faces <file>    List the faces of a font or collection (.ttc)
+        \\  extract-face <ttc> <index> <out>  Write one face as a standalone font
+        \\  find-font <family> [--bold] [--italic] [--dir DIR]... [--out FILE]
+        \\                       Find an installed font (whole family without flags)
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
         \\  mark-test [ttf] [out]   Test GPOS mark positioning (diacritics)
         \\  calt-test [ttf] [out]   Test GSUB contextual alternates (arrows, ligatures)

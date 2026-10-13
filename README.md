@@ -208,6 +208,35 @@ _ = try doc.writeAt(.{ .x = 50, .y = 90 }, "Bold text", strong, .{});
 _ = try doc.writeAt(.{ .x = 50, .y = 110 }, "Bold italic text", strong_emphasis, .{});
 ```
 
+### Font Collections and System Fonts
+
+```zig
+// One face of a TrueType collection (.ttc); the document keeps a copy.
+const ttc = try std.Io.Dir.cwd().readFileAlloc(io, "Helvetica.ttc", allocator, .limited(64 << 20));
+defer allocator.free(ttc);
+const helvetica_bold = try doc.loadFontFromCollection(ttc, 1, .identity);
+
+// List faces, or extract one as standalone .ttf bytes.
+const faces = try platen.listFaces(allocator, ttc);
+defer platen.font_collection.freeFaces(allocator, faces);
+const face_bytes = try platen.extractFace(allocator, ttc, 1);
+defer allocator.free(face_bytes);
+
+// Find an installed family (macOS, Linux, Windows font folders).
+var georgia = try platen.findSystemFontFamily(io, allocator, "Georgia", .{
+    .home = init.environ_map.get("HOME"), // adds the per-user folders
+}) orelse return error.FontNotInstalled;
+defer georgia.deinit(allocator); // after the document is done with the bytes
+const font = try doc.loadFontFamilyFromMemory(georgia.memoryOptions(.identity).?);
+
+// Or a single face: .data is a standalone sfnt for loadFontFromMemory.
+const bold = try platen.findSystemFont(io, allocator, "Helvetica", .{ .bold = true }, .{});
+```
+
+The CLI exposes the same: `platen font-faces <file>`, `platen
+extract-face <ttc> <index> <out>`, `platen find-font <family> [--bold]
+[--italic] [--dir DIR]... [--out FILE]`.
+
 ### Text Flow with Word Wrapping
 
 ```zig
@@ -742,6 +771,7 @@ document. For fonts shared across documents, see
 | `loadFontFromMemory(data, encoding) -> Font` | Load TTF/OTF font from memory buffer (borrows data) |
 | `loadFontFamily(FontFamilyOptions) -> Font` | Load font family from files |
 | `loadFontFamilyFromMemory(FontFamilyMemoryOptions) -> Font` | Load font family from memory buffers |
+| `loadFontFromCollection(data, index, encoding) -> Font` | Load face `index` of a .ttc/.otc (copies the face; data only read during the call) |
 | `setFeature(Feature, bool)` | Set an OpenType feature for all fonts in this document (current and future) |
 | `getFontMetricsStyled(TextStyle) -> FontMetrics` | Get metrics (ascender, descender, etc.) for a style |
 

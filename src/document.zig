@@ -11,6 +11,7 @@ pub const objects = @import("objects.zig");
 pub const fonts = @import("fonts.zig");
 pub const metrics = @import("metrics.zig");
 pub const ttf = @import("ttf.zig");
+pub const font_collection = @import("font_collection.zig");
 pub const embedded = @import("embedded.zig");
 pub const color = @import("color.zig");
 pub const layout = @import("layout.zig");
@@ -385,6 +386,21 @@ pub const Document = struct {
     /// documents is the intended high-throughput pattern.)
     pub fn loadFontFromMemory(self: *Document, data: []const u8, encoding: FontEncoding) !Font {
         const emb = try EmbeddedFont.fromMemory(self.allocator, data, false);
+        emb.encoding = encoding;
+        try self.registerFont(emb);
+        return Font{ .embedded = emb };
+    }
+
+    /// Load face `index` of a TrueType/OpenType collection (.ttc/.otc).
+    /// A plain .ttf/.otf is a one-face collection (index 0).
+    /// Lifetime: `data` is only read during the call - the face is copied
+    /// out as a standalone font owned by the Document.
+    pub fn loadFontFromCollection(self: *Document, data: []const u8, index: u32, encoding: FontEncoding) !Font {
+        const face = try font_collection.extractFace(self.allocator, data, index);
+        const emb = EmbeddedFont.fromMemory(self.allocator, face, true) catch |err| {
+            self.allocator.free(face);
+            return err;
+        };
         emb.encoding = encoding;
         try self.registerFont(emb);
         return Font{ .embedded = emb };

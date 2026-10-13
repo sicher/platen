@@ -37,6 +37,7 @@ const test_cases = [_]TestCase{
     .{ .name = "all_fonts", .generate = generateAllFontsPdf },
     .{ .name = "multi_page", .generate = generateMultiPagePdf },
     .{ .name = "embedded_fonts", .generate = generateEmbeddedFontsPdf },
+    .{ .name = "font_collection", .generate = generateFontCollectionPdf }, // faces loaded from Inter.ttc
     .{ .name = "cid_fonts", .generate = generateCIDFontsPdf },
     .{ .name = "inter_fonts", .generate = generateInterFontsPdf },
     .{ .name = "gentium_diacritics", .generate = generateGentiumDiacriticsPdf },
@@ -249,6 +250,33 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     // Character set
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@[\\]^_`{|}~", .{ .font = courier_regular, .size = 10 }, .{});
 
+    return doc.output();
+}
+
+fn generateFontCollectionPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+
+    const ttc = try std.Io.Dir.cwd().readFileAlloc(app_io, "test/fonts/Inter/Inter.ttc", allocator, .limited(64 << 20));
+    defer allocator.free(ttc); // the Document keeps its own copy of each face
+
+    // (face index, font): Inter Regular/Bold, Inter Display Italic/Bold Italic.
+    const indices = [_]u32{ 0, 14, 21, 33 };
+    var faces: [indices.len]platen.Font = undefined;
+    for (indices, &faces) |index, *font| font.* = try doc.loadFontFromCollection(ttc, index, .win_ansi);
+
+    try doc.addPage(.{});
+    var y: f64 = 50;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Font Collection (Inter.ttc)", .{ .font = faces[1], .size = 24 }, .{});
+    y += 36;
+    for (indices, faces) |index, font| {
+        var buf: [96]u8 = undefined;
+        const line = try std.fmt.bufPrint(&buf, "Face {d}: The quick brown fox jumps over the lazy dog.", .{index});
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, line, .{ .font = font, .size = 12 }, .{});
+        y += 18;
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789", .{ .font = font, .size = 12 }, .{});
+        y += 26;
+    }
     return doc.output();
 }
 

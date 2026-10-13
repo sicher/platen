@@ -12,6 +12,8 @@ pub const objects = @import("objects.zig");
 pub const fonts = @import("fonts.zig");
 pub const metrics = @import("metrics.zig");
 pub const ttf = @import("ttf.zig");
+pub const font_collection = @import("font_collection.zig");
+pub const system_fonts = @import("system_fonts.zig");
 pub const embedded = @import("embedded.zig");
 pub const color = @import("color.zig");
 pub const layout = @import("layout.zig");
@@ -39,6 +41,16 @@ pub const FontFamily = document.FontFamily;
 pub const EmbeddedFont = document.EmbeddedFont;
 pub const FontFamilyOptions = Document.FontFamilyOptions;
 pub const FontFamilyMemoryOptions = Document.FontFamilyMemoryOptions;
+
+// Re-export font collection and system font lookup
+pub const FaceInfo = font_collection.FaceInfo;
+pub const extractFace = font_collection.extractFace;
+pub const listFaces = font_collection.listFaces;
+pub const FoundFont = system_fonts.FoundFont;
+pub const FoundFamily = system_fonts.FoundFamily;
+pub const SystemFontOptions = system_fonts.Options;
+pub const findSystemFont = system_fonts.find;
+pub const findSystemFontFamily = system_fonts.findFamily;
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
@@ -151,6 +163,8 @@ test {
     _ = fonts;
     _ = metrics;
     _ = ttf;
+    _ = font_collection;
+    _ = system_fonts;
     _ = embedded;
     _ = images;
     _ = xml;
