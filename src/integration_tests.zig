@@ -4008,6 +4008,23 @@ fn generatePdfa2bBroad(allocator: std.mem.Allocator) ![]u8 {
     return generatePdfaBroad(allocator, .pdfa_2b);
 }
 
+/// PDF/A with explicit creation/modification dates (time zone offset,
+/// UTC): they must reach XMP as the same instants (6.7.3).
+fn generatePdfaExplicitDates(allocator: std.mem.Allocator) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+    doc.setConformance(.pdfa_1b);
+    doc.setMetadata(.{
+        .title = "Explicit dates",
+        .creation_date = "D:20260101120000+02'00'",
+        .mod_date = "D:20260315083005Z",
+    });
+    try doc.addPage(.{});
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Explicit dates", .{ .font = inter, .size = 12 }, .{});
+    return doc.output();
+}
+
 test "integration: PDF/A output passes veraPDF" {
     // Skips when veraPDF is not installed. It was the only check that
     // would have caught the Zig 0.17 date regression (signed "+2026").
@@ -4018,6 +4035,7 @@ test "integration: PDF/A output passes veraPDF" {
         .{ .name = "pdfa_2b", .flavour = "2b", .generate = generatePdfa2bPdf },
         .{ .name = "pdfa_1b_broad", .flavour = "1b", .generate = generatePdfa1bBroad },
         .{ .name = "pdfa_2b_broad", .flavour = "2b", .generate = generatePdfa2bBroad },
+        .{ .name = "pdfa_1b_explicit_dates", .flavour = "1b", .generate = generatePdfaExplicitDates },
     };
     var failures: usize = 0;
     for (pdfa_cases) |c| {

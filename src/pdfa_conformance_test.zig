@@ -95,3 +95,61 @@ test "PDF/A rejects SVGs with text (rendered in standard fonts)" {
     const shapes = try doc.loadSvgFromMemory("<svg width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>");
     try doc.drawSvg(shapes, .{ .x = 10, .y = 10 });
 }
+
+/// Text between `open` and `close` after the first `open` in `pdf`.
+fn between(pdf: []const u8, open: []const u8, close: []const u8) ![]const u8 {
+    const start = (std.mem.indexOf(u8, pdf, open) orelse return error.TestUnexpectedResult) + open.len;
+    const len = std.mem.indexOf(u8, pdf[start..], close) orelse return error.TestUnexpectedResult;
+    return pdf[start..][0..len];
+}
+
+fn pdfaWithDates(meta: platen.DocumentMetadata) ![]u8 {
+    var doc = platen.Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.setConformance(.pdfa_1b);
+    doc.setMetadata(meta);
+    try doc.addPage(.{});
+    return doc.output();
+}
+
+test "PDF/A: explicit dates reach both /Info and XMP, as the same instants" {
+    // Explicit dates used to reach /Info only, while XMP got the clock:
+    // every PDF/A file with explicit dates failed veraPDF 6.7.3.
+    const pdf = try pdfaWithDates(.{
+        .creation_date = "D:20260101120000+02'00'",
+        .mod_date = "D:20260315083005Z",
+    });
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expectEqualStrings("D:20260101120000+02'00'", try between(pdf, "/CreationDate (", ")"));
+    try std.testing.expectEqualStrings("2026-01-01T12:00:00+02:00", try between(pdf, "<xmp:CreateDate>", "<"));
+    try std.testing.expectEqualStrings("D:20260315083005Z", try between(pdf, "/ModDate (", ")"));
+    try std.testing.expectEqualStrings("2026-03-15T08:30:05Z", try between(pdf, "<xmp:ModifyDate>", "<"));
+}
+
+test "PDF/A: automatic dates are one clock reading in /Info and XMP" {
+    // /Info and XMP each read the clock; a second boundary in between made
+    // CreateDate != CreationDate. Repeat to give a straddle a chance.
+    for (0..50) |_| {
+        const pdf = try pdfaWithDates(.{});
+        defer std.testing.allocator.free(pdf);
+        const info = try between(pdf, "/CreationDate (", ")");
+        var buf: [32]u8 = undefined;
+        const iso = @import("pdf_output.zig").pdfDateToIso(&buf, info) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqualStrings(iso, try between(pdf, "<xmp:CreateDate>", "<"));
+        try std.testing.expectEqualStrings(iso, try between(pdf, "<xmp:ModifyDate>", "<"));
+        try std.testing.expectEqualStrings(info, try between(pdf, "/ModDate (", ")"));
+    }
+}
+
+test "PDF/A rejects explicit dates that are not PDF dates; plain output keeps them" {
+    try std.testing.expectError(error.InvalidDate, pdfaWithDates(.{ .creation_date = "2026-01-01" }));
+    try std.testing.expectError(error.InvalidDate, pdfaWithDates(.{ .mod_date = "D:20261332" }));
+
+    var doc = platen.Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.setMetadata(.{ .creation_date = "2026-01-01" });
+    try doc.addPage(.{});
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expectEqualStrings("2026-01-01", try between(pdf, "/CreationDate (", ")"));
+}

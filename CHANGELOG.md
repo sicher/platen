@@ -28,6 +28,14 @@
   without its components and kept the original component IDs, so those
   characters rendered blank. Components are now included and remapped, as
   the `.identity` path already did.
+- PDF/A dates: `/Info` and XMP each read the clock, so a second boundary
+  between them made `CreationDate` and `xmp:CreateDate` differ and
+  veraPDF failed the file (6.7.3). `output()` now reads the clock once.
+  Explicit `metadata.creation_date`/`mod_date` reached `/Info` only, so
+  PDF/A with explicit dates was never compliant; they are now converted
+  to ISO 8601 for XMP (same precision and time zone). Under PDF/A an
+  explicit date that is not a valid PDF date fails with
+  `error.InvalidDate`.
 
 ## 0.11.0 — 2026-10-06
 
