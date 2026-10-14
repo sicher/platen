@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Font collections (.ttc/.otc):** `doc.loadFontFromCollection(data,
+  index, encoding)` loads one face of a collection (the Document keeps its
+  own copy). `platen.extractFace` rebuilds face N as a standalone font
+  (tables byte-identical, 4-byte aligned, checksums kept);
+  `platen.listFaces` / `font_collection.describeFace` give each face's
+  family, subfamily, PostScript name, weight, width and bold/italic.
+  A plain .ttf/.otf counts as a one-face collection.
+- **System font lookup:** `platen.findSystemFont(io, allocator, family,
+  .{ .bold, .italic }, opts)` and `platen.findSystemFontFamily` search the
+  platform font folders recursively and return caller-owned standalone
+  sfnt bytes (extracted from collections) with family, subfamily,
+  PostScript name, path and face index; `FoundFamily.memoryOptions()`
+  feeds `loadFontFamilyFromMemory`. Matching uses the name table
+  (typographic family, case-insensitive) and the subfamily; the per-user
+  folders come from `opts.home`, so the library stays stateless.
+- CLI: `font-faces`, `extract-face`, `find-font`.
+
+### Fixed
+
+- `.win_ansi` TrueType fonts dropped composite glyphs: the WinAnsi
+  subsetter copied a composite (e.g. Inter's i, j, colon = base + dot)
+  without its components and kept the original component IDs, so those
+  characters rendered blank. Components are now included and remapped, as
+  the `.identity` path already did.
+- PDF/A dates: `/Info` and XMP each read the clock, so a second boundary
+  between them made `CreationDate` and `xmp:CreateDate` differ and
+  veraPDF failed the file (6.7.3). `output()` now reads the clock once.
+  Explicit `metadata.creation_date`/`mod_date` reached `/Info` only, so
+  PDF/A with explicit dates was never compliant; they are now converted
+  to ISO 8601 for XMP (same precision and time zone). Under PDF/A an
+  explicit date that is not a valid PDF date fails with
+  `error.InvalidDate`.
+
 ## 0.11.0 — 2026-10-06
 
 ### Added

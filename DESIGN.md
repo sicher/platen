@@ -11,6 +11,8 @@
 - `metrics.zig` - Font metrics, text measurement, spacing
 - `writer.zig` - PDF serialization (header, objects, xref, trailer)
 - `ttf.zig` - TrueType/OpenType font parser
+- `font_collection.zig` - .ttc/.otc faces: count, extract, describe (names)
+- `system_fonts.zig` - Installed-font lookup by family/style
 - `embedded.zig` - Font embedding, subsetting, CID fonts
 - `opentype.zig` - OpenType GSUB/GPOS (ligatures, kerning, marks)
 - `ttf_subset.zig` - TTF subsetting helpers
@@ -25,7 +27,7 @@
 - `layout.zig` - Layout types (Point, TextBox, Margins, Padding)
 - `zlib.zig` - FlateDecode compression via std.compress.flate (zlib container)
 - `pdfa.zig` - PDF/A conformance (validation, XMP metadata, ICC profile)
-- `cli.zig` - Command line tool
+- `cli.zig` - Command line tool (`cli_fonts.zig`: font-faces, extract-face, find-font)
 
 ### PDF Structure
 Objects are numbered sequentially starting at 1:
@@ -177,6 +179,49 @@ endstream
 4. OpenType GSUB/GPOS (ligatures, kerning, mark positioning)
 5. COLR v1 / CPAL color fonts → PDF Type3 color fonts (color emoji)
 
+### Font Collections and System Fonts (session #29)
+
+Requested by fdxview (prints Final Draft scripts with installed fonts and
+reads advances/kerning/hhea from the bytes it embeds), so the lookup
+returns **standalone sfnt bytes**, not a loaded Font.
+
+- **Extraction** (`font_collection.extractFace`): copies the face's
+  offset table + directory, then each table in directory order, 4-byte
+  aligned with zero padding, offsets rewritten; checksums and
+  searchRange fields are kept (table bytes unchanged). head
+  checkSumAdjustment and a DSIG table are left stale - irrelevant for PDF
+  embedding, which subsets anyway. A plain sfnt is a one-face collection
+  (index 0, copied as is), so callers need no branch.
+- **Names** (`describeFace`): family = ID 16 else 1, subfamily = 17 else 2,
+  PostScript = 6. Record preference: Windows US English (3/0x409) >
+  Unicode platform > Mac Roman English > other Windows languages.
+  Decoded to UTF-8 (UTF-16BE with surrogates; full Mac Roman table).
+  Note `ttf.Font.getNameEntry` still returns raw record bytes.
+- **Matching** (`system_fonts.classify`): exact subfamily names first
+  (squashed: regular/roman/normal, bold, italic/oblique,
+  bolditalic/boldoblique); otherwise an inexact match only for OS/2
+  weight 400/700 at width 5 (italic from fsSelection). Light, Black,
+  Condensed etc. never match. Ties: earlier folder, then smaller path,
+  then lower face index - independent of directory iteration order.
+- **Prefilter** (`nameMayMatch`): the squashed file stem starts with the
+  squashed family, or an 8.3-style stem (<= 8 chars, Windows "timesbd",
+  "cour") shares the family's first 4 chars. `prefilter = false` scans
+  everything (needed for fonts whose file name is unrelated, e.g.
+  Hiragino's Japanese file names). Real-macOS lookups take 10-60 ms.
+- **Folders**: macOS /System/Library/Fonts(+/Supplemental), /Library/Fonts,
+  ~/Library/Fonts; Linux /usr/share/fonts, /usr/local/share/fonts,
+  ~/.local/share/fonts, ~/.fonts; Windows C:\Windows\Fonts and
+  %USERPROFILE%\AppData\Local\Microsoft\Windows\Fonts. All recursive
+  via `walkSelectively` (unreadable folders skipped, symlinked folders not
+  followed). Home comes in through `Options.home` (stateless library);
+  `Options.dirs` replaces the defaults (tests point it at test/fonts).
+- Not supported: .dfont (resource fork), WOFF/WOFF2 in the lookup.
+- Tests: Inter.ttc (36 faces, families "Inter" and "Inter Display", with
+  Thin..Black weights that must be rejected); face names checked against
+  fontTools (`scripts/gen_ttc_reference.py` ->
+  test/reference/inter_ttc_faces.tsv); reference PDF `font_collection`
+  (fpdf2 embeds fontTools-extracted faces).
+
 ### Color Fonts (COLR/CPAL, OT-SVG and CBDT/sbix → Type3)
 Color glyphs (e.g. Noto Color Emoji, Bungee Color) are rendered as **PDF Type3
 color fonts**, one per color font used in the document. Both **COLR v0** (flat
@@ -299,10 +344,22 @@ wrongly (clips to white), and shares platen's tRNS gap - agreement between
 two libraries is not correctness. The `pngsuite` integration test keeps
 three explicit lists, each enforced in both directions (a listed entry
 that starts working fails the test, so lists cannot go stale):
-`pngsuite_pending` (decode errors expected: Adam7 interlacing, 16-bit
-with alpha), `pngsuite_fpdf2_wrong` (skipped in the fpdf2 pixel
-comparison only), `pngsuite_truth_gaps` (tRNS color keys on gray/RGB
-not applied yet). Corrupt `x*` files are a unit test in images.zig.
+`pngsuite_pending` (expected decode errors), `pngsuite_fpdf2_wrong`
+(skipped in the fpdf2 pixel comparison only) and `pngsuite_truth_gaps`.
+Since 0.10.0 pending and truth gaps are empty: all 161 files match the
+truth. Corrupt `x*` files are a unit test in images.zig.
+
+**The comparator is tested too**: `scripts/test_compare_pdfs.py` runs as
+part of `zig build test` (via testing.zig). It decides whether every
+reference test passes, so a blind spot there hides failures - it used to
+compare fonts only when both pages had some, and read a qpdf failure as
+"no fonts".
+
+**Test-run inputs**: build.zig declares every file under test/ (except
+test/output) and the comparator scripts as file inputs of the test run
+(`addFileInputsUnder`), so the build cache re-runs tests when a reference
+PDF, fixture or script changes. Without that, a corrupted reference
+passed from cache.
 
 **Running one test**: `zig test --test-filter` only collects tests from
 files some matching test pulls in. To run a single test in a file that
@@ -311,6 +368,11 @@ the root: `zig test -lc src/opentype.zig --test-filter "..."`. A filtered
 run reporting only `platen.test_0` ran nothing. Files that import
 document.zig (via version.zig) also need the version build option, which
 only `zig build` provides - use `zig build test` for those.
+
+**Package contents**: build.zig.zon `.paths` lists what a dependent
+fetches (sources, build files, license, docs) and `.gitattributes`
+export-ignore keeps tests, fixtures and tools out of release archives:
+0.4 MB fetched instead of 45 MB.
 
 **Version** is single-sourced from build.zig.zon: build.zig passes it as
 the `build_options` module and src/version.zig re-exports it, so
@@ -416,7 +478,7 @@ Naming convention: `write*` for text, `draw*` for graphics (future).
 |----------|---------|
 | `write(str)` | Write at cursor position |
 | `writeAt(x, y, str)` | Write at specific position |
-| `writeStyled(&region, *StyledText, opts)` | Styled text in region, returns overflow |
+| `writeStyled(&region, *StyledText, style, opts)` | Styled text in region, returns overflow |
 | `write(&region, str, .{ .measure_only = true })` | Measure layout without rendering |
 
 ### Text Opacity
@@ -610,12 +672,30 @@ const FlowOptions = struct {
 ```zig
 fn write(self: *Document, text: []const u8) !void
 fn writeAt(self: *Document, x: f64, y: f64, text: []const u8) !void
-fn writeStyled(self: *Document, box: *Region, text: *StyledText, opts: ParagraphOptions) !WriteResult
+fn writeStyled(self: *Document, region: *Region, text: *StyledText, style: TextStyle, opts: ParagraphOptions) !WriteResult
 fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 
 /// Draw text box's border/fill (without text)
 fn drawTextBox(self: *Document, box: *const TextBox) !void
 ```
+
+### StyledText span overrides (0.11.0)
+
+`StyledText.append(text, TextStyleOptions)`: every span field is an
+optional override of the base `TextStyle` passed to `writeStyled`
+(color, decoration, bold, italic); null inherits. `TextStyleOptions.resolve(base)`
+is the one place that merges them. Before, spans carried a full color
+(default black) and decoration (default none), so the base color and
+underline never reached the page.
+
+- The base style is kept *raw* (not normalized to a variant font) so a
+  span's bold/italic resolves through the base font's family, exactly as
+  `TextStyle.bold/.italic` do; `.bold = false` turns an inherited bold off.
+- Widths are measured per resolved span (bold is wider), so line breaking
+  sees the real font.
+- `Document.checkVariant` validates every span's variant up front:
+  `error.FontVariantNotLoaded` comes before any command is emitted or the
+  region cursor moves.
 
 ### Usage Patterns
 
@@ -648,7 +728,7 @@ var st = doc.createStyledText();
 defer st.deinit();
 try st.append(text, .{});
 
-const result = try doc.writeStyled(&box, &st, .{});
+const result = try doc.writeStyled(&box, &st, style, .{});
 if (result.overflow != null) {
     try doc.addPage(null);
     box = doc.getPageTextBox();
@@ -666,7 +746,7 @@ defer st.deinit();
 try st.append(text, .{});
 
 for ([_]*TextBox{ &left, &right }) |box| {
-    const result = try doc.writeStyled(box, &st, .{});
+    const result = try doc.writeStyled(box, &st, style, .{});
     if (result.overflow == null) break;
 }
 // result.overflow still has text? Add page, repeat...
@@ -1145,8 +1225,8 @@ Use structs with sensible defaults for optional parameters:
 var st = doc.createStyledText();
 defer st.deinit();
 try st.append(text, .{});
-_ = try doc.writeStyled(&box, &st, .{});  // all defaults
-_ = try doc.writeStyled(&box, &st, .{ .alignment = .justify });
+_ = try doc.writeStyled(&box, &st, style, .{});  // all defaults
+_ = try doc.writeStyled(&box, &st, style, .{ .alignment = .justify });
 ```
 
 ## Zig Compatibility Notes
@@ -1157,6 +1237,9 @@ The project targets Zig 0.17 (migrated from 0.16 on 2026-10-05). Key things to r
 - **0.17: `@typeInfo` enums are struct-of-arrays.** `.@"enum".fields` became parallel `field_names` / `field_values` slices.
 - **0.17: build args.** `b.args` is gone; forward `zig build <step> -- ...` with `run.addPassthruArgs()`.
 - **0.17: stock test runner.** The vendored `scripts/test_runner.zig` (a 0.16 `--fuzz` compile workaround) was deleted; upstream carries the fix.
+- **0.17: a signed integer formatted with a width gets a `+`.** `{d:0>4}` on an `i32` year of 2026 prints `+2026`. Silent: no compile error, and our tests passed; veraPDF caught it (every PDF/XMP date was `D:+2026...`, and a fixed-length slice also cut the trailing `Z`). Fix: use unsigned types for anything formatted with a width (`DateTime` in pdf_output.zig), and test exact formats. When migrating, grep for `{d:` with signed arguments.
+- **0.17: `@intFromEnum` → `@backingInt`, `@enumFromInt` → `@fromBackingInt`.** The old names still compile; 0.17's `zig fmt` rewrites them. Run the formatter as a separate commit after the migration (here ~220 lines).
+- **0.17 build.zig APIs we use:** `@import("build.zig.zon")` in build.zig reads the manifest (the version is single-sourced from there); `b.graph.io` is the build's `std.Io`; `b.root` (a `Cache.Path`: `root_dir.handle` + `sub_path`) is the project root for walking directories; `Run.addFileInput` declares a file as a run input for caching.
 
 - **`std.Io`-driven file I/O**. There is no implicit "current process" I/O in 0.16. `Document` carries an `io: std.Io` and threads it through `loadFont`, `loadImage`, `loadSvg`. Free functions that touch the filesystem (e.g. `ttf.Font.fromFile`, `Image.fromFile`, `Svg.fromFile`, `EmbeddedFont.fromFile`) take `io` as the first parameter. CLI / perf / integration entry points hold a module-level `app_io` that is initialised from `init.io` (or `std.testing.io` in test builds).
 - **Writer interface**: `std.Io.Writer.fixed(buf)` for fixed-buffer writing; pass `&w` (a `*std.Io.Writer`) — there is no `.writer()` accessor. `w.buffered()` returns the slice written so far, `w.end` is the cursor. For dynamic buffers use `std.Io.Writer.Allocating`.

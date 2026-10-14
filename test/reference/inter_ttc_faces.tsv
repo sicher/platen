@@ -1,0 +1,36 @@
+0	Inter	Regular	Inter-Regular	400	5	0	0
+1	Inter	Black	Inter-Black	900	5	0	0
+2	Inter	Black Italic	Inter-BlackItalic	900	5	0	1
+3	Inter	Italic	Inter-Italic	400	5	0	1
+4	Inter	Thin	Inter-Thin	100	5	0	0
+5	Inter	Thin Italic	Inter-ThinItalic	100	5	0	1
+6	Inter	Light	Inter-Light	300	5	0	0
+7	Inter	Light Italic	Inter-LightItalic	300	5	0	1
+8	Inter	ExtraLight	Inter-ExtraLight	200	5	0	0
+9	Inter	ExtraLight Italic	Inter-ExtraLightItalic	200	5	0	1
+10	Inter	Medium	Inter-Medium	500	5	0	0
+11	Inter	Medium Italic	Inter-MediumItalic	500	5	0	1
+12	Inter	SemiBold	Inter-SemiBold	600	5	0	0
+13	Inter	SemiBold Italic	Inter-SemiBoldItalic	600	5	0	1
+14	Inter	Bold	Inter-Bold	700	5	1	0
+15	Inter	Bold Italic	Inter-BoldItalic	700	5	1	1
+16	Inter	ExtraBold	Inter-ExtraBold	800	5	0	0
+17	Inter	ExtraBold Italic	Inter-ExtraBoldItalic	800	5	0	1
+18	Inter Display	Black	InterDisplay-Black	900	5	0	0
+19	Inter Display	Black Italic	InterDisplay-BlackItalic	900	5	0	1
+20	Inter Display	Regular	InterDisplay-Regular	400	5	0	0
+21	Inter Display	Italic	InterDisplay-Italic	400	5	0	1
+22	Inter Display	Thin	InterDisplay-Thin	100	5	0	0
+23	Inter Display	Thin Italic	InterDisplay-ThinItalic	100	5	0	1
+24	Inter Display	Light	InterDisplay-Light	300	5	0	0
+25	Inter Display	Light Italic	InterDisplay-LightItalic	300	5	0	1
+26	Inter Display	ExtraLight	InterDisplay-ExtraLight	200	5	0	0
+27	Inter Display	ExtraLight Italic	InterDisplay-ExtraLightItalic	200	5	0	1
+28	Inter Display	Medium	InterDisplay-Medium	500	5	0	0
+29	Inter Display	Medium Italic	InterDisplay-MediumItalic	500	5	0	1
+30	Inter Display	SemiBold	InterDisplay-SemiBold	600	5	0	0
+31	Inter Display	SemiBold Italic	InterDisplay-SemiBoldItalic	600	5	0	1
+32	Inter Display	Bold	InterDisplay-Bold	700	5	1	0
+33	Inter Display	Bold Italic	InterDisplay-BoldItalic	700	5	1	1
+34	Inter Display	ExtraBold	InterDisplay-ExtraBold	800	5	0	0
+35	Inter Display	ExtraBold Italic	InterDisplay-ExtraBoldItalic	800	5	0	1

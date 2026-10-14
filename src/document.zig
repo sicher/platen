@@ -11,6 +11,7 @@ pub const objects = @import("objects.zig");
 pub const fonts = @import("fonts.zig");
 pub const metrics = @import("metrics.zig");
 pub const ttf = @import("ttf.zig");
+pub const font_collection = @import("font_collection.zig");
 pub const embedded = @import("embedded.zig");
 pub const color = @import("color.zig");
 pub const layout = @import("layout.zig");
@@ -119,8 +120,10 @@ pub const DocumentMetadata = struct {
     creator: ?[]const u8 = null,
     /// Application that produced the PDF (defaults to "platen <version>").
     producer: ?[]const u8 = version.full,
-    /// Creation date in PDF format (D:YYYYMMDDHHmmSS).
-    /// If null, current time is used automatically.
+    /// Creation date in PDF format (D:YYYYMMDDHHmmSS, optionally with
+    /// Z or +HH'mm' and fewer trailing fields). If null, the time of
+    /// output() is used. PDF/A mirrors it into XMP, so there it must be a
+    /// valid PDF date (else output() fails with error.InvalidDate).
     creation_date: ?[]const u8 = null,
     /// Modification date in PDF format (D:YYYYMMDDHHmmSS).
     /// If null, same as creation_date.
@@ -385,6 +388,21 @@ pub const Document = struct {
     /// documents is the intended high-throughput pattern.)
     pub fn loadFontFromMemory(self: *Document, data: []const u8, encoding: FontEncoding) !Font {
         const emb = try EmbeddedFont.fromMemory(self.allocator, data, false);
+        emb.encoding = encoding;
+        try self.registerFont(emb);
+        return Font{ .embedded = emb };
+    }
+
+    /// Load face `index` of a TrueType/OpenType collection (.ttc/.otc).
+    /// A plain .ttf/.otf is a one-face collection (index 0).
+    /// Lifetime: `data` is only read during the call - the face is copied
+    /// out as a standalone font owned by the Document.
+    pub fn loadFontFromCollection(self: *Document, data: []const u8, index: u32, encoding: FontEncoding) !Font {
+        const face = try font_collection.extractFace(self.allocator, data, index);
+        const emb = EmbeddedFont.fromMemory(self.allocator, face, true) catch |err| {
+            self.allocator.free(face);
+            return err;
+        };
         emb.encoding = encoding;
         try self.registerFont(emb);
         return Font{ .embedded = emb };
@@ -3028,6 +3046,14 @@ pub const Document = struct {
         try color_fonts.buildColorFontPlans(self);
         defer color_fonts.clearColorPlans(self);
 
+        // One clock reading for the whole document: /Info and XMP must
+        // carry the same dates (PDF/A 6.7.3).
+        var date_bufs: pdf_output.OutputDates.Buffers = .{};
+        const dates = pdf_output.OutputDates.resolve(&date_bufs, .now(), self.metadata.creation_date, self.metadata.mod_date);
+        if (self.conformance != .none and (dates.create_iso == null or dates.modify_iso == null)) {
+            return pdfa.ConformanceError.InvalidDate;
+        }
+
         var ids = try self.reserveObjectIds();
         defer ids.deinit(self.allocator);
 
@@ -3050,7 +3076,7 @@ pub const Document = struct {
         try w.writeHeader();
         try self.writeCatalog(&w, &ids);
         try self.writePagesRoot(&w, &ids);
-        try self.writePdfaObjects(&w, &ids);
+        try self.writePdfaObjects(&w, &ids, &dates);
         try self.writeStandardFonts(&w, &ids);
         try self.subsetFontsAndRenderPages();
 
@@ -3078,7 +3104,7 @@ pub const Document = struct {
         try self.writeImages(&w, &ids);
         try self.writeSvgs(&w, &ids);
         const next_id = try self.writePages(&w, &ids);
-        const info_id = try self.writeInfoDict(&w, next_id);
+        const info_id = try self.writeInfoDict(&w, next_id, &dates);
         try self.writeOutlines(&w, &ids);
         try self.writePageLabels(&w, &ids);
 
@@ -3290,7 +3316,7 @@ pub const Document = struct {
 
     /// Write PDF/A objects (XMP metadata, ICC profile, OutputIntent).
     /// No-op unless a conformance level is set.
-    fn writePdfaObjects(self: *Document, w: *Writer, ids: *const OutputIds) !void {
+    fn writePdfaObjects(self: *Document, w: *Writer, ids: *const OutputIds, dates: *const pdf_output.OutputDates) !void {
         if (self.conformance != .none) {
             // Generate UUIDs for XMP document/instance IDs (simple pseudo-random)
             var uuid_buf: [32]u8 = undefined;
@@ -3301,10 +3327,6 @@ pub const Document = struct {
             const uuid_str = uuid_buf[0..32];
 
             // 1. XMP Metadata stream
-            // Generate ISO 8601 date for XMP (required for PDF/A)
-            var iso_date_buf: [21]u8 = undefined;
-            const iso_date = pdf_output.formatIsoDate(&iso_date_buf);
-
             const xmp_data = try pdfa.generateXmpMetadata(self.allocator, .{
                 .title = self.metadata.title,
                 .author = self.metadata.author,
@@ -3315,8 +3337,8 @@ pub const Document = struct {
                 .conformance = self.conformance,
                 .document_id = uuid_str,
                 .instance_id = uuid_str,
-                .create_date = iso_date,
-                .modify_date = iso_date,
+                .create_date = dates.create_iso.?, // checked in output()
+                .modify_date = dates.modify_iso.?,
             });
             defer self.allocator.free(xmp_data);
 
@@ -4093,7 +4115,7 @@ pub const Document = struct {
 
     /// Write the Info dictionary if any metadata is set, consuming `next_id`.
     /// Returns its object ID, or null when there is no metadata.
-    fn writeInfoDict(self: *Document, w: *Writer, next_id: ObjectId) !?ObjectId {
+    fn writeInfoDict(self: *Document, w: *Writer, next_id: ObjectId, dates: *const pdf_output.OutputDates) !?ObjectId {
         if (!self.metadata.hasAnyField()) return null;
         const info_id = next_id;
 
@@ -4120,21 +4142,9 @@ pub const Document = struct {
             try info_dict.put("Producer", Value.string(producer));
         }
 
-        // Auto-generate dates if not explicitly set
-        var date_buf: [24]u8 = undefined; // "D:YYYYMMDDHHmmSS+00'00'"
-        const date_str = if (self.metadata.creation_date) |date|
-            date
-        else
-            formatPdfDate(&date_buf);
-
-        try info_dict.put("CreationDate", Value.string(date_str));
-
-        const mod_date_str = if (self.metadata.mod_date) |date|
-            date
-        else
-            date_str; // Same as creation date if not set
-
-        try info_dict.put("ModDate", Value.string(mod_date_str));
+        // Explicit dates verbatim, else the output's single clock reading.
+        try info_dict.put("CreationDate", Value.string(dates.creation_pdf));
+        try info_dict.put("ModDate", Value.string(dates.mod_pdf));
 
         try w.writeDict(info_dict);
         try w.endObject();
@@ -4328,9 +4338,6 @@ pub const Document = struct {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-// formatPdfDate is now in pdf_output.zig
-const formatPdfDate = pdf_output.formatPdfDate;
 
 // Soft-hyphen utilities are in styled_text.zig
 const isSoftHyphenAt = styled_text.isSoftHyphenAt;

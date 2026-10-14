@@ -61,6 +61,9 @@ pub const ConformanceError = error{
     /// PDF/A (every level) requires all fonts to be embedded; the standard
     /// 14 fonts have no font program to embed. Use a TTF/OTF font.
     FontNotEmbedded,
+    /// An explicit creation_date/mod_date is not a valid PDF date
+    /// (D:YYYYMMDDHHmmSSOHH'mm'); PDF/A must repeat it in XMP as ISO 8601.
+    InvalidDate,
 };
 
 /// Validate opacity values against conformance requirements.

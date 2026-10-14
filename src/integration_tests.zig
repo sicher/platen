@@ -37,6 +37,7 @@ const test_cases = [_]TestCase{
     .{ .name = "all_fonts", .generate = generateAllFontsPdf },
     .{ .name = "multi_page", .generate = generateMultiPagePdf },
     .{ .name = "embedded_fonts", .generate = generateEmbeddedFontsPdf },
+    .{ .name = "font_collection", .generate = generateFontCollectionPdf }, // faces loaded from Inter.ttc
     .{ .name = "cid_fonts", .generate = generateCIDFontsPdf },
     .{ .name = "inter_fonts", .generate = generateInterFontsPdf },
     .{ .name = "gentium_diacritics", .generate = generateGentiumDiacriticsPdf },
@@ -249,6 +250,33 @@ fn generateEmbeddedFontsPdf(allocator: std.mem.Allocator) ![]u8 {
     // Character set
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "!\"#$%&'()*+,-./0123456789:;<=>?@[\\]^_`{|}~", .{ .font = courier_regular, .size = 10 }, .{});
 
+    return doc.output();
+}
+
+fn generateFontCollectionPdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+
+    const ttc = try std.Io.Dir.cwd().readFileAlloc(app_io, "test/fonts/Inter/Inter.ttc", allocator, .limited(64 << 20));
+    defer allocator.free(ttc); // the Document keeps its own copy of each face
+
+    // (face index, font): Inter Regular/Bold, Inter Display Italic/Bold Italic.
+    const indices = [_]u32{ 0, 14, 21, 33 };
+    var faces: [indices.len]platen.Font = undefined;
+    for (indices, &faces) |index, *font| font.* = try doc.loadFontFromCollection(ttc, index, .win_ansi);
+
+    try doc.addPage(.{});
+    var y: f64 = 50;
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Font Collection (Inter.ttc)", .{ .font = faces[1], .size = 24 }, .{});
+    y += 36;
+    for (indices, faces) |index, font| {
+        var buf: [96]u8 = undefined;
+        const line = try std.fmt.bufPrint(&buf, "Face {d}: The quick brown fox jumps over the lazy dog.", .{index});
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, line, .{ .font = font, .size = 12 }, .{});
+        y += 18;
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789", .{ .font = font, .size = 12 }, .{});
+        y += 26;
+    }
     return doc.output();
 }
 
@@ -3980,6 +4008,23 @@ fn generatePdfa2bBroad(allocator: std.mem.Allocator) ![]u8 {
     return generatePdfaBroad(allocator, .pdfa_2b);
 }
 
+/// PDF/A with explicit creation/modification dates (time zone offset,
+/// UTC): they must reach XMP as the same instants (6.7.3).
+fn generatePdfaExplicitDates(allocator: std.mem.Allocator) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+    doc.setConformance(.pdfa_1b);
+    doc.setMetadata(.{
+        .title = "Explicit dates",
+        .creation_date = "D:20260101120000+02'00'",
+        .mod_date = "D:20260315083005Z",
+    });
+    try doc.addPage(.{});
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Explicit dates", .{ .font = inter, .size = 12 }, .{});
+    return doc.output();
+}
+
 test "integration: PDF/A output passes veraPDF" {
     // Skips when veraPDF is not installed. It was the only check that
     // would have caught the Zig 0.17 date regression (signed "+2026").
@@ -3990,6 +4035,7 @@ test "integration: PDF/A output passes veraPDF" {
         .{ .name = "pdfa_2b", .flavour = "2b", .generate = generatePdfa2bPdf },
         .{ .name = "pdfa_1b_broad", .flavour = "1b", .generate = generatePdfa1bBroad },
         .{ .name = "pdfa_2b_broad", .flavour = "2b", .generate = generatePdfa2bBroad },
+        .{ .name = "pdfa_1b_explicit_dates", .flavour = "1b", .generate = generatePdfaExplicitDates },
     };
     var failures: usize = 0;
     for (pdfa_cases) |c| {

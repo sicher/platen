@@ -320,6 +320,44 @@ def gen_embedded_fonts():
     print("  embedded_fonts.pdf")
 
 
+def gen_font_collection():
+    """Faces of a TrueType collection (Inter.ttc), two families.
+
+    fontTools writes each face to a standalone .ttf for fpdf2; platen loads
+    the same faces straight from the collection (loadFontFromCollection).
+    """
+    import tempfile
+    from fontTools.ttLib import TTCollection
+
+    faces = [
+        (0, "Inter", ""),             # Inter Regular
+        (14, "Inter", "B"),           # Inter Bold
+        (21, "InterDisplay", "I"),    # Inter Display Italic
+        (33, "InterDisplay", "BI"),   # Inter Display Bold Italic
+    ]
+    collection = TTCollection("test/fonts/Inter/Inter.ttc")
+    pdf = make_pdf()
+    with tempfile.TemporaryDirectory() as tmp:
+        for index, family, style in faces:
+            path = Path(tmp) / f"face{index}.ttf"
+            collection[index].save(str(path))
+            pdf.add_font(family, style, str(path))
+
+        pdf.add_page()
+        y = 50
+        pdf.set_font("Inter", "B", size=24)
+        pdf.text(50, y, "Font Collection (Inter.ttc)")
+        y += 36
+        for index, family, style in faces:
+            pdf.set_font(family, style, size=12)
+            pdf.text(50, y, f"Face {index}: The quick brown fox jumps over the lazy dog.")
+            y += 18
+            pdf.text(50, y, "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789")
+            y += 26
+        pdf.output(str(OUTPUT_DIR / "font_collection.pdf"))
+    print("Generated font_collection.pdf")
+
+
 def gen_cid_fonts():
     """PDF with CID fonts (Identity-H encoding) for full Unicode support.
 
@@ -2690,6 +2728,7 @@ GENERATORS = {
     "multi_page": gen_multi_page,
     "insert_page": gen_insert_page,
     "embedded_fonts": gen_embedded_fonts,
+    "font_collection": gen_font_collection,
     "cid_fonts": gen_cid_fonts,
     "inter_fonts": gen_inter_fonts,
     "opentype_features": gen_opentype_features,

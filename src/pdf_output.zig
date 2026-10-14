@@ -80,7 +80,7 @@ pub const OutputTiming = struct {
 // ============================================================================
 
 /// Date/time components for formatting.
-const DateTime = struct {
+pub const DateTime = struct {
     /// Unsigned on purpose: Zig 0.17 formats a signed integer with a width
     /// ({d:0>4}) with a leading "+", which broke every PDF/XMP date.
     year: u16,
@@ -90,10 +90,16 @@ const DateTime = struct {
     minute: u8,
     second: u8,
 
-    fn now() DateTime {
+    /// Current UTC time. Read it ONCE per output: /Info and XMP must carry
+    /// the same instant (PDF/A 6.7.3), and two readings can straddle a
+    /// second boundary.
+    pub fn now() DateTime {
         var ts: std.c.timespec = undefined;
         _ = std.c.clock_gettime(.REALTIME, &ts);
-        const epoch_secs: u64 = @intCast(ts.sec);
+        return fromEpochSeconds(@intCast(ts.sec));
+    }
+
+    pub fn fromEpochSeconds(epoch_secs: u64) DateTime {
         const epoch = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
         const day = epoch.getEpochDay();
         const year_day = day.calculateYearDay();
@@ -110,24 +116,117 @@ const DateTime = struct {
     }
 };
 
-/// Format current UTC time as PDF date string: D:YYYYMMDDHHmmSSZ
+/// Format `dt` (UTC) as PDF date string: D:YYYYMMDDHHmmSSZ
 /// Returns a slice into the provided buffer.
-pub fn formatPdfDate(buf: *[24]u8) []const u8 {
-    const dt = DateTime.now();
+pub fn formatPdfDate(buf: *[24]u8, dt: DateTime) []const u8 {
     return std.fmt.bufPrint(buf, "D:{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}Z", .{
         dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
     }) catch unreachable;
 }
 
-/// Format current UTC time as ISO 8601 date string: YYYY-MM-DDTHH:mm:ssZ
+/// Format `dt` (UTC) as ISO 8601 date string: YYYY-MM-DDTHH:mm:ssZ
 /// Required for XMP metadata in PDF/A documents.
 /// Returns a slice into the provided buffer.
-pub fn formatIsoDate(buf: *[21]u8) []const u8 {
-    const dt = DateTime.now();
+pub fn formatIsoDate(buf: *[21]u8, dt: DateTime) []const u8 {
     return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{
         dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
     }) catch unreachable;
 }
+
+/// Converts a PDF date (ISO 32000 7.9.4: D:YYYYMMDDHHmmSSOHH'mm', every
+/// field after the year optional, "D:" prefix optional) to the XMP form
+/// (ISO 8601 as profiled by XMP: YYYY[-MM[-DD[Thh:mm[:ss][TZD]]]]) with
+/// the same precision. Null if `pdf` is not a valid PDF date.
+pub fn pdfDateToIso(buf: *[32]u8, pdf: []const u8) ?[]const u8 {
+    var s = if (std.mem.startsWith(u8, pdf, "D:")) pdf[2..] else pdf;
+    const year = takeDigits(&s, 4) orelse return null;
+    // MM DD HH mm SS, each optional but only in order.
+    const limits = [_][2]u8{ .{ 1, 12 }, .{ 1, 31 }, .{ 0, 23 }, .{ 0, 59 }, .{ 0, 59 } };
+    var fields: [5]?u8 = @splat(null);
+    for (&fields, limits) |*f, lim| {
+        const v = takeDigits(&s, 2) orelse break;
+        if (v < lim[0] or v > lim[1]) return null;
+        f.* = @intCast(v);
+    }
+
+    // Time zone: Z, or +/- HH['mm['] ] (the trailing apostrophe is optional).
+    var tz_buf: [6]u8 = undefined;
+    var tz: []const u8 = "";
+    if (s.len > 0) {
+        const sign = s[0];
+        if (sign != 'Z' and sign != '+' and sign != '-') return null;
+        s = s[1..];
+        if (sign == 'Z') {
+            tz = "Z";
+            // Some writers emit "Z00'00'": accept a zero offset after Z.
+            if (s.len > 0 and !std.mem.eql(u8, s, "00'00'") and !std.mem.eql(u8, s, "00'00")) return null;
+            s = "";
+        } else {
+            const tzh = takeDigits(&s, 2) orelse return null;
+            if (tzh > 23) return null;
+            var tzm: u32 = 0;
+            if (s.len > 0 and s[0] == '\'') s = s[1..];
+            if (s.len > 0) {
+                tzm = takeDigits(&s, 2) orelse return null;
+                if (tzm > 59) return null;
+                if (s.len > 0 and s[0] == '\'') s = s[1..];
+            }
+            if (s.len != 0) return null;
+            tz = std.fmt.bufPrint(&tz_buf, "{c}{d:0>2}:{d:0>2}", .{ sign, tzh, tzm }) catch unreachable;
+        }
+    }
+
+    var w: std.Io.Writer = .fixed(buf);
+    w.print("{d:0>4}", .{year}) catch unreachable;
+    if (fields[0]) |mo| w.print("-{d:0>2}", .{mo}) catch unreachable;
+    if (fields[1]) |d| w.print("-{d:0>2}", .{d}) catch unreachable;
+    // XMP times need hours and minutes; a PDF hour alone means minute 0.
+    if (fields[2]) |h| {
+        w.print("T{d:0>2}:{d:0>2}", .{ h, fields[3] orelse 0 }) catch unreachable;
+        if (fields[4]) |sec| w.print(":{d:0>2}", .{sec}) catch unreachable;
+        w.writeAll(tz) catch unreachable;
+    }
+    return w.buffered();
+}
+
+/// Parses exactly `n` ASCII digits from the front of `s`, advancing it.
+fn takeDigits(s: *[]const u8, n: usize) ?u32 {
+    if (s.len < n) return null;
+    var v: u32 = 0;
+    for (s.*[0..n]) |c| {
+        if (!std.ascii.isDigit(c)) return null;
+        v = v * 10 + (c - '0');
+    }
+    s.* = s.*[n..];
+    return v;
+}
+
+/// The creation and modification dates of one output, for /Info (PDF
+/// format) and XMP (ISO 8601), all from a single clock reading. Explicit
+/// metadata dates are used verbatim in /Info and converted for XMP, so
+/// the two always describe the same instants (PDF/A 6.7.3).
+pub const OutputDates = struct {
+    creation_pdf: []const u8,
+    mod_pdf: []const u8,
+    /// Null when an explicit date is not a valid PDF date (PDF/A output
+    /// then fails with error.InvalidDate).
+    create_iso: ?[]const u8,
+    modify_iso: ?[]const u8,
+
+    pub const Buffers = struct {
+        now_pdf: [24]u8 = undefined,
+        create_iso: [32]u8 = undefined,
+        modify_iso: [32]u8 = undefined,
+    };
+
+    pub fn resolve(bufs: *Buffers, now: DateTime, creation_date: ?[]const u8, mod_date: ?[]const u8) OutputDates {
+        const creation = creation_date orelse formatPdfDate(&bufs.now_pdf, now);
+        const modified = mod_date orelse creation; // same as creation if not set
+        const create_iso = pdfDateToIso(&bufs.create_iso, creation);
+        const modify_iso = if (mod_date == null) create_iso else pdfDateToIso(&bufs.modify_iso, modified);
+        return .{ .creation_pdf = creation, .mod_pdf = modified, .create_iso = create_iso, .modify_iso = modify_iso };
+    }
+};
 
 // ============================================================================
 // Font Output Helpers
@@ -217,17 +316,74 @@ test "PDF and XMP dates have exact formats (no sign, nothing truncated)" {
     // Zig 0.17 prints "+2026" for a signed year with a width ({d:0>4});
     // with a hard-coded slice length that dropped the trailing "Z" too,
     // and veraPDF rejected every PDF/A file (XMP dates not dates).
+    const now = DateTime.now();
     var pdf_buf: [24]u8 = undefined;
-    const pdf = formatPdfDate(&pdf_buf);
+    const pdf = formatPdfDate(&pdf_buf, now);
     try std.testing.expectEqual(@as(usize, 17), pdf.len); // D:YYYYMMDDHHmmSSZ
     try std.testing.expectEqualStrings("D:", pdf[0..2]);
     for (pdf[2..16]) |c| try std.testing.expect(std.ascii.isDigit(c));
     try std.testing.expectEqual(@as(u8, 'Z'), pdf[16]);
 
     var iso_buf: [21]u8 = undefined;
-    const iso = formatIsoDate(&iso_buf);
+    const iso = formatIsoDate(&iso_buf, now);
     try std.testing.expectEqual(@as(usize, 20), iso.len); // YYYY-MM-DDTHH:mm:ssZ
     for (iso, "dddd-dd-ddTdd:dd:ddZ") |c, pattern| {
         if (pattern == 'd') try std.testing.expect(std.ascii.isDigit(c)) else try std.testing.expectEqual(pattern, c);
     }
+}
+
+test "PDF and ISO dates of one instant agree" {
+    const dt = DateTime.fromEpochSeconds(1_791_892_799); // 2026-10-13T11:59:59Z
+    var pdf_buf: [24]u8 = undefined;
+    var iso_buf: [21]u8 = undefined;
+    var conv_buf: [32]u8 = undefined;
+    const pdf = formatPdfDate(&pdf_buf, dt);
+    try std.testing.expectEqualStrings("D:20261013115959Z", pdf);
+    try std.testing.expectEqualStrings(formatIsoDate(&iso_buf, dt), pdfDateToIso(&conv_buf, pdf).?);
+}
+
+test "pdfDateToIso keeps precision and time zone" {
+    const cases = [_][2][]const u8{
+        .{ "D:2026", "2026" },
+        .{ "D:202603", "2026-03" },
+        .{ "D:20260315", "2026-03-15" },
+        .{ "D:2026031508", "2026-03-15T08:00" },
+        .{ "D:202603150830", "2026-03-15T08:30" },
+        .{ "D:20260315083005", "2026-03-15T08:30:05" },
+        .{ "D:20260315083005Z", "2026-03-15T08:30:05Z" },
+        .{ "D:20260315083005Z00'00'", "2026-03-15T08:30:05Z" },
+        .{ "D:20260315083005+02'00'", "2026-03-15T08:30:05+02:00" },
+        .{ "D:20260315083005-05'30", "2026-03-15T08:30:05-05:30" },
+        .{ "D:20260315083005+01", "2026-03-15T08:30:05+01:00" },
+        .{ "20260315083005Z", "2026-03-15T08:30:05Z" },
+    };
+    for (cases) |c| {
+        var buf: [32]u8 = undefined;
+        try std.testing.expectEqualStrings(c[1], pdfDateToIso(&buf, c[0]) orelse return error.TestUnexpectedResult);
+    }
+    for ([_][]const u8{ "", "D:", "D:26", "D:20261", "D:20261315", "D:20260332", "D:2026031524", "D:20260315083060", "D:20260315083005X", "D:20260315083005+2", "D:20260315083005+02'00'x", "D:20260315083005Z01'00'", "2026-03-15" }) |bad| {
+        var buf: [32]u8 = undefined;
+        try std.testing.expect(pdfDateToIso(&buf, bad) == null);
+    }
+}
+
+test "OutputDates: one instant, explicit dates mirrored into XMP" {
+    const now = DateTime.fromEpochSeconds(1_791_892_799);
+    var bufs: OutputDates.Buffers = .{};
+    const auto = OutputDates.resolve(&bufs, now, null, null);
+    try std.testing.expectEqualStrings("D:20261013115959Z", auto.creation_pdf);
+    try std.testing.expectEqualStrings("D:20261013115959Z", auto.mod_pdf);
+    try std.testing.expectEqualStrings("2026-10-13T11:59:59Z", auto.create_iso.?);
+    try std.testing.expectEqualStrings("2026-10-13T11:59:59Z", auto.modify_iso.?);
+
+    var bufs2: OutputDates.Buffers = .{};
+    const explicit = OutputDates.resolve(&bufs2, now, "D:20260101120000+02'00'", "D:20260315083005Z");
+    try std.testing.expectEqualStrings("D:20260101120000+02'00'", explicit.creation_pdf);
+    try std.testing.expectEqualStrings("2026-01-01T12:00:00+02:00", explicit.create_iso.?);
+    try std.testing.expectEqualStrings("D:20260315083005Z", explicit.mod_pdf);
+    try std.testing.expectEqualStrings("2026-03-15T08:30:05Z", explicit.modify_iso.?);
+
+    var bufs3: OutputDates.Buffers = .{};
+    const bad = OutputDates.resolve(&bufs3, now, "yesterday", null);
+    try std.testing.expect(bad.create_iso == null and bad.modify_iso == null);
 }
