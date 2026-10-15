@@ -23,8 +23,8 @@
 - **Legacy `kern` table kerning:** fonts that kern only through a TrueType
   `kern` table (format 0; Microsoft and Apple layouts) are now kerned in
   rendering and in `measureStyled`; before, only GPOS kerning was read and
-  such fonts came out unkerned. GPOS kerning still wins when present, as
-  in HarfBuzz.
+  such fonts (e.g. Bitstream Vera) came out unkerned.
+  GPOS kerning still wins when present, as in HarfBuzz.
 
 ### Fixed
 

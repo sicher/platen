@@ -204,16 +204,18 @@ test "kern: 16-bit length overflow is ignored (pair count bounds the pairs)" {
     try testing.expectEqual(@as(i16, 9), KernTable.parse(data).get(3, 4));
 }
 
-test "kern: Charter-derived table matches every HarfBuzz pair" {
-    // scripts/gen_kern_fonts.py: Charter's GPOS kerning as a format 0 table
-    const font = try std.Io.Dir.cwd().readFileAlloc(testing.io, "test/fonts/kern/CharterKern.ttf", testing.allocator, .limited(1 << 20));
+/// Every pair in `tsv_path` (left, right, value; from fontTools via
+/// scripts/gen_kern_fonts.py) reads back from the font's table, and the
+/// table holds exactly `expected` pairs, so none are missing or extra.
+fn expectPairs(font_path: []const u8, tsv_path: []const u8, expected: usize) !void {
+    const font = try std.Io.Dir.cwd().readFileAlloc(testing.io, font_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(font);
-    const tsv = try std.Io.Dir.cwd().readFileAlloc(testing.io, "test/reference/charter_kern_pairs.tsv", testing.allocator, .limited(1 << 20));
+    const tsv = try std.Io.Dir.cwd().readFileAlloc(testing.io, tsv_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(tsv);
 
-    const ttf = @import("ttf.zig");
-    const parsed = try ttf.Font.parse(font);
+    const parsed = try @import("ttf.zig").Font.parse(font);
     const t = KernTable.parse(parsed.getTable("kern".*) orelse return error.TestUnexpectedResult);
+    try testing.expectEqual(expected, t.pairCount());
 
     var n: usize = 0;
     var lines = std.mem.tokenizeScalar(u8, tsv, '\n');
@@ -223,9 +225,18 @@ test "kern: Charter-derived table matches every HarfBuzz pair" {
         const r = try std.fmt.parseInt(u16, f.next().?, 10);
         const v = try std.fmt.parseInt(i16, f.next().?, 10);
         try testing.expectEqual(v, t.get(l, r));
-        try testing.expectEqual(@as(i16, 0), t.get(r +% 1000, l)); // not a pair
     }
-    try testing.expectEqual(@as(usize, 160), n);
+    try testing.expectEqual(expected, n);
+}
+
+test "kern: Charter-derived table matches every HarfBuzz pair" {
+    // Charter's GPOS kerning moved to a format 0 table
+    try expectPairs("test/fonts/kern/CharterKern.ttf", "test/reference/charter_kern_pairs.tsv", 160);
+}
+
+test "kern: unmodified Bitstream Vera Sans 1.10 reads every pair" {
+    // A real legacy font: one format 0 'kern' subtable, no GPOS
+    try expectPairs("test/fonts/Bitstream Vera/Vera.ttf", "test/reference/vera_kern_pairs.tsv", 1940);
 }
 
 fn measureWith(path: []const u8, text: []const u8, kern: bool) !f64 {

@@ -3946,14 +3946,16 @@ test "integration: valign PDF" {
     try runIntegrationTest("valign", generateValignPdf);
 }
 
-/// Legacy 'kern' table: kern-only font, and GPOS + a wrong 'kern' table
-/// (GPOS must win). Fonts from scripts/gen_kern_fonts.py.
+/// Legacy 'kern' table: kern-only font, GPOS + a wrong 'kern' table (GPOS
+/// must win; both from scripts/gen_kern_fonts.py), and the unmodified
+/// Bitstream Vera Sans 1.10 (only a 'kern' table).
 fn generateKernTablePdf(allocator: std.mem.Allocator) ![]u8 {
     var doc = platen.Document.init(allocator, app_io);
     defer doc.deinit();
     const fonts = [_]platen.Font{
         try doc.loadFont("test/fonts/kern/CharterKern.ttf", .identity),
         try doc.loadFont("test/fonts/kern/CharterKernGpos.ttf", .identity),
+        try doc.loadFont("test/fonts/Bitstream Vera/Vera.ttf", .identity),
     };
     try doc.addPage(.{});
     var y: f64 = 60;
@@ -3962,6 +3964,7 @@ fn generateKernTablePdf(allocator: std.mem.Allocator) ![]u8 {
             "AVAVAVAVAVAVAVAVAVAV TATATATATATATATA",
             "AVATAR Toyota WAVE LT P. Yo",
             "WAWAWAWAWAWA VoVoVoVoVoVo",
+            "Y-T-Y-T-Y-T-Y-T-Y-T-Y-T-Y",
         }) |line| {
             _ = try doc.writeAt(.{ .x = 50, .y = y }, line, .{ .font = font, .size = 24 }, .{});
             y += 36;

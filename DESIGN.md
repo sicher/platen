@@ -19,6 +19,10 @@
   headers), used only when GPOS has no kern lookups (HarfBuzz's rule);
   no allocation, slices into the font data. Fixtures from
   scripts/gen_kern_fonts.py (Charter with its GPOS pairs moved to 'kern')
+  plus the unmodified Bitstream Vera Sans 1.10 (kern only, 1940 pairs).
+  HarfBuzz splits a legacy kern value over both glyphs (half advance on
+  the first, rest as advance + offset on the second); compare total
+  advances, not the first glyph's, when deriving pair values.
 - `ttf_subset.zig` - TTF subsetting helpers
 - `cff_subset.zig` - CFF subsetting helpers
 - `binary.zig` - Big-endian serialization helpers for font table construction

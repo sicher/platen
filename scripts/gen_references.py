@@ -321,24 +321,28 @@ def gen_embedded_fonts():
 
 
 def gen_kern_table():
-    """Legacy 'kern' table kerning (scripts/gen_kern_fonts.py fonts).
+    """Legacy 'kern' table kerning.
 
     CharterKern kerns only through a format 0 'kern' table; CharterKernGpos
-    has GPOS plus a deliberately wrong 'kern' table that must be ignored.
+    has GPOS plus a deliberately wrong 'kern' table that must be ignored
+    (both from scripts/gen_kern_fonts.py). Bitstream Vera Sans 1.10 is an
+    unmodified font with only a 'kern' table.
     HarfBuzz (fpdf2 text shaping) applies the same rule. Long kerned words
     make a missing or wrong kern shift word edges far beyond tolerance.
     """
     pdf = make_pdf()
     pdf.add_font("CharterKern", "", "test/fonts/kern/CharterKern.ttf")
     pdf.add_font("CharterKernGpos", "", "test/fonts/kern/CharterKernGpos.ttf")
+    pdf.add_font("BitstreamVeraSans", "", "test/fonts/Bitstream Vera/Vera.ttf")
     pdf.set_text_shaping(True, features={"kern": True})
     pdf.add_page()
     y = 60
-    for family in ("CharterKern", "CharterKernGpos"):
+    for family in ("CharterKern", "CharterKernGpos", "BitstreamVeraSans"):
         pdf.set_font(family, size=24)
         for line in ("AVAVAVAVAVAVAVAVAVAV TATATATATATATATA",
                      "AVATAR Toyota WAVE LT P. Yo",
-                     "WAWAWAWAWAWA VoVoVoVoVoVo"):
+                     "WAWAWAWAWAWA VoVoVoVoVoVo",
+                     "Y-T-Y-T-Y-T-Y-T-Y-T-Y-T-Y"):
             shaped_text(pdf, 50, y, line)
             y += 36
         y += 24
