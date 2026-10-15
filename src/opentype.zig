@@ -8,6 +8,7 @@
 //! - OpenType spec: https://learn.microsoft.com/en-us/typography/opentype/spec/gpos
 
 const std = @import("std");
+const KernTable = @import("kern_table.zig").KernTable;
 
 /// OpenType feature tags
 pub const Feature = enum(u32) {
@@ -1009,6 +1010,8 @@ pub const OpenTypeFeatures = struct {
     // GPOS data
     gpos_data: ?[]const u8 = null,
     kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .empty,
+    /// Legacy 'kern' table, set only when GPOS has no kern lookups.
+    legacy_kern: ?KernTable = null,
     mark_base_lookups: std.ArrayListUnmanaged(MarkBasePos) = .empty, // Type 4
     mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .empty, // Type 6
 
@@ -2383,6 +2386,7 @@ pub const OpenTypeFeatures = struct {
             kern = lookup.getKerning(glyph1, glyph2);
             if (kern != 0) break;
         }
+        if (self.legacy_kern) |*t| kern = t.get(glyph1, glyph2);
 
         // Cache the result (even if 0, to avoid repeated lookups);
         // colliding pairs simply overwrite each other

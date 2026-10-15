@@ -13,6 +13,7 @@ const colr = @import("colr.zig");
 const bitmap_glyphs = @import("bitmap_glyphs.zig");
 const svg_table = @import("svg_table.zig");
 pub const opentype = @import("opentype.zig");
+const KernTable = @import("kern_table.zig").KernTable;
 const format = @import("format.zig");
 const binary = @import("binary.zig");
 
@@ -525,10 +526,18 @@ pub const EmbeddedFont = struct {
             try ot.parseGPOS(gpos_data);
         }
 
+        // Legacy 'kern' table only when GPOS has no kerning (as HarfBuzz)
+        if (ot.kern_lookups.items.len == 0) {
+            if (self.font.getTable("kern".*)) |kern_data| {
+                const t = KernTable.parse(kern_data);
+                if (t.count > 0) ot.legacy_kern = t;
+            }
+        }
+
         self.ot_features = ot;
 
         // Cache flags for fast render-time checks
-        self.has_kern_data = ot.kern_lookups.items.len > 0;
+        self.has_kern_data = ot.kern_lookups.items.len > 0 or ot.legacy_kern != null;
         self.has_mark_data = ot.mark_base_lookups.items.len > 0 or ot.mark_mark_lookups.items.len > 0;
     }
 

@@ -20,6 +20,11 @@
   (typographic family, case-insensitive) and the subfamily; the per-user
   folders come from `opts.home`, so the library stays stateless.
 - CLI: `font-faces`, `extract-face`, `find-font`.
+- **Legacy `kern` table kerning:** fonts that kern only through a TrueType
+  `kern` table (format 0; Microsoft and Apple layouts) are now kerned in
+  rendering and in `measureStyled`; before, only GPOS kerning was read and
+  such fonts (e.g. Bitstream Vera) came out unkerned.
+  GPOS kerning still wins when present, as in HarfBuzz.
 
 ### Fixed
 
