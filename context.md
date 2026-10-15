@@ -3,12 +3,12 @@
 ## Current Focus
 **0.11.0 released (2026-10-06)** - after 0.10.0 and 0.10.1 the same day.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 516 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 535 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
 `.tools/devkit/devkit release X.Y.Z` (merge dev, date the notes, set the
-version in build.zig.zon, test, tag) or `devkit promote`; then push main
+version in build.zig.zon, test, tag) or `devkit promote` (run on main); then push main
 and the tag, wait for CI, `devkit publish` (on main), and `devkit
 sync-dev` on dev. Never commit to main directly (config bootstrap for
 .devkit.conf is the one exception devkit's README prescribes).
@@ -36,6 +36,18 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   idle. Deferred by the user.
 - Other urverk projects need the 0.17 migration: DESIGN.md "Zig
   Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
+
+## What We Did (Session 2026-10-15 #30 - dates and file IDs)
+- PDF/A dates: one clock reading per `output()` (`OutputDates`); explicit
+  /Info dates converted to ISO 8601 for XMP; invalid explicit date under
+  PDF/A -> `error.InvalidDate`. Had broken `devkit promote` (veraPDF 6.7.3).
+- File IDs (trailer /ID, XMP Document/InstanceID as v4 UUIDs) now come
+  from `doc.rng` (`FileIds`), not the clock. Decision: rng + explicit
+  dates = byte-reproducible PDF/A and encrypted output; no clock override.
+- Both promoted and pushed (main 59e86e2, still 0.11.0). Repo description
+  set on the forge.
+- Open: reference comparator can't detect blank glyphs (needs a render
+  check); kerning API for fdxview not started (not urgent).
 
 ## What We Did (Session 2026-10-13 #29 - font collections, system fonts)
 - **Requested by fdxview** (a peer session; fdxview uses platen as a path
