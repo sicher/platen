@@ -36,6 +36,13 @@
   to ISO 8601 for XMP (same precision and time zone). Under PDF/A an
   explicit date that is not a valid PDF date fails with
   `error.InvalidDate`.
+- File IDs came from the millisecond clock: the trailer `/ID` (PDF/A and
+  encrypted output) and the XMP `DocumentID`/`InstanceID` (one shared,
+  non-UUID string). Outputs in the same millisecond, e.g. concurrent
+  documents, got identical IDs, and `doc.rng` did not make output
+  reproducible as documented. All three now come from `doc.rng` (default:
+  system CSPRNG); the XMP IDs are distinct version-4 UUIDs. With `doc.rng`
+  set and explicit dates, PDF/A and encrypted output is byte-identical.
 
 ## 0.11.0 — 2026-10-06
 

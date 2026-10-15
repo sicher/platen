@@ -228,6 +228,40 @@ pub const OutputDates = struct {
     }
 };
 
+/// File identifiers of one output, all drawn from the document's RNG (the
+/// injected Document.rng, else the system CSPRNG): the trailer /ID and the
+/// XMP DocumentID/InstanceID. Never derived from the clock, so concurrent
+/// outputs cannot collide and a seeded RNG gives reproducible bytes.
+pub const FileIds = struct {
+    /// Trailer /ID: 16 random bytes as 32 hex digits.
+    trailer_hex: [32]u8,
+    /// XMP xmpMM:DocumentID / InstanceID: RFC 4122 version-4 UUIDs
+    /// (pdfa.zig adds the "uuid:" prefix).
+    document_uuid: [36]u8,
+    instance_uuid: [36]u8,
+
+    pub fn generate(random: std.Random) FileIds {
+        var trailer: [16]u8 = undefined;
+        random.bytes(&trailer);
+        return .{
+            .trailer_hex = std.fmt.bytesToHex(trailer, .lower),
+            .document_uuid = uuidV4(random),
+            .instance_uuid = uuidV4(random),
+        };
+    }
+};
+
+fn uuidV4(random: std.Random) [36]u8 {
+    var b: [16]u8 = undefined;
+    random.bytes(&b);
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+    const hex = std.fmt.bytesToHex(b, .lower);
+    var out: [36]u8 = undefined;
+    _ = std.fmt.bufPrint(&out, "{s}-{s}-{s}-{s}-{s}", .{ hex[0..8], hex[8..12], hex[12..16], hex[16..20], hex[20..32] }) catch unreachable;
+    return out;
+}
+
 // ============================================================================
 // Font Output Helpers
 // ============================================================================
