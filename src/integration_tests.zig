@@ -66,6 +66,7 @@ const test_cases = [_]TestCase{
     .{ .name = "auto_height", .generate = generateAutoHeightPdf },
     .{ .name = "styled_text", .generate = generateStyledTextPdf },
     .{ .name = "kerning", .generate = generateKerningPdf },
+    .{ .name = "kern_table", .generate = generateKernTablePdf },
     .{ .name = "insert_page", .generate = generateInsertPagePdf },
     .{ .name = "gentium_family", .generate = generateGentiumFamilyPdf },
     .{ .name = "pdfa", .generate = generatePdfaPdf, .skip_fonts = true }, // Has additional PDF/A structures
@@ -3943,6 +3944,35 @@ test "integration: styled_text PDF" {
 test "integration: valign PDF" {
     // Tests vertical text alignment (top, middle, bottom) in boxes
     try runIntegrationTest("valign", generateValignPdf);
+}
+
+/// Legacy 'kern' table: kern-only font, and GPOS + a wrong 'kern' table
+/// (GPOS must win). Fonts from scripts/gen_kern_fonts.py.
+fn generateKernTablePdf(allocator: std.mem.Allocator) ![]u8 {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+    const fonts = [_]platen.Font{
+        try doc.loadFont("test/fonts/kern/CharterKern.ttf", .identity),
+        try doc.loadFont("test/fonts/kern/CharterKernGpos.ttf", .identity),
+    };
+    try doc.addPage(.{});
+    var y: f64 = 60;
+    for (fonts) |font| {
+        for ([_][]const u8{
+            "AVAVAVAVAVAVAVAVAVAV TATATATATATATATA",
+            "AVATAR Toyota WAVE LT P. Yo",
+            "WAWAWAWAWAWA VoVoVoVoVoVo",
+        }) |line| {
+            _ = try doc.writeAt(.{ .x = 50, .y = y }, line, .{ .font = font, .size = 24 }, .{});
+            y += 36;
+        }
+        y += 24;
+    }
+    return doc.output();
+}
+
+test "integration: kern_table PDF" {
+    try runIntegrationTest("kern_table", generateKernTablePdf);
 }
 
 test "integration: kerning PDF" {

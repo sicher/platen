@@ -320,6 +320,32 @@ def gen_embedded_fonts():
     print("  embedded_fonts.pdf")
 
 
+def gen_kern_table():
+    """Legacy 'kern' table kerning (scripts/gen_kern_fonts.py fonts).
+
+    CharterKern kerns only through a format 0 'kern' table; CharterKernGpos
+    has GPOS plus a deliberately wrong 'kern' table that must be ignored.
+    HarfBuzz (fpdf2 text shaping) applies the same rule. Long kerned words
+    make a missing or wrong kern shift word edges far beyond tolerance.
+    """
+    pdf = make_pdf()
+    pdf.add_font("CharterKern", "", "test/fonts/kern/CharterKern.ttf")
+    pdf.add_font("CharterKernGpos", "", "test/fonts/kern/CharterKernGpos.ttf")
+    pdf.set_text_shaping(True, features={"kern": True})
+    pdf.add_page()
+    y = 60
+    for family in ("CharterKern", "CharterKernGpos"):
+        pdf.set_font(family, size=24)
+        for line in ("AVAVAVAVAVAVAVAVAVAV TATATATATATATATA",
+                     "AVATAR Toyota WAVE LT P. Yo",
+                     "WAWAWAWAWAWA VoVoVoVoVoVo"):
+            shaped_text(pdf, 50, y, line)
+            y += 36
+        y += 24
+    pdf.output(OUTPUT_DIR / "kern_table.pdf")
+    print("  kern_table.pdf")
+
+
 def gen_font_collection():
     """Faces of a TrueType collection (Inter.ttc), two families.
 
@@ -2716,6 +2742,7 @@ def gen_emoji():
 GENERATORS = {
     "gentium_family": gen_gentium_family,
     "kerning": gen_kerning,
+    "kern_table": gen_kern_table,
     "text_decorations": gen_text_decorations,
     "text_style": gen_text_style,
     "auto_height": gen_auto_height,

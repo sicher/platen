@@ -9,7 +9,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 - **Text rendering** with standard PDF fonts (Helvetica, Times, Courier, Symbol, ZapfDingbats)
 - **TrueType/OpenType font embedding** with automatic subsetting
 - **Unicode via CID fonts** (Latin, Greek, Cyrillic, CJK glyphs, emoji; see [Limitations](#limitations))
-- **OpenType features**: ligatures, kerning, mark positioning, stylistic sets, character variants, and more
+- **OpenType features**: ligatures, kerning (GPOS, or a legacy `kern` table), mark positioning, stylistic sets, character variants, and more
 - **Color fonts**: COLR v0/v1 (layered, gradients, sweep gradients), sbix/CBDT/EBDT bitmap strikes, and OT-SVG — full color emoji support
 - **Text flow**: word wrapping, justified text, Knuth-Plass optimal line breaking
 - **Graphics**: lines, rectangles, circles, ellipses, polygons

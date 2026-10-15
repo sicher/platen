@@ -209,6 +209,8 @@ fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
         }
     }
 
+    try showKerning(font);
+
     // Show name if available
     if (font.getFamilyName()) |name| {
         try print("\nFamily: ", .{});
@@ -223,6 +225,22 @@ fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
             try print("{s}", .{name});
         }
         try print("\n", .{});
+    }
+}
+
+/// Kerning sources: GPOS, and the legacy 'kern' table (platen uses the
+/// table only when GPOS has no kern lookups).
+fn showKerning(font: platen.ttf.Font) !void {
+    try print("\nKerning:\n", .{});
+    try print("  GPOS: {s}\n", .{if (font.getTable("GPOS".*) != null) "present" else "absent"});
+    const data = font.getTable("kern".*) orelse return print("  kern table: absent\n", .{});
+    const t = platen.kern_table.KernTable.parse(data);
+    try print("  kern table: {d} usable subtable(s), {d} pairs\n", .{ t.count, t.pairCount() });
+    const pairs = [_][2]u21{ .{ 'A', 'V' }, .{ 'T', 'o' }, .{ 'V', 'a' }, .{ 'L', 'T' } };
+    for (pairs) |p| {
+        const l = font.getGlyphId(p[0]) orelse continue;
+        const r = font.getGlyphId(p[1]) orelse continue;
+        try print("    '{u}{u}': {d}\n", .{ p[0], p[1], t.get(l, r) });
     }
 }
 

@@ -15,6 +15,10 @@
 - `system_fonts.zig` - Installed-font lookup by family/style
 - `embedded.zig` - Font embedding, subsetting, CID fonts
 - `opentype.zig` - OpenType GSUB/GPOS (ligatures, kerning, marks)
+- `kern_table.zig` - Legacy 'kern' table (format 0, MS and Apple
+  headers), used only when GPOS has no kern lookups (HarfBuzz's rule);
+  no allocation, slices into the font data. Fixtures from
+  scripts/gen_kern_fonts.py (Charter with its GPOS pairs moved to 'kern')
 - `ttf_subset.zig` - TTF subsetting helpers
 - `cff_subset.zig` - CFF subsetting helpers
 - `binary.zig` - Big-endian serialization helpers for font table construction

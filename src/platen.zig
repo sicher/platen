@@ -15,6 +15,7 @@ pub const ttf = @import("ttf.zig");
 pub const font_collection = @import("font_collection.zig");
 pub const system_fonts = @import("system_fonts.zig");
 pub const embedded = @import("embedded.zig");
+pub const kern_table = @import("kern_table.zig");
 pub const color = @import("color.zig");
 pub const layout = @import("layout.zig");
 pub const Writer = @import("writer.zig").Writer;
@@ -166,6 +167,7 @@ test {
     _ = font_collection;
     _ = system_fonts;
     _ = embedded;
+    _ = kern_table;
     _ = images;
     _ = xml;
     _ = svg;
