@@ -267,8 +267,9 @@ pub const Document = struct {
     conformance: pdfa.Conformance = .none,
     /// AES-256 encryption (default: none). Mutually exclusive with PDF/A.
     encryption: ?encrypt.Encryption = null,
-    /// RNG for encryption IVs/salts and document IDs. Defaults to the
-    /// system CSPRNG; override for deterministic test output.
+    /// RNG for encryption IVs/salts and the file IDs (trailer /ID, XMP
+    /// DocumentID/InstanceID). Defaults to the system CSPRNG; set it (with
+    /// explicit metadata dates) for byte-reproducible output.
     rng: ?std.Random = null,
     /// COLR color-font emission plans, rebuilt on each `output()` call. Each
     /// entry is heap-allocated so pointers stay stable as the list grows.
@@ -3057,26 +3058,32 @@ pub const Document = struct {
         var ids = try self.reserveObjectIds();
         defer ids.deinit(self.allocator);
 
+        if (self.encryption != null and self.conformance != .none) return error.EncryptionNotAllowedInPdfA;
+
+        // File IDs and encryption draw from one RNG: the injected rng, else
+        // the system CSPRNG (state lives in this frame for the whole output).
+        var sys_csprng: encrypt.SystemCsprng = undefined;
+        const needs_ids = self.conformance != .none or self.encryption != null;
+        const random: ?std.Random = if (!needs_ids) null else self.rng orelse blk: {
+            sys_csprng = try encrypt.SystemCsprng.init(self.io);
+            break :blk sys_csprng.random();
+        };
+        const file_ids: ?pdf_output.FileIds = if (random) |r| .generate(r) else null;
+
         // Set up encryption before any stream is written.
         var enc_material: ?encrypt.Material = null;
         var encrypt_id: ObjectId = 0;
-        var sys_csprng: encrypt.SystemCsprng = undefined;
         if (self.encryption) |enc_opts| {
-            if (self.conformance != .none) return error.EncryptionNotAllowedInPdfA;
-            const random = self.rng orelse blk: {
-                sys_csprng = try encrypt.SystemCsprng.init(self.io);
-                break :blk sys_csprng.random();
-            };
-            const m = encrypt.buildMaterial(enc_opts, random);
+            const m = encrypt.buildMaterial(enc_opts, random.?);
             enc_material = m;
-            w.encryptor = .{ .key = m.file_key, .random = random };
+            w.encryptor = .{ .key = m.file_key, .random = random.? };
             _ = &encrypt_id; // assigned after all other objects exist
         }
 
         try w.writeHeader();
         try self.writeCatalog(&w, &ids);
         try self.writePagesRoot(&w, &ids);
-        try self.writePdfaObjects(&w, &ids, &dates);
+        try self.writePdfaObjects(&w, &ids, &dates, if (file_ids) |*f| f else null);
         try self.writeStandardFonts(&w, &ids);
         try self.subsetFontsAndRenderPages();
 
@@ -3112,7 +3119,7 @@ pub const Document = struct {
             encrypt_id = w.nextObjectId();
             try self.writeEncryptDict(&w, encrypt_id, m);
         }
-        return self.finishDocument(&w, &ids, info_id, if (enc_material != null) encrypt_id else null);
+        return self.finishDocument(&w, &ids, info_id, if (enc_material != null) encrypt_id else null, if (file_ids) |*f| f else null);
     }
 
     /// Write the /Encrypt dictionary object (AESV3 / R6 crypt filter).
@@ -3316,15 +3323,9 @@ pub const Document = struct {
 
     /// Write PDF/A objects (XMP metadata, ICC profile, OutputIntent).
     /// No-op unless a conformance level is set.
-    fn writePdfaObjects(self: *Document, w: *Writer, ids: *const OutputIds, dates: *const pdf_output.OutputDates) !void {
+    fn writePdfaObjects(self: *Document, w: *Writer, ids: *const OutputIds, dates: *const pdf_output.OutputDates, file_ids: ?*const pdf_output.FileIds) !void {
         if (self.conformance != .none) {
-            // Generate UUIDs for XMP document/instance IDs (simple pseudo-random)
-            var uuid_buf: [32]u8 = undefined;
-            var ts: std.c.timespec = undefined;
-            _ = std.c.clock_gettime(.REALTIME, &ts);
-            const timestamp: u64 = @as(u64, @intCast(ts.sec)) *% 1000 +% @as(u64, @intCast(ts.nsec)) / 1_000_000;
-            _ = std.fmt.bufPrint(&uuid_buf, "{x:0>16}{x:0>16}", .{ timestamp, timestamp ^ 0xDEADBEEF }) catch unreachable;
-            const uuid_str = uuid_buf[0..32];
+            const fid = file_ids.?; // always generated under PDF/A
 
             // 1. XMP Metadata stream
             const xmp_data = try pdfa.generateXmpMetadata(self.allocator, .{
@@ -3335,8 +3336,8 @@ pub const Document = struct {
                 .creator = self.metadata.creator,
                 .producer = self.metadata.producer,
                 .conformance = self.conformance,
-                .document_id = uuid_str,
-                .instance_id = uuid_str,
+                .document_id = &fid.document_uuid,
+                .instance_id = &fid.instance_uuid,
                 .create_date = dates.create_iso.?, // checked in output()
                 .modify_date = dates.modify_iso.?,
             });
@@ -4295,23 +4296,14 @@ pub const Document = struct {
     }
 
     /// Write the xref table and trailer; returns the finished PDF bytes.
-    fn finishDocument(self: *Document, w: *Writer, ids: *const OutputIds, info_id: ?ObjectId, encrypt_id: ?ObjectId) ![]u8 {
+    /// file_ids is set exactly when a trailer /ID is required (PDF/A,
+    /// encryption).
+    fn finishDocument(self: *Document, w: *Writer, ids: *const OutputIds, info_id: ?ObjectId, encrypt_id: ?ObjectId, file_ids: ?*const pdf_output.FileIds) ![]u8 {
         const finish_start = pdf_output.milliTimestamp();
-
-        // Generate document ID for PDF/A (required in trailer)
-        // A file ID is required for encrypted documents and PDF/A.
-        var doc_id_buf: [32]u8 = undefined;
-        const doc_id: ?[]const u8 = if (self.conformance != .none or encrypt_id != null) blk: {
-            const timestamp = @as(u64, @intCast(pdf_output.milliTimestamp()));
-            const content_hash = @as(u64, @intCast(w.output.items.len)) ^ 0xCAFEBABE;
-            _ = std.fmt.bufPrint(&doc_id_buf, "{x:0>16}{x:0>16}", .{ timestamp, content_hash }) catch unreachable;
-            break :blk doc_id_buf[0..32];
-        } else null;
-
         const result = try w.finish(.{
             .catalog_ref = .{ .id = ids.catalog_id },
             .info_ref = if (info_id) |id| .{ .id = id } else null,
-            .id = doc_id,
+            .id = if (file_ids) |f| &f.trailer_hex else null,
             .encrypt_ref = if (encrypt_id) |id| .{ .id = id } else null,
         });
         self.last_output_timing.finish_ms = pdf_output.milliTimestamp() - finish_start;

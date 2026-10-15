@@ -1154,12 +1154,15 @@ emit `IV ++ AES-256-CBC(PKCS#7)` in place of the raw body.
 - `src/encrypt.zig` is self-contained: Algorithm 2.B (the iterated
   SHA-256/384/512 + AES-128 password hash), Algorithms 8/9/10 (U/UE/O/OE
   /Perms), the content Encryptor, and a SystemCsprng seeded from
-  `std.c.arc4random_buf`.
-- Determinism: encryption needs randomness (IVs, salts, file key, /ID),
-  which collides with byte-identical guarantees. `Document.rng` is an
+  `io.randomSecure`.
+- Determinism: encryption needs randomness (IVs, salts, file key), which
+  collides with byte-identical guarantees. `Document.rng` is an
   injectable `std.Random` (defaults to the system CSPRNG); tests seed it.
-  Unencrypted output is unchanged - the encryptor is null by default and
-  byte-identity tests still pass.
+  The file IDs (trailer /ID, XMP DocumentID/InstanceID as v4 UUIDs,
+  `pdf_output.FileIds`) come from the same RNG, never the clock, so the
+  only clock input is the one date reading per `output()`: with `rng` and
+  explicit dates set, PDF/A and encrypted output is byte-reproducible.
+  Unencrypted, non-PDF/A output draws no randomness at all.
 - Scope: `/StmF /StdCF` (AESV3) encrypts streams; `/StrF /Identity`
   leaves strings cleartext. Strings serialize deep in Dict/Value.format
   with no encryptor in scope; encrypting them would need threading the

@@ -3959,6 +3959,28 @@ test "encryption: qpdf (independent reader) validates the encrypted PDF" {
     try std.testing.expect(result.rejects_wrong_password); // really encrypted
 }
 
+test "encryption: seeded rng and explicit dates give byte-identical output" {
+    const makePdf = struct {
+        fn call() ![]u8 {
+            var prng = std.Random.DefaultPrng.init(0x5eed);
+            var doc = Document.init(std.testing.allocator, std.testing.io);
+            defer doc.deinit();
+            doc.encryption = .{ .user_password = "pw" };
+            doc.rng = prng.random();
+            doc.setMetadata(.{ .creation_date = "D:20260101120000Z" });
+            const font = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
+            try doc.addPage(.{});
+            _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "same bytes", .{ .font = font, .size = 12 }, .{});
+            return doc.output();
+        }
+    }.call;
+    const a = try makePdf();
+    defer std.testing.allocator.free(a);
+    const b = try makePdf();
+    defer std.testing.allocator.free(b);
+    try std.testing.expectEqualSlices(u8, a, b); // trailer /ID used to be the clock
+}
+
 test "encryption is rejected under PDF/A" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

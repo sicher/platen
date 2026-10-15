@@ -153,3 +153,55 @@ test "PDF/A rejects explicit dates that are not PDF dates; plain output keeps th
     defer std.testing.allocator.free(pdf);
     try std.testing.expectEqualStrings("2026-01-01", try between(pdf, "/CreationDate (", ")"));
 }
+
+fn pdfaSeeded(seed: ?u64) ![]u8 {
+    var prng = std.Random.DefaultPrng.init(seed orelse 0);
+    var doc = platen.Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.setConformance(.pdfa_1b);
+    doc.setMetadata(.{ .creation_date = "D:20260101120000Z" });
+    if (seed != null) doc.rng = prng.random();
+    try doc.addPage(.{});
+    return doc.output();
+}
+
+fn expectUuidV4(s: []const u8) !void {
+    try std.testing.expectEqual(@as(usize, 36), s.len);
+    for (s, 0..) |c, i| switch (i) {
+        8, 13, 18, 23 => try std.testing.expectEqual(@as(u8, '-'), c),
+        else => try std.testing.expect(std.ascii.isHex(c) and !std.ascii.isUpper(c)),
+    };
+    try std.testing.expectEqual(@as(u8, '4'), s[14]); // version
+    try std.testing.expect(std.mem.indexOfScalar(u8, "89ab", s[19]) != null); // variant
+}
+
+test "PDF/A: file IDs come from the RNG, not the clock" {
+    // Trailer /ID and XMP IDs were the millisecond clock: outputs in the
+    // same millisecond got identical IDs, and no rng made bytes stable.
+    const a = try pdfaSeeded(1);
+    defer std.testing.allocator.free(a);
+    const b = try pdfaSeeded(1);
+    defer std.testing.allocator.free(b);
+    try std.testing.expectEqualSlices(u8, a, b); // seeded rng + explicit dates: reproducible
+
+    const doc_id = try between(a, "<xmpMM:DocumentID>uuid:", "<");
+    const inst_id = try between(a, "<xmpMM:InstanceID>uuid:", "<");
+    try expectUuidV4(doc_id);
+    try expectUuidV4(inst_id);
+    try std.testing.expect(!std.mem.eql(u8, doc_id, inst_id));
+    const trailer = try between(a, "/ID [<", ">");
+    try std.testing.expectEqual(@as(usize, 32), trailer.len);
+    for (trailer) |c| try std.testing.expect(std.ascii.isHex(c));
+
+    const c = try pdfaSeeded(2);
+    defer std.testing.allocator.free(c);
+    try std.testing.expect(!std.mem.eql(u8, trailer, try between(c, "/ID [<", ">")));
+
+    // Default (system CSPRNG): back-to-back outputs never share IDs.
+    const d = try pdfaSeeded(null);
+    defer std.testing.allocator.free(d);
+    const e = try pdfaSeeded(null);
+    defer std.testing.allocator.free(e);
+    try std.testing.expect(!std.mem.eql(u8, try between(d, "/ID [<", ">"), try between(e, "/ID [<", ">")));
+    try std.testing.expect(!std.mem.eql(u8, try between(d, "<xmpMM:DocumentID>", "<"), try between(e, "<xmpMM:DocumentID>", "<")));
+}
