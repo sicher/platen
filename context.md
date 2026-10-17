@@ -51,10 +51,10 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   Bitstream Vera Sans 1.10; `font-info` shows kerning sources.
 - Kerning API for fdxview: dropped. `measureStyled` already measures
   exactly what renders; fdxview should use it instead of parsing `kern`.
-- devkit bug (urverk/devkit, not fixed here): `release`/`promote` lack
-  sync-dev's "Already up to date" guard, so releasing right after a
-  promote amends the pushed promote merge (non-FF). Workaround: a real
-  commit on dev first.
+- devkit: releasing right after a promote amended the pushed promote
+  merge (non-FF). Already fixed upstream (devkit 5ca517b, 2026-10-06);
+  our .tools/devkit clone was stale. `git -C .tools/devkit pull` before
+  releasing.
 - Open: reference comparator can't detect blank glyphs (needs a render
   check).
 
