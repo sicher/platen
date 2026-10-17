@@ -1,9 +1,10 @@
 # platen Context
 
 ## Current Focus
-**0.11.0 released (2026-10-06)** - after 0.10.0 and 0.10.1 the same day.
+**0.12.0 released (2026-10-17)**: font collections, system font lookup,
+legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 535 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 544 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
@@ -44,10 +45,18 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 - File IDs (trailer /ID, XMP Document/InstanceID as v4 UUIDs) now come
   from `doc.rng` (`FileIds`), not the clock. Decision: rng + explicit
   dates = byte-reproducible PDF/A and encrypted output; no clock override.
-- Both promoted and pushed (main 59e86e2, still 0.11.0). Repo description
-  set on the forge.
+- Legacy `kern` table (`kern_table.zig`, format 0, MS + Apple headers),
+  used only when GPOS has no kern lookups (HarfBuzz rule). Tested with
+  Charter-derived fixtures (scripts/gen_kern_fonts.py) and the unmodified
+  Bitstream Vera Sans 1.10; `font-info` shows kerning sources.
+- Kerning API for fdxview: dropped. `measureStyled` already measures
+  exactly what renders; fdxview should use it instead of parsing `kern`.
+- devkit bug (urverk/devkit, not fixed here): `release`/`promote` lack
+  sync-dev's "Already up to date" guard, so releasing right after a
+  promote amends the pushed promote merge (non-FF). Workaround: a real
+  commit on dev first.
 - Open: reference comparator can't detect blank glyphs (needs a render
-  check); kerning API for fdxview not started (not urgent).
+  check).
 
 ## What We Did (Session 2026-10-13 #29 - font collections, system fonts)
 - **Requested by fdxview** (a peer session; fdxview uses platen as a path
