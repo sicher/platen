@@ -721,7 +721,10 @@ unchanged StyledText. Stateless: the position lives with the caller.
   byte offset into the word (single-span words only; multi-span words are
   never broken). A mid-word start finishes that word first.
 - Knuth-Plass restarts from the resume point (`computeOptimalBreaks(..,
-  start)`): each region's part is optimized separately.
+  start)`): each region's part is optimized separately. A word wider
+  than the line is a feasible line on its own (cost 0, nothing shares
+  it) and `writeStyledOptimal` breaks it with `writeBrokenWord`, so both
+  modes split and resume over-wide words identically.
 - `WriteResult.overflow` is unchanged and, for styled text, only the rest
   of one span - documented as a preview; `resume_at` is the way to go on.
 

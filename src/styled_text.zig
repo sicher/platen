@@ -492,8 +492,16 @@ pub const StyledText = struct {
                 if (start_i + 1 < j) line_w += space_width;
                 line_w += word.width;
 
-                // Line too wide
-                if (line_w > line_width + 0.01) break;
+                // Line too wide. A single word wider than the line still
+                // gets a line of its own (the renderer breaks it into
+                // pieces); nothing may share it.
+                if (line_w > line_width + 0.01) {
+                    if (start_i + 1 == j and dp[start_i] < dp[j]) {
+                        dp[j] = dp[start_i];
+                        prev[j] = start_i;
+                    }
+                    break;
+                }
 
                 // Compute badness
                 const slack = line_width - line_w;

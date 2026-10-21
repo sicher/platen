@@ -24,6 +24,11 @@
   word (lines are the unit, as in TeX and CSS fragmentation). Pieces are
   measured in the span's own style (bold words were broken with regular
   widths).
+- **Knuth-Plass put a too-wide word on one endless line:** with
+  `.line_breaking = .optimal`, a word wider than the line made every
+  break infeasible and the whole paragraph came out as a single line
+  running past the region. Such a word now gets a line of its own and is
+  broken into pieces, as with greedy breaking.
 - **`measure_only` drew broken words:** measuring a paragraph containing
   a word wider than the line drew that word's pieces on the page.
 - **Combining marks compose to the font's precomposed glyphs:** a base

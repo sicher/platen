@@ -984,7 +984,8 @@ test "writeStyled resume_at continues every span in the next region" {
 }
 
 test "writeStyled resumes a word broken over lines mid-word" {
-    // Words wider than the 90pt column are broken over lines - between
+    // Words wider than the 90pt column are broken over lines (on lines of
+    // their own, with greedy and Knuth-Plass alike) - between
     // characters, after regular hyphens, or at soft hyphens (drawing a
     // hyphen). A region boundary may fall inside such a word: the next
     // region continues mid-word, so chained 2-line regions draw exactly
@@ -995,17 +996,19 @@ test "writeStyled resumes a word broken over lines mid-word" {
         &.{.{ .text = "Before state-of-the-art-and-well-known-hyphenated-compound after.", .opts = .{} }},
         &.{.{ .text = "Before In\u{AD}com\u{AD}pre\u{AD}hen\u{AD}si\u{AD}bil\u{AD}i\u{AD}ties\u{AD}and\u{AD}ex\u{AD}tra\u{AD}or\u{AD}di\u{AD}nar\u{AD}i\u{AD}ly\u{AD}long\u{AD}com\u{AD}pounds after.", .opts = .{} }},
     };
-    for (cases) |spans| {
-        for ([_]f64{ 25, 40 }) |height| { // 2 and 3 lines per region
-            var one: ResumeStats = .{};
-            const whole = try renderResumed(allocator, spans, 1000, .greedy, &one);
-            defer allocator.free(whole);
-            var many: ResumeStats = .{};
-            const chained = try renderResumed(allocator, spans, height, .greedy, &many);
-            defer allocator.free(chained);
+    for ([_]platen.LineBreaking{ .greedy, .optimal }) |breaking| {
+        for (cases) |spans| {
+            for ([_]f64{ 25, 40 }) |height| { // 2 and 3 lines per region
+                var one: ResumeStats = .{};
+                const whole = try renderResumed(allocator, spans, 1000, breaking, &one);
+                defer allocator.free(whole);
+                var many: ResumeStats = .{};
+                const chained = try renderResumed(allocator, spans, height, breaking, &many);
+                defer allocator.free(chained);
 
-            try std.testing.expect(many.mid_word > 0); // a boundary fell inside the word
-            try std.testing.expectEqualStrings(whole, chained);
+                try std.testing.expect(many.mid_word > 0); // a boundary fell inside the word
+                try std.testing.expectEqualStrings(whole, chained);
+            }
         }
     }
 }

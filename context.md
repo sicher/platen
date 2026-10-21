@@ -23,8 +23,7 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 ## What's Next
 - Open from session #31 (TODO.md "Found by the README showcase"): `ccmp`
   (GSUB chain-context formats 1/2 not parsed; dotted i under marks with
-  no precomposed form), and Knuth-Plass (`.optimal`) has no handling for
-  words wider than the line.
+  no precomposed form).
 - TODO.md roadmap: text render modes (`Tr`), Form XObject stamps, the
   opt-in 16-bit -> 8-bit flag for PDF/A-1b, splitting document.zig
   (~4,400 lines), parallel page rendering, metadata encryption; post-1.0:

@@ -2594,6 +2594,18 @@ pub const Document = struct {
                 };
             }
 
+            // A word wider than the line, alone on its line: break it
+            if (line_end == line_start + 1 and text.words.items[line_start].width > line_width + 0.01) {
+                if (try self.writeBrokenWord(region, text, style, text.words.items[line_start], 0, opts, line_height, line_width)) |broken| {
+                    lines_written += broken.lines;
+                    if (broken.resume_offset) |offset| {
+                        return resumeResult(text, .{ .word = line_start, .offset = offset }, lines_written, line_height, rect_x, rect_y, rect_width);
+                    }
+                    line_start = line_end;
+                    continue;
+                }
+            }
+
             // Calculate line content width
             var content_width: f64 = 0;
             for (line_start..line_end) |w| {

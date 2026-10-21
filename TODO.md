@@ -184,7 +184,8 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   2026-10-21) Lines are the unit, as in TeX/CSS fragmentation: the
   region may end mid-word and `resume_at.offset` continues it
   (writeBrokenWord, used by the greedy path and for a mid-word start).
-  Knuth-Plass (`.optimal`) still has no oversized-word handling of its own.
+  Knuth-Plass (`.optimal`): done too - a too-wide word is a line of its
+  own there and broken the same way (before: one endless line).
 - [x] **`platen.Path` is not exported** (done 2026-10-21) from the root module (only
   `document.Path`), so users can't name the type returned by
   `createPath()` in their own helpers (showcase uses `anytype`).
