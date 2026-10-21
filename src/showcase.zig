@@ -3,7 +3,7 @@
 //! rasterized from its output (scripts/render-readme-images).
 //!
 //! Run with: zig build showcase -- [--output=PATH]
-//! Default output: zig-out/showcase.pdf
+//! Default output: examples/showcase.pdf (linked from the README)
 
 const std = @import("std");
 const platen = @import("platen");
@@ -28,7 +28,7 @@ const Fonts = struct {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
-    var output_path: []const u8 = "zig-out/showcase.pdf";
+    var output_path: []const u8 = "examples/showcase.pdf";
     var args = init.minimal.args.iterate();
     _ = args.next(); // program name
     while (args.next()) |arg| {
@@ -325,7 +325,7 @@ fn colorPage(doc: *platen.Document, fonts: Fonts) !void {
             }
         }
     }
-    const robot = try doc.loadImage("test/images/robot.png");
+    const robot = try doc.loadImage("test/images/robot_480.png");
     try doc.drawImage(robot, .{ .x = ix, .y = iy, .width = iw, .height = ih });
     _ = try doc.writeAt(.{ .x = ix + iw / 2, .y = iy + ih + 16 }, "PNG with alpha channel", .{ .font = fonts.inter, .size = 8, .color = muted }, .{ .anchor = .center });
 

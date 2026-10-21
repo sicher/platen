@@ -6,7 +6,7 @@ A fast, self-contained PDF generation library written in Zig. Supports text layo
 
 ## Gallery
 
-Every page below is a PDF rendered by platen, rasterized with poppler.
+Every page below is a PDF rendered by platen, rasterized with poppler; the PDF links open the originals for closer inspection.
 
 <table>
   <tr>
@@ -14,30 +14,30 @@ Every page below is a PDF rendered by platen, rasterized with poppler.
 
 [![Typography page: justified two-column text with Knuth-Plass line breaking, Greek, Cyrillic and Vietnamese diacritics, and font weight specimens](docs/images/typography.png)](docs/images/typography.png)
 
-<sub><b>Typography</b><br>Knuth-Plass justification, OpenType shaping, Unicode marks</sub>
+<sub><b>Typography</b> · [PDF, page 1](examples/showcase.pdf)<br>Knuth-Plass justification, OpenType shaping, Unicode marks</sub>
 </td>
     <td align="center" width="25%">
 
 [![Vector graphics page: the SVG tiger, translucent circles, a radial-gradient sphere, rotated squares, dashed rounded rectangle, Bezier wave and star](docs/images/graphics.png)](docs/images/graphics.png)
 
-<sub><b>Vector graphics</b><br>SVG, gradients, clipping, transforms, opacity</sub>
+<sub><b>Vector graphics</b> · [PDF, page 2](examples/showcase.pdf)<br>SVG, gradients, clipping, transforms, opacity</sub>
 </td>
     <td align="center" width="25%">
 
 [![Color fonts page: COLRv1 gradient lettering, a grid of color emoji, a PNG with alpha over a checkerboard, and COLRv0 and OpenType-SVG lettering](docs/images/color.png)](docs/images/color.png)
 
-<sub><b>Color fonts &amp; images</b><br>COLRv0/v1, OT-SVG, emoji, PNG alpha</sub>
+<sub><b>Color fonts &amp; images</b> · [PDF, page 3](examples/showcase.pdf)<br>COLRv0/v1, OT-SVG, emoji, PNG alpha</sub>
 </td>
     <td align="center" width="25%">
 
 [![A one-page invoice with the platen logo, line items table and totals](docs/images/invoice.png)](docs/images/invoice.png)
 
-<sub><b>Invoice</b><br>~17,700 per second on 8 cores (<a href="#many-small-documents-invoice-throughput">benchmark</a>)</sub>
+<sub><b>Invoice</b> · [PDF](examples/benchmark_invoice.pdf)<br>~17,700 per second on 8 cores (<a href="#many-small-documents-invoice-throughput">benchmark</a>)</sub>
 </td>
   </tr>
 </table>
 
-The first three pages come from [`src/showcase.zig`](src/showcase.zig) (`zig build showcase` writes `zig-out/showcase.pdf`); the invoice is the [invoice benchmark](src/invoice_bench.zig)'s sample. `scripts/render-readme-images` regenerates all four images.
+The first three pages are [`examples/showcase.pdf`](examples/showcase.pdf), made by [`src/showcase.zig`](src/showcase.zig) (`zig build showcase`); the invoice is the [invoice benchmark](src/invoice_bench.zig)'s sample. `scripts/render-readme-images` regenerates all four images.
 
 ## Features
 

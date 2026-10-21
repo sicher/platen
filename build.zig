@@ -142,7 +142,7 @@ pub fn build(b: *std.Build) void {
     const run_showcase = b.addRunArtifact(showcase_exe);
     run_showcase.addPassthruArgs();
 
-    const showcase_step = b.step("showcase", "Render the feature showcase PDF (zig-out/showcase.pdf)");
+    const showcase_step = b.step("showcase", "Render the feature showcase PDF (examples/showcase.pdf)");
     showcase_step.dependOn(&run_showcase.step);
 }
 
