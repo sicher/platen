@@ -2920,7 +2920,8 @@ pub const Document = struct {
                                 if (t.char_spacing != 0) {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                                 }
-                                try cw.print("{d:.2} Tw\n", .{t.word_spacing});
+                                // Word spacing is in the TJ (see the CID branch)
+                                try cw.append("0.00 Tw\n");
                                 try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y, t.word_spacing);
                             } else {
                                 try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
@@ -2928,8 +2929,13 @@ pub const Document = struct {
                                 if (t.char_spacing != 0) {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                                 }
-                                // Always emit Tw to ensure correct word spacing (state persists across text blocks)
-                                try cw.print("{d:.2} Tw\n", .{t.word_spacing});
+                                // Always emit Tw (state persists across text blocks).
+                                // Identity-H codes are 2-byte, so Tw must not apply;
+                                // the renderer puts word spacing into the TJ instead.
+                                // Tw stays 0 there: poppler applies it to code
+                                // 0x0020 anyway (e.g. a ligature subset to CID 32).
+                                const tw = if (emb.encoding == .identity) 0 else t.word_spacing;
+                                try cw.print("{d:.2} Tw\n", .{tw});
 
                                 if (emb.encoding == .identity) {
                                     // CID mode: output with ligatures, kerning, and mark positioning

@@ -9,6 +9,14 @@
 
 ### Fixed
 
+- **Combining marks compose to the font's precomposed glyphs:** a base
+  followed by combining marks (e.g. `i` + U+0308) was drawn as separate
+  glyphs positioned by GPOS - or simply overprinted in fonts without mark
+  positioning - giving a dotted i under a diaeresis. Like HarfBuzz,
+  shaping now composes the sequence into the precomposed character
+  (U+00EF) when the font has a glyph for it; otherwise it stays
+  decomposed. Measurement and rendering share the decoding, and the
+  ToUnicode text of such a glyph is the sequence as typed.
 - **Unused fonts were embedded whole:** a font loaded into a document but
   never drawn with (only measured, or not used at all) has no glyphs to
   subset, so `output()` wrote the complete original font file as orphan
@@ -20,7 +28,9 @@
   color-font runs), so those lines came out ragged in every
   `.identity` font. The extra word space is now emitted after each space
   glyph as a `TJ` adjustment (or `Tm` offset in the mark-positioning
-  path). New fpdf2 reference `justify_embedded`.
+  path), and `Tw` is 0 for these runs (poppler applies it to the 2-byte
+  code 0x0020 anyway, e.g. a ligature subset to CID 32). New fpdf2
+  reference `justify_embedded`.
 - **`char_spacing` in runs with combining marks:** runs with GPOS mark
   positioning place every glyph with `Tm`, so `Tc` never applied and the
   text came out unspaced while `measureStyled` included the spacing. The

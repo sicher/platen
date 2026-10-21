@@ -7,6 +7,16 @@
 
 const std = @import("std");
 const ttf = @import("ttf.zig");
+const unicode_compose = @import("unicode_compose.zig");
+
+/// Whether `text` may contain a combining mark: UTF-8 lead bytes below
+/// 0xCC encode code points below U+0300 (unicode_compose.first_mark).
+fn mayCompose(text: []const u8) bool {
+    for (text) |b| {
+        if (b >= 0xCC) return true;
+    }
+    return false;
+}
 const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
 const colr = @import("colr.zig");
@@ -238,6 +248,8 @@ pub const EmbeddedFont = struct {
 
     // Scratch buffers for shaping (reused across calls to avoid allocations)
     scratch_codepoints: std.ArrayListUnmanaged(u21) = .empty,
+    // Per scratch code point: composed from a decomposed sequence (decodeText)
+    scratch_composed: std.ArrayListUnmanaged(bool) = .empty,
     scratch_glyphs: std.ArrayListUnmanaged(u16) = .empty,
 
     // COLR/CPAL color-font support (lazily probed). All slices in ColorInfo
@@ -442,6 +454,7 @@ pub const EmbeddedFont = struct {
         self.ligature_codepoints.deinit(self.allocator);
         // Free scratch buffers
         self.scratch_codepoints.deinit(self.allocator);
+        self.scratch_composed.deinit(self.allocator);
         self.scratch_glyphs.deinit(self.allocator);
         if (!self.borrowed) {
             if (self.synthetic_loca) |sl| self.allocator.free(sl);
@@ -471,6 +484,7 @@ pub const EmbeddedFont = struct {
         emb.gid_remap = .empty;
         emb.ligature_codepoints = .empty;
         emb.scratch_codepoints = .empty;
+        emb.scratch_composed = .empty;
         emb.scratch_glyphs = .empty;
         if (proto.ot_features) |proto_ot| {
             const ot = try allocator.create(opentype.OpenTypeFeatures);
@@ -614,48 +628,84 @@ pub const EmbeddedFont = struct {
             self.hasCharVariantLookups(ot);
     }
 
-    pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8, output_allocator: ?std.mem.Allocator) ![]u16 {
-        const out_alloc = output_allocator orelse self.allocator;
-        const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
-
-        // First pass: decode text into codepoints and map to glyph IDs
-        // Use scratch buffers to avoid allocations on repeated calls
+    /// Decode UTF-8 `text` into `scratch_codepoints` and their nominal
+    /// glyphs in `scratch_glyphs`, composing a base + combining marks into
+    /// the precomposed character when this font has a glyph for it (the
+    /// normalization HarfBuzz does before shaping). Every identity shaping
+    /// path - rendering and measurement - decodes here, so they agree.
+    /// Invalid sequences are skipped; a truncated one ends the text.
+    fn decodeText(self: *EmbeddedFont, text: []const u8) !void {
         self.scratch_codepoints.clearRetainingCapacity();
+        self.scratch_composed.clearRetainingCapacity();
         self.scratch_glyphs.clearRetainingCapacity();
-
-        // Estimate capacity needed (worst case: all ASCII = text.len chars)
+        // Worst case: all ASCII = text.len code points
         try self.scratch_codepoints.ensureTotalCapacity(self.allocator, text.len);
+        try self.scratch_composed.ensureTotalCapacity(self.allocator, text.len);
         try self.scratch_glyphs.ensureTotalCapacity(self.allocator, text.len);
 
+        var may_compose = false;
         var i: usize = 0;
         while (i < text.len) {
             const byte = text[i];
-
-            // ASCII fast path: byte < 128 means single-byte UTF-8, codepoint == byte
             if (byte < 128) {
                 self.scratch_codepoints.appendAssumeCapacity(byte);
-                // Use cached ASCII glyph directly (already looked up at font load)
-                const gid = if (self.font.has_ascii_cache) self.font.ascii_glyphs[byte] else self.font.getGlyphId(byte) orelse 0;
-                self.scratch_glyphs.appendAssumeCapacity(gid);
                 i += 1;
                 continue;
             }
-
-            // Multi-byte UTF-8 path
             const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
             if (i + len > text.len) break;
-
             const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
                 i += 1;
                 continue;
             };
-
+            if (codepoint >= unicode_compose.first_mark) may_compose = true;
             self.scratch_codepoints.appendAssumeCapacity(codepoint);
-            const gid = self.font.getGlyphId(codepoint) orelse 0;
-            self.scratch_glyphs.appendAssumeCapacity(gid);
-
             i += len;
         }
+
+        if (may_compose) {
+            const ctx = struct {
+                font: *const ttf.Font,
+                pub fn hasGlyph(c: @This(), cp: u21) bool {
+                    return (c.font.getGlyphId(cp) orelse 0) != 0;
+                }
+            }{ .font = &self.font };
+            self.scratch_composed.items.len = self.scratch_codepoints.items.len;
+            self.scratch_codepoints.items.len = unicode_compose.composeInPlace(self.scratch_codepoints.items, self.scratch_composed.items, ctx);
+            self.scratch_composed.items.len = self.scratch_codepoints.items.len;
+        } else {
+            self.scratch_composed.appendNTimesAssumeCapacity(false, self.scratch_codepoints.items.len);
+        }
+
+        for (self.scratch_codepoints.items) |cp| {
+            // ASCII: cached glyph (looked up at font load)
+            const gid = if (cp < 128 and self.font.has_ascii_cache) self.font.ascii_glyphs[cp] else self.font.getGlyphId(cp) orelse 0;
+            self.scratch_glyphs.appendAssumeCapacity(gid);
+        }
+    }
+
+    /// Record the ToUnicode text of `gid` (first use wins). A glyph that
+    /// decodeText composed from base + marks maps to its canonical
+    /// decomposition - the text as typed - so copying it back yields the
+    /// input, not a normalized form of it.
+    fn trackGlyphText(self: *EmbeddedFont, gid: u16, cp: u21, composed: bool) !void {
+        if (self.glyph_to_codepoint.contains(gid) or self.ligature_codepoints.contains(gid)) return;
+        if (!composed) {
+            try self.glyph_to_codepoint.put(self.allocator, gid, cp);
+            return;
+        }
+        var buf: [4]u21 = undefined;
+        const seq = try self.allocator.dupe(u21, unicode_compose.decompose(cp, &buf));
+        errdefer self.allocator.free(seq);
+        try self.ligature_codepoints.put(self.allocator, gid, seq);
+    }
+
+    pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8, output_allocator: ?std.mem.Allocator) ![]u16 {
+        const out_alloc = output_allocator orelse self.allocator;
+        const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
+
+        // First pass: decode text into (composed) codepoints and glyph IDs
+        try self.decodeText(text);
 
         // Use local references for cleaner code
         const codepoints = &self.scratch_codepoints;
@@ -671,20 +721,17 @@ pub const EmbeddedFont = struct {
             if (self.ot_features) |ot| {
                 if (self.hasActiveGsub(ot)) {
                     // Apply GSUB substitutions, track results, and return glyphs
-                    return try self.applyGSUBAndTrack(codepoints.items, base_glyphs.items, scale, out_alloc);
+                    return try self.applyGSUBAndTrack(codepoints.items, self.scratch_composed.items, base_glyphs.items, scale, out_alloc);
                 }
             }
         }
 
         // No GSUB - just track the base glyphs
-        for (codepoints.items, base_glyphs.items) |cp, gid| {
+        for (codepoints.items, self.scratch_composed.items, base_glyphs.items) |cp, composed, gid| {
             if (!self.cid_used_glyphs.contains(cp)) {
                 try self.cid_used_glyphs.put(self.allocator, cp, gid);
             }
-            // Track glyph→codepoint for ToUnicode
-            if (!self.glyph_to_codepoint.contains(gid)) {
-                try self.glyph_to_codepoint.put(self.allocator, gid, cp);
-            }
+            try self.trackGlyphText(gid, cp, composed);
             if (!self.cid_glyph_widths.contains(gid)) {
                 if (self.font.getGlyphWidth(gid)) |w| {
                     const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
@@ -699,7 +746,7 @@ pub const EmbeddedFont = struct {
 
     /// Apply GSUB substitutions (calt and/or ligatures) and track all resulting glyphs.
     /// Returns the final glyph sequence (caller owns the memory, allocated with out_alloc).
-    fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, base_glyphs: []const u16, scale: f64, out_alloc: std.mem.Allocator) ![]u16 {
+    fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, composed: []const bool, base_glyphs: []const u16, scale: f64, out_alloc: std.mem.Allocator) ![]u16 {
         const ot = self.ot_features orelse return try out_alloc.dupe(u16, base_glyphs);
 
         // Apply GSUB substitutions to get final glyph sequence
@@ -776,10 +823,8 @@ pub const EmbeddedFont = struct {
                     if (!self.cid_used_glyphs.contains(cp)) {
                         try self.cid_used_glyphs.put(self.allocator, cp, gid);
                     }
-                    // Track glyph→codepoint for ToUnicode (handles calt variants)
-                    if (!self.glyph_to_codepoint.contains(gid)) {
-                        try self.glyph_to_codepoint.put(self.allocator, gid, cp);
-                    }
+                    // ToUnicode for the variant (handles calt variants)
+                    try self.trackGlyphText(gid, cp, composed[src_pos]);
                 }
 
                 // Track width for this glyph
@@ -797,10 +842,7 @@ pub const EmbeddedFont = struct {
                 if (!self.cid_used_glyphs.contains(cp)) {
                     try self.cid_used_glyphs.put(self.allocator, cp, gid);
                 }
-                // Track glyph→codepoint for ToUnicode
-                if (!self.glyph_to_codepoint.contains(gid)) {
-                    try self.glyph_to_codepoint.put(self.allocator, gid, cp);
-                }
+                try self.trackGlyphText(gid, cp, composed[src_pos]);
                 if (!self.cid_glyph_widths.contains(gid)) {
                     if (self.font.getGlyphWidth(gid)) |w| {
                         const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
@@ -822,34 +864,8 @@ pub const EmbeddedFont = struct {
     /// Get glyph sequence for text with ligature substitution applied
     /// Returns allocated slice that caller must free
     pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {
-        var base_glyphs = std.ArrayListUnmanaged(u16).empty;
-        defer base_glyphs.deinit(self.allocator);
-
-        var i: usize = 0;
-        while (i < text.len) {
-            const byte = text[i];
-
-            // ASCII fast path
-            if (byte < 128) {
-                const gid = if (self.font.has_ascii_cache) self.font.ascii_glyphs[byte] else self.font.getGlyphId(byte) orelse 0;
-                try base_glyphs.append(self.allocator, gid);
-                i += 1;
-                continue;
-            }
-
-            // Multi-byte UTF-8 path
-            const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
-            if (i + len > text.len) break;
-
-            const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
-                i += 1;
-                continue;
-            };
-
-            const gid = self.font.getGlyphId(codepoint) orelse 0;
-            try base_glyphs.append(self.allocator, gid);
-            i += len;
-        }
+        try self.decodeText(text);
+        const base_glyphs = &self.scratch_glyphs;
 
         // Apply GSUB substitutions if enabled and available
         if (self.ot_features) |ot| {
@@ -870,7 +886,7 @@ pub const EmbeddedFont = struct {
             }
         }
 
-        return base_glyphs.toOwnedSlice(self.allocator);
+        return self.allocator.dupe(u16, base_glyphs.items);
     }
 
     /// Get kerning value between two glyphs (in font units)
@@ -1145,6 +1161,13 @@ pub const EmbeddedFont = struct {
                 } else |_| {} // OOM etc: fall through to unshaped estimate
             }
         }
+        // Combining marks may compose into precomposed glyphs (decodeText);
+        // lead bytes below 0xCC encode code points below U+0300 and never do
+        if (mayCompose(text)) {
+            if (self.decodeText(text)) {
+                return self.glyphSequenceWidth(self.scratch_glyphs.items, size, char_spacing);
+            } else |_| {} // OOM: fall through to unshaped estimate
+        }
         return self.measureUnshaped(text, size, char_spacing);
     }
 
@@ -1218,29 +1241,9 @@ pub const EmbeddedFont = struct {
     /// renderer uses: decode to base glyphs, substitute, then sum the final
     /// glyph advances plus kerning and char_spacing.
     fn measureShaped(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64, ot: *opentype.OpenTypeFeatures) !f64 {
-        // Decode to base glyphs (same scratch buffers and decode rules as
-        // markUnicodeCharsUsed, so shaping input matches rendering)
-        self.scratch_glyphs.clearRetainingCapacity();
-        try self.scratch_glyphs.ensureTotalCapacity(self.allocator, text.len);
-
-        var i: usize = 0;
-        while (i < text.len) {
-            const byte = text[i];
-            if (byte < 128) {
-                const gid = if (self.font.has_ascii_cache) self.font.ascii_glyphs[byte] else self.font.getGlyphId(byte) orelse 0;
-                self.scratch_glyphs.appendAssumeCapacity(gid);
-                i += 1;
-                continue;
-            }
-            const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
-            if (i + len > text.len) break;
-            const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
-                i += 1;
-                continue;
-            };
-            self.scratch_glyphs.appendAssumeCapacity(self.font.getGlyphId(codepoint) orelse 0);
-            i += len;
-        }
+        // Same decoding (and composition) as markUnicodeCharsUsed, so
+        // shaping input matches rendering
+        try self.decodeText(text);
 
         const final_glyphs = try ot.applyGSUBWithFlags(self.scratch_glyphs.items, self.feature_flags);
         defer self.allocator.free(final_glyphs);

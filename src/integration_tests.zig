@@ -1171,7 +1171,7 @@ fn generateJustifyEmbeddedPdf(allocator: std.mem.Allocator) ![]u8 {
         .{ .path = "test/fonts/Courier Prime/Courier Prime.ttf", .text = "In narrow columns, justified text requires more word spacing adjustment. " ++
             "Each line must stretch to fill the available width, which can create " ++
             "noticeable gaps between words. The last line stays ragged." },
-        .{ .path = "test/fonts/Gentium/Gentium-Regular.ttf", .text = "Combining marks: re\u{0301}sume\u{0301} and cafe\u{0301} and u\u{0308}ber " ++
+        .{ .path = "test/fonts/Gentium/Gentium-Regular.ttf", .text = "Combining marks: re\u{0301}sume\u{0301} and cafe\u{0301} and nai\u{0308}ve and u\u{0308}ber " ++
             "and pin\u{0303}ata stretched across the line, then more ordinary words " ++
             "fill the paragraph so that several lines are justified with marks." },
     };

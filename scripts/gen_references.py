@@ -1048,7 +1048,7 @@ JUSTIFY_EMBEDDED_PARAGRAPHS = [
      "Each line must stretch to fill the available width, which can create "
      "noticeable gaps between words. The last line stays ragged."),
     ("Gentium",
-     "Combining marks: re\u0301sume\u0301 and cafe\u0301 and u\u0308ber "
+     "Combining marks: re\u0301sume\u0301 and cafe\u0301 and nai\u0308ve and u\u0308ber "
      "and pin\u0303ata stretched across the line, then more ordinary words "
      "fill the paragraph so that several lines are justified with marks."),
 ]

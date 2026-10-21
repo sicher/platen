@@ -1233,9 +1233,10 @@ test "mark positioning with Tm absolute coordinates" {
 
     try doc.addPage(.{});
 
-    // Write "À" (A + combining grave)
+    // Write B + combining grave: no precomposed form exists, so it stays
+    // base + mark (A + grave would compose to the font's own À glyph)
     const style = TextStyle{ .font = inter, .size = 14 };
-    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style, .{});
+    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "B\xcc\x80", style, .{});
 
     // Render via output(); page.content stays populated afterwards
     const pdf = try doc.output();
