@@ -1010,6 +1010,50 @@ def gen_colored_text():
     print("  colored_text.pdf")
 
 
+def gen_justify_embedded():
+    """Justified text in embedded (Identity-H CID) fonts.
+
+    PDF word spacing (Tw) only applies to the single-byte code 32, so
+    CID text needs explicit per-space adjustments. Covers the kerned TJ
+    path (Charter), the unkerned path (Courier Prime), and the per-glyph
+    mark-positioning path (Gentium with combining marks). Ragged lines
+    move every word after the first by several points.
+    """
+    pdf = make_pdf()
+    pdf.add_font("Charter", "", "test/fonts/Charter/Charter Regular.ttf")
+    pdf.add_font("CourierPrime", "", "test/fonts/Courier Prime/Courier Prime.ttf")
+    pdf.add_font("Gentium", "", "test/fonts/Gentium/Gentium-Regular.ttf")
+    pdf.set_text_shaping(True, features={"kern": True})
+    pdf.add_page()
+
+    y = 60
+    for family, text in JUSTIFY_EMBEDDED_PARAGRAPHS:
+        pdf.set_font(family, size=11)
+        pdf.set_xy(50, y)
+        pdf.multi_cell(w=300, h=11 * 1.2, text=text, align="J")
+        y = pdf.get_y() + 20
+
+    pdf.output(OUTPUT_DIR / "justify_embedded.pdf")
+    print("  justify_embedded.pdf")
+
+
+JUSTIFY_EMBEDDED_PARAGRAPHS = [
+    ("Charter",
+     "Typography is the art and technique of arranging type to make written "
+     "language legible, readable, and appealing when displayed. Justified text "
+     "creates clean edges on both sides of a text block, which many readers "
+     "find visually appealing. The last line is typically left-aligned."),
+    ("CourierPrime",
+     "In narrow columns, justified text requires more word spacing adjustment. "
+     "Each line must stretch to fill the available width, which can create "
+     "noticeable gaps between words. The last line stays ragged."),
+    ("Gentium",
+     "Combining marks: re\u0301sume\u0301 and cafe\u0301 and u\u0308ber "
+     "and pin\u0303ata stretched across the line, then more ordinary words "
+     "fill the paragraph so that several lines are justified with marks."),
+]
+
+
 def gen_justify():
     """Test justified text alignment."""
     pdf = make_pdf()
@@ -2765,6 +2809,7 @@ GENERATORS = {
     "opentype_features": gen_opentype_features,
     "text_flow": gen_text_flow,
     "justify": gen_justify,
+    "justify_embedded": gen_justify_embedded,
     "colored_text": gen_colored_text,
     "shapes": gen_shapes,
     "images": gen_images,

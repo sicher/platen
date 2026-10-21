@@ -3474,6 +3474,100 @@ test "embedded-font measurement includes char_spacing" {
     try std.testing.expectApproxEqAbs(w_plain + 12 * 2.0, w_spaced, 0.001);
 }
 
+/// Simulate the Tc (character spacing) text-state parameter through a
+/// content stream and return the largest absolute Tc in effect at any BT.
+/// Tc is graphics state: it survives ET/BT, so a run that sets it must not
+/// leave it behind for later runs that never set it.
+fn maxTcAtTextStart(pdf: []const u8) !f64 {
+    var tc: f64 = 0;
+    var worst: f64 = 0;
+    var lines = std.mem.splitScalar(u8, pdf, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, "BT")) {
+            worst = @max(worst, @abs(tc));
+        } else if (std.mem.endsWith(u8, line, " Tc") and std.mem.indexOfScalar(u8, line, '/') == null) {
+            tc = try std.fmt.parseFloat(f64, line[0 .. line.len - 3]);
+        }
+    }
+    return worst;
+}
+
+test "char_spacing does not leak into later text runs" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const emoji = try doc.loadFont(noto_color_emoji_path, .identity);
+    try doc.addPage(.{});
+
+    // Each font path (standard, embedded CID, Type3 color run) sets Tc and
+    // is followed by plain text; every plain run must start at Tc 0.
+    const spaced = [_]Font{ Font.helvetica, charter, emoji };
+    var y: f64 = 50;
+    for (spaced) |font| {
+        const text = if (font == .embedded and font.embedded == emoji.embedded) "\u{1F600}\u{1F680}" else "Spaced";
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, text, .{ .font = font, .size = 12, .char_spacing = 3.0 }, .{});
+        _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "Plain", .{ .font = Font.helvetica, .size = 12 }, .{});
+        _ = try doc.writeAt(.{ .x = 50, .y = y + 40 }, "Plain", .{ .font = charter, .size = 12 }, .{});
+        y += 80;
+    }
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    // The spaced runs themselves must still set it.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "3.00 Tc\n") != null);
+    try std.testing.expectEqual(@as(f64, 0), try maxTcAtTextStart(pdf));
+}
+
+test "justified color-font text widens spaces with TJ adjustments" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    // Color runs mix Type3 subfonts (code 32 never assigned) with 2-byte
+    // CID segments, so Tw cannot justify them: each space in a mono
+    // segment must carry the word spacing as a TJ adjustment.
+    const emoji = try doc.loadFont(noto_color_emoji_path, .identity);
+    try doc.addPage(.{});
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 400 };
+    const text = "\u{1F600} \u{1F680} \u{2B50} \u{1F525} \u{1F308} \u{1F355} \u{1F431} \u{1F98A} \u{1F427} \u{1F419}";
+    const res = try doc.writeBlock(&region, text, .{ .font = emoji, .size = 20 }, .{ .alignment = .justify });
+    try std.testing.expect(res.lines_written >= 2); // first line is justified
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 20.00 Tf") != null);
+    // A widened space: "[<gid> -N <" (negative TJ adjustment = extra space)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "> -") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, ">] TJ\n") != null);
+}
+
+test "gradients copy their color stops" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the shading functions searchable
+    try doc.addPage(.{});
+
+    // The caller's stops are reused after registration (as when they live
+    // in a stack frame that has since returned); the document must render
+    // the stops as they were when the gradient was added.
+    var stops = [_]platen.ColorStop{
+        .{ .offset = 0.0, .color = Color.rgb(255, 0, 0) },
+        .{ .offset = 1.0, .color = Color.rgb(0, 0, 255) },
+    };
+    const linear = try doc.addLinearGradient(.{ .x0 = 0, .y0 = 0, .x1 = 100, .y1 = 0, .stops = &stops });
+    const radial = try doc.addRadialGradient(.{ .x0 = 50, .y0 = 50, .r0 = 0, .x1 = 50, .y1 = 50, .r1 = 50, .stops = &stops });
+    try doc.fillRectGradient(.{ .x = 0, .y = 0, .width = 100, .height = 100 }, linear);
+    try doc.fillRectGradient(.{ .x = 0, .y = 100, .width = 100, .height = 100 }, radial);
+    for (&stops) |*s| s.color = Color.rgb(0, 255, 0);
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "/C0 [1.000 0.000 0.000]\n/C1 [0.000 0.000 1.000]"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "[0.000 1.000 0.000]") == null);
+}
+
 test "measurement applies GSUB ligatures like rendering" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

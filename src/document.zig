@@ -322,7 +322,10 @@ pub const Document = struct {
         }
         self.loaded_svgs.deinit(self.allocator);
         self.svg_owned.deinit(self.allocator);
-        // Clean up gradients
+        // Clean up gradients (each owns a copy of its stops)
+        for (self.gradients.items) |g| switch (g) {
+            inline else => |grad| self.allocator.free(grad.stops),
+        };
         self.gradients.deinit(self.allocator);
         // Clean up outline
         if (self.outline) |*o| {
@@ -2815,20 +2818,28 @@ pub const Document = struct {
     }
 
     /// Add a linear gradient to the document and return its index.
+    /// The document keeps its own copy of `grad.stops`.
     pub fn addLinearGradient(self: *Document, grad: LinearGradient) !usize {
         try validate.check(grad);
         try validate.checkEach(grad.stops);
+        var owned = grad;
+        owned.stops = try self.allocator.dupe(ColorStop, grad.stops);
+        errdefer self.allocator.free(owned.stops);
         const idx = self.gradients.items.len;
-        try self.gradients.append(self.allocator, .{ .linear = grad });
+        try self.gradients.append(self.allocator, .{ .linear = owned });
         return idx;
     }
 
     /// Add a radial gradient to the document and return its index.
+    /// The document keeps its own copy of `grad.stops`.
     pub fn addRadialGradient(self: *Document, grad: RadialGradient) !usize {
         try validate.check(grad);
         try validate.checkEach(grad.stops);
+        var owned = grad;
+        owned.stops = try self.allocator.dupe(ColorStop, grad.stops);
+        errdefer self.allocator.free(owned.stops);
         const idx = self.gradients.items.len;
-        try self.gradients.append(self.allocator, .{ .radial = grad });
+        try self.gradients.append(self.allocator, .{ .radial = owned });
         return idx;
     }
 
@@ -2910,7 +2921,7 @@ pub const Document = struct {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                                 }
                                 try cw.print("{d:.2} Tw\n", .{t.word_spacing});
-                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y);
+                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y, t.word_spacing);
                             } else {
                                 try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
 
@@ -2924,7 +2935,7 @@ pub const Document = struct {
                                     // CID mode: output with ligatures, kerning, and mark positioning
                                     // Pass absolute position for Tm-based mark positioning
                                     // Use cached glyphs if available (avoids duplicate OpenType shaping)
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y);
+                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y, t.word_spacing);
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode
@@ -2950,6 +2961,9 @@ pub const Document = struct {
                         },
                     }
 
+                    // Tc is graphics state and survives ET: reset it so
+                    // later runs (which only emit Tc when non-zero) start at 0
+                    if (t.char_spacing != 0) try cw.append("0 Tc\n");
                     try cw.append("ET\n");
 
                     // Draw text decorations (underline/strikethrough)

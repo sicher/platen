@@ -4,6 +4,21 @@
 
 A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, color emoji fonts, images, vector graphics, and PDF/A archival output. Pure Zig — no dependencies at all.
 
+## Gallery
+
+Every page below is a PDF rendered by platen, rasterized with poppler.
+
+<table>
+  <tr>
+    <td align="center" width="25%"><a href="docs/images/typography.png"><img src="docs/images/typography.png" alt="Typography page: justified two-column text with Knuth-Plass line breaking, Greek, Cyrillic and Vietnamese diacritics, and font weight specimens"></a><br><sub><b>Typography</b><br>Knuth-Plass justification, OpenType shaping, Unicode marks</sub></td>
+    <td align="center" width="25%"><a href="docs/images/graphics.png"><img src="docs/images/graphics.png" alt="Vector graphics page: the SVG tiger, translucent circles, a radial-gradient sphere, rotated squares, dashed rounded rectangle, Bezier wave and star"></a><br><sub><b>Vector graphics</b><br>SVG, gradients, clipping, transforms, opacity</sub></td>
+    <td align="center" width="25%"><a href="docs/images/color.png"><img src="docs/images/color.png" alt="Color fonts page: COLRv1 gradient lettering, a grid of color emoji, a PNG with alpha over a checkerboard, and COLRv0 and OpenType-SVG lettering"></a><br><sub><b>Color fonts &amp; images</b><br>COLRv0/v1, OT-SVG, emoji, PNG alpha</sub></td>
+    <td align="center" width="25%"><a href="docs/images/invoice.png"><img src="docs/images/invoice.png" alt="A one-page invoice with the platen logo, line items table and totals"></a><br><sub><b>Invoice</b><br>~17,700 per second on 8 cores (<a href="#many-small-documents-invoice-throughput">benchmark</a>)</sub></td>
+  </tr>
+</table>
+
+The first three pages come from [`src/showcase.zig`](src/showcase.zig) (`zig build showcase` writes `zig-out/showcase.pdf`); the invoice is the [invoice benchmark](src/invoice_bench.zig)'s sample. `scripts/render-readme-images` regenerates all four images.
+
 ## Features
 
 - **Text rendering** with standard PDF fonts (Helvetica, Times, Courier, Symbol, ZapfDingbats)

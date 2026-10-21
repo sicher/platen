@@ -18,6 +18,7 @@ const svg = @import("svg.zig");
 const format = @import("format.zig");
 const colr = @import("colr.zig");
 const pagemod = @import("page.zig");
+const text_render = @import("text_render.zig");
 
 const Document = @import("document.zig").Document;
 const Writer = @import("writer.zig").Writer;
@@ -612,10 +613,16 @@ pub fn renderColorText(
     font_size: f64,
     x: f64,
     y: f64,
+    word_spacing: f64,
 ) !void {
     if (glyphs.len == 0) return;
     const cid_res = plan.font_index + 1; // /E{n}
     const has_remap = emb.gid_remap.count() > 0;
+    // Tw never reaches these runs (2-byte CID codes; code 32 is unassigned
+    // in the Type3 subfonts), so word spacing goes after space glyphs as
+    // TJ adjustments in the mono segments
+    const space_gid = text_render.spaceGlyph(emb, glyphs, word_spacing);
+    const ws_1000 = text_render.wordSpacing1000(word_spacing, font_size);
 
     try cw.print("{d:.2} {d:.2} Td\n", .{ x, y });
 
@@ -640,13 +647,19 @@ pub fn renderColorText(
             try cw.append("> Tj\n");
         } else {
             try cw.print("/E{d} {d:.2} Tf\n", .{ cid_res, font_size });
-            try cw.append("<");
-            for (glyphs[i..j]) |g| {
+            // A space ending the segment still widens the gap: the next
+            // segment continues from the advanced position
+            const widen = if (space_gid) |sp| std.mem.indexOfScalar(u16, glyphs[i..@min(j, glyphs.len - 1)], sp) != null else false;
+            try cw.append(if (widen) "[<" else "<");
+            for (glyphs[i..j], i..) |g, k| {
                 const final_gid = if (has_remap) emb.gid_remap.get(g) orelse 0 else g;
                 format.writeHex4(&hex_buf, final_gid);
                 try cw.append(&hex_buf);
+                if (widen and g == space_gid.? and k + 1 < glyphs.len) {
+                    try cw.writeKernAdjust(-ws_1000);
+                }
             }
-            try cw.append("> Tj\n");
+            try cw.append(if (widen) ">] TJ\n" else "> Tj\n");
         }
         i = j;
     }

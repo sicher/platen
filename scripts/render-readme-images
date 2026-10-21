@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Regenerate the README gallery (docs/images/*.png) from PDFs rendered by
+# platen itself: the three showcase pages (src/showcase.zig) and a sample
+# invoice from the invoice benchmark. Needs poppler's pdftoppm.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+command -v pdftoppm >/dev/null || { echo "pdftoppm (poppler) not found" >&2; exit 1; }
+
+mkdir -p zig-out docs/images
+zig build showcase -- --output=zig-out/showcase.pdf
+zig build bench-invoice -- --count=1 --output=zig-out/invoice.pdf >/dev/null 2>&1
+
+# 900 px wide: sharp on HiDPI when the README shows them at ~300 px
+names=(typography graphics color)
+for page in 1 2 3; do
+    pdftoppm -png -f "$page" -l "$page" -singlefile -scale-to-x 900 -scale-to-y -1 \
+        zig-out/showcase.pdf "docs/images/${names[page - 1]}"
+done
+pdftoppm -png -singlefile -scale-to-x 900 -scale-to-y -1 zig-out/invoice.pdf docs/images/invoice
+
+ls -l docs/images

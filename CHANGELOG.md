@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Justified text in embedded Unicode fonts:** lines set in a single
+  style were justified only through the PDF `Tw` operator, which applies
+  to the single-byte code 32 and never to 2-byte Identity-H codes (nor to
+  color-font runs), so those lines came out ragged in every
+  `.identity` font. The extra word space is now emitted after each space
+  glyph as a `TJ` adjustment (or `Tm` offset in the mark-positioning
+  path). New fpdf2 reference `justify_embedded`.
+- **`char_spacing` leaked into later text:** a run with non-zero
+  `char_spacing` set the PDF `Tc` operator but never reset it, and `Tc`
+  survives `ET`, so every later text run on the page was letter-spaced
+  too, while layout measured it without the spacing (overlapping spans,
+  text overrunning its region). The run now resets `Tc` before `ET`.
+- **Gradient stops are copied:** `addLinearGradient`/`addRadialGradient`
+  kept a pointer to the caller's `stops` slice until `output()`; stops in
+  a stack frame that had returned were read after free (garbage colors or
+  a panic). The document now keeps its own copy.
+
 ## 0.12.0 — 2026-10-17
 
 ### Added

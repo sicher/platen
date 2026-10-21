@@ -21,6 +21,8 @@ const writeHex4 = format.writeHex4;
 /// Returns true if advanced positioning was used (kerning or marks)
 /// start_x, start_y are absolute page coordinates for Tm-based mark positioning
 /// If cached_glyphs is provided, uses those instead of computing from str
+/// word_spacing (points) is added after each space glyph: PDF applies Tw
+/// only to the single-byte code 32, never to 2-byte Identity-H codes
 pub fn renderCIDTextWithKerning(
     cw: *ContentWriter,
     emb: *EmbeddedFont,
@@ -29,6 +31,7 @@ pub fn renderCIDTextWithKerning(
     font_size: f64,
     start_x: f64,
     start_y: f64,
+    word_spacing: f64,
 ) !bool {
     // Use cached glyphs if available, otherwise compute
     const glyphs_to_free: ?[]u16 = if (cached_glyphs == null) try emb.getGlyphsForText(str) else null;
@@ -60,15 +63,17 @@ pub fn renderCIDTextWithKerning(
         }
     }
 
+    const space_gid = spaceGlyph(emb, glyphs, word_spacing);
+
     // If we have marks with y-offsets, use Tm-based absolute positioning (like LibreOffice)
     if (has_marks) {
-        return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y);
+        return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y, space_gid, word_spacing);
     }
 
     // No marks - use Td for initial position
     try cw.writeTd(start_x, start_y);
 
-    if (!has_kerning) {
+    if (!has_kerning and space_gid == null) {
         // No kerning - use simple hex string
         try cw.append("<");
         var hex_buf: [4]u8 = undefined;
@@ -81,8 +86,9 @@ pub fn renderCIDTextWithKerning(
         return false;
     }
 
-    // Use TJ operator with kerning adjustments
+    // Use TJ operator with kerning (and word spacing) adjustments
     // Format: [<HexGlyphs> kern <HexGlyphs> kern ...] TJ
+    const ws_1000 = wordSpacing1000(word_spacing, font_size);
     try cw.append("[<");
     var hex_buf: [4]u8 = undefined;
 
@@ -94,17 +100,32 @@ pub fn renderCIDTextWithKerning(
         // Add kerning adjustment before next glyph
         if (i + 1 < glyphs.len) {
             const kern = emb.getKerning(gid, glyphs[i + 1]);
-            if (kern != 0) {
-                // Convert from font units to 1/1000 em, negate for TJ
-                // TJ uses positive values to move left (reduce spacing)
-                const kern_1000: i32 = @divTrunc(@as(i32, kern) * 1000, @as(i32, units_per_em));
-                try cw.writeKernAdjust(-kern_1000);
+            // Convert from font units to 1/1000 em, negate for TJ
+            // TJ uses positive values to move left (reduce spacing)
+            const kern_1000: i32 = @divTrunc(@as(i32, kern) * 1000, @as(i32, units_per_em));
+            const ws: i32 = if (space_gid != null and gid == space_gid.?) ws_1000 else 0;
+            if (kern_1000 != 0 or ws != 0) {
+                try cw.writeKernAdjust(-kern_1000 - ws);
             }
         }
     }
 
     try cw.append(">] TJ\n");
     return true;
+}
+
+/// The (unremapped) space glyph when `word_spacing` applies to this run,
+/// else null.
+pub fn spaceGlyph(emb: *const EmbeddedFont, glyphs: []const u16, word_spacing: f64) ?u16 {
+    if (word_spacing == 0) return null;
+    const gid = emb.font.getGlyphId(' ') orelse return null;
+    if (gid == 0 or std.mem.indexOfScalar(u16, glyphs, gid) == null) return null;
+    return gid;
+}
+
+/// Word spacing in TJ units (1/1000 em of the current font size).
+pub fn wordSpacing1000(word_spacing: f64, font_size: f64) i32 {
+    return @intFromFloat(@round(word_spacing * 1000.0 / font_size));
 }
 
 /// Render glyphs with mark positioning using absolute Tm positioning (like LibreOffice).
@@ -119,6 +140,8 @@ fn renderWithMarkPositioning(
     has_remap: bool,
     start_x: f64,
     start_y: f64,
+    space_gid: ?u16,
+    word_spacing: f64,
 ) !bool {
     // Track absolute position for each glyph
     var abs_x = start_x;
@@ -167,6 +190,7 @@ fn renderWithMarkPositioning(
 
         // Advance position for next base glyph
         abs_x += glyph_width_pts;
+        if (space_gid != null and gid == space_gid.?) abs_x += word_spacing;
 
         if (mark_count > 0) {
             // Render marks with absolute positioning

@@ -157,6 +157,32 @@ shape. Items come from the 2026-07-20 API review and performance sessions.
   guard: WinAnsi text only reaches markCharsUsed (cid_used_glyphs is
   identity-only), so the subset is <= 253 glyphs.
 
+## Found by the README showcase (2026-10-21)
+
+Building `src/showcase.zig` (real pages, inspected as rendered images)
+found three bugs, fixed the same day (CHANGELOG Unreleased): justified
+CID text ragged (Tw ignored for Identity-H), `char_spacing` Tc leaking
+into later runs, gradient stops borrowed instead of copied. Still open:
+
+- [ ] **`i` + combining mark keeps the dot.** "nai\u{0308}ve" in Gentium
+  draws the diaeresis over a dotted i; HarfBuzz (fpdf2 reference) composes
+  to the precomposed ï. Missing canonical composition when the font has
+  the precomposed glyph, and/or `ccmp` i -> dotless ı before above-marks.
+  Also makes pdftotext split the word (the mark's box sits higher). Add an
+  fpdf2 reference case once fixed (removed from `justify_embedded`).
+- [ ] **`writeStyled` overflow drops later spans.**
+  `StyledText.getTextFromWord` returns the rest of ONE span, so
+  `WriteResult.overflow` silently loses every following span (and all
+  styling). Needs an API decision: a continuation (word index / resumable
+  StyledText) instead of `[]const u8`. Breaking - decide before 1.0.0.
+- [ ] **`platen.Path` is not exported** from the root module (only
+  `document.Path`), so users can't name the type returned by
+  `createPath()` in their own helpers (showcase uses `anytype`).
+- [ ] **`char_spacing` ignored in the mark-positioning path.**
+  `renderWithMarkPositioning` places every glyph with `Tm`, so Tc never
+  applies, while measurement includes it. Add it to `abs_x` per glyph
+  (like word spacing after spaces).
+
 ## Code health
 
 - [ ] **Split document.zig** (4200+ lines): output phase, text layout, and
