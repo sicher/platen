@@ -3544,6 +3544,54 @@ test "char_spacing does not leak into later text runs" {
     try std.testing.expectEqual(@as(f64, 0), try maxTcAtTextStart(pdf));
 }
 
+/// The x of every "1 0 0 1 x y Tm" (per-glyph placement in the
+/// mark-positioning path), in content-stream order.
+fn tmXs(allocator: std.mem.Allocator, pdf: []const u8) ![]f64 {
+    var xs: std.ArrayListUnmanaged(f64) = .empty;
+    errdefer xs.deinit(allocator);
+    var rest = pdf;
+    while (std.mem.indexOf(u8, rest, "1 0 0 1 ")) |i| {
+        rest = rest[i + 8 ..];
+        const end = std.mem.indexOfScalar(u8, rest, ' ') orelse break;
+        try xs.append(allocator, try std.fmt.parseFloat(f64, rest[0..end]));
+    }
+    return xs.toOwnedSlice(allocator);
+}
+
+fn renderMarkRun(allocator: std.mem.Allocator, char_spacing: f64) ![]u8 {
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    try doc.addPage(.{});
+    // q + combining acute has no precomposed form, so it stays base + mark
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "aq\u{0301}bq\u{0301}c", .{ .font = gentium, .size = 20, .char_spacing = char_spacing }, .{});
+    return doc.output();
+}
+
+test "char_spacing applies in the mark-positioning path" {
+    const allocator = std.testing.allocator;
+    const plain_pdf = try renderMarkRun(allocator, 0);
+    defer allocator.free(plain_pdf);
+    const spaced_pdf = try renderMarkRun(allocator, 3);
+    defer allocator.free(spaced_pdf);
+
+    const plain = try tmXs(allocator, plain_pdf);
+    defer allocator.free(plain);
+    const spaced = try tmXs(allocator, spaced_pdf);
+    defer allocator.free(spaced);
+
+    // Glyphs a q ◌́ b q ◌́ c, each placed with Tm. Measurement adds Tc per
+    // glyph gap (marks included), so a glyph moves by 3 for every glyph
+    // before it - a mark moves with its base.
+    const expected_shift = [_]f64{ 0, 3, 3, 9, 12, 12, 18 };
+    try std.testing.expectEqual(expected_shift.len, plain.len);
+    try std.testing.expectEqual(expected_shift.len, spaced.len);
+    for (expected_shift, plain, spaced) |shift, p, s| {
+        try std.testing.expectApproxEqAbs(shift, s - p, 0.011);
+    }
+}
+
 test "justified color-font text widens spaces with TJ adjustments" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

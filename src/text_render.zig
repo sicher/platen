@@ -22,7 +22,9 @@ const writeHex4 = format.writeHex4;
 /// start_x, start_y are absolute page coordinates for Tm-based mark positioning
 /// If cached_glyphs is provided, uses those instead of computing from str
 /// word_spacing (points) is added after each space glyph: PDF applies Tw
-/// only to the single-byte code 32, never to 2-byte Identity-H codes
+/// only to the single-byte code 32, never to 2-byte Identity-H codes.
+/// char_spacing is applied by Tc, except in the per-glyph Tm path, which
+/// adds it itself
 pub fn renderCIDTextWithKerning(
     cw: *ContentWriter,
     emb: *EmbeddedFont,
@@ -32,6 +34,7 @@ pub fn renderCIDTextWithKerning(
     start_x: f64,
     start_y: f64,
     word_spacing: f64,
+    char_spacing: f64,
 ) !bool {
     // Use cached glyphs if available, otherwise compute
     const glyphs_to_free: ?[]u16 = if (cached_glyphs == null) try emb.getGlyphsForText(str) else null;
@@ -67,7 +70,7 @@ pub fn renderCIDTextWithKerning(
 
     // If we have marks with y-offsets, use Tm-based absolute positioning (like LibreOffice)
     if (has_marks) {
-        return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y, space_gid, word_spacing);
+        return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y, space_gid, word_spacing, char_spacing);
     }
 
     // No marks - use Td for initial position
@@ -142,6 +145,7 @@ fn renderWithMarkPositioning(
     start_y: f64,
     space_gid: ?u16,
     word_spacing: f64,
+    char_spacing: f64,
 ) !bool {
     // Track absolute position for each glyph
     var abs_x = start_x;
@@ -245,6 +249,11 @@ fn renderWithMarkPositioning(
         } else {
             i += 1;
         }
+
+        // Tc never applies here (every glyph is placed by Tm): add the
+        // character spacing of the base and each of its marks, as
+        // measurement counts one gap per glyph
+        abs_x += char_spacing * @as(f64, @floatFromInt(1 + mark_count));
 
         // Add kerning if next glyph exists
         const next_idx = i;

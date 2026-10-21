@@ -178,7 +178,7 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 - [x] **`platen.Path` is not exported** (done 2026-10-21) from the root module (only
   `document.Path`), so users can't name the type returned by
   `createPath()` in their own helpers (showcase uses `anytype`).
-- [ ] **`char_spacing` ignored in the mark-positioning path.**
+- [x] **`char_spacing` ignored in the mark-positioning path.** (done 2026-10-21)
   `renderWithMarkPositioning` places every glyph with `Tm`, so Tc never
   applies, while measurement includes it. Add it to `abs_x` per glyph
   (like word spacing after spaces).

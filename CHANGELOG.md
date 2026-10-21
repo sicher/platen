@@ -16,6 +16,10 @@
   `.identity` font. The extra word space is now emitted after each space
   glyph as a `TJ` adjustment (or `Tm` offset in the mark-positioning
   path). New fpdf2 reference `justify_embedded`.
+- **`char_spacing` in runs with combining marks:** runs with GPOS mark
+  positioning place every glyph with `Tm`, so `Tc` never applied and the
+  text came out unspaced while `measureStyled` included the spacing. The
+  spacing is now added per glyph in that path.
 - **`char_spacing` leaked into later text:** a run with non-zero
   `char_spacing` set the PDF `Tc` operator but never reset it, and `Tc`
   survives `ET`, so every later text run on the page was letter-spaced

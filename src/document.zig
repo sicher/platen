@@ -2935,7 +2935,7 @@ pub const Document = struct {
                                     // CID mode: output with ligatures, kerning, and mark positioning
                                     // Pass absolute position for Tm-based mark positioning
                                     // Use cached glyphs if available (avoids duplicate OpenType shaping)
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y, t.word_spacing);
+                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y, t.word_spacing, t.char_spacing);
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode
