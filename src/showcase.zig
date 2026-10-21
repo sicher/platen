@@ -1,9 +1,10 @@
-//! Feature showcase: renders a few pages exercising typography, vector
-//! graphics, and color fonts/images. The README gallery images are
-//! rasterized from its output (scripts/render-readme-images).
+//! Feature showcase: one single-page PDF per topic - typography, vector
+//! graphics, and color fonts/images. The README gallery shows them
+//! rasterized (scripts/render-readme-images) and links each image to its
+//! PDF.
 //!
-//! Run with: zig build showcase -- [--output=PATH]
-//! Default output: examples/showcase.pdf (linked from the README)
+//! Run with: zig build showcase -- [--output-dir=DIR]
+//! Default output: examples/showcase_{typography,graphics,color}.pdf
 
 const std = @import("std");
 const platen = @import("platen");
@@ -25,27 +26,51 @@ const Fonts = struct {
     bungee: platen.Font,
 };
 
+const pages = [_]struct {
+    name: []const u8,
+    title: []const u8,
+    render: *const fn (*platen.Document, Fonts) anyerror!void,
+}{
+    .{ .name = "typography", .title = "platen showcase: typography", .render = typographyPage },
+    .{ .name = "graphics", .title = "platen showcase: vector graphics", .render = graphicsPage },
+    .{ .name = "color", .title = "platen showcase: color fonts and images", .render = colorPage },
+};
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
-    var output_path: []const u8 = "examples/showcase.pdf";
+    var output_dir: []const u8 = "examples";
     var args = init.minimal.args.iterate();
     _ = args.next(); // program name
     while (args.next()) |arg| {
-        if (std.mem.startsWith(u8, arg, "--output=")) {
-            output_path = arg["--output=".len..];
+        if (std.mem.startsWith(u8, arg, "--output-dir=")) {
+            output_dir = arg["--output-dir=".len..];
         } else {
-            std.debug.print("Usage: showcase [--output=PATH]\n", .{});
+            std.debug.print("Usage: showcase [--output-dir=DIR]\n", .{});
             return error.InvalidArgument;
         }
     }
 
-    var doc = platen.Document.init(allocator, init.io);
-    defer doc.deinit();
-    doc.compression_level = 9;
-    doc.setMetadata(.{ .title = "platen showcase", .creator = "platen showcase" });
+    for (pages) |page| {
+        var doc = platen.Document.init(allocator, init.io);
+        defer doc.deinit();
+        doc.compression_level = 9;
+        doc.setMetadata(.{ .title = page.title, .creator = "platen showcase" });
 
-    const fonts = Fonts{
+        try page.render(&doc, try loadFonts(&doc));
+
+        const pdf = try doc.output();
+        defer allocator.free(pdf);
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/showcase_{s}.pdf", .{ output_dir, page.name });
+        try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = path, .data = pdf });
+        std.debug.print("wrote {s} ({d} KB)\n", .{ path, pdf.len / 1024 });
+    }
+}
+
+/// Fonts shared by the pages; only the glyphs a page uses are embedded.
+fn loadFonts(doc: *platen.Document) !Fonts {
+    return .{
         .charter = try doc.loadFontFamily(.{
             .regular = "test/fonts/Charter/Charter Regular.ttf",
             .bold = "test/fonts/Charter/Charter Bold.ttf",
@@ -60,15 +85,6 @@ pub fn main(init: std.process.Init) !void {
         .emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", .identity),
         .bungee = try doc.loadFont("test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf", .identity),
     };
-
-    try typographyPage(&doc, fonts);
-    try graphicsPage(&doc, fonts);
-    try colorPage(&doc, fonts);
-
-    const pdf = try doc.output();
-    defer allocator.free(pdf);
-    try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = output_path, .data = pdf });
-    std.debug.print("wrote {s} ({d} KB)\n", .{ output_path, pdf.len / 1024 });
 }
 
 /// Page header: small caps label, title, and a rule.
