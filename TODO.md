@@ -175,7 +175,7 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   `WriteResult.overflow` silently loses every following span (and all
   styling). Needs an API decision: a continuation (word index / resumable
   StyledText) instead of `[]const u8`. Breaking - decide before 1.0.0.
-- [ ] **`platen.Path` is not exported** from the root module (only
+- [x] **`platen.Path` is not exported** (done 2026-10-21) from the root module (only
   `document.Path`), so users can't name the type returned by
   `createPath()` in their own helpers (showcase uses `anytype`).
 - [ ] **`char_spacing` ignored in the mark-positioning path.**

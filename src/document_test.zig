@@ -1609,6 +1609,30 @@ test "drawPath basic triangle" {
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
 }
 
+/// A user-side helper must be able to name the type createPath returns.
+fn appendSquare(path: *platen.Path, x: f64, y: f64, side: f64) !void {
+    try path.moveTo(.{ .x = x, .y = y });
+    try path.lineTo(.{ .x = x + side, .y = y });
+    try path.lineTo(.{ .x = x + side, .y = y + side });
+    try path.lineTo(.{ .x = x, .y = y + side });
+    try path.closePath();
+}
+
+test "platen.Path names the type createPath returns" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+
+    var path: platen.Path = doc.createPath();
+    defer path.deinit();
+    try appendSquare(&path, 50, 50, 20);
+    try doc.drawPath(&path, .{ .fill = .{} });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-"));
+}
+
 test "drawPath with bezier curve" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

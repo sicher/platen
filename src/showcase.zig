@@ -277,7 +277,7 @@ fn graphicsPage(doc: *platen.Document, fonts: Fonts) !void {
 }
 
 /// Four-arc circle approximation (kappa = 0.5523).
-fn appendCircle(path: anytype, cx: f64, cy: f64, r: f64) !void {
+fn appendCircle(path: *platen.Path, cx: f64, cy: f64, r: f64) !void {
     const k = 0.5523 * r;
     try path.moveTo(.{ .x = cx + r, .y = cy });
     try path.curveTo(.{ .x = cx + r, .y = cy + k }, .{ .x = cx + k, .y = cy + r }, .{ .x = cx, .y = cy + r });

@@ -106,6 +106,7 @@ pub const Point = document.Point;
 pub const StrokeStyle = document.StrokeStyle;
 pub const FillStyle = document.FillStyle;
 pub const ShapeStyle = document.ShapeStyle;
+pub const Path = document.Path;
 
 // Re-export gradient types
 pub const LinearGradient = document.LinearGradient;

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- `platen.Path`: the path builder type returned by `doc.createPath()` is
+  now exported, so helpers can take a `*platen.Path`.
+
 ### Fixed
 
 - **Justified text in embedded Unicode fonts:** lines set in a single

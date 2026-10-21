@@ -1006,6 +1006,7 @@ platen.pt_per_cm    // 28.34...
 **Graphics:**
 - `StrokeStyle` - Stroke settings (color, width, cap, join, dash)
 - `FillStyle` - Fill settings (color)
+- `Path` - Path builder returned by `doc.createPath()` (moveTo, lineTo, curveTo, quadTo, closePath)
 - `ShapeStyle` - Combined stroke and/or fill (`.{ .stroke = .{} }`, `.{ .fill = .{} }`, `.{ .stroke = .{}, .fill = .{} }`)
 - `LineCap` - `.butt`, `.round`, `.square`
 - `LineJoin` - `.miter`, `.round`, `.bevel`
