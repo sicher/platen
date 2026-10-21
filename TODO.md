@@ -174,7 +174,8 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   i -> dotless ı before above-marks; Gentium uses chain-context format
   1/2 lookups, which the GSUB engine does not parse yet - only format 3).
 - [x] **`writeStyled` overflow drops later spans.** (done 2026-10-21:
-  `resume_word` / `start_word`, user decision; `overflow` kept as is)
+  `resume_at` / `start` as a `TextPosition`, user decision; `overflow`
+  kept as is)
   `StyledText.getTextFromWord` returns the rest of ONE span, so
   `WriteResult.overflow` silently loses every following span (and all
   styling). Needs an API decision: a continuation (word index / resumable

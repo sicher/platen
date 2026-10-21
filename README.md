@@ -315,18 +315,19 @@ _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
 
 #### Continuing styled text in the next region
 
-When a styled paragraph doesn't fit, `writeStyled` returns `resume_word`:
-the first word that wasn't written. Pass it back as `start_word`, with the
+When a styled paragraph doesn't fit, `writeStyled` returns `resume_at`, a
+`TextPosition` (`word`, plus a byte `offset` when a word too wide for the
+line was broken and continues mid-word). Pass it back as `start`, with the
 same unchanged `StyledText`, to continue in the next column or page. Every
 span keeps its style. (`overflow` holds only the rest of the span where
-writing stopped, so use `resume_word` for styled text.)
+writing stopped, so use `resume_at` for styled text.)
 
 ```zig
 var opts = platen.ParagraphOptions{ .alignment = .justify, .line_breaking = .optimal };
 var column = left_column;
 while (true) {
     const res = try doc.writeStyled(&column, &st, style, opts);
-    opts.start_word = res.resume_word orelse break;
+    opts.start = res.resume_at orelse break;
     column = next_column; // or doc.addPage(...) and a fresh region
 }
 ```
@@ -1029,7 +1030,8 @@ platen.pt_per_cm    // 28.34...
 - `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
 - `WriteAtOptions` / `WriteOptions` / `BlockOptions` / `ParagraphOptions` - Options for `writeAt` / `write` / `writeBlock` / `writeStyled`
 - `TextStyleOptions` - Per-span overrides in `StyledText` (`color`, `decoration`, `bold`, `italic`; unset fields inherit the base style)
-- `WriteResult` - Result with lines_written, overflow text, and bounding rect
+- `WriteResult` - Result with lines_written, overflow text, bounding rect, and `resume_at` (where writeStyled stopped)
+- `TextPosition` - Position in a StyledText (`word`, byte `offset` within it); `ParagraphOptions.start` / `WriteResult.resume_at`
 - `TextMetrics` / `FontMetrics` - Measurement results
 
 **Fonts:**

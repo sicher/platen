@@ -122,7 +122,7 @@ fn typographyPage(doc: *platen.Document, fonts: Fonts) !void {
 
     // One styled text in two balanced, justified columns: Knuth-Plass line
     // breaking with mixed spans, measured first, then continued from the
-    // left column into the right one with resume_word
+    // left column into the right one with resume_at
     const col_gap = 22.0;
     const col_w = (full_w - col_gap) / 2;
     const base = platen.TextStyle{ .font = fonts.charter, .size = 10.5, .color = ink };
@@ -152,9 +152,9 @@ fn typographyPage(doc: *platen.Document, fonts: Fonts) !void {
     var left = platen.Region{ .x = margin, .y = y, .width = col_w, .height = col_h };
     const first = try doc.writeStyled(&left, &st, base, para);
     var right = platen.Region{ .x = margin + col_w + col_gap, .y = y, .width = col_w, .height = 400 };
-    if (first.resume_word) |w| {
+    if (first.resume_at) |pos| {
         var cont = para;
-        cont.start_word = w;
+        cont.start = pos;
         _ = try doc.writeStyled(&right, &st, base, cont);
     }
     y += @max(left.cursor_y, right.cursor_y) + 26;

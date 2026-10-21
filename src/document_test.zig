@@ -942,14 +942,14 @@ fn renderResumed(allocator: std.mem.Allocator, height: f64, breaking: platen.Lin
     for (resume_spans) |s| try st.append(s.text, s.opts);
     const base = TextStyle{ .font = Font.helvetica, .size = 10 };
 
-    var start: usize = 0;
+    var start: platen.TextPosition = .{};
     regions_used.* = 0;
     while (true) {
         try doc.addPage(.{});
         var region = Region{ .x = 50, .y = 50, .width = 90, .height = height };
-        const res = try doc.writeStyled(&region, &st, base, .{ .line_breaking = breaking, .start_word = start });
+        const res = try doc.writeStyled(&region, &st, base, .{ .line_breaking = breaking, .start = start });
         regions_used.* += 1;
-        start = res.resume_word orelse break;
+        start = res.resume_at orelse break;
         try std.testing.expect(res.lines_written > 0); // always progresses
         try std.testing.expect(res.overflow != null); // still reported
         if (regions_used.* > 20) return error.TestUnexpectedResult;
@@ -960,7 +960,7 @@ fn renderResumed(allocator: std.mem.Allocator, height: f64, breaking: platen.Lin
     return drawnRuns(allocator, pdf);
 }
 
-test "writeStyled resume_word continues every span in the next region" {
+test "writeStyled resume_at continues every span in the next region" {
     const allocator = std.testing.allocator;
     for ([_]platen.LineBreaking{ .greedy, .optimal }) |breaking| {
         var one: usize = 0;
@@ -978,7 +978,7 @@ test "writeStyled resume_word continues every span in the next region" {
     }
 }
 
-test "writeStyled start_word past the end is an error" {
+test "writeStyled start past the end is an error" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
     try doc.addPage(.{});
@@ -988,11 +988,11 @@ test "writeStyled start_word past the end is an error" {
     var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
     const base = TextStyle{ .font = Font.helvetica, .size = 10 };
 
-    // start_word == word count: nothing left to write
-    const done = try doc.writeStyled(&region, &st, base, .{ .start_word = 2 });
+    // start at the word count: nothing left to write
+    const done = try doc.writeStyled(&region, &st, base, .{ .start = .{ .word = 2 } });
     try std.testing.expectEqual(@as(usize, 0), done.lines_written);
-    try std.testing.expectEqual(@as(?usize, null), done.resume_word);
-    try std.testing.expectError(error.InvalidStartWord, doc.writeStyled(&region, &st, base, .{ .start_word = 3 }));
+    try std.testing.expectEqual(@as(?platen.TextPosition, null), done.resume_at);
+    try std.testing.expectError(error.InvalidStartPosition, doc.writeStyled(&region, &st, base, .{ .start = .{ .word = 3 } }));
 }
 
 test "writeStyled newline forces line break" {

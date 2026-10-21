@@ -92,6 +92,7 @@ pub const WriteAtOptions = document.WriteAtOptions;
 pub const Anchor = document.Anchor;
 pub const BlockOptions = document.BlockOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
+pub const TextPosition = document.TextPosition;
 pub const PageSize = document.PageSize;
 pub const PageOptions = document.PageOptions;
 pub const Encryption = document.Encryption;

@@ -338,6 +338,14 @@ pub const Region = struct {
     }
 };
 
+/// A position in a StyledText: word index (StyledText.words) plus a byte
+/// offset into that word, non-zero when a word broken over lines (wider
+/// than the region) continues mid-word.
+pub const TextPosition = struct {
+    word: usize = 0,
+    offset: usize = 0,
+};
+
 /// Result of writeStyled.
 pub const WriteResult = struct {
     /// Number of lines rendered.
@@ -345,14 +353,14 @@ pub const WriteResult = struct {
     /// Text that didn't fit, or null if all text was written. For
     /// writeStyled this is only the rest of the span where writing stopped
     /// (later spans and all styling are not in it): continue a styled
-    /// paragraph with `resume_word` instead.
+    /// paragraph with `resume_at` instead.
     overflow: ?[]const u8,
     /// Bounding rectangle of the rendered text.
     rect: Rect,
-    /// writeStyled: index of the first word that did not fit, or null if
-    /// everything was written. Pass it as `ParagraphOptions.start_word`
-    /// with the same, unchanged StyledText to continue in another region.
-    resume_word: ?usize = null,
+    /// writeStyled: where writing stopped, or null if everything was
+    /// written. Pass it as `ParagraphOptions.start` with the same,
+    /// unchanged StyledText to continue in another region.
+    resume_at: ?TextPosition = null,
 };
 
 /// Options for write() (flowing text with cursor tracking).
@@ -399,10 +407,10 @@ pub const ParagraphOptions = struct {
     line_breaking: LineBreaking = .greedy,
     /// Line height multiplier (1.2 = default, 1.0 = single spacing, 1.5 = 150%, etc.).
     line_height: f64 = 1.2,
-    /// First word to write: a previous call's `WriteResult.resume_word`, to
+    /// Where to start: a previous call's `WriteResult.resume_at`, to
     /// continue the same StyledText in the next region (column, page).
-    /// Past the word count is error.InvalidStartWord.
-    start_word: usize = 0,
+    /// A position past the text is error.InvalidStartPosition.
+    start: TextPosition = .{},
 };
 
 /// Page size in points (1 point = 1/72 inch)

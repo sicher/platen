@@ -87,6 +87,7 @@ pub const WriteAtOptions = layout.WriteAtOptions;
 pub const Anchor = layout.Anchor;
 pub const BlockOptions = layout.BlockOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
+pub const TextPosition = layout.TextPosition;
 pub const PageSize = layout.PageSize;
 pub const PageOptions = layout.PageOptions;
 pub const PageRotation = layout.PageRotation;
@@ -1911,8 +1912,10 @@ pub const Document = struct {
 
         const space_width = self.getTextWidthStyled(" ", style);
 
-        if (opts.start_word > text.words.items.len) return error.InvalidStartWord;
-        if (opts.start_word == text.words.items.len) {
+        const start_word = opts.start.word;
+        if (start_word > text.words.items.len) return error.InvalidStartPosition;
+        if (opts.start.offset != 0) return error.InvalidStartPosition; // mid-word resume: next commit
+        if (start_word == text.words.items.len) {
             const rect_x = region.x + region.padding.left;
             const rect_y = region.y + region.padding.top + region.cursor_y;
             return .{ .lines_written = 0, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = line_width, .height = 0 } };
@@ -1920,7 +1923,7 @@ pub const Document = struct {
 
         // For middle/bottom valign, calculate block offset first
         if (opts.valign == .middle or opts.valign == .bottom) {
-            const line_count = self.countStyledLinesStyled(text, style, line_width, space_width, opts.start_word);
+            const line_count = self.countStyledLinesStyled(text, style, line_width, space_width, start_word);
             const fm = self.getFontMetricsStyled(style);
             const ascender = fm.ascender;
             const descender = @abs(fm.descender);
@@ -1951,7 +1954,7 @@ pub const Document = struct {
             .break_on_hyphens = opts.break_on_hyphens,
             .line_breaking = opts.line_breaking,
             .line_height = opts.line_height,
-            .start_word = opts.start_word,
+            .start = opts.start,
         };
 
         const start_cursor_y = region.cursor_y;
@@ -1972,7 +1975,7 @@ pub const Document = struct {
 
         // Greedy algorithm
         const n = text.words.items.len;
-        var word_idx: usize = opts.start_word;
+        var word_idx: usize = start_word;
 
         while (word_idx < n) {
             // Check if we have room for another line
@@ -1986,7 +1989,7 @@ pub const Document = struct {
                     .lines_written = lines_written,
                     .overflow = text.getTextFromWord(word_idx),
                     .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
-                    .resume_word = word_idx,
+                    .resume_at = .{ .word = word_idx },
                 };
             }
 
@@ -2617,7 +2620,7 @@ pub const Document = struct {
         const rect_width = region.contentWidth();
 
         // Compute optimal break points using preprocessed word data
-        const breaks = try text.computeOptimalBreaks(line_width, space_width, opts.start_word);
+        const breaks = try text.computeOptimalBreaks(line_width, space_width, opts.start.word);
         defer self.allocator.free(breaks);
 
         if (breaks.len == 0) {
@@ -2625,7 +2628,7 @@ pub const Document = struct {
         }
 
         var lines_written: usize = 0;
-        var line_start: usize = opts.start_word;
+        var line_start: usize = opts.start.word;
 
         for (breaks, 0..) |line_end, line_idx| {
             // Check if we have room
@@ -2634,7 +2637,7 @@ pub const Document = struct {
                     .lines_written = lines_written,
                     .overflow = text.getTextFromWord(line_start),
                     .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
-                    .resume_word = line_start,
+                    .resume_at = .{ .word = line_start },
                 };
             }
 

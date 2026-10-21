@@ -4,10 +4,10 @@
 
 ### Added
 
-- **Continuing styled text across regions:** `WriteResult.resume_word`
-  (the first word that did not fit) and `ParagraphOptions.start_word`.
-  Call `writeStyled` again with the same `StyledText` and
-  `start_word = resume_word` to continue in the next column or page with
+- **Continuing styled text across regions:** `WriteResult.resume_at` (a
+  `TextPosition`: word index plus byte offset, where writing stopped) and
+  `ParagraphOptions.start`. Call `writeStyled` again with the same
+  `StyledText` and `start = resume_at` to continue in the next column or page with
   every span and style intact. Before, the only continuation was
   `overflow`, which for styled text holds just the rest of one span -
   later spans were silently lost.
