@@ -3640,6 +3640,27 @@ test "gradients copy their color stops" {
     try std.testing.expect(std.mem.indexOf(u8, pdf, "[0.000 1.000 0.000]") == null);
 }
 
+test "fonts loaded but never drawn are not embedded" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep dictionaries searchable
+
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const unused = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", .{ .font = charter, .size = 12 }, .{});
+    // Measuring is not drawing
+    _ = try doc.measureStyled("measured only", .{ .font = unused, .size = 12 });
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "Charter") != null);
+    // An unused font used to be written whole (no glyphs -> no subset ->
+    // the original file), as orphan objects no page references.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "Gentium") == null);
+    try std.testing.expect(pdf.len < 100 * 1024); // Gentium alone is 971 KB
+}
+
 test "measurement applies GSUB ligatures like rendering" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

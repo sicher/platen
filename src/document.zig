@@ -3202,7 +3202,13 @@ pub const Document = struct {
         // Reserve IDs for embedded fonts
         // CID fonts need: Type0 + CIDFont + FontDescriptor + FontFile + ToUnicode = 5 objects
         // WinAnsi fonts need: Font + FontDescriptor + FontFile + ToUnicode = 4 objects
+        // A font no page draws with gets no objects (0 = not written):
+        // it has no glyphs to subset, so it would be embedded whole
         for (self.embedded_fonts.items) |emb_font| {
+            if (!self.isFontDrawn(emb_font)) {
+                try ids.emb_font_base_ids.append(self.allocator, 0);
+                continue;
+            }
             try ids.emb_font_base_ids.append(self.allocator, next_id);
             if (emb_font.encoding == .identity) {
                 next_id += 5; // CID font objects
@@ -3450,6 +3456,7 @@ pub const Document = struct {
             }
         }
         for (self.embedded_fonts.items) |emb_font| {
+            if (!self.isFontDrawn(emb_font)) continue; // not written
             const font_data = emb_font.getFontData();
             if (font_data.len >= Writer.min_compress_len) {
                 try jobs.append(self.allocator, .{ .data = font_data });
@@ -3488,6 +3495,16 @@ pub const Document = struct {
         }
     }
 
+    /// Whether any page draws with `emb_font` (only those are written).
+    fn isFontDrawn(self: *const Document, emb_font: *const EmbeddedFont) bool {
+        for (self.pages.items) |*page| {
+            for (page.used_embedded.items) |f| {
+                if (f == emb_font) return true;
+            }
+        }
+        return false;
+    }
+
     /// Write embedded font objects: CID fonts (Type0 + CIDFont + descriptor +
     /// font file + ToUnicode) or WinAnsi fonts (Font + descriptor + font file +
     /// ToUnicode).
@@ -3495,6 +3512,7 @@ pub const Document = struct {
         const font_write_start = pdf_output.milliTimestamp();
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
             const base_id = ids.emb_font_base_ids.items[i];
+            if (base_id == 0) continue; // no page draws with it
 
             if (emb_font.encoding == .identity) {
                 // CID font: Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode (5 objects)

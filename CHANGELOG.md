@@ -9,6 +9,11 @@
 
 ### Fixed
 
+- **Unused fonts were embedded whole:** a font loaded into a document but
+  never drawn with (only measured, or not used at all) has no glyphs to
+  subset, so `output()` wrote the complete original font file as orphan
+  objects - 25 MB for Noto Color Emoji. Only fonts some page draws with
+  are written now.
 - **Justified text in embedded Unicode fonts:** lines set in a single
   style were justified only through the PDF `Tw` operator, which applies
   to the single-byte code 32 and never to 2-byte Identity-H codes (nor to
