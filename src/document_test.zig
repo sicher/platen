@@ -901,6 +901,100 @@ test "writeStyled overflow returns remaining text" {
     try std.testing.expect(result.overflow != null);
 }
 
+/// The (font selection, string) of every "(...) Tj" in content-stream
+/// order, joined as "font|text\n" - what was drawn, in which style,
+/// independent of where.
+fn drawnRuns(allocator: std.mem.Allocator, pdf: []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var font: []const u8 = "";
+    var lines = std.mem.splitScalar(u8, pdf, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.endsWith(u8, line, " Tf") and line.len > 0 and line[0] == '/') {
+            font = line[0 .. std.mem.indexOfScalar(u8, line, ' ') orelse line.len];
+        } else if (std.mem.startsWith(u8, line, "(") and std.mem.endsWith(u8, line, ") Tj")) {
+            try out.appendSlice(allocator, font);
+            try out.append(allocator, '|');
+            try out.appendSlice(allocator, line[1 .. line.len - 4]);
+            try out.append(allocator, '\n');
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+const resume_spans = [_]struct { text: []const u8, opts: platen.TextStyleOptions }{
+    .{ .text = "alpha beta gamma delta ", .opts = .{} },
+    .{ .text = "epsilon zeta eta theta", .opts = .{ .bold = true } },
+    .{ .text = " iota kappa ", .opts = .{} },
+    .{ .text = "lambda mu nu", .opts = .{ .italic = true } },
+    .{ .text = " xi omicron pi rho sigma tau.", .opts = .{} },
+};
+
+/// Render `resume_spans` into regions of `height` (one per page),
+/// continuing with resume_word until everything is written.
+fn renderResumed(allocator: std.mem.Allocator, height: f64, breaking: platen.LineBreaking, regions_used: *usize) ![]u8 {
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    var st = doc.createStyledText();
+    defer st.deinit();
+    for (resume_spans) |s| try st.append(s.text, s.opts);
+    const base = TextStyle{ .font = Font.helvetica, .size = 10 };
+
+    var start: usize = 0;
+    regions_used.* = 0;
+    while (true) {
+        try doc.addPage(.{});
+        var region = Region{ .x = 50, .y = 50, .width = 90, .height = height };
+        const res = try doc.writeStyled(&region, &st, base, .{ .line_breaking = breaking, .start_word = start });
+        regions_used.* += 1;
+        start = res.resume_word orelse break;
+        try std.testing.expect(res.lines_written > 0); // always progresses
+        try std.testing.expect(res.overflow != null); // still reported
+        if (regions_used.* > 20) return error.TestUnexpectedResult;
+    }
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+    return drawnRuns(allocator, pdf);
+}
+
+test "writeStyled resume_word continues every span in the next region" {
+    const allocator = std.testing.allocator;
+    for ([_]platen.LineBreaking{ .greedy, .optimal }) |breaking| {
+        var one: usize = 0;
+        const whole = try renderResumed(allocator, 1000, breaking, &one);
+        defer allocator.free(whole);
+        var many: usize = 0;
+        const chained = try renderResumed(allocator, 25, breaking, &many); // 2 lines each
+        defer allocator.free(chained);
+
+        try std.testing.expectEqual(@as(usize, 1), one);
+        try std.testing.expect(many > 2);
+        // Same text, same fonts, same order: nothing lost, styles kept
+        try std.testing.expectEqualStrings(whole, chained);
+        try std.testing.expect(std.mem.indexOf(u8, chained, "omicron") != null);
+    }
+}
+
+test "writeStyled start_word past the end is an error" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("two words", .{});
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
+    const base = TextStyle{ .font = Font.helvetica, .size = 10 };
+
+    // start_word == word count: nothing left to write
+    const done = try doc.writeStyled(&region, &st, base, .{ .start_word = 2 });
+    try std.testing.expectEqual(@as(usize, 0), done.lines_written);
+    try std.testing.expectEqual(@as(?usize, null), done.resume_word);
+    try std.testing.expectError(error.InvalidStartWord, doc.writeStyled(&region, &st, base, .{ .start_word = 3 }));
+}
+
 test "writeStyled newline forces line break" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();

@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Continuing styled text across regions:** `WriteResult.resume_word`
+  (the first word that did not fit) and `ParagraphOptions.start_word`.
+  Call `writeStyled` again with the same `StyledText` and
+  `start_word = resume_word` to continue in the next column or page with
+  every span and style intact. Before, the only continuation was
+  `overflow`, which for styled text holds just the rest of one span -
+  later spans were silently lost.
 - `platen.Path`: the path builder type returned by `doc.createPath()` is
   now exported, so helpers can take a `*platen.Path`.
 

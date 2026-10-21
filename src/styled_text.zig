@@ -452,10 +452,12 @@ pub const StyledText = struct {
         return span.text[word.start_offset..];
     }
 
-    /// Compute optimal line breaks using Knuth-Plass algorithm.
+    /// Compute optimal line breaks using Knuth-Plass algorithm, for the
+    /// words from `start` on (a resumed paragraph is optimized from there).
     /// Returns array of word indices where lines end (caller owns the slice).
-    pub fn computeOptimalBreaks(self: *const StyledText, line_width: f64, space_width: f64) ![]usize {
-        const n = self.words.items.len;
+    pub fn computeOptimalBreaks(self: *const StyledText, line_width: f64, space_width: f64, start: usize) ![]usize {
+        const words = self.words.items[start..];
+        const n = words.len;
         if (n == 0) return self.allocator.alloc(usize, 0);
 
         const INFINITY: f64 = 1e18;
@@ -478,7 +480,7 @@ pub const StyledText = struct {
             var start_i = j;
             while (start_i > 0) {
                 start_i -= 1;
-                const word = self.words.items[start_i];
+                const word = words[start_i];
 
                 // Check force break constraint
                 if (word.force_break and start_i + 1 < j) break;
@@ -493,7 +495,7 @@ pub const StyledText = struct {
                 // Compute badness
                 const slack = line_width - line_w;
                 const is_last_line = (j == n);
-                const is_forced = self.words.items[j - 1].force_break;
+                const is_forced = words[j - 1].force_break;
                 const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
 
                 const total = dp[start_i] + badness;
@@ -510,7 +512,7 @@ pub const StyledText = struct {
 
         var pos = n;
         while (pos > 0) {
-            try breaks.append(self.allocator, pos);
+            try breaks.append(self.allocator, start + pos);
             pos = prev[pos];
         }
 

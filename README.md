@@ -313,6 +313,24 @@ try st.append("colored text", .{ .color = platen.Color.blue });
 _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
 ```
 
+#### Continuing styled text in the next region
+
+When a styled paragraph doesn't fit, `writeStyled` returns `resume_word`:
+the first word that wasn't written. Pass it back as `start_word`, with the
+same unchanged `StyledText`, to continue in the next column or page. Every
+span keeps its style. (`overflow` holds only the rest of the span where
+writing stopped, so use `resume_word` for styled text.)
+
+```zig
+var opts = platen.ParagraphOptions{ .alignment = .justify, .line_breaking = .optimal };
+var column = left_column;
+while (true) {
+    const res = try doc.writeStyled(&column, &st, style, opts);
+    opts.start_word = res.resume_word orelse break;
+    column = next_column; // or doc.addPage(...) and a fresh region
+}
+```
+
 #### Optical Top Alignment
 
 The default `.top` vertical alignment uses **cap-height optical alignment** — capital letters touch the top edge of the region, using real font metrics from the OS/2 table. This produces tighter, more visually precise layouts than the traditional half-leading approach.

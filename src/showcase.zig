@@ -120,34 +120,43 @@ fn typographyPage(doc: *platen.Document, fonts: Fonts) !void {
     _ = try doc.writeBlock(&lead, "A platen is the flat plate that presses paper against inked type. This one presses glyphs into PDF: shaped, kerned, subset and laid out, in pure Zig.", .{ .font = fonts.charter, .size = 14, .italic = true, .color = deep }, .{ .line_height = 1.35 });
     var y = lead.y + lead.cursor_y + 18;
 
-    // Two justified columns, one paragraph each: Knuth-Plass line
-    // breaking with mixed spans
+    // One styled text in two balanced, justified columns: Knuth-Plass line
+    // breaking with mixed spans, measured first, then continued from the
+    // left column into the right one with resume_word
     const col_gap = 22.0;
     const col_w = (full_w - col_gap) / 2;
     const base = platen.TextStyle{ .font = fonts.charter, .size = 10.5, .color = ink };
     const para = platen.ParagraphOptions{ .alignment = .justify, .line_breaking = .optimal, .line_height = 1.4 };
 
-    var first = doc.createStyledText();
-    defer first.deinit();
-    try first.append("Same input, same bytes. ", .{ .bold = true });
-    try first.append(body_text, .{});
-    try first.append("Justified text here is set with ", .{});
-    try first.append("Knuth-Plass optimal line breaking", .{ .italic = true });
-    try first.append(", the algorithm behind TeX, which weighs every possible break in the paragraph at once instead of filling one line at a time.", .{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("Same input, same bytes. ", .{ .bold = true });
+    try st.append(body_text, .{});
+    try st.append("Justified text here is set with ", .{});
+    try st.append("Knuth-Plass optimal line breaking", .{ .italic = true });
+    try st.append(", the algorithm behind TeX. ", .{});
+    try st.append("Fonts are embedded and subset. ", .{ .bold = true });
+    try st.append("TrueType and OpenType fonts are parsed once and cut down to ", .{});
+    try st.append("only the glyphs you use", .{ .color = accent });
+    try st.append(", so a page of text in a large font family still makes a small file. Kerning, ligatures and mark positioning come from the font's own OpenType tables: ", .{});
+    try st.append("office, affluent, fjord, waffle", .{ .italic = true });
+    try st.append(". Diacritics are positioned from GPOS anchors, stylistic sets and character variants can be switched per document, and color fonts are drawn as real vector glyphs. Nothing is cached between documents, so any number of them can be rendered on any number of threads.", .{});
 
-    var second = doc.createStyledText();
-    defer second.deinit();
-    try second.append("Fonts are embedded and subset. ", .{ .bold = true });
-    try second.append("TrueType and OpenType fonts are parsed once and cut down to ", .{});
-    try second.append("only the glyphs you use", .{ .color = accent });
-    try second.append(", so a page of text in a large font family still makes a small file. Kerning, ligatures and mark positioning come from the font's own OpenType tables: ", .{});
-    try second.append("office, affluent, fjord, waffle", .{ .italic = true });
-    try second.append(". Diacritics are positioned from GPOS anchors, stylistic sets and character variants can be switched per document, and color fonts are drawn as real vector glyphs. Nothing is cached between documents, so any number of them can be rendered on any number of threads.", .{});
+    var measure = platen.Region{ .x = margin, .y = y, .width = col_w, .height = 10_000 };
+    var measure_opts = para;
+    measure_opts.measure_only = true;
+    const total_lines = (try doc.writeStyled(&measure, &st, base, measure_opts)).lines_written;
+    const line_h = base.size * para.line_height;
+    const col_h = @as(f64, @floatFromInt((total_lines + 1) / 2)) * line_h + 1;
 
-    var left = platen.Region{ .x = margin, .y = y, .width = col_w, .height = 400 };
-    _ = try doc.writeStyled(&left, &first, base, para);
+    var left = platen.Region{ .x = margin, .y = y, .width = col_w, .height = col_h };
+    const first = try doc.writeStyled(&left, &st, base, para);
     var right = platen.Region{ .x = margin + col_w + col_gap, .y = y, .width = col_w, .height = 400 };
-    _ = try doc.writeStyled(&right, &second, base, para);
+    if (first.resume_word) |w| {
+        var cont = para;
+        cont.start_word = w;
+        _ = try doc.writeStyled(&right, &st, base, cont);
+    }
     y += @max(left.cursor_y, right.cursor_y) + 26;
 
     // Pull quote
