@@ -1883,6 +1883,98 @@ pub const Document = struct {
         }
     }
 
+    /// Result of a writeStyled call that stopped at `pos` (the region is full).
+    fn resumeResult(text: *const StyledText, pos: TextPosition, lines_written: usize, line_height: f64, rect_x: f64, rect_y: f64, rect_width: f64) WriteResult {
+        const word = text.words.items[pos.word];
+        const span = text.spans.items[word.start_span];
+        return .{
+            .lines_written = lines_written,
+            .overflow = span.text[word.start_offset + pos.offset ..],
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+            .resume_at = pos,
+        };
+    }
+
+    const BrokenWord = struct {
+        lines: usize,
+        /// Byte offset into the word where the region filled up, or null
+        /// when the whole word was written.
+        resume_offset: ?usize,
+    };
+
+    /// Write a word wider than the line, one piece per line, starting
+    /// `from` bytes into it: up to a soft hyphen (drawing a hyphen), else
+    /// after a regular hyphen (break_on_hyphens), else between characters.
+    /// Stops when the region is full and reports where. Draws nothing under
+    /// measure_only. Null if the word spans several styles (not broken).
+    fn writeBrokenWord(self: *Document, region: *Region, text: *const StyledText, style: TextStyle, word: StyledText.Word, from: usize, opts: ParagraphOptions, line_height: f64, line_width: f64) !?BrokenWord {
+        if (word.start_span != word.end_span) return null;
+        const span = text.spans.items[word.start_span];
+        const word_text = span.text[word.start_offset..word.end_offset];
+        const render_style = span.style.resolve(style);
+        const fm = self.getFontMetricsStyled(style);
+        const hyphen_width = self.getTextWidthStyled("-", render_style);
+
+        var lines: usize = 0;
+        var pos = from;
+        while (pos < word_text.len) {
+            if (region.remainingHeight() < line_height) return .{ .lines = lines, .resume_offset = pos };
+
+            const rest = word_text[pos..];
+            var rest_buf: [512]u8 = undefined;
+            const clean_rest = styled_text.stripSoftHyphensTo(rest, &rest_buf);
+
+            // The piece for this line and where the next one starts
+            var piece = clean_rest;
+            var draw_hyphen = false;
+            var next = word_text.len;
+            if (self.getTextWidthStyled(clean_rest, render_style) > line_width + 0.01) {
+                var best_soft: ?usize = null; // offset in word_text of a fitting soft hyphen
+                if (word.break_points) |break_points| {
+                    for (break_points) |bp| {
+                        const at = bp.offset - word.start_offset;
+                        if (at <= pos) continue;
+                        var seg_buf: [512]u8 = undefined;
+                        const seg = styled_text.stripSoftHyphensTo(word_text[pos..at], &seg_buf);
+                        if (self.getTextWidthStyled(seg, render_style) + hyphen_width > line_width + 0.01) break;
+                        best_soft = at;
+                    }
+                }
+                if (best_soft) |at| {
+                    piece = styled_text.stripSoftHyphensTo(word_text[pos..at], &rest_buf);
+                    draw_hyphen = true;
+                    next = at + 2; // past the soft hyphen (2 bytes in UTF-8)
+                } else if (rest.len == clean_rest.len) {
+                    // After a regular hyphen, else between characters (at
+                    // least one character per line)
+                    const cut: usize = blk: {
+                        if (opts.break_on_hyphens) {
+                            if (self.findHyphenBreakStyled(rest, line_width, render_style)) |c| break :blk c;
+                        }
+                        break :blk self.findCharacterBreakStyled(rest, line_width, render_style) orelse
+                            @min(std.unicode.utf8ByteSequenceLength(rest[0]) catch 1, rest.len);
+                    };
+                    piece = rest[0..cut];
+                    next = pos + cut;
+                }
+                // else: soft hyphens, but no piece up to one fits; offsets
+                // in the stripped text don't map back, so the rest is
+                // drawn as-is (overflowing the line)
+            }
+
+            if (!opts.measure_only) {
+                const x = region.x + region.padding.left;
+                const y = valignBaseline(region, line_height, fm, opts.valign);
+                const r = try self.writeAt(.{ .x = x, .y = y }, piece, render_style, .{});
+                if (draw_hyphen) _ = try self.writeAt(.{ .x = x + r.width, .y = y }, "-", render_style, .{});
+            }
+            region.newLine(line_height);
+            lines += 1;
+            pos = next;
+        }
+        return .{ .lines = lines, .resume_offset = null };
+    }
+
     /// Write styled text into a region with alignment support.
     /// Uses Knuth-Plass optimal line breaking when requested.
     pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style_in: TextStyle, opts: ParagraphOptions) !WriteResult {
@@ -1914,7 +2006,12 @@ pub const Document = struct {
 
         const start_word = opts.start.word;
         if (start_word > text.words.items.len) return error.InvalidStartPosition;
-        if (opts.start.offset != 0) return error.InvalidStartPosition; // mid-word resume: next commit
+        if (opts.start.offset != 0) {
+            // Mid-word: only a word broken over lines resumes there
+            if (start_word == text.words.items.len) return error.InvalidStartPosition;
+            const w = text.words.items[start_word];
+            if (w.start_span != w.end_span or opts.start.offset >= w.end_offset - w.start_offset) return error.InvalidStartPosition;
+        }
         if (start_word == text.words.items.len) {
             const rect_x = region.x + region.padding.left;
             const rect_y = region.y + region.padding.top + region.cursor_y;
@@ -1963,9 +2060,28 @@ pub const Document = struct {
         const rect_width = region.contentWidth();
         var lines_written: usize = 0;
 
+        // Resuming mid-word: finish the broken word first
+        var first_word = start_word;
+        if (opts.start.offset != 0) {
+            const broken = (try self.writeBrokenWord(region, text, style, text.words.items[start_word], opts.start.offset, render_opts, line_height, line_width)).?;
+            lines_written = broken.lines;
+            if (broken.resume_offset) |offset| {
+                if (opts.measure_only) {
+                    region.cursor_x = saved_cursor_x;
+                    region.cursor_y = saved_cursor_y;
+                }
+                return resumeResult(text, .{ .word = start_word, .offset = offset }, lines_written, line_height, rect_x, rect_y, rect_width);
+            }
+            first_word = start_word + 1;
+        }
+
         // Use optimal or greedy line breaking based on options
         if (render_opts.line_breaking == .optimal) {
-            const result = try self.writeStyledOptimal(region, text, style, render_opts, line_height, space_width, line_width, start_cursor_y);
+            var rest_opts = render_opts;
+            rest_opts.start = .{ .word = first_word };
+            var result = try self.writeStyledOptimal(region, text, style, rest_opts, line_height, space_width, line_width, start_cursor_y);
+            result.lines_written += lines_written;
+            result.rect.height = @as(f64, @floatFromInt(result.lines_written)) * line_height;
             if (opts.measure_only) {
                 region.cursor_x = saved_cursor_x;
                 region.cursor_y = saved_cursor_y;
@@ -1975,7 +2091,7 @@ pub const Document = struct {
 
         // Greedy algorithm
         const n = text.words.items.len;
-        var word_idx: usize = start_word;
+        var word_idx: usize = first_word;
 
         while (word_idx < n) {
             // Check if we have room for another line
@@ -2010,186 +2126,23 @@ pub const Document = struct {
                 if (word.force_break) break;
             }
 
-            // Handle case where first word doesn't fit
+            // A first word wider than the line is broken over lines
             if (line_end == line_start and line_start < n) {
                 const big_word = text.words.items[line_start];
-
-                // Try to break at soft-hyphen if available
-                if (big_word.break_points) |break_points| {
-                    const hyphen_width = self.getTextWidthStyled("-", text.spans.items[big_word.start_span].style.resolve(style));
-
-                    // Find best break point that fits
-                    var best_bp: ?styled_text.BreakPoint = null;
-                    for (break_points) |bp| {
-                        if (bp.width + hyphen_width <= line_width + 0.01) {
-                            best_bp = bp;
-                        } else {
-                            break; // Break points are ordered by position
+                if (try self.writeBrokenWord(region, text, style, big_word, 0, render_opts, line_height, line_width)) |broken| {
+                    lines_written += broken.lines;
+                    if (broken.resume_offset) |offset| {
+                        if (opts.measure_only) {
+                            region.cursor_x = saved_cursor_x;
+                            region.cursor_y = saved_cursor_y;
                         }
+                        return resumeResult(text, .{ .word = line_start, .offset = offset }, lines_written, line_height, rect_x, rect_y, rect_width);
                     }
-
-                    if (best_bp) |_| {
-                        const span = text.spans.items[big_word.start_span];
-                        const fm = self.getFontMetricsStyled(style);
-
-                        const render_style = span.style.resolve(style);
-
-                        // Recursively break at soft-hyphens until the remaining fits
-                        var remaining_start: u16 = big_word.start_offset;
-
-                        while (remaining_start < big_word.end_offset) {
-                            const remaining = span.text[remaining_start..big_word.end_offset];
-                            var remaining_buf: [512]u8 = undefined;
-                            const clean_remaining = stripSoftHyphensTo(remaining, &remaining_buf);
-                            const remaining_width = self.getTextWidthStyled(clean_remaining, span.style.resolve(style));
-
-                            // If remaining fits on one line, render it and we're done
-                            if (remaining_width <= line_width + 0.01) {
-                                if (region.remainingHeight() >= line_height) {
-                                    const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style, .{});
-                                    region.newLine(line_height);
-                                    lines_written += 1;
-                                }
-                                break;
-                            }
-
-                            // Find best break point that fits, searching from remaining_start
-                            var best_break_offset: ?u16 = null;
-                            for (break_points) |bp| {
-                                if (bp.offset <= remaining_start) continue; // Skip already-used break points
-                                // Measure text from remaining_start to this break point
-                                const segment = span.text[remaining_start..bp.offset];
-                                var seg_buf: [512]u8 = undefined;
-                                const clean_seg = stripSoftHyphensTo(segment, &seg_buf);
-                                const seg_width = self.getTextWidthStyled(clean_seg, span.style.resolve(style));
-                                if (seg_width + hyphen_width <= line_width + 0.01) {
-                                    best_break_offset = bp.offset;
-                                } else {
-                                    break; // Break points are ordered, no point checking further
-                                }
-                            }
-
-                            if (best_break_offset) |break_offset| {
-                                // Render prefix + hyphen on this line
-                                const prefix = span.text[remaining_start..break_offset];
-                                var prefix_buf: [512]u8 = undefined;
-                                const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
-                                const prefix_width = self.getTextWidthStyled(clean_prefix, span.style.resolve(style));
-
-                                const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                const x_pos = region.x + region.padding.left;
-                                _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, clean_prefix, render_style, .{});
-                                _ = try self.writeAt(.{ .x = x_pos + prefix_width, .y = y_pos }, "-", render_style, .{});
-
-                                region.newLine(line_height);
-                                lines_written += 1;
-
-                                // Move to after the soft-hyphen (2 bytes for UTF-8)
-                                remaining_start = break_offset + 2;
-                            } else {
-                                // No break point fits, render remaining as-is (will overflow)
-                                if (region.remainingHeight() >= line_height) {
-                                    const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style, .{});
-                                    region.newLine(line_height);
-                                    lines_written += 1;
-                                }
-                                break;
-                            }
-                        }
-
-                        word_idx = line_start + 1;
-                        continue;
-                    }
+                    word_idx = line_start + 1;
+                    continue;
                 }
 
-                // Try regular hyphen breaking if enabled (only for single-span words)
-                if (render_opts.break_on_hyphens and big_word.start_span == big_word.end_span) {
-                    const span = text.spans.items[big_word.start_span];
-                    const word_text = span.text[big_word.start_offset..big_word.end_offset];
-
-                    if (self.findHyphenBreakStyled(word_text, line_width, style)) |break_pos| {
-                        // break_pos is position after the hyphen
-                        const prefix = word_text[0..break_pos];
-                        const suffix = word_text[break_pos..];
-
-                        // CSS-style .top valign
-                        const fm = self.getFontMetricsStyled(style);
-                        const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-
-                        const render_style = span.style.resolve(style);
-
-                        const x_pos = region.x + region.padding.left;
-                        _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
-
-                        region.newLine(line_height);
-                        lines_written += 1;
-
-                        // Render suffix on next line
-                        if (suffix.len > 0 and region.remainingHeight() >= line_height) {
-                            const y_pos2 = valignBaseline(region, line_height, fm, render_opts.valign);
-                            _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos2 }, suffix, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                        }
-
-                        word_idx = line_start + 1;
-                        continue;
-                    }
-                }
-
-                // Last resort: character-level breaking (only for single-span words)
-                // Loop until entire word is consumed
-                if (big_word.start_span == big_word.end_span) {
-                    const span = text.spans.items[big_word.start_span];
-                    var remaining_text = span.text[big_word.start_offset..big_word.end_offset];
-                    // CSS-style .top valign
-                    const fm = self.getFontMetricsStyled(style);
-                    var did_break = false;
-
-                    const render_style = span.style.resolve(style);
-
-                    while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
-                        const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                        const x_pos = region.x + region.padding.left;
-
-                        // Check if remaining text fits on line
-                        const remaining_width = self.getTextWidthStyled(remaining_text, render_style);
-                        if (remaining_width <= line_width + 0.01) {
-                            // Fits - render it and we're done
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                            did_break = true;
-                            break;
-                        }
-
-                        // Doesn't fit - find break point
-                        if (self.findCharacterBreakStyled(remaining_text, line_width, style)) |break_pos| {
-                            const prefix = remaining_text[0..break_pos];
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                            remaining_text = remaining_text[break_pos..];
-                            did_break = true;
-                        } else {
-                            // Can't break (shouldn't happen) - render what we can
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                            did_break = true;
-                            break;
-                        }
-                    }
-
-                    if (did_break) {
-                        word_idx = line_start + 1;
-                        continue;
-                    }
-                }
-
-                // No break point found - include oversized word as-is
+                // Unbreakable (spans several styles): include it as-is
                 line_end = line_start + 1;
                 current_width = big_word.width;
             }

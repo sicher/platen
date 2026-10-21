@@ -922,7 +922,9 @@ fn drawnRuns(allocator: std.mem.Allocator, pdf: []const u8) ![]u8 {
     return out.toOwnedSlice(allocator);
 }
 
-const resume_spans = [_]struct { text: []const u8, opts: platen.TextStyleOptions }{
+const SpanSpec = struct { text: []const u8, opts: platen.TextStyleOptions };
+
+const resume_spans = [_]SpanSpec{
     .{ .text = "alpha beta gamma delta ", .opts = .{} },
     .{ .text = "epsilon zeta eta theta", .opts = .{ .bold = true } },
     .{ .text = " iota kappa ", .opts = .{} },
@@ -930,29 +932,32 @@ const resume_spans = [_]struct { text: []const u8, opts: platen.TextStyleOptions
     .{ .text = " xi omicron pi rho sigma tau.", .opts = .{} },
 };
 
-/// Render `resume_spans` into regions of `height` (one per page),
-/// continuing with resume_word until everything is written.
-fn renderResumed(allocator: std.mem.Allocator, height: f64, breaking: platen.LineBreaking, regions_used: *usize) ![]u8 {
+/// Render `spans` into 90pt-wide regions of `height` (one per page),
+/// continuing with resume_at until everything is written.
+const ResumeStats = struct { regions: usize = 0, mid_word: usize = 0 };
+
+fn renderResumed(allocator: std.mem.Allocator, spans: []const SpanSpec, height: f64, breaking: platen.LineBreaking, stats: *ResumeStats) ![]u8 {
     var doc = Document.init(allocator, std.testing.io);
     defer doc.deinit();
     doc.compression_level = 0; // keep the content stream searchable
 
     var st = doc.createStyledText();
     defer st.deinit();
-    for (resume_spans) |s| try st.append(s.text, s.opts);
+    for (spans) |s| try st.append(s.text, s.opts);
     const base = TextStyle{ .font = Font.helvetica, .size = 10 };
 
     var start: platen.TextPosition = .{};
-    regions_used.* = 0;
+    stats.* = .{};
     while (true) {
         try doc.addPage(.{});
         var region = Region{ .x = 50, .y = 50, .width = 90, .height = height };
         const res = try doc.writeStyled(&region, &st, base, .{ .line_breaking = breaking, .start = start });
-        regions_used.* += 1;
+        stats.regions += 1;
         start = res.resume_at orelse break;
+        if (start.offset != 0) stats.mid_word += 1;
         try std.testing.expect(res.lines_written > 0); // always progresses
         try std.testing.expect(res.overflow != null); // still reported
-        if (regions_used.* > 20) return error.TestUnexpectedResult;
+        if (stats.regions > 20) return error.TestUnexpectedResult;
     }
 
     const pdf = try doc.output();
@@ -963,19 +968,67 @@ fn renderResumed(allocator: std.mem.Allocator, height: f64, breaking: platen.Lin
 test "writeStyled resume_at continues every span in the next region" {
     const allocator = std.testing.allocator;
     for ([_]platen.LineBreaking{ .greedy, .optimal }) |breaking| {
-        var one: usize = 0;
-        const whole = try renderResumed(allocator, 1000, breaking, &one);
+        var one: ResumeStats = .{};
+        const whole = try renderResumed(allocator, &resume_spans, 1000, breaking, &one);
         defer allocator.free(whole);
-        var many: usize = 0;
-        const chained = try renderResumed(allocator, 25, breaking, &many); // 2 lines each
+        var many: ResumeStats = .{};
+        const chained = try renderResumed(allocator, &resume_spans, 25, breaking, &many); // 2 lines each
         defer allocator.free(chained);
 
-        try std.testing.expectEqual(@as(usize, 1), one);
-        try std.testing.expect(many > 2);
+        try std.testing.expectEqual(@as(usize, 1), one.regions);
+        try std.testing.expect(many.regions > 2);
         // Same text, same fonts, same order: nothing lost, styles kept
         try std.testing.expectEqualStrings(whole, chained);
         try std.testing.expect(std.mem.indexOf(u8, chained, "omicron") != null);
     }
+}
+
+test "writeStyled resumes a word broken over lines mid-word" {
+    // Words wider than the 90pt column are broken over lines - between
+    // characters, after regular hyphens, or at soft hyphens (drawing a
+    // hyphen). A region boundary may fall inside such a word: the next
+    // region continues mid-word, so chained 2-line regions draw exactly
+    // what one tall region draws.
+    const allocator = std.testing.allocator;
+    const cases = [_][]const SpanSpec{
+        &.{.{ .text = "Before Pneumonoultramicroscopicsilicovolcanoconiosis after the long word.", .opts = .{} }},
+        &.{.{ .text = "Before state-of-the-art-and-well-known-hyphenated-compound after.", .opts = .{} }},
+        &.{.{ .text = "Before In\u{AD}com\u{AD}pre\u{AD}hen\u{AD}si\u{AD}bil\u{AD}i\u{AD}ties\u{AD}and\u{AD}ex\u{AD}tra\u{AD}or\u{AD}di\u{AD}nar\u{AD}i\u{AD}ly\u{AD}long\u{AD}com\u{AD}pounds after.", .opts = .{} }},
+    };
+    for (cases) |spans| {
+        for ([_]f64{ 25, 40 }) |height| { // 2 and 3 lines per region
+            var one: ResumeStats = .{};
+            const whole = try renderResumed(allocator, spans, 1000, .greedy, &one);
+            defer allocator.free(whole);
+            var many: ResumeStats = .{};
+            const chained = try renderResumed(allocator, spans, height, .greedy, &many);
+            defer allocator.free(chained);
+
+            try std.testing.expect(many.mid_word > 0); // a boundary fell inside the word
+            try std.testing.expectEqualStrings(whole, chained);
+        }
+    }
+}
+
+test "writeStyled measure_only draws nothing, even for broken words" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+    try doc.addPage(.{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("Before Pneumonoultramicroscopicsilicovolcanoconiosis Ex\u{AD}tra\u{AD}or\u{AD}di\u{AD}nar\u{AD}i\u{AD}ly after.", .{});
+    var region = Region{ .x = 50, .y = 50, .width = 90, .height = 1000 };
+    const base = TextStyle{ .font = Font.helvetica, .size = 10 };
+    const res = try doc.writeStyled(&region, &st, base, .{ .measure_only = true });
+    try std.testing.expect(res.lines_written > 3);
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_y); // measuring has no side effects
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    const runs = try drawnRuns(std.testing.allocator, pdf);
+    defer std.testing.allocator.free(runs);
+    try std.testing.expectEqualStrings("", runs);
 }
 
 test "writeStyled start past the end is an error" {

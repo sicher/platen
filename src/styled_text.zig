@@ -93,7 +93,8 @@ pub const Span = struct {
 
 /// A potential break point within a word (soft-hyphen location).
 pub const BreakPoint = struct {
-    /// Byte offset within word where soft-hyphen is located.
+    /// Byte offset of the soft-hyphen within the word's span (like
+    /// StyledWord.start_offset).
     offset: u16,
     /// Width of text up to this point (not including the hyphen that would be added).
     width: f64,
@@ -125,6 +126,8 @@ pub const MeasureFn = *const fn (text: []const u8, style: TextStyleOptions, ctx:
 /// Builder for constructing styled text with inline style changes.
 /// Mirrors the Path API pattern.
 pub const StyledText = struct {
+    pub const Word = StyledWord;
+
     allocator: std.mem.Allocator,
     spans: std.ArrayListUnmanaged(Span) = .empty,
 

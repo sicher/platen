@@ -16,6 +16,16 @@
 
 ### Fixed
 
+- **Words wider than the line lost their end at a region boundary:** a
+  word broken over lines (soft hyphens, regular hyphens, or between
+  characters) that reached the bottom of the region was cut off and
+  layout went on with the next word. Writing now stops mid-word and
+  `resume_at` carries the byte offset, so the next region continues the
+  word (lines are the unit, as in TeX and CSS fragmentation). Pieces are
+  measured in the span's own style (bold words were broken with regular
+  widths).
+- **`measure_only` drew broken words:** measuring a paragraph containing
+  a word wider than the line drew that word's pieces on the page.
 - **Combining marks compose to the font's precomposed glyphs:** a base
   followed by combining marks (e.g. `i` + U+0308) was drawn as separate
   glyphs positioned by GPOS - or simply overprinted in fonts without mark
