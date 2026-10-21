@@ -4,8 +4,11 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 544 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 561 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
+Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
+continuing styled text across regions, Unicode composition, and a batch
+of rendering fixes found by the showcase (session #31).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
 `.tools/devkit/devkit release X.Y.Z` (merge dev, date the notes, set the
@@ -18,6 +21,10 @@ sync-dev` on dev. Never commit to main directly (config bootstrap for
 CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 
 ## What's Next
+- Open from session #31 (TODO.md "Found by the README showcase"): `ccmp`
+  (GSUB chain-context formats 1/2 not parsed; dotted i under marks with
+  no precomposed form), and Knuth-Plass (`.optimal`) has no handling for
+  words wider than the line.
 - TODO.md roadmap: text render modes (`Tr`), Form XObject stamps, the
   opt-in 16-bit -> 8-bit flag for PDF/A-1b, splitting document.zig
   (~4,400 lines), parallel page rendering, metadata encryption; post-1.0:
@@ -37,6 +44,26 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   idle. Deferred by the user.
 - Other urverk projects need the 0.17 migration: DESIGN.md "Zig
   Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
+
+## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
+- README gallery: `zig build showcase` (src/showcase.zig) writes one PDF
+  per page (examples/showcase_*.pdf); `scripts/render-readme-images`
+  rasterizes them + the invoice into docs/images. Gallery images link to
+  the PDFs (Forgejo renders them). HTML <a href> in README is NOT
+  rewritten by Forgejo (404) - use Markdown links inside table cells
+  (blank line after <td>). Check rendering via POST /api/v1/markdown.
+- Building the showcase found and fixed (each with a failing test first):
+  justified CID text ragged (Tw ignored for Identity-H), Tc leaking into
+  later runs, gradient stops borrowed, unused fonts embedded whole (25 MB),
+  char_spacing ignored in the Tm mark path, Tw on CID runs splitting
+  ligatures at CID 0x0020 in poppler, measure_only drawing broken words.
+- `platen.Path` exported.
+- Unicode composition before shaping (HarfBuzz-style), `naïve` etc.
+- `writeStyled` continuation: `resume_at` / `ParagraphOptions.start`
+  (`TextPosition { word, offset }`), mid-word for broken words.
+- Decisions: continuation as one struct (user); lines are the unit, a
+  region may end mid-word (TeX/CSS model, not "move the whole word");
+  `overflow` kept unchanged; ToUnicode of composed glyphs = typed text.
 
 ## What We Did (Session 2026-10-15 #30 - dates and file IDs)
 - PDF/A dates: one clock reading per `output()` (`OutputDates`); explicit

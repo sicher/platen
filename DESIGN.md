@@ -51,6 +51,17 @@ Uses PDF content stream operators:
 - `Td` - Move text position
 - `Tj` - Show text string
 
+Text state (`Tc`, `Tw`) is graphics state and survives `ET`/`BT`:
+- `Tc` is emitted only when non-zero, so a run that sets it resets it
+  (`0 Tc`) before `ET`.
+- `Tw` applies only to the single-byte code 32. Identity-H codes are 2
+  bytes, so CID runs (and color-font runs) get justification as `TJ`
+  adjustments after each space glyph (`Tm` offsets in the per-glyph mark
+  path), and `Tw` is written as 0 for them: poppler applies Tw to the
+  2-byte code 0x0020 anyway (e.g. a ligature subset to CID 32).
+- The mark-positioning path places every glyph with `Tm`, so neither Tc
+  nor Tw applies there; it adds char and word spacing to `abs_x` itself.
+
 ### Standard Fonts (Base 14)
 PDF viewers must have these fonts built-in:
 - Helvetica (4 styles: normal, bold, oblique, bold-oblique)
@@ -186,6 +197,11 @@ endstream
 3. OpenType CFF font support (CIDFontType0C)
 4. OpenType GSUB/GPOS (ligatures, kerning, mark positioning)
 5. COLR v1 / CPAL color fonts → PDF Type3 color fonts (color emoji)
+
+Only fonts some page draws with are written (`isFontDrawn` over
+`page.used_embedded`; others get no object IDs). A loaded but unused font
+has no glyphs to subset, and `getFontData` falls back to the whole
+original file - it used to be embedded as orphan objects.
 
 ### Font Collections and System Fonts (session #29)
 
@@ -336,6 +352,13 @@ python scripts/gen_references.py  # Auto-installs fpdf2 in .venv/
 - Text content (exact match)
 - Text positions (within 1.0pt tolerance)
 - Page dimensions
+
+**Showcase as a test bench** (session #31): `zig build showcase` renders
+realistic pages (examples/showcase_*.pdf) and `scripts/render-readme-images`
+rasterizes them. Looking at the rendered pages found seven bugs the suite
+missed (reference tests use mostly standard fonts and simple layouts).
+When a render looks wrong, treat it as a library bug and write the
+failing test first - don't adjust the showcase around it.
 
 **Image pixels** (opt-in, `compare_images` in TestOptions): poppler's
 `pdfimages` extracts every image XObject and soft mask from both PDFs as
@@ -686,6 +709,21 @@ fn writeFlow(self: *Document, text: []const u8, opts: FlowOptions) !void
 /// Draw text box's border/fill (without text)
 fn drawTextBox(self: *Document, box: *const TextBox) !void
 ```
+
+### Continuing styled text across regions (session #31)
+`writeStyled` returns `resume_at: ?TextPosition` (`{ word, offset }`) and
+takes `ParagraphOptions.start`; the caller passes it back with the same,
+unchanged StyledText. Stateless: the position lives with the caller.
+- Lines are the unit, as in TeX and CSS fragmentation: a word wider than
+  the line is broken into pieces, one per line (`writeBrokenWord`: soft
+  hyphen with a drawn hyphen, else after a regular hyphen, else between
+  characters), and a region may end between two pieces - `offset` is the
+  byte offset into the word (single-span words only; multi-span words are
+  never broken). A mid-word start finishes that word first.
+- Knuth-Plass restarts from the resume point (`computeOptimalBreaks(..,
+  start)`): each region's part is optimized separately.
+- `WriteResult.overflow` is unchanged and, for styled text, only the rest
+  of one span - documented as a preview; `resume_at` is the way to go on.
 
 ### StyledText span overrides (0.11.0)
 
@@ -1071,6 +1109,26 @@ draws. Three rules keep it true:
   width computed from its own shaped run, and anchoring (.center/.right)
   shifts the just-appended deferred command. Every string is shaped
   exactly once.
+- Every identity UTF-8 -> glyph path (rendering, shaped and unshaped
+  measurement, getGlyphsForText) decodes through `EmbeddedFont.decodeText`,
+  which also does Unicode composition - never decode text elsewhere.
+
+### Unicode composition (session #31)
+Before shaping, a base + combining marks becomes the precomposed
+character when the font has a glyph for it, like HarfBuzz's
+normalization (`i` + U+0308 -> U+00EF; `e` + U+0323 + U+0302 -> U+1EC7);
+otherwise the sequence stays decomposed for GPOS mark positioning.
+- `src/unicode_compose.zig`: NFC-style composition restricted to
+  combining marks (blocking rule; no reordering, input assumed in
+  canonical order). Data `src/unicode_compose_data.zig` is generated from
+  Python's unicodedata by `scripts/gen_unicode_compose.py` (902 pairs,
+  393 combining-class ranges). Hangul is not composed.
+- Fast path: text with no code point >= U+0300 skips it (`mayCompose`
+  checks for UTF-8 lead bytes >= 0xCC in measurement).
+- ToUnicode of a composed glyph is its canonical decomposition - the text
+  as typed - via `ligature_codepoints` (`trackGlyphText`, first use wins).
+- Not done: `ccmp` (soft-dotted i -> dotless before above-marks for
+  sequences without a precomposed form).
 
 ### Concurrency model
 - **Documents share nothing** — one Document per thread renders
