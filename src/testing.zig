@@ -44,6 +44,8 @@ pub const SemanticOptions = struct {
     skip_fonts: bool = false,
     /// Also compare every image's decoded pixels (and soft mask) exactly.
     compare_images: bool = false,
+    /// Also compare the rendered pages pixel for pixel (pdftoppm, exact).
+    compare_render: bool = false,
     /// 0-based indices of reference images that the actual PDF omits on
     /// purpose (formats not supported yet); requires compare_images.
     skip_expected_images: []const usize = &.{},
@@ -457,6 +459,7 @@ fn comparePdfsSemanticWithOptions(io: std.Io, allocator: std.mem.Allocator, actu
     try argv.appendSlice(allocator, &.{ "python3", "scripts/compare_pdfs.py", tmp_expected.path, tmp_actual.path, "--tolerance=1.0" });
     if (options.skip_fonts) try argv.append(allocator, "--skip-fonts");
     if (options.compare_images) try argv.append(allocator, "--compare-images");
+    if (options.compare_render) try argv.append(allocator, "--compare-render");
 
     var skip_arg: std.Io.Writer.Allocating = .init(allocator);
     defer skip_arg.deinit();

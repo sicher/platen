@@ -52,6 +52,19 @@
   covered the glyph - Noto's rainbow flag 🏳️‍🌈 came out grey, and about
   2,000 Noto Color Emoji glyphs had such gradients. Stop alpha is now
   drawn through a soft mask (or `/ca` when it is constant).
+- **A color glyph without an outline painted the whole page:** Bungee
+  Spice's space is a color glyph whose clip glyph has no contours; the
+  empty clip was written as `W n` with no path, which sets no clip, so its
+  gradient covered the page from that point on. Such paints are now
+  skipped (an empty clip shows nothing).
+- **Underlines and strikethroughs ran into the space a line wraps at**
+  (`write()`): the line was drawn with its trailing space, and the
+  decoration with it. The space now hangs past the line end, as in CSS;
+  spaces inside the line stay decorated.
+- **Bitmap-only fonts had an empty `FontBBox`:** an OTB pixel font's head
+  box is 0 wide, so every glyph fell outside its Type3 font's box
+  (poppler warned on each). Such fonts now get `[0 0 0 0]`, which tells
+  viewers to make no assumptions about glyph sizes.
 - **Color emoji ligatures extracted as U+FFFD:** the Type3 ToUnicode of
   a color font mapped only single code points, so a joined emoji (ZWJ
   family, flag, keycap) copied as a replacement character. It maps to the
@@ -121,6 +134,11 @@
   (`scripts/gen_gsub_test_font.py`); `scripts/gen_shaping_reference.py`
   regenerates it.
 - `zig build test -Dtest-filter=NAME` runs only matching tests.
+- References platen generates itself (color fonts, decorations,
+  transforms) are now also compared rendered, pixel for pixel
+  (`compare_pdfs.py --compare-render`, poppler): the text-and-position
+  comparison missed drawing changes, and three references had drifted
+  (`color_v1_gradient` even had the page-filling space baked in).
 
 ## 0.12.0 — 2026-10-17
 

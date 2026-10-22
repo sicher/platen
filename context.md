@@ -4,7 +4,7 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 562 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 564 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
@@ -69,6 +69,12 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   luminosity soft mask (gray copy of the shading in a form XObject,
   `/Gm{n}`). Fixed the grey rainbow flag; ~2,000 Noto glyphs affected.
   Checked by eye (no COLRv1 reference renderer in .venv).
+- **Pixel check for platen-generated references** (`--compare-render`).
+  It found: `color_v1_gradient` reference broken (empty-outline clip
+  filled the page - fixed); `text_style` decorations changed by the
+  2026-01 line batching (f8663cb) - mid-line spaces decorated is CSS, the
+  wrap space was not (fixed); pixel_font FontBBox empty (fixed).
+  `clig` on by default.
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
 - README gallery: `zig build showcase` (src/showcase.zig) writes one PDF
