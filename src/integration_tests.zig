@@ -2679,6 +2679,25 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.write(&region, "decorations ", platen.TextStyle{ .font = platen.Font.helvetica, .size = 11, .color = platen.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "within the same wrapped paragraph.", base_style, .{ .valign = .top_leading });
 
+    // Decorations at line ends: a space a line wraps at hangs undecorated,
+    // whether the wrap comes inside one write() call (left) or with the
+    // next call's first word (right: each decorated call ends with a
+    // space, and the following word does not fit on its line)
+    const ends_y = box_y + box_height + 30;
+    _ = try doc.writeAt(.{ .x = 50, .y = ends_y }, "Decorations at line ends:", header_12, .{});
+    const underline_11 = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11, .color = platen.Color.rgbf(0, 0, 0.8), .decoration = .{ .underline = true } };
+    const strike_11 = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11, .color = platen.Color.rgbf(0.8, 0, 0), .decoration = .{ .strikethrough = true } };
+    var within = platen.Region{ .x = 50, .y = ends_y + 12, .width = 140, .height = 70, .padding = .{ .left = padding, .right = padding, .top = padding, .bottom = padding }, .border = platen.Border.all };
+    _ = try doc.write(&within, "underlined words wrap within one call", underline_11, .{ .valign = .top_leading });
+    try doc.drawRegion(within);
+    var across = platen.Region{ .x = 210, .y = ends_y + 12, .width = 140, .height = 70, .padding = .{ .left = padding, .right = padding, .top = padding, .bottom = padding }, .border = platen.Border.all };
+    _ = try doc.write(&across, "Plain then ", base_style, .{ .valign = .top_leading });
+    _ = try doc.write(&across, "underlined ", underline_11, .{ .valign = .top_leading });
+    _ = try doc.write(&across, "wrapping. A ", base_style, .{ .valign = .top_leading });
+    _ = try doc.write(&across, "struck ", strike_11, .{ .valign = .top_leading });
+    _ = try doc.write(&across, "\nnewline.", base_style, .{ .valign = .top_leading });
+    try doc.drawRegion(across);
+
     return doc.output();
 }
 
