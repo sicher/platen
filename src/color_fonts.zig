@@ -457,7 +457,13 @@ pub fn writeColorFont(doc: *Document, w: *Writer, plan: *ColorFontPlan) !void {
     const inv = 1.0 / upem;
 
     const font_matrix = try std.fmt.allocPrint(arena, "[{d:.10} 0 0 {d:.10} 0 0]", .{ inv, inv });
-    const font_bbox = try std.fmt.allocPrint(arena, "[{d} {d} {d} {d}]", .{ head.x_min, head.y_min, head.x_max, head.y_max });
+    // A font without outlines (bitmap-only, e.g. OTB pixel fonts) has an
+    // empty head box that no glyph fits; all zeros tells the viewer to make
+    // no assumptions about glyph sizes (PDF 32000 9.6.5)
+    const font_bbox = if (head.x_min < head.x_max and head.y_min < head.y_max)
+        try std.fmt.allocPrint(arena, "[{d} {d} {d} {d}]", .{ head.x_min, head.y_min, head.x_max, head.y_max })
+    else
+        "[0 0 0 0]";
 
     // All subfonts share the plan's accumulated shadings/ExtGStates.
     const resources = try buildColorFontResources(arena, plan);

@@ -3387,6 +3387,9 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
     // 'A': 7x13 px at upem 2048 / 13 ppem → 157.54 units/px. Advance 1024
     // (hmtx); bbox bottom 3 px below baseline (-472.62), top at 1575.38.
     try std.testing.expect(std.mem.indexOf(u8, pdf, "1024 0 0.00 -472.62 1102.77 1575.38 d1") != null);
+    // Cozette has no outlines, so head's box is empty in x (0..0): every
+    // glyph box would fall outside it. All zeros means "no assumptions"
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontBBox [0 0 0 0]") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Im1 Do") != null);
     // Text color applies to the mask.
     try std.testing.expect(std.mem.indexOf(u8, pdf, "0.784 0.000 0.000 rg") != null);
