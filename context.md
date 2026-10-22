@@ -75,6 +75,15 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   wrap space was not (fixed); pixel_font FontBBox empty (fixed).
   `clig` on by default. cmap format 14 variation sequences (GsubTest
   entries + HarfBuzz reference).
+- Pixel check covers all 19 platen-made references (any test without an
+  fpdf2 generator in gen_references.py, not just EXCLUDED_TESTS). A
+  drifted reference is looked at before regenerating - svg_embedding's
+  had wrong stroke widths. gentium_diacritics gained a composition /
+  dotless i/j section (decomposed vs precomposed, ccmp, Inter).
+- Next candidates: write() edge case (a call's trailing space decorated
+  when the next call wraps at once); SVG stroke widths written with 2
+  decimals (0.172 -> 0.17); TODO.md roadmap (Tr, Form XObject stamps,
+  split document.zig).
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
 - README gallery: `zig build showcase` (src/showcase.zig) writes one PDF
