@@ -67,8 +67,10 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{.{ .name = "build_options", .module = build_options_mod }},
     });
+    const test_filters = b.option([]const []const u8, "test-filter", "Run only tests whose name contains this (repeatable)") orelse &.{};
     const lib_tests = b.addTest(.{
         .root_module = test_mod,
+        .filters = test_filters,
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);

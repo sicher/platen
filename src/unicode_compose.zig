@@ -54,6 +54,11 @@ pub fn compose(a: u21, b: u21) ?u21 {
 /// composite is returned as itself. `buf` must hold the result (4 is
 /// enough for every pair-built composite).
 pub fn decompose(c: u21, buf: []u21) []u21 {
+    // The first primary composite is U+00C0
+    if (c < 0xC0) {
+        buf[0] = c;
+        return buf[0..1];
+    }
     for (data.pairs) |p| {
         if (p.c == c) {
             const head = decompose(p.a, buf);

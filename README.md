@@ -1068,7 +1068,13 @@ platen.pt_per_cm    // 28.34...
 
 **OpenType Features:**
 
-GSUB (Glyph Substitution):
+GSUB (Glyph Substitution) supports every lookup type (single, multiple,
+alternate, ligature, contextual, chained contextual, extension, reverse
+chained) with lookup flags, applied in the font's lookup order as
+HarfBuzz does; a differential test checks the glyphs against HarfBuzz.
+- `ccmp` - Glyph composition/decomposition (e.g. dotless i under an accent) - *enabled by default*
+- `locl` - Localized forms - *enabled by default*
+- `rlig` - Required ligatures - *enabled by default*
 - `liga` - Standard ligatures (fi, fl, ff, etc.) - *enabled by default*
 - `clig` - Contextual ligatures
 - `dlig` - Discretionary ligatures

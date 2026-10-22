@@ -490,13 +490,11 @@ pub const EmbeddedFont = struct {
             const ot = try allocator.create(opentype.OpenTypeFeatures);
             errdefer allocator.destroy(ot);
             // Struct copy shares the parsed lookup tables (read-only after
-            // parse) and inherits the prototype's kern cache values; scratch
-            // buffers are reset so shaping never touches shared memory.
+            // parse) and inherits the prototype's kern cache values; shaping
+            // buffers are fresh so shaping never touches shared memory.
             ot.* = proto_ot.*;
             ot.allocator = allocator;
-            ot.scratch_a = .empty;
-            ot.scratch_b = .empty;
-            ot.scratch_c = .empty;
+            ot.shaper = .{};
             ot.borrowed_tables = true;
             emb.ot_features = ot;
         }
@@ -532,7 +530,7 @@ pub const EmbeddedFont = struct {
 
         // Parse GSUB table if present (for ligatures)
         if (self.font.getTable("GSUB".*)) |gsub_data| {
-            try ot.parseGSUB(gsub_data);
+            try ot.parseGSUB(gsub_data, self.font.getTable("GDEF".*));
         }
 
         // Parse GPOS table if present (for kerning)
@@ -560,36 +558,6 @@ pub const EmbeddedFont = struct {
         self.feature_flags.set(feature, enabled);
     }
 
-    /// Check if any stylistic set feature is enabled
-    fn anyStylisticSetEnabled(self: *const EmbeddedFont) bool {
-        return self.feature_flags.anyEnabledInRange(.ss01, .ss20);
-    }
-
-    /// Check if any enabled stylistic set has lookups in the font
-    fn hasStylisticSetLookups(self: *const EmbeddedFont, ot: *const opentype.OpenTypeFeatures) bool {
-        for (opentype.Feature.stylistic_sets, 0..) |ss, i| {
-            if (ot.ss_lookups[i].items.len > 0 and self.feature_flags.isEnabled(ss)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// Check if any character variant feature is enabled
-    fn anyCharVariantEnabled(self: *const EmbeddedFont) bool {
-        return self.feature_flags.anyEnabledInRange(.cv01, .cv99);
-    }
-
-    /// Check if any enabled character variant has lookups in the font
-    fn hasCharVariantLookups(self: *const EmbeddedFont, ot: *const opentype.OpenTypeFeatures) bool {
-        for (opentype.Feature.character_variants, 0..) |cv, i| {
-            if (ot.cv_lookups[i].items.len > 0 and self.feature_flags.isEnabled(cv)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /// Mark Unicode codepoints as used (CID mode)
     /// Parses UTF-8 text and records Unicode→GlyphID mappings
     /// Applies ligature substitution if enabled
@@ -600,32 +568,13 @@ pub const EmbeddedFont = struct {
     /// True if any feature that affects shaping or positioning is enabled -
     /// the condition for lazily parsing GSUB/GPOS.
     fn anyShapingFeatureEnabled(self: *const EmbeddedFont) bool {
-        const f = &self.feature_flags;
-        return f.isEnabled(.liga) or f.isEnabled(.dlig) or
-            f.isEnabled(.clig) or f.isEnabled(.hlig) or
-            f.isEnabled(.calt) or f.isEnabled(.kern) or
-            f.isEnabled(.tnum) or f.isEnabled(.pnum) or
-            f.isEnabled(.frac) or f.isEnabled(.zero) or
-            f.isEnabled(.case_) or self.anyStylisticSetEnabled() or
-            self.anyCharVariantEnabled();
+        return std.mem.indexOfScalar(bool, &self.feature_flags.flags, true) != null;
     }
 
     /// True if any enabled GSUB feature has lookups in this font, i.e. the
     /// rendered glyph sequence may differ from the codepoint sequence.
-    fn hasActiveGsub(self: *const EmbeddedFont, ot: *const opentype.OpenTypeFeatures) bool {
-        const f = &self.feature_flags;
-        return (f.isEnabled(.calt) and ot.chain_context_lookups.items.len > 0) or
-            (f.isEnabled(.liga) and ot.liga_lookups.items.len > 0) or
-            (f.isEnabled(.dlig) and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0)) or
-            (f.isEnabled(.clig) and ot.clig_lookups.items.len > 0) or
-            (f.isEnabled(.hlig) and ot.hlig_lookups.items.len > 0) or
-            (f.isEnabled(.tnum) and ot.tnum_lookups.items.len > 0) or
-            (f.isEnabled(.pnum) and ot.pnum_lookups.items.len > 0) or
-            (f.isEnabled(.frac) and ot.frac_chain_lookups.items.len > 0) or
-            (f.isEnabled(.zero) and ot.zero_lookups.items.len > 0) or
-            (f.isEnabled(.case_) and ot.case_lookups.items.len > 0) or
-            self.hasStylisticSetLookups(ot) or
-            self.hasCharVariantLookups(ot);
+    fn hasActiveGsub(self: *const EmbeddedFont, ot: *opentype.OpenTypeFeatures) !bool {
+        return ot.hasActiveGsub(self.feature_flags);
     }
 
     /// Decode UTF-8 `text` into `scratch_codepoints` and their nominal
@@ -719,7 +668,7 @@ pub const EmbeddedFont = struct {
         // Apply GSUB substitutions if enabled (any substitution feature)
         if (base_glyphs.items.len > 0) {
             if (self.ot_features) |ot| {
-                if (self.hasActiveGsub(ot)) {
+                if (try self.hasActiveGsub(ot)) {
                     // Apply GSUB substitutions, track results, and return glyphs
                     return try self.applyGSUBAndTrack(codepoints.items, self.scratch_composed.items, base_glyphs.items, scale, out_alloc);
                 }
@@ -744,149 +693,97 @@ pub const EmbeddedFont = struct {
         return try out_alloc.dupe(u16, base_glyphs.items);
     }
 
-    /// Apply GSUB substitutions (calt and/or ligatures) and track all resulting glyphs.
-    /// Returns the final glyph sequence (caller owns the memory, allocated with out_alloc).
+    /// Shape the decoded text with GSUB and record every output glyph's
+    /// width and ToUnicode text (trackClusterText). Glyphs sharing a
+    /// cluster came from the code points [cluster, next cluster). Returns
+    /// the glyphs (caller owns, out_alloc).
     fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, composed: []const bool, base_glyphs: []const u16, scale: f64, out_alloc: std.mem.Allocator) ![]u16 {
         const ot = self.ot_features orelse return try out_alloc.dupe(u16, base_glyphs);
+        const shaped = try ot.shape(base_glyphs, codepoints, self.feature_flags);
 
-        // Apply GSUB substitutions to get final glyph sequence
-        const final_glyphs = try ot.applyGSUBWithFlags(base_glyphs, self.feature_flags);
-        errdefer self.allocator.free(final_glyphs);
-
-        // Track all glyphs in the final sequence
-        // We need to handle cases where substitutions occurred (ligatures/calt changes)
-        var src_pos: usize = 0;
-        var dst_pos: usize = 0;
-
-        while (dst_pos < final_glyphs.len and src_pos < codepoints.len) {
-            const gid = final_glyphs[dst_pos];
-
-            // Check if this might be a ligature (glyph consumes multiple codepoints)
-            // We detect this by checking if the glyph at dst_pos differs from base_glyphs[src_pos]
-            // and trying to find how many source glyphs were consumed
-            if (src_pos < base_glyphs.len and gid != base_glyphs[src_pos]) {
-                // A substitution occurred - could be a ligature or single substitution
-                // Try to find how many source glyphs map to this output glyph
-                var consumed: usize = 1;
-
-                // Check all enabled ligature features for a match
-                const lookup_arrays = [_][]const opentype.LigatureSubst{
-                    if (self.feature_flags.isEnabled(.liga)) ot.liga_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.isEnabled(.dlig)) ot.dlig_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.isEnabled(.clig)) ot.clig_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.isEnabled(.hlig)) ot.hlig_lookups.items else &[_]opentype.LigatureSubst{},
-                    if (self.feature_flags.isEnabled(.calt)) ot.calt_liga_lookups.items else &[_]opentype.LigatureSubst{},
-                };
-
-                outer: for (lookup_arrays) |lookups| {
-                    for (lookups) |lookup| {
-                        if (lookup.findLigature(base_glyphs, src_pos, ot.ligature_sets.items, ot.ligature_structs.items)) |match| {
-                            // Check if output glyph matches the ligature directly
-                            // OR if the ligature was further substituted by chain context
-                            if (match.lig_glyph == gid) {
-                                consumed = match.consumed;
-                                break :outer;
-                            }
-                            // Check if chain context substituted the ligature glyph to the output glyph
-                            if (self.feature_flags.isEnabled(.calt)) {
-                                for (ot.single_lookups.items) |single| {
-                                    if (single.substitute(match.lig_glyph)) |subst_glyph| {
-                                        if (subst_glyph == gid) {
-                                            consumed = match.consumed;
-                                            break :outer;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (consumed > 1) {
-                    // Ligature: track codepoints for ToUnicode mapping
-                    // But skip if this glyph is already mapped to a single codepoint
-                    // (e.g., Inter has ⇔ as both a direct glyph AND a <=> ligature)
-                    // Use glyph_to_codepoint for O(1) lookup instead of O(n) iteration
-                    const already_single = self.glyph_to_codepoint.contains(gid);
-                    if (!already_single and !self.ligature_codepoints.contains(gid)) {
-                        const lig_cps = try self.allocator.alloc(u21, consumed);
-                        for (0..consumed) |j| {
-                            if (src_pos + j < codepoints.len) {
-                                lig_cps[j] = codepoints[src_pos + j];
-                            }
-                        }
-                        try self.ligature_codepoints.put(self.allocator, gid, lig_cps);
-                    }
-                } else {
-                    // Single substitution (calt): track codepoint->substituted glyph mapping
-                    const cp = codepoints[src_pos];
-                    if (!self.cid_used_glyphs.contains(cp)) {
-                        try self.cid_used_glyphs.put(self.allocator, cp, gid);
-                    }
-                    // ToUnicode for the variant (handles calt variants)
-                    try self.trackGlyphText(gid, cp, composed[src_pos]);
-                }
-
-                // Track width for this glyph
-                if (!self.cid_glyph_widths.contains(gid)) {
-                    if (self.font.getGlyphWidth(gid)) |w| {
-                        const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
-                        try self.cid_glyph_widths.put(self.allocator, gid, width);
-                    }
-                }
-
-                src_pos += consumed;
-            } else {
-                // No substitution or single calt substitution (1:1 mapping)
-                const cp = codepoints[src_pos];
-                if (!self.cid_used_glyphs.contains(cp)) {
-                    try self.cid_used_glyphs.put(self.allocator, cp, gid);
-                }
-                try self.trackGlyphText(gid, cp, composed[src_pos]);
-                if (!self.cid_glyph_widths.contains(gid)) {
-                    if (self.font.getGlyphWidth(gid)) |w| {
-                        const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
-                        try self.cid_glyph_widths.put(self.allocator, gid, width);
-                    }
-                }
-                src_pos += 1;
-            }
-
-            dst_pos += 1;
+        const result = try out_alloc.alloc(u16, shaped.len);
+        errdefer out_alloc.free(result);
+        for (result, shaped) |*r, g| {
+            r.* = g.id;
+            try self.trackGlyphWidth(g.id, scale);
         }
-
-        // Dupe to output allocator and free the OT-allocated version
-        const result = try out_alloc.dupe(u16, final_glyphs);
-        self.allocator.free(final_glyphs);
+        var k: usize = 0;
+        while (k < shaped.len) {
+            const cluster = shaped[k].cluster;
+            var end = k + 1;
+            while (end < shaped.len and shaped[end].cluster == cluster) end += 1;
+            // Clusters are non-decreasing (left-to-right shaping)
+            const next = if (end < shaped.len) shaped[end].cluster else codepoints.len;
+            const first: usize = @min(cluster, codepoints.len);
+            const last: usize = @max(first, @min(next, codepoints.len));
+            if (last > first) try self.trackClusterText(result[k..end], codepoints[first..last], composed[first..last]);
+            k = end;
+        }
         return result;
+    }
+
+    fn trackGlyphWidth(self: *EmbeddedFont, gid: u16, scale: f64) !void {
+        if (self.cid_glyph_widths.contains(gid)) return;
+        if (self.font.getGlyphWidth(gid)) |w| {
+            const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
+            try self.cid_glyph_widths.put(self.allocator, gid, width);
+        }
+    }
+
+    /// ToUnicode text of a cluster's glyphs (first use of a glyph wins).
+    /// The text is the cluster's code points as typed (composed ones
+    /// decomposed back). One glyph per code point maps glyph by glyph;
+    /// so does a cluster a multiple substitution split into one glyph per
+    /// code point of the canonical decomposition (ccmp turning U+012F into
+    /// dotless i + ogonek), which keeps each glyph's text the same wherever
+    /// it occurs. Otherwise (a ligature) the first glyph carries the whole
+    /// text and the others none, so extracted text holds it once.
+    fn trackClusterText(self: *EmbeddedFont, glyphs: []const u16, cps: []const u21, composed: []const bool) !void {
+        if (cps.len == 1 and !self.cid_used_glyphs.contains(cps[0])) {
+            try self.cid_used_glyphs.put(self.allocator, cps[0], glyphs[0]);
+        }
+        if (glyphs.len == 1 and cps.len == 1) return self.trackGlyphText(glyphs[0], cps[0], composed[0]);
+        // Text is fixed at a glyph's first use: nothing to do once all are
+        // mapped (the common case for a repeated ligature)
+        for (glyphs) |gid| {
+            if (!self.glyph_to_codepoint.contains(gid) and !self.ligature_codepoints.contains(gid)) break;
+        } else return;
+
+        var typed: std.ArrayListUnmanaged(u21) = .empty;
+        defer typed.deinit(self.allocator);
+        var decomposed: std.ArrayListUnmanaged(u21) = .empty;
+        defer decomposed.deinit(self.allocator);
+        for (cps, composed) |cp, c| {
+            var buf: [8]u21 = undefined;
+            const full = unicode_compose.decompose(cp, &buf);
+            try typed.appendSlice(self.allocator, if (c) full else &.{cp});
+            try decomposed.appendSlice(self.allocator, full);
+        }
+        for ([_][]const u21{ typed.items, decomposed.items }) |text| {
+            if (text.len != glyphs.len) continue;
+            for (glyphs, text) |gid, cp| try self.trackGlyphText(gid, cp, false);
+            return;
+        }
+        // Ligature. A glyph already mapped to a single code point keeps it
+        // (Inter has a direct glyph for U+21D4 and a <=> ligature to it).
+        const gid = glyphs[0];
+        if (self.glyph_to_codepoint.contains(gid) or self.ligature_codepoints.contains(gid)) return;
+        if (typed.items.len == 1) return self.trackGlyphText(gid, typed.items[0], false);
+        const owned = try typed.toOwnedSlice(self.allocator);
+        errdefer self.allocator.free(owned);
+        try self.ligature_codepoints.put(self.allocator, gid, owned);
     }
 
     /// Get glyph sequence for text with ligature substitution applied
     /// Returns allocated slice that caller must free
     pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {
         try self.decodeText(text);
-        const base_glyphs = &self.scratch_glyphs;
-
-        // Apply GSUB substitutions if enabled and available
         if (self.ot_features) |ot| {
-            const has_gsub = (self.feature_flags.isEnabled(.calt) and (ot.calt_liga_lookups.items.len > 0 or ot.chain_context_lookups.items.len > 0)) or
-                (self.feature_flags.isEnabled(.liga) and ot.liga_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.dlig) and (ot.dlig_lookups.items.len > 0 or ot.dlig_chain_lookups.items.len > 0)) or
-                (self.feature_flags.isEnabled(.clig) and ot.clig_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.hlig) and ot.hlig_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.tnum) and ot.tnum_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.pnum) and ot.pnum_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.frac) and ot.frac_chain_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.zero) and ot.zero_lookups.items.len > 0) or
-                (self.feature_flags.isEnabled(.case_) and ot.case_lookups.items.len > 0) or
-                self.hasStylisticSetLookups(ot);
-
-            if (has_gsub) {
-                return ot.applyGSUBWithFlags(base_glyphs.items, self.feature_flags);
+            if (try self.hasActiveGsub(ot)) {
+                return ot.glyphIds(self.scratch_glyphs.items, self.scratch_codepoints.items, self.feature_flags);
             }
         }
-
-        return self.allocator.dupe(u16, base_glyphs.items);
+        return self.allocator.dupe(u16, self.scratch_glyphs.items);
     }
 
     /// Get kerning value between two glyphs (in font units)
@@ -1155,7 +1052,7 @@ pub const EmbeddedFont = struct {
         // differs from the codepoint sequence (ligatures, alternates) -
         // measure the shaped sequence so measure == render.
         if (self.ot_features) |ot| {
-            if (self.hasActiveGsub(ot)) {
+            if (self.hasActiveGsub(ot) catch true) {
                 if (self.measureShaped(text, size, char_spacing, ot)) |width| {
                     return width;
                 } else |_| {} // OOM etc: fall through to unshaped estimate
@@ -1245,7 +1142,7 @@ pub const EmbeddedFont = struct {
         // shaping input matches rendering
         try self.decodeText(text);
 
-        const final_glyphs = try ot.applyGSUBWithFlags(self.scratch_glyphs.items, self.feature_flags);
+        const final_glyphs = try ot.glyphIds(self.scratch_glyphs.items, self.scratch_codepoints.items, self.feature_flags);
         defer self.allocator.free(final_glyphs);
 
         return self.glyphSequenceWidth(final_glyphs, size, char_spacing);
@@ -2045,6 +1942,12 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
         if (gid != 0 and gid < cs_count) {
             try glyph_set.put(allocator, gid, {});
         }
+    }
+    // Every drawn glyph has a width entry - contextual variants and the
+    // extra glyphs of multiple substitutions included, which no code point
+    // maps to (as createSubsetTTF_Compact)
+    for (emb.cid_glyph_widths.keys()) |gid| {
+        if (gid != 0 and gid < cs_count) try glyph_set.put(allocator, gid, {});
     }
 
     // Add ligature glyph IDs
@@ -3009,7 +2912,7 @@ test "OpenType features initialization" {
     try std.testing.expect(font.ot_features != null);
 
     // Charter has GPOS but no GSUB
-    try std.testing.expectEqual(@as(usize, 0), font.ot_features.?.liga_lookups.items.len);
+    try std.testing.expect(font.ot_features.?.gsub == null);
     try std.testing.expect(font.ot_features.?.kern_lookups.items.len > 0);
 }
 
@@ -3078,6 +2981,47 @@ test "Satoshi ligature codepoint tracking" {
     while (iter.next()) |entry| {
         try std.testing.expectEqual(@as(usize, 2), entry.value_ptr.*.len);
     }
+}
+
+/// The text the ToUnicode maps give a glyph sequence, concatenated.
+fn textOfGlyphs(font: *const EmbeddedFont, glyphs: []const u16, out: *std.ArrayListUnmanaged(u21)) !void {
+    for (glyphs) |gid| {
+        if (font.glyph_to_codepoint.get(gid)) |cp| {
+            try out.append(std.testing.allocator, cp);
+        } else if (font.ligature_codepoints.get(gid)) |seq| {
+            try out.appendSlice(std.testing.allocator, seq);
+        }
+    }
+}
+
+test "ccmp output maps back to the text as typed" {
+    // Gentium's ccmp swaps i/j for dotless forms before above-marks, and
+    // decomposes U+1ECB (i with dot below, which "i" + U+0323 composes to)
+    // into dotless i + U+0323 when an above-mark follows. The same
+    // i.Dotless glyph thus comes from "i" and from the composed
+    // character; ToUnicode must still yield every input code point once.
+    // Text typed precomposed and split by ccmp (U+012F -> dotless i +
+    // ogonek) comes back decomposed: canonically equivalent, so compare
+    // canonical decompositions.
+    var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Gentium/Gentium-Regular.ttf");
+    defer font.deinit();
+    const text = "i\u{0307}\u{0301} i\u{0323}\u{0301} j\u{0301} \u{012F}\u{0301}";
+    const glyphs = try font.markUnicodeCharsUsed(text, null);
+    defer font.allocator.free(glyphs);
+    // ccmp did apply: dotless j, not j
+    try std.testing.expect(std.mem.indexOfScalar(u16, glyphs, font.font.getGlyphId('j').?) == null);
+
+    var extracted: std.ArrayListUnmanaged(u21) = .empty;
+    defer extracted.deinit(std.testing.allocator);
+    try textOfGlyphs(font, glyphs, &extracted);
+    var expected: std.ArrayListUnmanaged(u21) = .empty;
+    defer expected.deinit(std.testing.allocator);
+    var it = (try std.unicode.Utf8View.init(text)).iterator();
+    while (it.nextCodepoint()) |cp| {
+        var buf: [8]u21 = undefined;
+        try expected.appendSlice(std.testing.allocator, unicode_compose.decompose(cp, &buf));
+    }
+    try std.testing.expectEqualSlices(u21, expected.items, extracted.items);
 }
 
 /// A parsed font file: one weight/style of one typeface. Caller-owned and

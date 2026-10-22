@@ -1,5 +1,5 @@
 //! CLI commands for font collections and system font lookup:
-//! font-faces, extract-face, find-font.
+//! font-faces, extract-face, find-font, shape.
 
 const std = @import("std");
 const platen = @import("platen.zig");
@@ -18,6 +18,31 @@ pub fn fontFaces(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []
         try out.print("  {d:>3}  {s} | {s} | {s} | weight {d} width {d}{s}{s}\n", .{
             f.index, f.family, f.subfamily, f.postscript_name, f.weight, f.width, if (f.bold) " bold" else "", if (f.italic) " italic" else "",
         });
+    }
+}
+
+/// shape <font> [+feat|-feat]...: shape each stdin line (UTF-8, one text
+/// per line) through the same path rendering uses, and print its glyph IDs
+/// space-separated, one line per input. Features not named keep their
+/// defaults. Used by scripts/compare_shaping.py against HarfBuzz.
+pub fn shape(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
+    if (args.len < 1) return out.writeAll("Usage: platen shape <font> [+feat|-feat]... < lines\n");
+    const font = try platen.EmbeddedFont.fromFile(io, allocator, args[0]);
+    defer font.deinit();
+    for (args[1..]) |arg| {
+        if (arg.len != 5 or (arg[0] != '+' and arg[0] != '-')) return out.print("Bad feature: {s} (use +liga or -liga)\n", .{arg});
+        const feature = platen.opentype.Feature.fromTag(std.mem.readInt(u32, arg[1..5], .big)) orelse
+            return out.print("Unknown feature: {s}\n", .{arg[1..]});
+        font.setFeature(feature, arg[0] == '+');
+    }
+
+    var in_buffer: [64 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &in_buffer);
+    while (try stdin.interface.takeDelimiter('\n')) |line| {
+        const glyphs = try font.markUnicodeCharsUsed(line, allocator);
+        defer allocator.free(glyphs);
+        for (glyphs, 0..) |gid, i| try out.print("{s}{d}", .{ if (i == 0) "" else " ", gid });
+        try out.writeAll("\n");
     }
 }
 

@@ -13,9 +13,36 @@
   later spans were silently lost.
 - `platen.Path`: the path builder type returned by `doc.createPath()` is
   now exported, so helpers can take a `*platen.Path`.
+- **Complete GSUB:** every lookup type - single, multiple, alternate,
+  ligature, context (formats 1-3), chained context (formats 1-3),
+  extension, reverse chained - with lookup flags (ignore base glyphs /
+  ligatures / marks, mark attachment classes, mark filtering sets, via
+  GDEF), applied in lookup-list order over the whole run as HarfBuzz does,
+  for any feature. Before, only single, ligature and chained context
+  format 3 lookups were read, each wired to a few features. New default
+  features, as in HarfBuzz: `ccmp`, `locl`, `rlig` (turn off with
+  `setFeature`). `ccmp` gives dotless i/j under accents (Gentium, Inter:
+  `j́`, `ị́`, Lithuanian `į́`) and joins emoji ZWJ sequences, skin tones
+  and flags into one glyph (Noto Color Emoji).
+- CLI `shape <font> [+feat|-feat]...`: glyph IDs for each stdin line, as
+  rendering shapes it.
 
 ### Fixed
 
+- **Shaping differed from HarfBuzz** (found by the new differential
+  test): Inter's `<->` became `<-` plus `>`, `case` together with `tnum`
+  gave tabular but not case forms (features ran in a fixed order, not the
+  font's lookup order), and Satoshi's `frac` gave no numerators or
+  denominators.
+- **CFF fonts lost contextual alternates:** a subset of a `.otf` font kept
+  only the first glyph drawn for each character, so a contextual variant
+  of a character already drawn plainly (Inter's raised hyphen in `A-B`
+  after `a-b`) rendered as .notdef. Every drawn glyph is kept now, as for
+  TrueType.
+- **Text extraction of substituted glyphs:** ToUnicode now follows the
+  shaped glyphs' clusters - a ligature maps to its characters, a glyph a
+  multiple substitution produced to its own character of the
+  decomposition - instead of re-guessing ligatures after shaping.
 - **Words wider than the line lost their end at a region boundary:** a
   word broken over lines (soft hyphens, regular hyphens, or between
   characters) that reached the bottom of the region was cut off and
@@ -66,6 +93,16 @@
   kept a pointer to the caller's `stops` slice until `output()`; stops in
   a stack frame that had returned were read after free (garbage colors or
   a panic). The document now keeps its own copy.
+
+### Internal
+
+- GSUB differential test: `test/shaping/harfbuzz.txt` holds HarfBuzz's
+  glyphs for Latin, diacritic and emoji texts in Inter, Satoshi, Gentium,
+  Bungee and Noto Emoji under several feature sets, plus a synthetic font
+  with one scenario per lookup type and flag
+  (`scripts/gen_gsub_test_font.py`); `scripts/gen_shaping_reference.py`
+  regenerates it.
+- `zig build test -Dtest-filter=NAME` runs only matching tests.
 
 ## 0.12.0 — 2026-10-17
 

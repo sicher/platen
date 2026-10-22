@@ -14,7 +14,8 @@
 - `font_collection.zig` - .ttc/.otc faces: count, extract, describe (names)
 - `system_fonts.zig` - Installed-font lookup by family/style
 - `embedded.zig` - Font embedding, subsetting, CID fonts
-- `opentype.zig` - OpenType GSUB/GPOS (ligatures, kerning, marks)
+- `opentype.zig` - OpenType features, GPOS (kerning, marks), GSUB entry
+- `gsub.zig` - GSUB engine: all lookup types, flags, clusters
 - `kern_table.zig` - Legacy 'kern' table (format 0, MS and Apple
   headers), used only when GPOS has no kern lookups (HarfBuzz's rule);
   no allocation, slices into the font data. Fixtures from
@@ -1130,8 +1131,53 @@ otherwise the sequence stays decomposed for GPOS mark positioning.
   checks for UTF-8 lead bytes >= 0xCC in measurement).
 - ToUnicode of a composed glyph is its canonical decomposition - the text
   as typed - via `ligature_codepoints` (`trackGlyphText`, first use wins).
-- Not done: `ccmp` (soft-dotted i -> dotless before above-marks for
-  sequences without a precomposed form).
+- `ccmp` (session #32) then handles what composition can't: dotless i/j
+  before above-marks, decomposing a composite when another mark follows.
+
+### GSUB engine (session #32, `src/gsub.zig`)
+HarfBuzz's model: the lookups of all enabled features (plus the language
+system's required feature), sorted by lookup index, each applied over the
+whole run. Lookup types 1-8 (7 resolved at parse), context/chain context
+formats 1-3, lookup flags through GDEF classes (no GDEF classes: marks
+synthesized from combining class, as HarfBuzz from Mn). Script selection
+stays DFLT, else latn; default language system.
+- Tables are read in place from the font bytes; parse collects lookup
+  headers, subtable offsets, feature -> lookup lists. Immutable after
+  parse, shared by FontFace clones; per-instance `Shaper` (buffer, cached
+  active lookup list per FeatureFlags) is not.
+- Nested lookups in contexts shift the matched positions when they change
+  the run length (HarfBuzz's apply_lookup, max 64 positions, depth 8);
+  after a context applies, matching resumes after its input.
+- Ligature bookkeeping as HarfBuzz's lig_props (`lig_id`, `lig_comp`):
+  marks between components remember their component, and match_input
+  refuses marks of different components (a mark ligature across `f_f_i`).
+- Clusters: each glyph carries the index of its code point; ligatures
+  merge the span, multiple substitutions copy it. `applyGSUBAndTrack`
+  maps ToUnicode per cluster: 1:1; or glyph by glyph when the cluster's
+  text (as typed, else canonically decomposed) has one code point per
+  glyph (ccmp splitting U+1ECB into dotless i + U+0323 - keeps i.Dotless
+  meaning "i" everywhere, since ToUnicode is one global map); otherwise
+  the first glyph carries all (ligature).
+- Alternate substitution takes the first alternate (feature value 1).
+- Speed (shared-face invoice bench on par with the old engine, plain mode
+  +20%; HarfBuzz-level per call): bloom digests per lookup and subtable
+  (`Digest`, 3x64 bits) and of the whole run (skips lookups); lookups with
+  >= 8 subtables get an exact glyph -> subtables index (Inter calt has
+  61); ligature subtables have a digest of second components, checked
+  against the next glyph before any coverage search (Inter's ccmp composes
+  base + mark; text is base + base); GDEF classes read lazily (only flags
+  need them); coverage arrays bounds-checked once per search. A
+  coverage-result memo cache did not pay off (and hurt multi-threaded).
+- Differential test (`src/shaping_test.zig`): glyph IDs must equal
+  HarfBuzz's for every text in `test/shaping/harfbuzz.txt`
+  (`scripts/gen_shaping_reference.py`, uharfbuzz in .venv; HarfBuzz runs
+  with script Zyyy so it picks DFLT like platen, and clig/rclt/... off).
+  `test/fonts/gsub/GsubTest.ttf` (`scripts/gen_gsub_test_font.py`) has one
+  stylistic set per lookup type/flag scenario.
+- Not done: default ignorables (U+FE0F, ZWJ, ...) are neither skipped in
+  matching nor hidden afterwards, and cmap format 14 variation glyphs are
+  not looked up - emoji with U+FE0F (keycaps, ❤️, 🏳️‍🌈) differ from
+  HarfBuzz (U+FE0F draws .notdef, as before).
 
 ### Concurrency model
 - **Documents share nothing** — one Document per thread renders
@@ -1154,15 +1200,15 @@ otherwise the sequence stays decomposed for GPOS mark positioning.
 
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,
-and **all** OpenType lookups eagerly (`parseGSUB` → `parseAllGSUBLookups`,
-so nothing parses lazily later). Faces go directly into styles
+and **all** OpenType lookups eagerly (`parseGSUB` builds the whole
+`gsub.Table`, so nothing parses lazily later). Faces go directly into styles
 (`Font{ .face = &f }`, `Font{ .family = ... }`); the Document normalizes
 such styles at its public entry points (writeTextStyled, measureStyled,
 getTextWidthStyled, getFontMetricsStyled) into a per-document
 `EmbeddedFont` clone held in `face_instances`, so internal layout/render
 layers only ever see `.embedded`. The clone is a struct copy sharing the
 immutable parsed tables while all mutable state is fresh and owned (glyph
-tracking maps, subset data, scratch buffers, OT scratch/kern-cache).
+tracking maps, subset data, scratch buffers, OT shaper/kern-cache).
 Borrow flags (`EmbeddedFont.borrowed`, `OpenTypeFeatures.borrowed_tables`)
 make deinit skip shared memory. Two-phase life cycle: configuration
 (setFeature/warmup) until the first instantiation freezes the face

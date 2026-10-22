@@ -4045,27 +4045,23 @@ test "FontFace clones own all scratch buffers (no shared mutable state)" {
 
     var face = try embedded_mod.FontFace.fromMemory(allocator, data);
     defer face.deinit();
-    // Grow the prototype's scratch buffers (calt-heavy text exercises
-    // scratch_c, the buffer the review found shared)
+    // Grow the prototype's shaping buffer (calt-heavy text)
     try face.warmup("Warmup with arrows -> => and ligatures ffi ffl offices");
 
     const clone = try face.instantiate(allocator);
     defer clone.deinit();
-    // Shape calt-heavy text on the clone so its scratch buffers are in use
+    // Shape calt-heavy text on the clone so its shaping buffer is in use
     const glyphs = try clone.markUnicodeCharsUsed("clone text -> with calt => arrows", null);
     clone.allocator.free(glyphs);
 
     const proto_ot = face.prototype.ot_features.?;
     const clone_ot = clone.ot_features.?;
-    // A clone's scratch storage must never alias the prototype's
-    if (clone_ot.scratch_c.capacity > 0 and proto_ot.scratch_c.capacity > 0) {
-        try std.testing.expect(clone_ot.scratch_c.items.ptr != proto_ot.scratch_c.items.ptr);
-    }
-    if (clone_ot.scratch_a.capacity > 0 and proto_ot.scratch_a.capacity > 0) {
-        try std.testing.expect(clone_ot.scratch_a.items.ptr != proto_ot.scratch_a.items.ptr);
-    }
-    // std.testing.allocator additionally catches the scratch_c leak and any
-    // double-free through the deinits above
+    // A clone's shaping storage must never alias the prototype's
+    try std.testing.expect(clone_ot.shaper.buf.capacity > 0 and proto_ot.shaper.buf.capacity > 0);
+    try std.testing.expect(clone_ot.shaper.buf.items.ptr != proto_ot.shaper.buf.items.ptr);
+    try std.testing.expect(clone_ot.shaper.active.items.ptr != proto_ot.shaper.active.items.ptr);
+    // std.testing.allocator additionally catches a leak or double-free
+    // through the deinits above
 }
 
 test "face family style survives allocation failure at every point" {
@@ -4347,4 +4343,38 @@ test "unencrypted output is byte-identical regardless of encryption field defaul
     try std.testing.expectEqualSlices(u8, a, b); // deterministic, unchanged
     try std.testing.expect(std.mem.startsWith(u8, a, "%PDF-1.4"));
     try std.testing.expect(std.mem.indexOf(u8, a, "/Encrypt") == null);
+}
+
+test "CFF subsets keep every drawn glyph, contextual variants included" {
+    // Inter's calt swaps the hyphen between capitals (A-B) for a raised
+    // variant. Once "-" has been drawn plainly, the variant is a second
+    // glyph for the same code point; the subset must contain both, in the
+    // CFF (.otf) path as in the TrueType one.
+    for ([_][]const u8{ "test/fonts/Inter/Inter-Regular.otf", "test/fonts/Inter/Inter-Regular.ttf" }) |path| {
+        var doc = Document.init(std.testing.allocator, std.testing.io);
+        defer doc.deinit();
+        try doc.addPage(.{});
+        const font = try doc.loadFont(path, .identity);
+        _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "a-b A-B", .{ .font = font, .size = 12 }, .{});
+        const pdf = try doc.output();
+        defer std.testing.allocator.free(pdf);
+
+        const emb = font.embedded;
+        const plain = emb.font.getGlyphId('-').?;
+        var drawn: std.ArrayListUnmanaged(u16) = .empty;
+        defer drawn.deinit(std.testing.allocator);
+        for (emb.cid_glyph_widths.keys()) |gid| try drawn.append(std.testing.allocator, gid);
+        // The variant really is drawn (else this test proves nothing)
+        var variants: usize = 0;
+        for (drawn.items) |gid| {
+            if (gid != plain and emb.glyph_to_codepoint.get(gid) == '-') variants += 1;
+        }
+        try std.testing.expect(variants > 0);
+        for (drawn.items) |gid| {
+            if (!emb.gid_remap.contains(gid)) {
+                std.debug.print("{s}: drawn glyph {d} missing from the subset\n", .{ path, gid });
+                return error.GlyphMissingFromSubset;
+            }
+        }
+    }
 }

@@ -4,11 +4,12 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 561 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 555 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
-of rendering fixes found by the showcase (session #31).
+of rendering fixes found by the showcase (session #31); a complete GSUB
+engine checked against HarfBuzz (session #32).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
 `.tools/devkit/devkit release X.Y.Z` (merge dev, date the notes, set the
@@ -21,9 +22,11 @@ sync-dev` on dev. Never commit to main directly (config bootstrap for
 CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 
 ## What's Next
-- Open from session #31 (TODO.md "Found by the README showcase"): `ccmp`
-  (GSUB chain-context formats 1/2 not parsed; dotted i under marks with
-  no precomposed form).
+- Next (session #32 follow-up, TODO.md): default ignorables in shaping -
+  skip U+FE0F/ZWJ while matching, then remove them (HarfBuzz with
+  REMOVE_DEFAULT_IGNORABLES as the oracle); maybe cmap format 14. Its
+  failing test: put the U+FE0F emoji texts back into
+  scripts/gen_shaping_reference.py (keycaps, ❤️, 🏳️‍🌈).
 - TODO.md roadmap: text render modes (`Tr`), Form XObject stamps, the
   opt-in 16-bit -> 8-bit flag for PDF/A-1b, splitting document.zig
   (~4,400 lines), parallel page rendering, metadata encryption; post-1.0:
@@ -43,6 +46,26 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   idle. Deferred by the user.
 - Other urverk projects need the 0.17 migration: DESIGN.md "Zig
   Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
+
+## What We Did (Session 2026-10-22 #32 - GSUB engine)
+- **New `src/gsub.zig`** replaces the per-feature GSUB code in
+  opentype.zig (-1,800 lines there): every lookup type and format, lookup
+  flags via GDEF, HarfBuzz order and context semantics, clusters.
+  `ccmp`, `locl`, `rlig` on by default (HarfBuzz's defaults; clig stays
+  off as before).
+- **Differential test against HarfBuzz** (shaping_test.zig + committed
+  reference + synthetic GsubTest.ttf). It found old-engine bugs: Inter
+  `<->`, `case`+`tnum`, Satoshi `frac`; and a mark-ligature case that
+  needed HarfBuzz's lig_id/lig_comp bookkeeping.
+- **CFF subsets dropped contextual variants** (glyph drawn as .notdef) -
+  fixed with a failing test first.
+- **ToUnicode from clusters**; multi-glyph clusters map glyph by glyph
+  when the decomposition fits (test: ccmp text extracts as typed, NFD for
+  precomposed input that ccmp splits).
+- **Performance:** first version was 25% slower in the shared-face
+  invoice bench (more work: ccmp now runs). Profiled with `sample`; fixes
+  in DESIGN.md "GSUB engine". Now on par (shared, 8 threads) and +20%
+  plain. Tools added: `-Dtest-filter`, CLI `shape`.
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
 - README gallery: `zig build showcase` (src/showcase.zig) writes one PDF
@@ -121,24 +144,13 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   110 pages; invoices 2,060 / 3,350 shared / 9,500 at 8 threads / ~17,700
   at 8 threads shared (README said ~19,000).
 
-## What We Did (Session 2026-10-04/05 #27 - Zig 0.17, hardening, PngSuite)
-- Zig 0.17 migration; README compile-checked.
-- Number contract (error.InvalidNumber, ±1e6) at every Document entry.
-- Parser overflow audit (~50 sites) + fuzzing; CFF desubroutinization
-  bounded; PNG: CRC, tRNS, 16-bit alpha, Adam7 (all 161 PngSuite images
-  match PngSuite's pixel truth); PDF/A: FontNotEmbedded, image rules,
-  veraPDF found a 0.17 date regression and missing link /F flags.
-- Bugs found on the way: >32 images/fonts broke PDFs; writeDict failed on
-  large dicts; SVG wrote "inf".
-
-### Decisions (2026-10-05/06)
-- Invalid input is an error, never a silent clamp/conversion.
-- fpdf2 is not a pixel authority for PNG; PngSuite's own pixels are.
-- Reviews: user compares reference/actual PDFs visually; keep reference
-  PDFs self-explaining (marks, legends).
-- Releases: devkit model, notes required; veraPDF not on CI.
-
-## Older sessions (pruned 2026-10-06)
+## Older sessions (pruned 2026-10-22)
+Session #27 (2026-10-04/05): Zig 0.17 migration, number contract
+(error.InvalidNumber), parser overflow audit + fuzzing, PngSuite pixel
+truth, veraPDF fixes. Decisions then: invalid input is an error, never a
+silent clamp; PngSuite (not fpdf2) is the pixel authority for PNG; user
+reviews reference/actual PDFs visually, so keep references
+self-explaining; releases via devkit with notes, veraPDF not on CI.
 Sessions #1-#26b (2026-01 .. 2026-07-21): bootstrap, text/graphics/
 images/SVG, OpenType shaping, color fonts, PDF/A, fuzzing, the
 zapdf->platen rename, invoice benchmark and perf work, parallel

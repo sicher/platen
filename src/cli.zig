@@ -63,6 +63,8 @@ pub fn main(init: std.process.Init) !void {
         try showFontInfo(allocator, args[2]);
     } else if (std.mem.eql(u8, cmd, "font-faces")) {
         try cli_fonts.fontFaces(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "shape")) {
+        try cli_fonts.shape(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "extract-face")) {
         try cli_fonts.extractFace(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "find-font")) {
@@ -152,6 +154,7 @@ fn printUsage() !void {
         \\  font-info <ttf>      Show TrueType font information
         \\  font-faces <file>    List the faces of a font or collection (.ttc)
         \\  extract-face <ttc> <index> <out>  Write one face as a standalone font
+        \\  shape <font> [+feat|-feat]...  Shape stdin lines (one text per line); print glyph IDs
         \\  find-font <family> [--bold] [--italic] [--dir DIR]... [--out FILE]
         \\                       Find an installed font (whole family without flags)
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
@@ -611,9 +614,9 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
 
     // Show calt lookup stats
     if (font.embedded.ot_features) |ot| {
-        try print("GSUB calt stats:\n", .{});
-        try print("  Calt ligature lookups: {}\n", .{ot.calt_liga_lookups.items.len});
-        try print("  Chain context lookups: {}\n", .{ot.chain_context_lookups.items.len});
+        if (ot.gsub) |*g| {
+            try print("GSUB: {} lookups, calt {s}\n", .{ g.lookups.len, if (g.hasFeature(.calt)) "present" else "absent" });
+        }
     }
 }
 
