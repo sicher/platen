@@ -1181,9 +1181,9 @@ stays DFLT, else latn; default language system.
 - Differential test (`src/shaping_test.zig`): glyph IDs must equal
   HarfBuzz's for every text in `test/shaping/harfbuzz.txt`
   (`scripts/gen_shaping_reference.py`, uharfbuzz in .venv; HarfBuzz runs
-  with script Zyyy so it picks DFLT like platen, and clig/rclt/... off).
+  with script Zyyy so it picks DFLT like platen, and rclt/abvm/... off).
   `test/fonts/gsub/GsubTest.ttf` (`scripts/gen_gsub_test_font.py`) has one
-  stylistic set per lookup type/flag scenario.
+  stylistic set per lookup type/flag scenario, plus a default-on `clig`.
 - Default ignorables (session #32, `gsub.Ignorable`, HarfBuzz's set
   without U+115F/1160/3164/FFA0): skipped while matching as HarfBuzz's
   skippy_iter "maybe" - taken if they match, else skipped; ZWJ always,

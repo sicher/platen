@@ -1076,7 +1076,7 @@ HarfBuzz does; a differential test checks the glyphs against HarfBuzz.
 - `locl` - Localized forms - *enabled by default*
 - `rlig` - Required ligatures - *enabled by default*
 - `liga` - Standard ligatures (fi, fl, ff, etc.) - *enabled by default*
-- `clig` - Contextual ligatures
+- `clig` - Contextual ligatures - *enabled by default*
 - `dlig` - Discretionary ligatures
 - `hlig` - Historical ligatures
 - `calt` - Contextual alternates (e.g., -> to arrow) - *enabled by default*

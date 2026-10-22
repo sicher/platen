@@ -201,8 +201,8 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 - [x] **COLRv1 gradient stops ignore alpha.** (done 2026-10-22: constant
   stop alpha is `/ca`, varying alpha a luminosity soft mask drawing the
   same gradient in gray; sweep wedges get `/ca` each)
-- [ ] **`clig` is off by default** while HarfBuzz enables it. Behavior
-  change for fonts with clig lookups; decide before 1.0.0.
+- [x] **`clig` is off by default** while HarfBuzz enables it. (done
+  2026-10-22: on by default; GsubTest has a clig scenario)
 
 ## Code health
 

@@ -27,7 +27,7 @@ import uharfbuzz as hb
 OUT = Path("test/shaping/harfbuzz.txt")
 
 # Features platen enables by default (opentype.Feature.defaultEnabled)
-PLATEN_DEFAULTS = {"ccmp", "locl", "rlig", "liga", "calt", "kern", "mark", "mkmk"}
+PLATEN_DEFAULTS = {"ccmp", "locl", "rlig", "liga", "clig", "calt", "kern", "mark", "mkmk"}
 # Features HarfBuzz enables by default for horizontal text; the ones platen
 # does not are switched off so both apply the same lookups
 HB_DEFAULTS = {"rvrn", "ccmp", "locl", "rlig", "abvm", "blwm", "mark", "mkmk",
@@ -70,7 +70,11 @@ GSUB_SCENARIOS = {
     "ss13": ["sus tvs sv usv"],
     "ss14": ["tsu uvt tsv tsut uvtt"],
 }
-ALL_SCENARIO_TEXTS = [t for texts in GSUB_SCENARIOS.values() for t in texts]
+# Default-on features of the test font: (tag, texts), checked with the
+# feature on (default) and off
+GSUB_DEFAULT_SCENARIOS = [("clig", ["zow ow zo w zzoww"])]
+ALL_SCENARIO_TEXTS = [t for texts in GSUB_SCENARIOS.values() for t in texts] + \
+    [t for _, texts in GSUB_DEFAULT_SCENARIOS for t in texts]
 
 EMOJI = [
     "\U0001F600 \U0001F44D\U0001F3FD \U0001F1F8\U0001F1EA \U0001F1FA\U0001F1F8",
@@ -86,6 +90,7 @@ CASES = [
     ("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", [], EMOJI),
     (GSUB_TEST, [], ALL_SCENARIO_TEXTS),
     *[(GSUB_TEST, ["+" + tag], texts) for tag, texts in GSUB_SCENARIOS.items()],
+    *[(GSUB_TEST, ["-" + tag], texts) for tag, texts in GSUB_DEFAULT_SCENARIOS],
     (GSUB_TEST, ["+" + tag for tag in GSUB_SCENARIOS], ALL_SCENARIO_TEXTS),
     ("test/fonts/Inter/Inter-Regular.otf", [], LATIN),
     ("test/fonts/Inter/Inter-Regular.otf", ["+dlig"], LATIN),

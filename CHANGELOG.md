@@ -20,7 +20,7 @@
   GDEF), applied in lookup-list order over the whole run as HarfBuzz does,
   for any feature. Before, only single, ligature and chained context
   format 3 lookups were read, each wired to a few features. New default
-  features, as in HarfBuzz: `ccmp`, `locl`, `rlig` (turn off with
+  features, as in HarfBuzz: `ccmp`, `locl`, `rlig`, `clig` (turn off with
   `setFeature`). `ccmp` gives dotless i/j under accents (Gentium, Inter:
   `j́`, `ị́`, Lithuanian `į́`) and joins emoji ZWJ sequences, skin tones
   and flags into one glyph (Noto Color Emoji).

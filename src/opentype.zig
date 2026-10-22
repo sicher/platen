@@ -177,8 +177,8 @@ pub const Feature = enum(u32) {
         // Stylistic sets and character variants are never enabled by default
         if (self.ssIndex() != null or self.cvIndex() != null) return false;
         return switch (self) {
-            // HarfBuzz's defaults for horizontal text, except clig
-            .ccmp, .locl, .rlig, .liga, .kern, .calt, .mark, .mkmk => true,
+            // HarfBuzz's defaults for horizontal text
+            .ccmp, .locl, .rlig, .liga, .clig, .kern, .calt, .mark, .mkmk => true,
             else => false,
         };
     }
@@ -403,7 +403,7 @@ pub const FeatureFlags = struct {
         return false;
     }
 
-    /// Initialize with default values (ccmp, locl, rlig, liga, kern, calt,
+    /// Initialize with default values (ccmp, locl, rlig, liga, clig, kern, calt,
     /// mark, mkmk enabled)
     pub fn init() FeatureFlags {
         var f: FeatureFlags = .{ .flags = @splat(false) };

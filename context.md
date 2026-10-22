@@ -4,7 +4,7 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 559 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 562 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
@@ -22,9 +22,7 @@ sync-dev` on dev. Never commit to main directly (config bootstrap for
 CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 
 ## What's Next
-- Open from session #32 (TODO.md): COLRv1 gradient stop alpha (Noto
-  rainbow flag renders grey); `clig` default (user decision); cmap
-  format 14.
+- Open from session #32 (TODO.md): cmap format 14 (variation glyphs).
 - TODO.md roadmap: text render modes (`Tr`), Form XObject stamps, the
   opt-in 16-bit -> 8-bit flag for PDF/A-1b, splitting document.zig
   (~4,400 lines), parallel page rendering, metadata encryption; post-1.0:
@@ -49,8 +47,8 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 - **New `src/gsub.zig`** replaces the per-feature GSUB code in
   opentype.zig (-1,800 lines there): every lookup type and format, lookup
   flags via GDEF, HarfBuzz order and context semantics, clusters.
-  `ccmp`, `locl`, `rlig` on by default (HarfBuzz's defaults; clig stays
-  off as before).
+  `ccmp`, `locl`, `rlig`, `clig` on by default (HarfBuzz's defaults;
+  clig by user decision).
 - **Differential test against HarfBuzz** (shaping_test.zig + committed
   reference + synthetic GsubTest.ttf). It found old-engine bugs: Inter
   `<->`, `case`+`tnum`, Satoshi `frac`; and a mark-ligature case that
@@ -67,6 +65,10 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   invoice bench (more work: ccmp now runs). Profiled with `sample`; fixes
   in DESIGN.md "GSUB engine". Now on par (shared, 8 threads) and +20%
   plain. Tools added: `-Dtest-filter`, CLI `shape`.
+- **COLRv1 gradient stop alpha:** constant -> `/ca`, varying -> a
+  luminosity soft mask (gray copy of the shading in a form XObject,
+  `/Gm{n}`). Fixed the grey rainbow flag; ~2,000 Noto glyphs affected.
+  Checked by eye (no COLRv1 reference renderer in .venv).
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
 - README gallery: `zig build showcase` (src/showcase.zig) writes one PDF

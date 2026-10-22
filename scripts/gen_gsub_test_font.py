@@ -22,6 +22,7 @@ path of src/gsub.zig against HarfBuzz:
   ss12  context substitution format 2 (classes)
   ss13  context substitution format 3 (coverages)
   ss14  chain context formats 1 and 2 (built by hand; feaLib picks)
+  clig  contextual ligature (on by default, as in HarfBuzz)
 
 Glyph outlines are empty: shaping only looks at glyph IDs.
 
@@ -42,7 +43,7 @@ LETTERS = [chr(c) for c in range(ord("a"), ord("z") + 1)]
 MARKS = {"gravecomb": 0x0300, "acutecomb": 0x0301, "dotbelowcomb": 0x0323, "ogonekcomb": 0x0328}
 EXTRA = ["a.alt", "b.alt1", "b.alt2", "c.one", "c.two", "c.three", "f_i", "f_f", "f_f_i",
          "acute_grave", "x.one", "x.two", "y.alt", "p_q", "r.alt", "d.alt", "h.alt",
-         "k.alt", "m.alt", "n.alt", "s.alt", "t.alt", "u.alt", "v.alt"]
+         "k.alt", "m.alt", "n.alt", "s.alt", "t.alt", "u.alt", "v.alt", "o_w"]
 
 FEA = """
 languagesystem DFLT dflt;
@@ -57,7 +58,7 @@ markClass [dotbelowcomb ogonekcomb] <anchor 0 0> @MC_BOTTOM;
 table GDEF {
     GlyphClassDef [a b c d e f g h i j k l m n o p q r s t u v w x y z a.alt b.alt1 b.alt2
                    c.one c.two c.three x.one x.two y.alt r.alt d.alt h.alt k.alt m.alt n.alt
-                   s.alt t.alt u.alt v.alt], [f_i f_f f_f_i p_q], [acutecomb gravecomb
+                   s.alt t.alt u.alt v.alt], [f_i f_f f_f_i p_q o_w], [acutecomb gravecomb
                    dotbelowcomb ogonekcomb acute_grave], ;
 } GDEF;
 
@@ -117,6 +118,9 @@ feature ss09 {
 lookup EXT useExtension { sub h by h.alt; } EXT;
 lookup EXTLIG useExtension { sub f i by f_i; } EXTLIG;
 feature ss10 { lookup EXT; lookup EXTLIG; } ss10;
+
+lookup OW { sub o w by o_w; } OW;
+feature clig { sub z o' lookup OW w'; } clig;
 """
 
 
