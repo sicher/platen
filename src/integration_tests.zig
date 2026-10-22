@@ -663,6 +663,7 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
     const gentium_bold = try doc.loadFont("test/fonts/Gentium/Gentium-Bold.ttf", .identity);
     const gentium_italic = try doc.loadFont("test/fonts/Gentium/Gentium-Italic.ttf", .identity);
+    const inter = try doc.loadFont("test/fonts/Inter/Inter-Regular.ttf", .identity);
 
     // Define styles
     const title_style = platen.TextStyle{ .font = gentium_bold, .size = 18 };
@@ -810,6 +811,27 @@ fn generateGentiumDiacriticsPdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Bold: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", bold_11_style, .{});
     y += 14;
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Italic: \xc3\x80\xc3\xa0 \xc3\x81\xc3\xa1 \xc3\x82\xc3\xa2 \xc3\x88\xc3\xa8 \xc3\x89\xc3\xa9 \xc3\x8a\xc3\xaa \xc3\x92\xc3\xb2 \xc3\x93\xc3\xb3 \xc3\x94\xc3\xb4", italic_11_style, .{});
+    y += 26;
+
+    // --- Composition and dotless i/j ---
+    // Each pair is typed decomposed (base + combining marks), then
+    // precomposed: shaping composes the first into the font's precomposed
+    // glyph, so both halves draw alike. The text extracts as typed.
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "Composition and Dotless i/j", header_style, .{});
+    y += 15;
+    const composition = [_]struct { text: []const u8, desc: []const u8, style: platen.TextStyle }{
+        .{ .text = "nai\u{0308}ve na\u{00EF}ve  e\u{0323}\u{0302} \u{1EC7}  A\u{030A} \u{00C5}  n\u{0303} \u{00F1}", .desc = "decomposed, then precomposed: i + diaeresis must not keep its dot", .style = main_style },
+        .{ .text = "j\u{0301}  i\u{0323}\u{0301}  \u{012F}\u{0301}  i\u{0307}\u{0301}  \u{1ECB}\u{0301}", .desc = "ccmp: dotless i/j under marks above (Lithuanian \u{012F}\u{0301}, i\u{0307}\u{0301})", .style = main_style },
+        .{ .text = "\u{015E}\u{0301} A\u{0328}\u{0304} E\u{0328}\u{0301}  s\u{0327}\u{0301} a\u{0328}\u{0304}", .desc = "ccmp: flatter .LP accents over capitals", .style = main_style },
+        .{ .text = "q\u{0301} x\u{0308} w\u{0323}\u{0302}", .desc = "no precomposed glyph: marks stay, placed by GPOS", .style = main_style },
+        .{ .text = "nai\u{0308}ve na\u{00EF}ve  j\u{0301}  i\u{0323}\u{0301}  e\u{0323}\u{0302} \u{1EC7}", .desc = "the same in Inter (its own ccmp)", .style = .{ .font = inter, .size = 13 } },
+    };
+    for (composition) |line| {
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, line.text, line.style, .{});
+        region = platen.Region{ .x = desc_x, .y = y - desc_offset, .width = desc_width, .height = 30 };
+        _ = try writeText(&doc, &region, line.desc, desc_style, .{ .valign = .top_leading });
+        y += 19;
+    }
 
     return doc.output();
 }
