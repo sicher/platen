@@ -639,6 +639,45 @@ pub const EmbeddedFont = struct {
             const gid = if (cp < 128 and self.font.has_ascii_cache) self.font.ascii_glyphs[cp] else self.font.getGlyphId(cp) orelse 0;
             self.scratch_glyphs.appendAssumeCapacity(gid);
         }
+
+        if (self.scratch_ignorables and self.font.cmap_uvs_offset != 0) self.applyVariationSequences();
+    }
+
+    /// A variation selector after a character picks the glyph the font's
+    /// cmap format 14 lists for the pair, before GSUB, and is consumed - as
+    /// in HarfBuzz's normalization. An unlisted pair is left alone: the
+    /// selector is a default ignorable, which shaping skips and removes.
+    fn applyVariationSequences(self: *EmbeddedFont) void {
+        const cps = self.scratch_codepoints.items;
+        const composed = self.scratch_composed.items;
+        const glyphs = self.scratch_glyphs.items;
+        var out: usize = 0;
+        var consumed = false;
+        var i: usize = 0;
+        while (i < cps.len) : (i += 1) {
+            cps[out] = cps[i];
+            composed[out] = composed[i];
+            glyphs[out] = glyphs[i];
+            if (i + 1 < cps.len and isVariationSelector(cps[i + 1])) {
+                if (self.font.getVariationGlyph(cps[i], cps[i + 1])) |gid| {
+                    glyphs[out] = gid;
+                    i += 1;
+                    consumed = true;
+                }
+            }
+            out += 1;
+        }
+        if (!consumed) return;
+        self.scratch_codepoints.items.len = out;
+        self.scratch_composed.items.len = out;
+        self.scratch_glyphs.items.len = out;
+        self.scratch_ignorables = for (self.scratch_codepoints.items) |cp| {
+            if (gsub.Ignorable.of(cp) != .none) break true;
+        } else false;
+    }
+
+    fn isVariationSelector(cp: u21) bool {
+        return (cp >= 0xFE00 and cp <= 0xFE0F) or (cp >= 0xE0100 and cp <= 0xE01EF);
     }
 
     /// Record the ToUnicode text of `gid` (first use wins). A glyph that
@@ -3107,6 +3146,28 @@ test "default ignorables measure as nothing, with and without GSUB" {
         const without = font.measureTextWidthSpaced("coop ab", 12, 0);
         try std.testing.expectEqual(without, with);
     }
+}
+
+test "a variation sequence measures and draws as the glyph cmap 14 gives it" {
+    // GsubTest: a+FE00 -> a.alt, 700 units wide (a is 500, upem 1000);
+    // a+FE01 is not listed, so a keeps its glyph and the selector goes.
+    // Once with GSUB (clig is on by default) and once without
+    var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/gsub/GsubTest.ttf");
+    defer font.deinit();
+    for ([_]bool{ true, false }) |clig| {
+        font.setFeature(.clig, clig);
+        try std.testing.expectEqual(@as(f64, 700), font.measureTextWidthSpaced("a\u{FE00}", 1000, 0));
+        try std.testing.expectEqual(@as(f64, 500), font.measureTextWidthSpaced("a\u{FE01}", 1000, 0));
+        try std.testing.expectEqual(@as(f64, 1200), font.measureTextWidthSpaced("a\u{FE00}a", 1000, 0));
+        const glyphs = try font.markUnicodeCharsUsed("a\u{FE00}a", std.testing.allocator);
+        defer std.testing.allocator.free(glyphs);
+        try std.testing.expectEqualSlices(u16, &.{ 32, 2 }, glyphs);
+    }
+    // The variant copies as the base character, without the selector
+    var text: std.ArrayListUnmanaged(u21) = .empty;
+    defer text.deinit(std.testing.allocator);
+    try textOfGlyphs(font, &.{32}, &text);
+    try std.testing.expectEqualSlices(u21, &.{'a'}, text.items);
 }
 
 /// A parsed font file: one weight/style of one typeface. Caller-owned and

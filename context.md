@@ -4,7 +4,7 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 564 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 566 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
@@ -22,7 +22,6 @@ sync-dev` on dev. Never commit to main directly (config bootstrap for
 CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 
 ## What's Next
-- Open from session #32 (TODO.md): cmap format 14 (variation glyphs).
 - TODO.md roadmap: text render modes (`Tr`), Form XObject stamps, the
   opt-in 16-bit -> 8-bit flag for PDF/A-1b, splitting document.zig
   (~4,400 lines), parallel page rendering, metadata encryption; post-1.0:
@@ -74,7 +73,8 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   filled the page - fixed); `text_style` decorations changed by the
   2026-01 line batching (f8663cb) - mid-line spaces decorated is CSS, the
   wrap space was not (fixed); pixel_font FontBBox empty (fixed).
-  `clig` on by default.
+  `clig` on by default. cmap format 14 variation sequences (GsubTest
+  entries + HarfBuzz reference).
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
 - README gallery: `zig build showcase` (src/showcase.zig) writes one PDF

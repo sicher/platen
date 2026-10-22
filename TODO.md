@@ -196,8 +196,8 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 
 - [x] **Default ignorables in shaping.** (done 2026-10-22: skipped while
   matching as HarfBuzz does, removed afterwards; HarfBuzz with
-  REMOVE_DEFAULT_IGNORABLES is the differential test's oracle) Still
-  open: cmap format 14 variation glyphs.
+  REMOVE_DEFAULT_IGNORABLES is the differential test's oracle; cmap
+  format 14 variation glyphs done the same day)
 - [x] **COLRv1 gradient stops ignore alpha.** (done 2026-10-22: constant
   stop alpha is `/ca`, varying alpha a luminosity soft mask drawing the
   same gradient in gray; sweep wedges get `/ca` each)

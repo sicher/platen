@@ -1201,8 +1201,14 @@ stays DFLT, else latn; default language system.
   goes through the shaper (`scratch_ignorables` from decodeText), also in
   fonts without GSUB and in measurement (`mayNeedDecoding`: lead bytes
   >= 0xCC or 0xC2 for the soft hyphen).
-- Not done: cmap format 14 variation glyphs (none of the test fonts need
-  them).
+- Variation sequences (cmap format 14, `Font.getVariationGlyph`):
+  `decodeText` gives a base followed by a variation selector (FE00-FE0F,
+  E0100-E01EF) the glyph format 14 lists for the pair - its own, or the
+  base's for a default-UVS entry - and drops the selector, before GSUB,
+  as HarfBuzz's normalization does (so GSUB sees the variant, e.g. no
+  ss02 expansion of c.one). An unlisted pair keeps the selector as an
+  ignorable. Runs only when the text has ignorables and the font a format
+  14 subtable. GsubTest has entries (a.alt is 700 wide to check widths).
 
 ### Concurrency model
 - **Documents share nothing** — one Document per thread renders

@@ -24,6 +24,9 @@ path of src/gsub.zig against HarfBuzz:
   ss14  chain context formats 1 and 2 (built by hand; feaLib picks)
   clig  contextual ligature (on by default, as in HarfBuzz)
 
+and a cmap format 14 subtable (UVS): variation sequences with their own
+glyph (non-default) and ones that use the base's glyph (default).
+
 Glyph outlines are empty: shaping only looks at glyph IDs.
 
 Run with: .venv/bin/python scripts/gen_gsub_test_font.py
@@ -38,6 +41,11 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib.tables import otTables as ot
 
 OUT = Path("test/fonts/gsub/GsubTest.ttf")
+
+# (base, variation selector, glyph or None for "the base's own glyph")
+UVS = [(ord("a"), 0xFE00, "a.alt"), (ord("b"), 0xFE00, None),
+       (ord("c"), 0xFE01, "c.one"), (ord("f"), 0xFE00, None),
+       (ord("d"), 0xE0100, "d.alt")]
 
 LETTERS = [chr(c) for c in range(ord("a"), ord("z") + 1)]
 MARKS = {"gravecomb": 0x0300, "acutecomb": 0x0301, "dotbelowcomb": 0x0323, "ogonekcomb": 0x0328}
@@ -135,10 +143,12 @@ def build_font():
     cmap = {0x20: "space"}
     cmap.update({ord(c): c for c in LETTERS})
     cmap.update({cp: name for name, cp in MARKS.items()})
-    fb.setupCharacterMap(cmap)
+    fb.setupCharacterMap(cmap, uvs=UVS)
     empty = TTGlyphPen(None).glyph()
     fb.setupGlyf({g: empty for g in order})
-    fb.setupHorizontalMetrics({g: (0 if g in MARKS else 500, 0) for g in order})
+    # a.alt is wider, so measuring a variation sequence shows which glyph
+    # it took
+    fb.setupHorizontalMetrics({g: (0 if g in MARKS else 700 if g == "a.alt" else 500, 0) for g in order})
     fb.setupHorizontalHeader(ascent=800, descent=-200)
     fb.setupNameTable({"familyName": "GsubTest", "styleName": "Regular"})
     fb.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWinAscent=800, usWinDescent=200)

@@ -73,8 +73,13 @@ GSUB_SCENARIOS = {
 # Default-on features of the test font: (tag, texts), checked with the
 # feature on (default) and off
 GSUB_DEFAULT_SCENARIOS = [("clig", ["zow ow zo w zzoww"])]
+# Variation sequences (cmap format 14): a listed pair takes its glyph
+# before GSUB (a non-default one, or the base's own) and consumes the
+# selector; an unlisted one keeps both, and the selector is removed
+UVS_TEXTS = ["a\uFE00 b\uFE00 c\uFE01 d\U000E0100 a\uFE01 c\uFE00 d\uFE00 e\uFE00",
+             "f\uFE00i f\uFE01i a\uFE00\uFE00 \uFE00a"]
 ALL_SCENARIO_TEXTS = [t for texts in GSUB_SCENARIOS.values() for t in texts] + \
-    [t for _, texts in GSUB_DEFAULT_SCENARIOS for t in texts]
+    [t for _, texts in GSUB_DEFAULT_SCENARIOS for t in texts] + UVS_TEXTS
 
 EMOJI = [
     "\U0001F600 \U0001F44D\U0001F3FD \U0001F1F8\U0001F1EA \U0001F1FA\U0001F1F8",

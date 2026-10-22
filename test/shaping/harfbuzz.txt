@@ -44,6 +44,8 @@ su tv sv uv ts	20 22 1 21 23 1 20 23 1 22 23 1 21 20
 sus tvs sv usv	20 22 20 1 21 23 20 1 20 23 1 22 20 23
 tsu uvt tsv tsut uvtt	21 20 22 1 22 23 21 1 21 20 23 1 21 20 22 21 1 22 23 21 21
 zow ow zo w zzoww	27 56 1 16 24 1 27 16 1 24 1 27 27 56 24
+a︀ b︀ c︁ d󠄀 a︁ c︀ d︀ e︀	32 1 3 1 35 1 47 1 2 1 4 1 5 1 6
+f︀i f︁i a︀︀ ︀a	7 10 1 7 10 1 32 1 2
 font test/fonts/gsub/GsubTest.ttf
 features +ss01
 a b k m n l	32 1 33 1 49 1 50 1 51 1 13
@@ -112,6 +114,8 @@ su tv sv uv ts	20 54 1 53 55 1 52 55 1 22 23 1 21 20
 sus tvs sv usv	20 54 20 1 53 55 20 1 52 55 1 22 52 55
 tsu uvt tsv tsut uvtt	21 20 54 1 22 55 21 1 21 52 55 1 21 20 54 21 1 22 55 21 21
 zow ow zo w zzoww	27 56 1 16 24 1 27 16 1 24 1 27 27 56 24
+a︀ b︀ c︁ d󠄀 a︁ c︀ d︀ e︀	32 1 33 1 35 1 47 1 32 1 35 36 37 1 5 1 6
+f︀i f︁i a︀︀ ︀a	38 1 38 1 32 1 32
 font test/fonts/Inter/Inter-Regular.otf
 features 
 The quick brown fox jumps over the lazy dog.	411 670 614 1777 849 915 689 586 727 1777 578 852 790 984 773 1777 647 790 993 1777 719 915 766 843 871 1777 790 980 614 852 1777 889 670 614 1777 736 507 1022 998 1777 597 790 658 1502

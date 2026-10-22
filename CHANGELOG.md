@@ -32,6 +32,11 @@
   in context - so keycaps (`1️⃣`), `❤️` and `🏳️‍🌈` join, `f`+ZWJ+`i` still
   ligates and ZWNJ still blocks ligatures. Their code points stay out of
   extracted text.
+- **Variation sequences** (cmap format 14): a character followed by a
+  variation selector draws as the glyph the font lists for the pair - CJK
+  ideograph variants, text-style emoji with U+FE0E in Noto Emoji - as
+  HarfBuzz does; unlisted selectors are dropped as before. `font-info`
+  shows whether a font has them.
 - CLI `shape <font> [+feat|-feat]...`: glyph IDs for each stdin line, as
   rendering shapes it.
 

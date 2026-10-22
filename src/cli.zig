@@ -203,6 +203,8 @@ fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
         try print("  num_glyphs: {d}\n\n", .{maxp.num_glyphs});
     }
 
+    try print("cmap: format {d}{s}\n\n", .{ font.cmap_format, if (font.cmap_uvs_offset != 0) " + format 14 (variation sequences)" else "" });
+
     // Show some character widths
     try print("Sample character widths (in font units):\n", .{});
     const samples = "ABCabc0123";
