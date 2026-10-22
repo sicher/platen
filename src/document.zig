@@ -1209,7 +1209,11 @@ pub const Document = struct {
         var line_render_x: f64 = region.cursor_x; // X position for rendering the line
         var line_has_content = false;
 
-        // Helper to flush (render) the current line batch
+        // Helper to flush (render) the current line batch. A line that
+        // ends here (wrap or newline) hangs its trailing space, so an
+        // underline or strikethrough stops at the last word, as in CSS; at
+        // the end of the call the space stays, since the next write()
+        // continues this line after it.
         const flushLine = struct {
             fn call(
                 doc: *Document,
@@ -1219,9 +1223,12 @@ pub const Document = struct {
                 render_x: f64,
                 render_y: f64,
                 sty: TextStyle,
+                line_ends: bool,
             ) !void {
                 if (text_end <= text_start) return;
-                const line_text = text[text_start..text_end];
+                var line_text = text[text_start..text_end];
+                if (line_ends) line_text = std.mem.trimEnd(u8, line_text, " \t");
+                if (line_text.len == 0) return;
                 try doc.writeWithWordSpacingStyled(render_x, render_y, line_text, 0, sty);
             }
         }.call;
@@ -1269,7 +1276,7 @@ pub const Document = struct {
                     // Flush current line before newline
                     if (!opts.measure_only and line_has_content) {
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                        try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                        try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                     }
                     region.newLine(line_height);
                     lines_written += 1;
@@ -1305,7 +1312,7 @@ pub const Document = struct {
                         // Explicit newline - flush line and move to next
                         if (!opts.measure_only and line_has_content) {
                             const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                         }
                         region.newLine(line_height);
                         lines_written += 1;
@@ -1421,7 +1428,7 @@ pub const Document = struct {
                 // Flush current line before wrapping
                 if (!opts.measure_only and line_has_content) {
                     const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                    try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                    try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                 }
                 region.newLine(line_height);
                 lines_written += 1;
@@ -1437,7 +1444,7 @@ pub const Document = struct {
         // Flush any remaining content on the last line
         if (!opts.measure_only and line_has_content) {
             const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, false);
         }
 
         // Calculate actual lines - if cursor moved vertically, that's our line count

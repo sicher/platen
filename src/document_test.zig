@@ -4425,3 +4425,25 @@ test "color glyph soft masks are written as gray transparency groups" {
     try std.testing.expect(std.mem.indexOf(u8, body, "/ColorSpace /DeviceGray") != null);
     try std.testing.expect(std.mem.indexOf(u8, body, "/Sh1 sh") != null);
 }
+
+test "write() decorates the spaces inside a line but not a space ending it" {
+    // As in CSS: the underline runs on through the spaces between words,
+    // and a space the line wraps at hangs past the end, undecorated
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
+    var region = Region{ .x = 72, .y = 100, .width = 80, .height = 200 };
+    _ = try doc.write(&region, "one two three four five", style, .{});
+
+    const page = &doc.pages.items[0];
+    try std.testing.expect(page.commands.items.len >= 2);
+    for (page.commands.items) |cmd| {
+        const t = cmd.text;
+        try std.testing.expect(t.underline);
+        try std.testing.expect(!std.mem.endsWith(u8, t.text_data, " "));
+        try std.testing.expect(!std.mem.startsWith(u8, t.text_data, " "));
+    }
+    // The first line keeps its inner space
+    try std.testing.expect(std.mem.indexOfScalar(u8, page.commands.items[0].text.text_data, ' ') != null);
+}
