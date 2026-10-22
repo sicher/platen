@@ -744,6 +744,19 @@ unchanged StyledText. Stateless: the position lives with the caller.
 - `WriteResult.overflow` is unchanged and, for styled text, only the rest
   of one span - documented as a preview; `resume_at` is the way to go on.
 
+### Decorations and spaces (session #32, user decision)
+
+Underline/strikethrough cover the spaces passed inside the decorated
+text, as in CSS: `write(..., "jumps ", underlined)` followed on the same
+line by more text decorates that space, and the spaces between decorated
+words. A space a line ends at hangs undecorated: `write()` draws a line
+that ends at a wrap or newline without its trailing space; at the end of
+a call the space stays, and the next `write()` shortens that command's
+decoration (`Document.hanging_space`, text_width - only decorations read
+it) if its first word wraps or it starts with a newline. `writeStyled`
+ends a decoration run at the last decorated word of a line. Rendered
+cases: text_style's boxes, styled_text.
+
 ### StyledText span overrides (0.11.0)
 
 `StyledText.append(text, TextStyleOptions)`: every span field is an
