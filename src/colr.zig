@@ -318,9 +318,20 @@ pub fn writeGlyphOutline(
     gid: u16,
     xf: Transform,
 ) !void {
+    try writeOutline(w, try glyphOutline(arena, ctx, gid, xf));
+}
+
+/// The contours of a glyph outline transformed by `xf` (empty for a glyph
+/// with no outline, such as a space). Allocated in `arena`.
+pub fn glyphOutline(arena: std.mem.Allocator, ctx: GlyfContext, gid: u16, xf: Transform) ![]const []Pt {
     var contours: std.ArrayListUnmanaged([]Pt) = .empty;
     try collectContours(arena, ctx, gid, xf, 0, &contours);
-    for (contours.items) |pts| {
+    return contours.items;
+}
+
+/// Emit PDF path operators for contours from glyphOutline.
+fn writeOutline(w: *std.Io.Writer, contours: []const []Pt) !void {
+    for (contours) |pts| {
         try writeContour(w, pts);
     }
 }
@@ -875,11 +886,16 @@ pub const PaintInterp = struct {
         const child = abs + readU24(self.colr.data, abs + 1);
         const gid = readU16(self.colr.data, abs + 4);
         const child_fmt = self.colr.paintFormat(child);
+        // An empty outline clips everything away. It must not reach the
+        // output: `W n` without a path sets no clip, so the child would
+        // cover the page
+        const outline = try glyphOutline(self.arena, self.glyf, gid, Transform.identity);
+        if (outline.len == 0) return;
 
         if (child_fmt == .solid or child_fmt == .var_solid) {
             // Fill the outline directly with the solid color.
             try self.beginSolid(child);
-            try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
+            try writeOutline(self.w, outline);
             try self.w.writeAll("f\n");
             try self.endSolid(child);
             return;
@@ -887,7 +903,7 @@ pub const PaintInterp = struct {
 
         // General case: set clip to the outline, then paint child into it.
         try self.w.writeAll("q\n");
-        try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
+        try writeOutline(self.w, outline);
         try self.w.writeAll("W n\n");
         self.clip_depth +|= 1;
         try self.renderPaint(child, depth + 1);
@@ -975,8 +991,10 @@ pub const PaintInterp = struct {
             if (self.ops_budget == 0) return;
             self.ops_budget -= 1;
             const layer = self.colr.v0Layer(i) orelse continue;
+            const outline = try glyphOutline(self.arena, self.glyf, layer.gid, Transform.identity);
+            if (outline.len == 0) continue; // `f` needs a path
             try self.beginSolidColor(layer.palette, 1.0);
-            try writeGlyphOutline(self.w, self.arena, self.glyf, layer.gid, Transform.identity);
+            try writeOutline(self.w, outline);
             try self.w.writeAll("f\n");
             try self.endSolidColor(layer.palette, 1.0);
         }
@@ -1680,6 +1698,19 @@ test "COLR v1 linear gradients on a non-emoji font (Bungee Spice)" {
     try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
     try testing.expect(std.mem.indexOf(u8, out, "/Sh2 sh") != null);
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, out, "f\n"));
+}
+
+test "PaintGlyph of an empty outline paints nothing (Bungee Spice space)" {
+    var fx = try InterpFixture.init("test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf");
+    defer fx.deinit();
+
+    var interp = fx.interp();
+    // gid 1 = space: two layers of PaintGlyph(space, no contours) over a
+    // linear gradient. An empty clip shows nothing; `W n` without a path
+    // would leave the gradient unclipped over the whole page
+    try interp.render(1);
+    try testing.expectEqualStrings("", fx.output());
+    try testing.expectEqual(@as(usize, 0), fx.res.shadings.items.len);
 }
 
 test "COLR v0 paint interpreter fills layers with palette colors (Bungee)" {
