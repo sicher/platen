@@ -1319,6 +1319,13 @@ pub const Document = struct {
                     lines_written += 1;
                     line_has_content = false;
                     line_render_x = 0;
+                } else if (region.cursor_x > 0) {
+                    // A space inside the line (a double space, or one this
+                    // call starts with): part of the line as typed
+                    line_text_end = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr) + 1;
+                    region.cursor_x += space_width;
+                    remaining = remaining[1..];
+                    continue;
                 }
                 remaining = remaining[1..];
                 // Update line start for next line

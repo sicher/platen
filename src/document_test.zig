@@ -4473,3 +4473,23 @@ test "write(): a decorated space hangs when the next write() wraps at once" {
         try std.testing.expectApproxEqAbs(expected, first.text_width, 1e-9);
     }
 }
+
+test "write() keeps text before a double space, and a call's leading space" {
+    // Line batching reset the batch at every space it skipped: "aa  bb"
+    // drew only "bb" (at aa's place), and " cc" continuing a line lost its
+    // space. Spaces inside a line are kept as typed
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const base = TextStyle{ .font = Font.helvetica, .size = 11 };
+    const first_width = (try doc.writeAt(.{ .x = 0, .y = 0 }, "aa  bb", base, .{})).width;
+    var r = Region{ .x = 50, .y = 100, .width = 300, .height = 70 };
+    _ = try doc.write(&r, "aa  bb", base, .{});
+    _ = try doc.write(&r, " cc", base, .{});
+    const cmds = doc.pages.items[0].commands.items;
+    try std.testing.expectEqual(@as(usize, 3), cmds.len);
+    try std.testing.expectEqualStrings("aa  bb", cmds[1].text.text_data);
+    try std.testing.expectApproxEqAbs(@as(f64, 50), cmds[1].text.x, 1e-9);
+    try std.testing.expectEqualStrings(" cc", cmds[2].text.text_data);
+    try std.testing.expectApproxEqAbs(50 + first_width, cmds[2].text.x, 1e-9);
+}
