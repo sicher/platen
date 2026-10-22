@@ -47,6 +47,11 @@
   of a character already drawn plainly (Inter's raised hyphen in `A-B`
   after `a-b`) rendered as .notdef. Every drawn glyph is kept now, as for
   TrueType.
+- **Translucent color-font gradients painted opaque:** COLRv1 gradient
+  stops carry an alpha, which was dropped, so overlays meant to fade out
+  covered the glyph - Noto's rainbow flag 🏳️‍🌈 came out grey, and about
+  2,000 Noto Color Emoji glyphs had such gradients. Stop alpha is now
+  drawn through a soft mask (or `/ca` when it is constant).
 - **Color emoji ligatures extracted as U+FFFD:** the Type3 ToUnicode of
   a color font mapped only single code points, so a joined emoji (ZWJ
   family, flag, keycap) copied as a replacement character. It maps to the

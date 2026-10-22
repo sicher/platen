@@ -198,12 +198,9 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   matching as HarfBuzz does, removed afterwards; HarfBuzz with
   REMOVE_DEFAULT_IGNORABLES is the differential test's oracle) Still
   open: cmap format 14 variation glyphs.
-- [ ] **COLRv1 gradient stops ignore alpha.** `readColorLine` keeps only
-  the color: a stop's alpha (and the palette entry's) is dropped, so
-  translucent gradient overlays paint opaque - Noto's rainbow flag 🏳️‍🌈
-  comes out as a grey gradient over the stripes. Needs a soft mask with
-  an alpha shading (PDF shadings carry no alpha). Found 2026-10-22, when
-  ccmp made such sequences render as one glyph.
+- [x] **COLRv1 gradient stops ignore alpha.** (done 2026-10-22: constant
+  stop alpha is `/ca`, varying alpha a luminosity soft mask drawing the
+  same gradient in gray; sweep wedges get `/ca` each)
 - [ ] **`clig` is off by default** while HarfBuzz enables it. Behavior
   change for fonts with clig lookups; decide before 1.0.0.
 

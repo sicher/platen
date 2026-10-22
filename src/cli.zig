@@ -407,6 +407,9 @@ fn generateColorTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     // the Type3 font, the blank space glyph via the mono CID font).
     _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "\u{1F600} \u{1F389} \u{1F680} \u{2764} \u{2B50}", .{ .font = emoji, .size = 28 }, .{});
 
+    // Gradients whose color stops fade (stop alpha): drawn through soft masks
+    _ = try doc.writeAt(.{ .x = 50, .y = y + 80 }, "\u{1F4E3}\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}\u{1F466}\u{1F458}\u{1F3A0}\u{1F4F0}", .{ .font = emoji, .size = 48 }, .{});
+
     const pdf = try doc.output();
     defer allocator.free(pdf);
 

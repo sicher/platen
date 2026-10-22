@@ -48,6 +48,7 @@ pub const ColorFontPlan = struct {
     first_charproc_id: ObjectId = 0, // contiguous block, one stream per gid
     image_obj_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one per image
     image_smask_ids: std.ArrayListUnmanaged(?ObjectId) = .empty, // per image, if it has alpha
+    first_soft_mask_id: ObjectId = 0, // contiguous block, one form per res.soft_masks entry
 
     /// Subfont index + single-byte PDF code of a color glyph.
     const Slot = struct { sub: usize, code: u8 };
@@ -428,6 +429,23 @@ pub fn writeColorFont(doc: *Document, w: *Writer, plan: *ColorFontPlan) !void {
         try writePlanImage(doc, w, img, plan.image_obj_ids.items[i], plan.image_smask_ids.items[i]);
     }
 
+    // 1c. Soft-mask forms (gradient stop alpha): a gray transparency group
+    // painting the mask's shading over any glyph's extent.
+    for (plan.res.soft_masks.items, 0..) |shading, i| {
+        try w.beginObject(plan.first_soft_mask_id + @as(ObjectId, @intCast(i)));
+        var form = Dict.init(doc.allocator);
+        defer form.deinit();
+        const resources = try std.fmt.allocPrint(doc.allocator, "<< /Shading << /Sh1 {s} >> >>", .{shading});
+        defer doc.allocator.free(resources);
+        try form.put("Type", Value.name("XObject"));
+        try form.put("Subtype", Value.name("Form"));
+        try form.put("BBox", Value.literal("[-32768 -32768 32768 32768]"));
+        try form.put("Group", Value.literal("<< /S /Transparency /CS /DeviceGray >>"));
+        try form.put("Resources", Value.literal(resources));
+        try w.writeStreamCompressed(&form, "/Sh1 sh\n");
+        try w.endObject();
+    }
+
     // 2. Font dictionaries. Composite entries are built as literal strings
     // in an arena so their backing memory outlives writeDict.
     var arena_state = std.heap.ArenaAllocator.init(doc.allocator);
@@ -579,7 +597,8 @@ fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: u
 }
 
 /// Build the Type3 font's /Resources literal from the plan's accumulated
-/// shadings (/Sh{n}), ExtGStates (/Ga{n}) and bitmap images (/Im{n}).
+/// shadings (/Sh{n}), ExtGStates (/Ga{n}, soft masks /Gm{n}) and bitmap
+/// images (/Im{n}).
 fn buildColorFontResources(arena: std.mem.Allocator, plan: *ColorFontPlan) ![]u8 {
     var r = std.Io.Writer.Allocating.init(arena);
     try r.writer.writeAll("<<");
@@ -597,10 +616,13 @@ fn buildColorFontResources(arena: std.mem.Allocator, plan: *ColorFontPlan) ![]u8
         }
         try r.writer.writeAll(" >>");
     }
-    if (plan.res.ext_gstates.items.len > 0) {
+    if (plan.res.ext_gstates.items.len > 0 or plan.res.soft_masks.items.len > 0) {
         try r.writer.writeAll(" /ExtGState <<");
         for (plan.res.ext_gstates.items, 0..) |body, i| {
             try r.writer.print(" /Ga{d} {s}", .{ i + 1, body });
+        }
+        for (0..plan.res.soft_masks.items.len) |i| {
+            try r.writer.print(" /Gm{d} << /Type /ExtGState /SMask << /S /Luminosity /G {d} 0 R >> >>", .{ i + 1, plan.first_soft_mask_id + i });
         }
         try r.writer.writeAll(" >>");
     }
@@ -675,8 +697,8 @@ pub fn renderColorText(
 }
 /// Reserve object IDs for all color-font plans, starting at `next_id`:
 /// per 255-glyph subfont a font dict + ToUnicode CMap, one stream per
-/// CharProc (color glyph), and for bitmap glyphs an image XObject (+ SMask
-/// when it has alpha). Returns the next free object ID.
+/// CharProc (color glyph), one form per gradient soft mask, and for bitmap
+/// glyphs an image XObject (+ SMask when it has alpha). Returns the next free object ID.
 pub fn reserveIds(doc: *Document, start_id: ObjectId) !ObjectId {
     var next_id = start_id;
     for (doc.color_plans.items) |plan| {
@@ -687,6 +709,8 @@ pub fn reserveIds(doc: *Document, start_id: ObjectId) !ObjectId {
         }
         plan.first_charproc_id = next_id;
         next_id += @intCast(plan.gids.items.len);
+        plan.first_soft_mask_id = next_id;
+        next_id += @intCast(plan.res.soft_masks.items.len);
         for (plan.images.items) |img| {
             try plan.image_obj_ids.append(doc.allocator, next_id);
             next_id += 1;

@@ -286,6 +286,16 @@ companion font still embeds.
   pad/repeat/reflect applied to `t`; wedges overlap 0.3° and the apex is pushed
   4 units past the center to hide AA seams), glyph-outline clips (`W n`), affine
   transforms (`cm`), and composites. Alpha < 1 wraps in a `/ca` ExtGState.
+  Gradient stop alpha (stop alpha × CPAL entry alpha): constant along the
+  line → `/ca` (× `alpha_scale`, since it replaces an enclosing `/ca`);
+  varying → a luminosity soft mask, `ColorResources.soft_masks`: the same
+  shading geometry in DeviceGray with the alphas as its function, written
+  by color_fonts.zig as a form XObject (`/Group << /S /Transparency /CS
+  /DeviceGray >>`, BBox ±32768) and set by ExtGState `/Gm{n}` right before
+  `sh` inside `q`/`Q` - the mask takes the CTM of the `gs`, so geometry
+  matches. Colors and alpha interpolate separately (unpremultiplied).
+  Sweep wedges are flat, so each gets its sampled alpha as `/ca`.
+  ExtGState dicts are deduplicated.
   Composite handling: blend modes 13..27 map to PDF `/BM` names (spec enum:
   SCREEN=13 … MULTIPLY=23, HSL modes 24..27); Porter-Duff CLEAR/SRC/DEST/
   DEST_OVER are exact by paint order; SRC_IN/OUT & DEST_IN/OUT with a solid

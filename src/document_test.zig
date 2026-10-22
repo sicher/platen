@@ -4396,3 +4396,29 @@ test "color emoji ligatures extract as their whole sequence" {
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<D83CDDF8D83CDDEA>"));
     try std.testing.expect(std.mem.indexOf(u8, pdf, "<FFFD>") == null);
 }
+
+test "color glyph soft masks are written as gray transparency groups" {
+    // The megaphone's gradient fades from alpha 1 to 0: its Type3 font
+    // sets /Gm1, an SMask whose /G is a form object in the file
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+    try doc.addPage(.{});
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F4E3}", .{ .font = emoji, .size = 12 }, .{});
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    const key = "/Gm1 << /Type /ExtGState /SMask << /S /Luminosity /G ";
+    const at = std.mem.indexOf(u8, pdf, key) orelse return error.TestUnexpectedResult;
+    const id_end = std.mem.indexOfScalarPos(u8, pdf, at + key.len, ' ').?;
+    var obj_buf: [32]u8 = undefined;
+    const obj = try std.fmt.bufPrint(&obj_buf, "\n{s} 0 obj", .{pdf[at + key.len .. id_end]});
+    const form = std.mem.indexOf(u8, pdf, obj) orelse return error.TestUnexpectedResult;
+    const form_end = std.mem.indexOfPos(u8, pdf, form, "endobj").?;
+    const body = pdf[form..form_end];
+    try std.testing.expect(std.mem.indexOf(u8, body, "/Subtype /Form") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "/S /Transparency /CS /DeviceGray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "/ColorSpace /DeviceGray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "/Sh1 sh") != null);
+}
