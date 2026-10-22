@@ -226,6 +226,10 @@ pub const Document = struct {
     pages: std.ArrayListUnmanaged(Page),
     /// Index of current page for content operations (0-based).
     current_page: usize = 0,
+    /// The decorated space a write() call ended with, while it may still
+    /// end its line: the next write() into the same region hangs it (see
+    /// hangSpace) if that call wraps before putting anything on the line.
+    hanging_space: ?HangingSpace = null,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .empty,
     // Track all embedded fonts
@@ -1166,9 +1170,40 @@ pub const Document = struct {
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
+    /// A decorated trailing space drawn by write(): the text command that
+    /// drew it, the line it is on, and how much of its width is space.
+    const HangingSpace = struct {
+        region: *const Region,
+        page: usize,
+        command: usize,
+        cursor_y: f64,
+        width: f64,
+    };
+
+    /// The line a hanging space was drawn on ends without more text: take
+    /// the space out of the decoration, as a space ending a line hangs
+    /// undecorated. Only while nothing else was drawn since.
+    fn hangSpace(self: *Document, space: HangingSpace, region: *const Region) void {
+        if (space.region != region or space.cursor_y != region.cursor_y) return;
+        if (space.page != self.current_page or space.page >= self.pages.items.len) return;
+        const commands = self.pages.items[space.page].commands.items;
+        if (space.command + 1 != commands.len) return;
+        switch (commands[space.command]) {
+            .text => |*t| t.text_width = @max(0, t.text_width - space.width),
+            else => {},
+        }
+    }
+
     pub fn write(self: *Document, region: *Region, str: []const u8, style_in: TextStyle, opts: WriteOptions) !WriteResult {
         try validate.check(.{ region.*, style_in, opts });
         try self.checkFontConformance(style_in);
+        // A previous call's decorated trailing space; hung if this call ends
+        // its line before adding to it. Measuring changes nothing
+        var hanging: ?HangingSpace = null;
+        if (!opts.measure_only) {
+            hanging = self.hanging_space;
+            self.hanging_space = null;
+        }
         // Resolve .face/.family up front so measure_only paths error on
         // invalid styles (e.g. bold on a single face) exactly like rendering
         const style = try self.normalizeStyle(style_in);
@@ -1278,6 +1313,8 @@ pub const Document = struct {
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                         try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                     }
+                    if (hanging) |h| self.hangSpace(h, region);
+                    hanging = null;
                     region.newLine(line_height);
                     lines_written += 1;
                     line_has_content = false;
@@ -1430,6 +1467,8 @@ pub const Document = struct {
                     const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
                     try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                 }
+                if (hanging) |h| self.hangSpace(h, region);
+                hanging = null;
                 region.newLine(line_height);
                 lines_written += 1;
                 // Reset line state for new line
@@ -1445,6 +1484,21 @@ pub const Document = struct {
         if (!opts.measure_only and line_has_content) {
             const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
             try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, false);
+            // A decorated trailing space may yet end the line
+            const line_text = str[line_text_start..line_text_end];
+            const trailing = line_text.len - std.mem.trimEnd(u8, line_text, " \t").len;
+            const page = &self.pages.items[self.current_page];
+            if (trailing > 0 and trailing < line_text.len and page.commands.items.len > 0 and
+                (style.decoration.underline or style.decoration.strikethrough))
+            {
+                self.hanging_space = .{
+                    .region = region,
+                    .page = self.current_page,
+                    .command = page.commands.items.len - 1,
+                    .cursor_y = region.cursor_y,
+                    .width = @as(f64, @floatFromInt(trailing)) * space_width,
+                };
+            }
         }
 
         // Calculate actual lines - if cursor moved vertically, that's our line count

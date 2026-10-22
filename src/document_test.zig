@@ -4447,3 +4447,29 @@ test "write() decorates the spaces inside a line but not a space ending it" {
     // The first line keeps its inner space
     try std.testing.expect(std.mem.indexOfScalar(u8, page.commands.items[0].text.text_data, ' ') != null);
 }
+
+test "write(): a decorated space hangs when the next write() wraps at once" {
+    // "one two " ends a call underlined. If the next call continues on the
+    // line, the space is inside the line and stays underlined (as in CSS);
+    // if its first word wraps, the space ends the line and hangs
+    const underlined = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
+    const plain = TextStyle{ .font = Font.helvetica, .size = 12 };
+    for ([_]struct { next: []const u8, keeps_space: bool }{
+        .{ .next = "x", .keeps_space = true },
+        .{ .next = "extraordinarily", .keeps_space = false },
+        .{ .next = "\nnext line", .keeps_space = false },
+    }) |case| {
+        var doc = Document.init(std.testing.allocator, std.testing.io);
+        defer doc.deinit();
+        try doc.addPage(.{});
+        const word_width = (try doc.writeAt(.{ .x = 0, .y = 0 }, "one two", plain, .{})).width;
+        const space_width = (try doc.writeAt(.{ .x = 0, .y = 0 }, " ", plain, .{})).width;
+        var region = Region{ .x = 72, .y = 100, .width = 80, .height = 200 };
+        _ = try doc.write(&region, "one two ", underlined, .{});
+        _ = try doc.write(&region, case.next, plain, .{});
+        const first = doc.pages.items[0].commands.items[2].text;
+        try std.testing.expect(first.underline);
+        const expected = if (case.keeps_space) word_width + space_width else word_width;
+        try std.testing.expectApproxEqAbs(expected, first.text_width, 1e-9);
+    }
+}

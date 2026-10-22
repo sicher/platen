@@ -4,7 +4,7 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 566 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 568 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
@@ -80,10 +80,10 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   drifted reference is looked at before regenerating - svg_embedding's
   had wrong stroke widths. gentium_diacritics gained a composition /
   dotless i/j section (decomposed vs precomposed, ccmp, Inter).
-- Next candidates: write() edge case (a call's trailing space decorated
-  when the next call wraps at once); SVG stroke widths written with 2
-  decimals (0.172 -> 0.17); TODO.md roadmap (Tr, Form XObject stamps,
-  split document.zig).
+- Fixed: a write() call's decorated trailing space now hangs when the
+  next write() wraps at once (`Document.hanging_space`); SVG stroke
+  widths keep four decimals.
+- Next: TODO.md roadmap (Tr, Form XObject stamps, split document.zig).
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)
 - README gallery: `zig build showcase` (src/showcase.zig) writes one PDF

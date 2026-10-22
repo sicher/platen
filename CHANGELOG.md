@@ -64,8 +64,11 @@
   skipped (an empty clip shows nothing).
 - **Underlines and strikethroughs ran into the space a line wraps at**
   (`write()`): the line was drawn with its trailing space, and the
-  decoration with it. The space now hangs past the line end, as in CSS;
-  spaces inside the line stay decorated.
+  decoration with it. The space now hangs past the line end, as in CSS,
+  also when it ends one write() call and the next call's first word
+  wraps; spaces inside the line stay decorated.
+- **SVG hairlines were rounded:** stroke widths were written with two
+  decimals in SVG units (the tiger's 0.172 became 0.17); now four.
 - **Bitmap-only fonts had an empty `FontBBox`:** an OTB pixel font's head
   box is 0 wide, so every glyph fell outside its Type3 font's box
   (poppler warned on each). Such fonts now get `[0 0 0 0]`, which tells
