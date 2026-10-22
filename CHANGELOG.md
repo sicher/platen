@@ -139,11 +139,14 @@
   (`scripts/gen_gsub_test_font.py`); `scripts/gen_shaping_reference.py`
   regenerates it.
 - `zig build test -Dtest-filter=NAME` runs only matching tests.
-- References platen generates itself (color fonts, decorations,
-  transforms) are now also compared rendered, pixel for pixel
-  (`compare_pdfs.py --compare-render`, poppler): the text-and-position
-  comparison missed drawing changes, and three references had drifted
-  (`color_v1_gradient` even had the page-filling space baked in).
+- The 19 references platen generates itself (color fonts, SVG,
+  decorations, line breaking, transforms, diacritics) are now also
+  compared rendered, pixel for pixel (`compare_pdfs.py --compare-render`,
+  poppler): the text-and-position comparison missed drawing changes.
+  Seven had drifted - three from bugs fixed here (`color_v1_gradient` had
+  the page-filling space baked in), the rest from intended changes
+  (`svg_embedding` predated per-path stroke widths: its tiger had 3x
+  thick whisker outlines).
 
 ## 0.12.0 — 2026-10-17
 
