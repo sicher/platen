@@ -901,6 +901,156 @@ test "writeStyled overflow returns remaining text" {
     try std.testing.expect(result.overflow != null);
 }
 
+/// The (font selection, string) of every "(...) Tj" in content-stream
+/// order, joined as "font|text\n" - what was drawn, in which style,
+/// independent of where.
+fn drawnRuns(allocator: std.mem.Allocator, pdf: []const u8) ![]u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var font: []const u8 = "";
+    var lines = std.mem.splitScalar(u8, pdf, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.endsWith(u8, line, " Tf") and line.len > 0 and line[0] == '/') {
+            font = line[0 .. std.mem.indexOfScalar(u8, line, ' ') orelse line.len];
+        } else if (std.mem.startsWith(u8, line, "(") and std.mem.endsWith(u8, line, ") Tj")) {
+            try out.appendSlice(allocator, font);
+            try out.append(allocator, '|');
+            try out.appendSlice(allocator, line[1 .. line.len - 4]);
+            try out.append(allocator, '\n');
+        }
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+const SpanSpec = struct { text: []const u8, opts: platen.TextStyleOptions };
+
+const resume_spans = [_]SpanSpec{
+    .{ .text = "alpha beta gamma delta ", .opts = .{} },
+    .{ .text = "epsilon zeta eta theta", .opts = .{ .bold = true } },
+    .{ .text = " iota kappa ", .opts = .{} },
+    .{ .text = "lambda mu nu", .opts = .{ .italic = true } },
+    .{ .text = " xi omicron pi rho sigma tau.", .opts = .{} },
+};
+
+/// Render `spans` into 90pt-wide regions of `height` (one per page),
+/// continuing with resume_at until everything is written.
+const ResumeStats = struct { regions: usize = 0, mid_word: usize = 0 };
+
+fn renderResumed(allocator: std.mem.Allocator, spans: []const SpanSpec, height: f64, breaking: platen.LineBreaking, stats: *ResumeStats) ![]u8 {
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    var st = doc.createStyledText();
+    defer st.deinit();
+    for (spans) |s| try st.append(s.text, s.opts);
+    const base = TextStyle{ .font = Font.helvetica, .size = 10 };
+
+    var start: platen.TextPosition = .{};
+    stats.* = .{};
+    while (true) {
+        try doc.addPage(.{});
+        var region = Region{ .x = 50, .y = 50, .width = 90, .height = height };
+        const res = try doc.writeStyled(&region, &st, base, .{ .line_breaking = breaking, .start = start });
+        stats.regions += 1;
+        start = res.resume_at orelse break;
+        if (start.offset != 0) stats.mid_word += 1;
+        try std.testing.expect(res.lines_written > 0); // always progresses
+        try std.testing.expect(res.overflow != null); // still reported
+        if (stats.regions > 20) return error.TestUnexpectedResult;
+    }
+
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+    return drawnRuns(allocator, pdf);
+}
+
+test "writeStyled resume_at continues every span in the next region" {
+    const allocator = std.testing.allocator;
+    for ([_]platen.LineBreaking{ .greedy, .optimal }) |breaking| {
+        var one: ResumeStats = .{};
+        const whole = try renderResumed(allocator, &resume_spans, 1000, breaking, &one);
+        defer allocator.free(whole);
+        var many: ResumeStats = .{};
+        const chained = try renderResumed(allocator, &resume_spans, 25, breaking, &many); // 2 lines each
+        defer allocator.free(chained);
+
+        try std.testing.expectEqual(@as(usize, 1), one.regions);
+        try std.testing.expect(many.regions > 2);
+        // Same text, same fonts, same order: nothing lost, styles kept
+        try std.testing.expectEqualStrings(whole, chained);
+        try std.testing.expect(std.mem.indexOf(u8, chained, "omicron") != null);
+    }
+}
+
+test "writeStyled resumes a word broken over lines mid-word" {
+    // Words wider than the 90pt column are broken over lines (on lines of
+    // their own, with greedy and Knuth-Plass alike) - between
+    // characters, after regular hyphens, or at soft hyphens (drawing a
+    // hyphen). A region boundary may fall inside such a word: the next
+    // region continues mid-word, so chained 2-line regions draw exactly
+    // what one tall region draws.
+    const allocator = std.testing.allocator;
+    const cases = [_][]const SpanSpec{
+        &.{.{ .text = "Before Pneumonoultramicroscopicsilicovolcanoconiosis after the long word.", .opts = .{} }},
+        &.{.{ .text = "Before state-of-the-art-and-well-known-hyphenated-compound after.", .opts = .{} }},
+        &.{.{ .text = "Before In\u{AD}com\u{AD}pre\u{AD}hen\u{AD}si\u{AD}bil\u{AD}i\u{AD}ties\u{AD}and\u{AD}ex\u{AD}tra\u{AD}or\u{AD}di\u{AD}nar\u{AD}i\u{AD}ly\u{AD}long\u{AD}com\u{AD}pounds after.", .opts = .{} }},
+    };
+    for ([_]platen.LineBreaking{ .greedy, .optimal }) |breaking| {
+        for (cases) |spans| {
+            for ([_]f64{ 25, 40 }) |height| { // 2 and 3 lines per region
+                var one: ResumeStats = .{};
+                const whole = try renderResumed(allocator, spans, 1000, breaking, &one);
+                defer allocator.free(whole);
+                var many: ResumeStats = .{};
+                const chained = try renderResumed(allocator, spans, height, breaking, &many);
+                defer allocator.free(chained);
+
+                try std.testing.expect(many.mid_word > 0); // a boundary fell inside the word
+                try std.testing.expectEqualStrings(whole, chained);
+            }
+        }
+    }
+}
+
+test "writeStyled measure_only draws nothing, even for broken words" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+    try doc.addPage(.{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("Before Pneumonoultramicroscopicsilicovolcanoconiosis Ex\u{AD}tra\u{AD}or\u{AD}di\u{AD}nar\u{AD}i\u{AD}ly after.", .{});
+    var region = Region{ .x = 50, .y = 50, .width = 90, .height = 1000 };
+    const base = TextStyle{ .font = Font.helvetica, .size = 10 };
+    const res = try doc.writeStyled(&region, &st, base, .{ .measure_only = true });
+    try std.testing.expect(res.lines_written > 3);
+    try std.testing.expectEqual(@as(f64, 0), region.cursor_y); // measuring has no side effects
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    const runs = try drawnRuns(std.testing.allocator, pdf);
+    defer std.testing.allocator.free(runs);
+    try std.testing.expectEqualStrings("", runs);
+}
+
+test "writeStyled start past the end is an error" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    var st = doc.createStyledText();
+    defer st.deinit();
+    try st.append("two words", .{});
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 100 };
+    const base = TextStyle{ .font = Font.helvetica, .size = 10 };
+
+    // start at the word count: nothing left to write
+    const done = try doc.writeStyled(&region, &st, base, .{ .start = .{ .word = 2 } });
+    try std.testing.expectEqual(@as(usize, 0), done.lines_written);
+    try std.testing.expectEqual(@as(?platen.TextPosition, null), done.resume_at);
+    try std.testing.expectError(error.InvalidStartPosition, doc.writeStyled(&region, &st, base, .{ .start = .{ .word = 3 } }));
+}
+
 test "writeStyled newline forces line break" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
@@ -1233,9 +1383,10 @@ test "mark positioning with Tm absolute coordinates" {
 
     try doc.addPage(.{});
 
-    // Write "À" (A + combining grave)
+    // Write B + combining grave: no precomposed form exists, so it stays
+    // base + mark (A + grave would compose to the font's own À glyph)
     const style = TextStyle{ .font = inter, .size = 14 };
-    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "A\xcc\x80", style, .{});
+    _ = try doc.writeAt(.{ .x = 100, .y = 700 }, "B\xcc\x80", style, .{});
 
     // Render via output(); page.content stays populated afterwards
     const pdf = try doc.output();
@@ -1607,6 +1758,30 @@ test "drawPath basic triangle" {
     defer doc.allocator.free(pdf);
 
     try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-1.4"));
+}
+
+/// A user-side helper must be able to name the type createPath returns.
+fn appendSquare(path: *platen.Path, x: f64, y: f64, side: f64) !void {
+    try path.moveTo(.{ .x = x, .y = y });
+    try path.lineTo(.{ .x = x + side, .y = y });
+    try path.lineTo(.{ .x = x + side, .y = y + side });
+    try path.lineTo(.{ .x = x, .y = y + side });
+    try path.closePath();
+}
+
+test "platen.Path names the type createPath returns" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+
+    var path: platen.Path = doc.createPath();
+    defer path.deinit();
+    try appendSquare(&path, 50, 50, 20);
+    try doc.drawPath(&path, .{ .fill = .{} });
+
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    try std.testing.expect(std.mem.startsWith(u8, pdf, "%PDF-"));
 }
 
 test "drawPath with bezier curve" {
@@ -3212,6 +3387,9 @@ test "OTB pixel font emits a Type3 font with ImageMask CharProcs" {
     // 'A': 7x13 px at upem 2048 / 13 ppem → 157.54 units/px. Advance 1024
     // (hmtx); bbox bottom 3 px below baseline (-472.62), top at 1575.38.
     try std.testing.expect(std.mem.indexOf(u8, pdf, "1024 0 0.00 -472.62 1102.77 1575.38 d1") != null);
+    // Cozette has no outlines, so head's box is empty in x (0..0): every
+    // glyph box would fall outside it. All zeros means "no assumptions"
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/FontBBox [0 0 0 0]") != null);
     try std.testing.expect(std.mem.indexOf(u8, pdf, "/Im1 Do") != null);
     // Text color applies to the mask.
     try std.testing.expect(std.mem.indexOf(u8, pdf, "0.784 0.000 0.000 rg") != null);
@@ -3474,6 +3652,169 @@ test "embedded-font measurement includes char_spacing" {
     try std.testing.expectApproxEqAbs(w_plain + 12 * 2.0, w_spaced, 0.001);
 }
 
+/// Simulate the Tc (character spacing) text-state parameter through a
+/// content stream and return the largest absolute Tc in effect at any BT.
+/// Tc is graphics state: it survives ET/BT, so a run that sets it must not
+/// leave it behind for later runs that never set it.
+fn maxTcAtTextStart(pdf: []const u8) !f64 {
+    var tc: f64 = 0;
+    var worst: f64 = 0;
+    var lines = std.mem.splitScalar(u8, pdf, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.eql(u8, line, "BT")) {
+            worst = @max(worst, @abs(tc));
+        } else if (std.mem.endsWith(u8, line, " Tc") and std.mem.indexOfScalar(u8, line, '/') == null) {
+            tc = try std.fmt.parseFloat(f64, line[0 .. line.len - 3]);
+        }
+    }
+    return worst;
+}
+
+test "char_spacing does not leak into later text runs" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const emoji = try doc.loadFont(noto_color_emoji_path, .identity);
+    try doc.addPage(.{});
+
+    // Each font path (standard, embedded CID, Type3 color run) sets Tc and
+    // is followed by plain text; every plain run must start at Tc 0.
+    const spaced = [_]Font{ Font.helvetica, charter, emoji };
+    var y: f64 = 50;
+    for (spaced) |font| {
+        const text = if (font == .embedded and font.embedded == emoji.embedded) "\u{1F600}\u{1F680}" else "Spaced";
+        _ = try doc.writeAt(.{ .x = 50, .y = y }, text, .{ .font = font, .size = 12, .char_spacing = 3.0 }, .{});
+        _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "Plain", .{ .font = Font.helvetica, .size = 12 }, .{});
+        _ = try doc.writeAt(.{ .x = 50, .y = y + 40 }, "Plain", .{ .font = charter, .size = 12 }, .{});
+        y += 80;
+    }
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    // The spaced runs themselves must still set it.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "3.00 Tc\n") != null);
+    try std.testing.expectEqual(@as(f64, 0), try maxTcAtTextStart(pdf));
+}
+
+/// The x of every "1 0 0 1 x y Tm" (per-glyph placement in the
+/// mark-positioning path), in content-stream order.
+fn tmXs(allocator: std.mem.Allocator, pdf: []const u8) ![]f64 {
+    var xs: std.ArrayListUnmanaged(f64) = .empty;
+    errdefer xs.deinit(allocator);
+    var rest = pdf;
+    while (std.mem.indexOf(u8, rest, "1 0 0 1 ")) |i| {
+        rest = rest[i + 8 ..];
+        const end = std.mem.indexOfScalar(u8, rest, ' ') orelse break;
+        try xs.append(allocator, try std.fmt.parseFloat(f64, rest[0..end]));
+    }
+    return xs.toOwnedSlice(allocator);
+}
+
+fn renderMarkRun(allocator: std.mem.Allocator, char_spacing: f64) ![]u8 {
+    var doc = Document.init(allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+    const gentium = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    try doc.addPage(.{});
+    // q + combining acute has no precomposed form, so it stays base + mark
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "aq\u{0301}bq\u{0301}c", .{ .font = gentium, .size = 20, .char_spacing = char_spacing }, .{});
+    return doc.output();
+}
+
+test "char_spacing applies in the mark-positioning path" {
+    const allocator = std.testing.allocator;
+    const plain_pdf = try renderMarkRun(allocator, 0);
+    defer allocator.free(plain_pdf);
+    const spaced_pdf = try renderMarkRun(allocator, 3);
+    defer allocator.free(spaced_pdf);
+
+    const plain = try tmXs(allocator, plain_pdf);
+    defer allocator.free(plain);
+    const spaced = try tmXs(allocator, spaced_pdf);
+    defer allocator.free(spaced);
+
+    // Glyphs a q ◌́ b q ◌́ c, each placed with Tm. Measurement adds Tc per
+    // glyph gap (marks included), so a glyph moves by 3 for every glyph
+    // before it - a mark moves with its base.
+    const expected_shift = [_]f64{ 0, 3, 3, 9, 12, 12, 18 };
+    try std.testing.expectEqual(expected_shift.len, plain.len);
+    try std.testing.expectEqual(expected_shift.len, spaced.len);
+    for (expected_shift, plain, spaced) |shift, p, s| {
+        try std.testing.expectApproxEqAbs(shift, s - p, 0.011);
+    }
+}
+
+test "justified color-font text widens spaces with TJ adjustments" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the content stream searchable
+
+    // Color runs mix Type3 subfonts (code 32 never assigned) with 2-byte
+    // CID segments, so Tw cannot justify them: each space in a mono
+    // segment must carry the word spacing as a TJ adjustment.
+    const emoji = try doc.loadFont(noto_color_emoji_path, .identity);
+    try doc.addPage(.{});
+    var region = Region{ .x = 50, .y = 50, .width = 200, .height = 400 };
+    const text = "\u{1F600} \u{1F680} \u{2B50} \u{1F525} \u{1F308} \u{1F355} \u{1F431} \u{1F98A} \u{1F427} \u{1F419}";
+    const res = try doc.writeBlock(&region, text, .{ .font = emoji, .size = 20 }, .{ .alignment = .justify });
+    try std.testing.expect(res.lines_written >= 2); // first line is justified
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "/Tc1 20.00 Tf") != null);
+    // A widened space: "[<gid> -N <" (negative TJ adjustment = extra space)
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "> -") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, ">] TJ\n") != null);
+}
+
+test "gradients copy their color stops" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep the shading functions searchable
+    try doc.addPage(.{});
+
+    // The caller's stops are reused after registration (as when they live
+    // in a stack frame that has since returned); the document must render
+    // the stops as they were when the gradient was added.
+    var stops = [_]platen.ColorStop{
+        .{ .offset = 0.0, .color = Color.rgb(255, 0, 0) },
+        .{ .offset = 1.0, .color = Color.rgb(0, 0, 255) },
+    };
+    const linear = try doc.addLinearGradient(.{ .x0 = 0, .y0 = 0, .x1 = 100, .y1 = 0, .stops = &stops });
+    const radial = try doc.addRadialGradient(.{ .x0 = 50, .y0 = 50, .r0 = 0, .x1 = 50, .y1 = 50, .r1 = 50, .stops = &stops });
+    try doc.fillRectGradient(.{ .x = 0, .y = 0, .width = 100, .height = 100 }, linear);
+    try doc.fillRectGradient(.{ .x = 0, .y = 100, .width = 100, .height = 100 }, radial);
+    for (&stops) |*s| s.color = Color.rgb(0, 255, 0);
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "/C0 [1.000 0.000 0.000]\n/C1 [0.000 0.000 1.000]"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "[0.000 1.000 0.000]") == null);
+}
+
+test "fonts loaded but never drawn are not embedded" {
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep dictionaries searchable
+
+    const charter = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
+    const unused = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    try doc.addPage(.{});
+    _ = try doc.writeAt(.{ .x = 50, .y = 50 }, "Hello", .{ .font = charter, .size = 12 }, .{});
+    // Measuring is not drawing
+    _ = try doc.measureStyled("measured only", .{ .font = unused, .size = 12 });
+
+    const pdf = try doc.output();
+    defer std.testing.allocator.free(pdf);
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "Charter") != null);
+    // An unused font used to be written whole (no glyphs -> no subset ->
+    // the original file), as orphan objects no page references.
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "Gentium") == null);
+    try std.testing.expect(pdf.len < 100 * 1024); // Gentium alone is 971 KB
+}
+
 test "measurement applies GSUB ligatures like rendering" {
     var doc = Document.init(std.testing.allocator, std.testing.io);
     defer doc.deinit();
@@ -3707,27 +4048,23 @@ test "FontFace clones own all scratch buffers (no shared mutable state)" {
 
     var face = try embedded_mod.FontFace.fromMemory(allocator, data);
     defer face.deinit();
-    // Grow the prototype's scratch buffers (calt-heavy text exercises
-    // scratch_c, the buffer the review found shared)
+    // Grow the prototype's shaping buffer (calt-heavy text)
     try face.warmup("Warmup with arrows -> => and ligatures ffi ffl offices");
 
     const clone = try face.instantiate(allocator);
     defer clone.deinit();
-    // Shape calt-heavy text on the clone so its scratch buffers are in use
+    // Shape calt-heavy text on the clone so its shaping buffer is in use
     const glyphs = try clone.markUnicodeCharsUsed("clone text -> with calt => arrows", null);
     clone.allocator.free(glyphs);
 
     const proto_ot = face.prototype.ot_features.?;
     const clone_ot = clone.ot_features.?;
-    // A clone's scratch storage must never alias the prototype's
-    if (clone_ot.scratch_c.capacity > 0 and proto_ot.scratch_c.capacity > 0) {
-        try std.testing.expect(clone_ot.scratch_c.items.ptr != proto_ot.scratch_c.items.ptr);
-    }
-    if (clone_ot.scratch_a.capacity > 0 and proto_ot.scratch_a.capacity > 0) {
-        try std.testing.expect(clone_ot.scratch_a.items.ptr != proto_ot.scratch_a.items.ptr);
-    }
-    // std.testing.allocator additionally catches the scratch_c leak and any
-    // double-free through the deinits above
+    // A clone's shaping storage must never alias the prototype's
+    try std.testing.expect(clone_ot.shaper.buf.capacity > 0 and proto_ot.shaper.buf.capacity > 0);
+    try std.testing.expect(clone_ot.shaper.buf.items.ptr != proto_ot.shaper.buf.items.ptr);
+    try std.testing.expect(clone_ot.shaper.active.items.ptr != proto_ot.shaper.active.items.ptr);
+    // std.testing.allocator additionally catches a leak or double-free
+    // through the deinits above
 }
 
 test "face family style survives allocation failure at every point" {
@@ -4009,4 +4346,150 @@ test "unencrypted output is byte-identical regardless of encryption field defaul
     try std.testing.expectEqualSlices(u8, a, b); // deterministic, unchanged
     try std.testing.expect(std.mem.startsWith(u8, a, "%PDF-1.4"));
     try std.testing.expect(std.mem.indexOf(u8, a, "/Encrypt") == null);
+}
+
+test "CFF subsets keep every drawn glyph, contextual variants included" {
+    // Inter's calt swaps the hyphen between capitals (A-B) for a raised
+    // variant. Once "-" has been drawn plainly, the variant is a second
+    // glyph for the same code point; the subset must contain both, in the
+    // CFF (.otf) path as in the TrueType one.
+    for ([_][]const u8{ "test/fonts/Inter/Inter-Regular.otf", "test/fonts/Inter/Inter-Regular.ttf" }) |path| {
+        var doc = Document.init(std.testing.allocator, std.testing.io);
+        defer doc.deinit();
+        try doc.addPage(.{});
+        const font = try doc.loadFont(path, .identity);
+        _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "a-b A-B", .{ .font = font, .size = 12 }, .{});
+        const pdf = try doc.output();
+        defer std.testing.allocator.free(pdf);
+
+        const emb = font.embedded;
+        const plain = emb.font.getGlyphId('-').?;
+        var drawn: std.ArrayListUnmanaged(u16) = .empty;
+        defer drawn.deinit(std.testing.allocator);
+        for (emb.cid_glyph_widths.keys()) |gid| try drawn.append(std.testing.allocator, gid);
+        // The variant really is drawn (else this test proves nothing)
+        var variants: usize = 0;
+        for (drawn.items) |gid| {
+            if (gid != plain and emb.glyph_to_codepoint.get(gid) == '-') variants += 1;
+        }
+        try std.testing.expect(variants > 0);
+        for (drawn.items) |gid| {
+            if (!emb.gid_remap.contains(gid)) {
+                std.debug.print("{s}: drawn glyph {d} missing from the subset\n", .{ path, gid });
+                return error.GlyphMissingFromSubset;
+            }
+        }
+    }
+}
+
+test "color emoji ligatures extract as their whole sequence" {
+    // ccmp joins ZWJ sequences and flags into one color glyph; its Type3
+    // ToUnicode must give the sequence, not U+FFFD
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+    try doc.addPage(.{});
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
+    // Family (man ZWJ woman ZWJ girl), Swedish flag
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{1F1F8}\u{1F1EA}", .{ .font = emoji, .size = 12 }, .{});
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    // Once in the mono CID font's map, once in the Type3 color font's
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<D83DDC68200DD83DDC69200DD83DDC67>"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<D83CDDF8D83CDDEA>"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "<FFFD>") == null);
+}
+
+test "color glyph soft masks are written as gray transparency groups" {
+    // The megaphone's gradient fades from alpha 1 to 0: its Type3 font
+    // sets /Gm1, an SMask whose /G is a form object in the file
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+    try doc.addPage(.{});
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F4E3}", .{ .font = emoji, .size = 12 }, .{});
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+
+    const key = "/Gm1 << /Type /ExtGState /SMask << /S /Luminosity /G ";
+    const at = std.mem.indexOf(u8, pdf, key) orelse return error.TestUnexpectedResult;
+    const id_end = std.mem.indexOfScalarPos(u8, pdf, at + key.len, ' ').?;
+    var obj_buf: [32]u8 = undefined;
+    const obj = try std.fmt.bufPrint(&obj_buf, "\n{s} 0 obj", .{pdf[at + key.len .. id_end]});
+    const form = std.mem.indexOf(u8, pdf, obj) orelse return error.TestUnexpectedResult;
+    const form_end = std.mem.indexOfPos(u8, pdf, form, "endobj").?;
+    const body = pdf[form..form_end];
+    try std.testing.expect(std.mem.indexOf(u8, body, "/Subtype /Form") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "/S /Transparency /CS /DeviceGray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "/ColorSpace /DeviceGray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "/Sh1 sh") != null);
+}
+
+test "write() decorates the spaces inside a line but not a space ending it" {
+    // As in CSS: the underline runs on through the spaces between words,
+    // and a space the line wraps at hangs past the end, undecorated
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const style = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
+    var region = Region{ .x = 72, .y = 100, .width = 80, .height = 200 };
+    _ = try doc.write(&region, "one two three four five", style, .{});
+
+    const page = &doc.pages.items[0];
+    try std.testing.expect(page.commands.items.len >= 2);
+    for (page.commands.items) |cmd| {
+        const t = cmd.text;
+        try std.testing.expect(t.underline);
+        try std.testing.expect(!std.mem.endsWith(u8, t.text_data, " "));
+        try std.testing.expect(!std.mem.startsWith(u8, t.text_data, " "));
+    }
+    // The first line keeps its inner space
+    try std.testing.expect(std.mem.indexOfScalar(u8, page.commands.items[0].text.text_data, ' ') != null);
+}
+
+test "write(): a decorated space hangs when the next write() wraps at once" {
+    // "one two " ends a call underlined. If the next call continues on the
+    // line, the space is inside the line and stays underlined (as in CSS);
+    // if its first word wraps, the space ends the line and hangs
+    const underlined = TextStyle{ .font = Font.helvetica, .size = 12, .decoration = .{ .underline = true } };
+    const plain = TextStyle{ .font = Font.helvetica, .size = 12 };
+    for ([_]struct { next: []const u8, keeps_space: bool }{
+        .{ .next = "x", .keeps_space = true },
+        .{ .next = "extraordinarily", .keeps_space = false },
+        .{ .next = "\nnext line", .keeps_space = false },
+    }) |case| {
+        var doc = Document.init(std.testing.allocator, std.testing.io);
+        defer doc.deinit();
+        try doc.addPage(.{});
+        const word_width = (try doc.writeAt(.{ .x = 0, .y = 0 }, "one two", plain, .{})).width;
+        const space_width = (try doc.writeAt(.{ .x = 0, .y = 0 }, " ", plain, .{})).width;
+        var region = Region{ .x = 72, .y = 100, .width = 80, .height = 200 };
+        _ = try doc.write(&region, "one two ", underlined, .{});
+        _ = try doc.write(&region, case.next, plain, .{});
+        const first = doc.pages.items[0].commands.items[2].text;
+        try std.testing.expect(first.underline);
+        const expected = if (case.keeps_space) word_width + space_width else word_width;
+        try std.testing.expectApproxEqAbs(expected, first.text_width, 1e-9);
+    }
+}
+
+test "write() keeps text before a double space, and a call's leading space" {
+    // Line batching reset the batch at every space it skipped: "aa  bb"
+    // drew only "bb" (at aa's place), and " cc" continuing a line lost its
+    // space. Spaces inside a line are kept as typed
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const base = TextStyle{ .font = Font.helvetica, .size = 11 };
+    const first_width = (try doc.writeAt(.{ .x = 0, .y = 0 }, "aa  bb", base, .{})).width;
+    var r = Region{ .x = 50, .y = 100, .width = 300, .height = 70 };
+    _ = try doc.write(&r, "aa  bb", base, .{});
+    _ = try doc.write(&r, " cc", base, .{});
+    const cmds = doc.pages.items[0].commands.items;
+    try std.testing.expectEqual(@as(usize, 3), cmds.len);
+    try std.testing.expectEqualStrings("aa  bb", cmds[1].text.text_data);
+    try std.testing.expectApproxEqAbs(@as(f64, 50), cmds[1].text.x, 1e-9);
+    try std.testing.expectEqualStrings(" cc", cmds[2].text.text_data);
+    try std.testing.expectApproxEqAbs(50 + first_width, cmds[2].text.x, 1e-9);
 }

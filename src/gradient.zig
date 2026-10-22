@@ -106,49 +106,55 @@ pub const RadialGradient = struct {
     }
 };
 
-/// Write a PDF Type 2 exponential interpolation function for two colors.
-fn writeType2Function(writer: anytype, c0: Color.Rgbf, c1: Color.Rgbf, comptime compact: bool) !void {
+/// What a gradient function interpolates per stop: the stop colors (RGB),
+/// or one value per stop (gray, e.g. the stop alphas of a luminosity soft
+/// mask), given in stop order.
+pub const Channels = union(enum) {
+    rgb,
+    gray: []const f64,
+};
+
+fn writeComponents(writer: anytype, stops: []const ColorStop, i: usize, channels: Channels) !void {
     var buf: [32]u8 = undefined;
-    if (compact) {
-        try writer.writeAll("<< /FunctionType 2 /Domain [0 1] /C0 [");
-        try writer.writeAll(format.writeF64_3(&buf, c0.r));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c0.g));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c0.b));
-        try writer.writeAll("] /C1 [");
-        try writer.writeAll(format.writeF64_3(&buf, c1.r));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c1.g));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c1.b));
-        try writer.writeAll("] /N 1 >>\n");
-    } else {
-        try writer.writeAll("<<\n/FunctionType 2\n/Domain [0 1]\n/C0 [");
-        try writer.writeAll(format.writeF64_3(&buf, c0.r));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c0.g));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c0.b));
-        try writer.writeAll("]\n/C1 [");
-        try writer.writeAll(format.writeF64_3(&buf, c1.r));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c1.g));
-        try writer.writeByte(' ');
-        try writer.writeAll(format.writeF64_3(&buf, c1.b));
-        try writer.writeAll("]\n/N 1\n>>");
+    switch (channels) {
+        .rgb => {
+            const c = stops[i].color.toRgbf();
+            try writer.writeAll(format.writeF64_3(&buf, c.r));
+            try writer.writeByte(' ');
+            try writer.writeAll(format.writeF64_3(&buf, c.g));
+            try writer.writeByte(' ');
+            try writer.writeAll(format.writeF64_3(&buf, c.b));
+        },
+        .gray => |values| try writer.writeAll(format.writeF64_3(&buf, values[i])),
     }
+}
+
+/// Write a PDF Type 2 exponential interpolation function between stops
+/// `i` and `i + 1`.
+fn writeType2Function(writer: anytype, stops: []const ColorStop, i: usize, channels: Channels, comptime compact: bool) !void {
+    try writer.writeAll(if (compact) "<< /FunctionType 2 /Domain [0 1] /C0 [" else "<<\n/FunctionType 2\n/Domain [0 1]\n/C0 [");
+    try writeComponents(writer, stops, i, channels);
+    try writer.writeAll(if (compact) "] /C1 [" else "]\n/C1 [");
+    try writeComponents(writer, stops, i + 1, channels);
+    try writer.writeAll(if (compact) "] /N 1 >>\n" else "]\n/N 1\n>>");
 }
 
 /// Write a PDF function for gradient color interpolation.
 /// For 2 stops: Type 2 exponential interpolation function.
 /// For 3+ stops: Type 3 stitching function.
 pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
+    return writeChannelFunctionDict(stops, .rgb, writer);
+}
+
+/// writeFunctionDict over the chosen channels: `.gray` interpolates one
+/// value per stop as a one-component function.
+pub fn writeChannelFunctionDict(stops: []const ColorStop, channels: Channels, writer: anytype) !void {
     if (stops.len < 2) return error.InvalidGradient;
+    if (channels == .gray and channels.gray.len != stops.len) return error.InvalidGradient;
 
     if (stops.len == 2) {
         // Simple 2-color: Type 2 exponential interpolation
-        try writeType2Function(writer, stops[0].color.toRgbf(), stops[1].color.toRgbf(), false);
+        try writeType2Function(writer, stops, 0, channels, false);
     } else {
         // Multi-color: Type 3 stitching function
         // Each pair of adjacent stops needs a Type 2 function
@@ -157,7 +163,7 @@ pub fn writeFunctionDict(stops: []const ColorStop, writer: anytype) !void {
         // Functions array (inline Type 2 functions)
         try writer.writeAll("/Functions [\n");
         for (0..stops.len - 1) |i| {
-            try writeType2Function(writer, stops[i].color.toRgbf(), stops[i + 1].color.toRgbf(), true);
+            try writeType2Function(writer, stops, i, channels, true);
         }
         try writer.writeAll("]\n");
 

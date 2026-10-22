@@ -93,7 +93,8 @@ pub const Span = struct {
 
 /// A potential break point within a word (soft-hyphen location).
 pub const BreakPoint = struct {
-    /// Byte offset within word where soft-hyphen is located.
+    /// Byte offset of the soft-hyphen within the word's span (like
+    /// StyledWord.start_offset).
     offset: u16,
     /// Width of text up to this point (not including the hyphen that would be added).
     width: f64,
@@ -125,6 +126,8 @@ pub const MeasureFn = *const fn (text: []const u8, style: TextStyleOptions, ctx:
 /// Builder for constructing styled text with inline style changes.
 /// Mirrors the Path API pattern.
 pub const StyledText = struct {
+    pub const Word = StyledWord;
+
     allocator: std.mem.Allocator,
     spans: std.ArrayListUnmanaged(Span) = .empty,
 
@@ -452,10 +455,12 @@ pub const StyledText = struct {
         return span.text[word.start_offset..];
     }
 
-    /// Compute optimal line breaks using Knuth-Plass algorithm.
+    /// Compute optimal line breaks using Knuth-Plass algorithm, for the
+    /// words from `start` on (a resumed paragraph is optimized from there).
     /// Returns array of word indices where lines end (caller owns the slice).
-    pub fn computeOptimalBreaks(self: *const StyledText, line_width: f64, space_width: f64) ![]usize {
-        const n = self.words.items.len;
+    pub fn computeOptimalBreaks(self: *const StyledText, line_width: f64, space_width: f64, start: usize) ![]usize {
+        const words = self.words.items[start..];
+        const n = words.len;
         if (n == 0) return self.allocator.alloc(usize, 0);
 
         const INFINITY: f64 = 1e18;
@@ -478,7 +483,7 @@ pub const StyledText = struct {
             var start_i = j;
             while (start_i > 0) {
                 start_i -= 1;
-                const word = self.words.items[start_i];
+                const word = words[start_i];
 
                 // Check force break constraint
                 if (word.force_break and start_i + 1 < j) break;
@@ -487,13 +492,21 @@ pub const StyledText = struct {
                 if (start_i + 1 < j) line_w += space_width;
                 line_w += word.width;
 
-                // Line too wide
-                if (line_w > line_width + 0.01) break;
+                // Line too wide. A single word wider than the line still
+                // gets a line of its own (the renderer breaks it into
+                // pieces); nothing may share it.
+                if (line_w > line_width + 0.01) {
+                    if (start_i + 1 == j and dp[start_i] < dp[j]) {
+                        dp[j] = dp[start_i];
+                        prev[j] = start_i;
+                    }
+                    break;
+                }
 
                 // Compute badness
                 const slack = line_width - line_w;
                 const is_last_line = (j == n);
-                const is_forced = self.words.items[j - 1].force_break;
+                const is_forced = words[j - 1].force_break;
                 const badness = if (is_last_line or is_forced) 0.0 else slack * slack;
 
                 const total = dp[start_i] + badness;
@@ -510,7 +523,7 @@ pub const StyledText = struct {
 
         var pos = n;
         while (pos > 0) {
-            try breaks.append(self.allocator, pos);
+            try breaks.append(self.allocator, start + pos);
             pos = prev[pos];
         }
 

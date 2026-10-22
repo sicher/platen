@@ -8,6 +8,10 @@ Compares two PDFs based on visual content rather than internal structure:
 - Same fonts used per page (via qpdf)
 - With --compare-images: identical decoded image pixels and alpha masks
   (via poppler's pdfimages; exact, no tolerance)
+- With --compare-render: identical rendered pages (via poppler's
+  pdftoppm; exact, no tolerance). For references platen generated itself,
+  where text and positions alone miss changes in how things are drawn
+  (color glyphs, gradients, clipping)
 
 Usage:
     python scripts/compare_pdfs.py expected.pdf actual.pdf [--tolerance=5.0]
@@ -390,9 +394,51 @@ def compare_images_to_truth(actual_path: str, names: list[str], truth_dir: str, 
     return diffs
 
 
+RENDER_DPI = 72
+
+
+def render_pages(pdf_path: str, workdir: Path) -> list[Path]:
+    """Every page rendered to PPM at RENDER_DPI, in page order."""
+    prefix = workdir / "page"
+    subprocess.run(["pdftoppm", "-r", str(RENDER_DPI), pdf_path, str(prefix)], check=True)
+    return sorted(workdir.glob("page-*.ppm"))
+
+
+def compare_renders(expected_path: str, actual_path: str) -> list[str]:
+    """Compare rendered pages pixel for pixel; report how many pixels of
+    each differing page differ and where (bounding box at RENDER_DPI)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        exp_dir, act_dir = Path(tmp) / "e", Path(tmp) / "a"
+        exp_dir.mkdir()
+        act_dir.mkdir()
+        expected = render_pages(expected_path, exp_dir)
+        actual = render_pages(actual_path, act_dir)
+        if len(expected) != len(actual):
+            return [f"Rendered page count differs: {len(expected)} vs {len(actual)}"]
+        diffs = []
+        for n, (e, a) in enumerate(zip(expected, actual)):
+            ew, eh, ep = read_netpbm(e)
+            aw, ah, ap = read_netpbm(a)
+            if (ew, eh) != (aw, ah):
+                diffs.append(f"Page {n + 1} render: size {ew}x{eh} vs {aw}x{ah}")
+                continue
+            if ep == ap:
+                continue
+            bad = 0
+            x0, y0, x1, y1 = ew, eh, -1, -1
+            for i in range(0, len(ep), 3):
+                if ep[i:i + 3] != ap[i:i + 3]:
+                    bad += 1
+                    x, y = (i // 3) % ew, (i // 3) // ew
+                    x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x), max(y1, y)
+            diffs.append(f"Page {n + 1} render: {bad} of {ew * eh} pixels differ, "
+                         f"within ({x0},{y0})-({x1},{y1}) at {RENDER_DPI} dpi")
+        return diffs
+
+
 def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0, skip_fonts: bool = False,
                  images: bool = False, skip_expected_images: set[int] | None = None,
-                 skip_actual_images: set[int] | None = None) -> tuple[bool, list[str]]:
+                 skip_actual_images: set[int] | None = None, render: bool = False) -> tuple[bool, list[str]]:
     """
     Compare two PDFs semantically.
 
@@ -418,6 +464,8 @@ def compare_pdfs(expected_path: str, actual_path: str, tolerance: float = 5.0, s
 
     if images:
         diffs.extend(compare_images(expected_path, actual_path, skip_expected_images or set(), skip_actual_images))
+    if render:
+        diffs.extend(compare_renders(expected_path, actual_path))
 
     return len(diffs) == 0, diffs
 
@@ -432,6 +480,8 @@ def main():
                         help="Skip font comparison (for SVG Form XObjects)")
     parser.add_argument("--compare-images", action="store_true",
                         help="Also compare decoded image pixels exactly (pdfimages)")
+    parser.add_argument("--compare-render", action="store_true",
+                        help="Also compare rendered pages pixel for pixel (pdftoppm)")
     parser.add_argument("--skip-expected-images", default="",
                         help="Comma-separated 0-based indices of reference images absent from actual")
     parser.add_argument("--skip-actual-images", default="",
@@ -456,7 +506,7 @@ def main():
     skip = {int(i) for i in args.skip_expected_images.split(",") if i}
     skip_actual = {int(i) for i in args.skip_actual_images.split(",") if i}
     match, diffs = compare_pdfs(args.expected, args.actual, args.tolerance, args.skip_fonts,
-                                args.compare_images, skip, skip_actual)
+                                args.compare_images, skip, skip_actual, args.compare_render)
     if args.truth_dir:
         names = [n for n in args.truth_names.split(",") if n]
         gaps = {n for n in args.truth_known_gaps.split(",") if n}

@@ -4,6 +4,41 @@
 
 A fast, self-contained PDF generation library written in Zig. Supports text layout, TrueType/OpenType font embedding, color emoji fonts, images, vector graphics, and PDF/A archival output. Pure Zig — no dependencies at all.
 
+## Gallery
+
+Every page below is a PDF rendered by platen; click an image to open the PDF itself.
+
+<table>
+  <tr>
+    <td align="center" width="25%">
+
+[![Typography page: justified two-column text with Knuth-Plass line breaking, Greek, Cyrillic and Vietnamese diacritics, and font weight specimens](docs/images/typography.png)](examples/showcase_typography.pdf)
+
+<sub><b>Typography</b><br>Knuth-Plass justification, OpenType shaping, Unicode marks</sub>
+</td>
+    <td align="center" width="25%">
+
+[![Vector graphics page: the SVG tiger, translucent circles, a radial-gradient sphere, rotated squares, dashed rounded rectangle, Bezier wave and star](docs/images/graphics.png)](examples/showcase_graphics.pdf)
+
+<sub><b>Vector graphics</b><br>SVG, gradients, clipping, transforms, opacity</sub>
+</td>
+    <td align="center" width="25%">
+
+[![Color fonts page: COLRv1 gradient lettering, a grid of color emoji, a PNG with alpha over a checkerboard, and COLRv0 and OpenType-SVG lettering](docs/images/color.png)](examples/showcase_color.pdf)
+
+<sub><b>Color fonts &amp; images</b><br>COLRv0/v1, OT-SVG, emoji, PNG alpha</sub>
+</td>
+    <td align="center" width="25%">
+
+[![A one-page invoice with the platen logo, line items table and totals](docs/images/invoice.png)](examples/benchmark_invoice.pdf)
+
+<sub><b>Invoice</b><br>~17,700 per second on 8 cores (<a href="#many-small-documents-invoice-throughput">benchmark</a>)</sub>
+</td>
+  </tr>
+</table>
+
+The first three are made by [`src/showcase.zig`](src/showcase.zig) (`zig build showcase` writes `examples/showcase_*.pdf`); the invoice is the [invoice benchmark](src/invoice_bench.zig)'s sample. `scripts/render-readme-images` regenerates all four images.
+
 ## Features
 
 - **Text rendering** with standard PDF fonts (Helvetica, Times, Courier, Symbol, ZapfDingbats)
@@ -276,6 +311,25 @@ try st.append("underlined text ", .{ .decoration = .{ .underline = true } });
 try st.append("colored text", .{ .color = platen.Color.blue });
 
 _ = try doc.writeStyled(&region, &st, style, .{ .alignment = .justify });
+```
+
+#### Continuing styled text in the next region
+
+When a styled paragraph doesn't fit, `writeStyled` returns `resume_at`, a
+`TextPosition` (`word`, plus a byte `offset` when a word too wide for the
+line was broken and continues mid-word). Pass it back as `start`, with the
+same unchanged `StyledText`, to continue in the next column or page. Every
+span keeps its style. (`overflow` holds only the rest of the span where
+writing stopped, so use `resume_at` for styled text.)
+
+```zig
+var opts = platen.ParagraphOptions{ .alignment = .justify, .line_breaking = .optimal };
+var column = left_column;
+while (true) {
+    const res = try doc.writeStyled(&column, &st, style, opts);
+    opts.start = res.resume_at orelse break;
+    column = next_column; // or doc.addPage(...) and a fresh region
+}
 ```
 
 #### Optical Top Alignment
@@ -976,7 +1030,8 @@ platen.pt_per_cm    // 28.34...
 - `LineBreaking` - `.greedy` (fast) or `.optimal` (Knuth-Plass for justified text)
 - `WriteAtOptions` / `WriteOptions` / `BlockOptions` / `ParagraphOptions` - Options for `writeAt` / `write` / `writeBlock` / `writeStyled`
 - `TextStyleOptions` - Per-span overrides in `StyledText` (`color`, `decoration`, `bold`, `italic`; unset fields inherit the base style)
-- `WriteResult` - Result with lines_written, overflow text, and bounding rect
+- `WriteResult` - Result with lines_written, overflow text, bounding rect, and `resume_at` (where writeStyled stopped)
+- `TextPosition` - Position in a StyledText (`word`, byte `offset` within it); `ParagraphOptions.start` / `WriteResult.resume_at`
 - `TextMetrics` / `FontMetrics` - Measurement results
 
 **Fonts:**
@@ -991,6 +1046,7 @@ platen.pt_per_cm    // 28.34...
 **Graphics:**
 - `StrokeStyle` - Stroke settings (color, width, cap, join, dash)
 - `FillStyle` - Fill settings (color)
+- `Path` - Path builder returned by `doc.createPath()` (moveTo, lineTo, curveTo, quadTo, closePath)
 - `ShapeStyle` - Combined stroke and/or fill (`.{ .stroke = .{} }`, `.{ .fill = .{} }`, `.{ .stroke = .{}, .fill = .{} }`)
 - `LineCap` - `.butt`, `.round`, `.square`
 - `LineJoin` - `.miter`, `.round`, `.bevel`
@@ -1012,9 +1068,15 @@ platen.pt_per_cm    // 28.34...
 
 **OpenType Features:**
 
-GSUB (Glyph Substitution):
+GSUB (Glyph Substitution) supports every lookup type (single, multiple,
+alternate, ligature, contextual, chained contextual, extension, reverse
+chained) with lookup flags, applied in the font's lookup order as
+HarfBuzz does; a differential test checks the glyphs against HarfBuzz.
+- `ccmp` - Glyph composition/decomposition (e.g. dotless i under an accent) - *enabled by default*
+- `locl` - Localized forms - *enabled by default*
+- `rlig` - Required ligatures - *enabled by default*
 - `liga` - Standard ligatures (fi, fl, ff, etc.) - *enabled by default*
-- `clig` - Contextual ligatures
+- `clig` - Contextual ligatures - *enabled by default*
 - `dlig` - Discretionary ligatures
 - `hlig` - Historical ligatures
 - `calt` - Contextual alternates (e.g., -> to arrow) - *enabled by default*

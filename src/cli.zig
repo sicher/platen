@@ -63,6 +63,8 @@ pub fn main(init: std.process.Init) !void {
         try showFontInfo(allocator, args[2]);
     } else if (std.mem.eql(u8, cmd, "font-faces")) {
         try cli_fonts.fontFaces(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "shape")) {
+        try cli_fonts.shape(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "extract-face")) {
         try cli_fonts.extractFace(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "find-font")) {
@@ -152,6 +154,7 @@ fn printUsage() !void {
         \\  font-info <ttf>      Show TrueType font information
         \\  font-faces <file>    List the faces of a font or collection (.ttc)
         \\  extract-face <ttc> <index> <out>  Write one face as a standalone font
+        \\  shape <font> [+feat|-feat]...  Shape stdin lines (one text per line); print glyph IDs
         \\  find-font <family> [--bold] [--italic] [--dir DIR]... [--out FILE]
         \\                       Find an installed font (whole family without flags)
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
@@ -199,6 +202,8 @@ fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
         try print("maxp table:\n", .{});
         try print("  num_glyphs: {d}\n\n", .{maxp.num_glyphs});
     }
+
+    try print("cmap: format {d}{s}\n\n", .{ font.cmap_format, if (font.cmap_uvs_offset != 0) " + format 14 (variation sequences)" else "" });
 
     // Show some character widths
     try print("Sample character widths (in font units):\n", .{});
@@ -403,6 +408,9 @@ fn generateColorTestPdf(allocator: std.mem.Allocator, font_path: []const u8, out
     // Space-separated emoji: exercises segmented rendering (color glyphs via
     // the Type3 font, the blank space glyph via the mono CID font).
     _ = try doc.writeAt(.{ .x = 50, .y = y + 20 }, "\u{1F600} \u{1F389} \u{1F680} \u{2764} \u{2B50}", .{ .font = emoji, .size = 28 }, .{});
+
+    // Gradients whose color stops fade (stop alpha): drawn through soft masks
+    _ = try doc.writeAt(.{ .x = 50, .y = y + 80 }, "\u{1F4E3}\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}\u{1F466}\u{1F458}\u{1F3A0}\u{1F4F0}", .{ .font = emoji, .size = 48 }, .{});
 
     const pdf = try doc.output();
     defer allocator.free(pdf);
@@ -611,9 +619,9 @@ fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
 
     // Show calt lookup stats
     if (font.embedded.ot_features) |ot| {
-        try print("GSUB calt stats:\n", .{});
-        try print("  Calt ligature lookups: {}\n", .{ot.calt_liga_lookups.items.len});
-        try print("  Chain context lookups: {}\n", .{ot.chain_context_lookups.items.len});
+        if (ot.gsub) |*g| {
+            try print("GSUB: {} lookups, calt {s}\n", .{ g.lookups.len, if (g.hasFeature(.calt)) "present" else "absent" });
+        }
     }
 }
 

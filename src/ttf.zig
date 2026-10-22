@@ -29,6 +29,9 @@ pub const Font = struct {
     // Cached cmap lookup (avoids subtable search on every glyph lookup)
     cmap_subtable_offset: u32 = 0,
     cmap_format: u16 = 0,
+    /// Offset of the format 14 subtable (variation sequences) in cmap,
+    /// 0 if the font has none.
+    cmap_uvs_offset: u32 = 0,
 
     // ASCII glyph cache for O(1) lookup of common characters
     ascii_glyphs: [128]u16 = @splat(0),
@@ -119,6 +122,20 @@ pub const Font = struct {
                     self.cmap_subtable_offset = subtable_offset;
                     self.cmap_format = 4;
                 }
+            }
+        }
+
+        // Variation sequences: platform 0 (Unicode), encoding 5
+        i = 0;
+        while (i < num_tables) : (i += 1) {
+            const record_offset = 4 + i * 8;
+            if (record_offset + 8 > cmap_data.len) break;
+            const subtable_offset = readU32(cmap_data, record_offset + 4);
+            if (readU16(cmap_data, record_offset) == 0 and readU16(cmap_data, record_offset + 2) == 5 and
+                subtable_offset > 0 and readU16(cmap_data, subtable_offset) == 14)
+            {
+                self.cmap_uvs_offset = subtable_offset;
+                break;
             }
         }
 
@@ -313,6 +330,21 @@ pub const Font = struct {
             return if (w != 0) w else self.getGlyphWidth(glyph_id);
         }
         return self.getGlyphWidth(glyph_id);
+    }
+
+    /// Glyph of the variation sequence `codepoint` + `selector` (cmap
+    /// format 14): its own glyph, or the base's glyph when the font lists
+    /// the sequence as using it (default UVS). Null when the sequence is
+    /// not listed, or the font has no format 14 subtable.
+    pub fn getVariationGlyph(self: *const Font, codepoint: u21, selector: u21) ?u16 {
+        if (self.cmap_uvs_offset == 0) return null;
+        const cmap_data = self.getTable("cmap".*) orelse return null;
+        const uvs = cmap_data[self.cmap_uvs_offset..];
+        return switch (lookupVariation(uvs, codepoint, selector)) {
+            .none => null,
+            .default => self.getGlyphId(codepoint),
+            .glyph => |g| g,
+        };
     }
 
     /// Get glyph ID for a Unicode codepoint
@@ -618,7 +650,72 @@ fn parseCmapFormat12(data: []const u8, codepoint: u21) ?u16 {
     return null;
 }
 
+const Variation = union(enum) { none, default, glyph: u16 };
+
+/// Look up `codepoint` + `selector` in a cmap format 14 subtable. As in
+/// HarfBuzz, the default UVS ranges are checked before the non-default
+/// mappings.
+fn lookupVariation(data: []const u8, codepoint: u21, selector: u21) Variation {
+    // uint16 format, uint32 length, uint32 numVarSelectorRecords;
+    // records: uint24 varSelector, Offset32 defaultUVS, Offset32 nonDefaultUVS
+    const num_records = readU32(data, 6);
+    const record = bsearch(data, 10, 11, num_records, selector) orelse return .none;
+    const default_uvs = readU32(data, record + 3);
+    if (default_uvs != 0 and default_uvs < data.len) {
+        // uint32 numUnicodeValueRanges; ranges: uint24 start, uint8 additionalCount
+        const ranges = data[default_uvs..];
+        const n = readU32(ranges, 0);
+        // Last range starting at or before codepoint
+        var lo: usize = 0;
+        var hi: usize = n;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            const at = 4 + mid * 4;
+            if (at + 4 > ranges.len) return .none;
+            if (readU24(ranges, at) <= codepoint) lo = mid + 1 else hi = mid;
+        }
+        if (lo > 0) {
+            const at = 4 + (lo - 1) * 4;
+            if (codepoint <= readU24(ranges, at) + @as(u32, ranges[at + 3])) return .default;
+        }
+    }
+    const non_default = readU32(data, record + 7);
+    if (non_default != 0 and non_default < data.len) {
+        // uint32 numUVSMappings; mappings: uint24 unicodeValue, uint16 glyphID
+        const mappings = data[non_default..];
+        const mapping = bsearch(mappings, 4, 5, readU32(mappings, 0), codepoint) orelse return .none;
+        return .{ .glyph = readU16(mappings, mapping + 3) };
+    }
+    return .none;
+}
+
+/// Binary search `count` records of `size` bytes starting at `start`, keyed
+/// by a leading uint24, for `key`. Returns the record's offset.
+fn bsearch(data: []const u8, start: usize, size: usize, count: u32, key: u21) ?usize {
+    var lo: usize = 0;
+    var hi: usize = count;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const at = start + mid * size;
+        if (at + size > data.len) return null;
+        const k = readU24(data, at);
+        if (key < k) {
+            hi = mid;
+        } else if (key > k) {
+            lo = mid + 1;
+        } else {
+            return at;
+        }
+    }
+    return null;
+}
+
 // Big-endian read helpers
+fn readU24(data: []const u8, offset: usize) u32 {
+    if (offset + 3 > data.len) return 0;
+    return std.mem.readInt(u24, data[offset..][0..3], .big);
+}
+
 fn readU16(data: []const u8, offset: usize) u16 {
     if (offset + 2 > data.len) return 0;
     return std.mem.readInt(u16, data[offset..][0..2], .big);
@@ -636,6 +733,21 @@ fn readU32(data: []const u8, offset: usize) u32 {
 // ============================================================================
 // Tests
 // ============================================================================
+
+test "cmap format 14 variation glyphs (GsubTest)" {
+    const loaded = Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/gsub/GsubTest.ttf") catch return error.SkipZigTest;
+    defer std.testing.allocator.free(loaded.data);
+    const font = loaded.font;
+    // scripts/gen_gsub_test_font.py: a+FE00 -> a.alt (gid 32), b+FE00 ->
+    // b's own glyph (default UVS), d+E0100 -> d.alt (gid 47); anything
+    // else is not listed
+    try std.testing.expectEqual(@as(?u16, 32), font.getVariationGlyph('a', 0xFE00));
+    try std.testing.expectEqual(font.getGlyphId('b'), font.getVariationGlyph('b', 0xFE00));
+    try std.testing.expectEqual(@as(?u16, 47), font.getVariationGlyph('d', 0xE0100));
+    try std.testing.expectEqual(@as(?u16, null), font.getVariationGlyph('a', 0xFE01));
+    try std.testing.expectEqual(@as(?u16, null), font.getVariationGlyph('e', 0xFE00));
+    try std.testing.expectEqual(@as(?u16, null), font.getVariationGlyph('d', 0xFE00));
+}
 
 test "parse Courier Prime" {
     const result = Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf") catch |err| {

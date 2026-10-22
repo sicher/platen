@@ -87,6 +87,7 @@ pub const WriteAtOptions = layout.WriteAtOptions;
 pub const Anchor = layout.Anchor;
 pub const BlockOptions = layout.BlockOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
+pub const TextPosition = layout.TextPosition;
 pub const PageSize = layout.PageSize;
 pub const PageOptions = layout.PageOptions;
 pub const PageRotation = layout.PageRotation;
@@ -225,6 +226,10 @@ pub const Document = struct {
     pages: std.ArrayListUnmanaged(Page),
     /// Index of current page for content operations (0-based).
     current_page: usize = 0,
+    /// The decorated space a write() call ended with, while it may still
+    /// end its line: the next write() into the same region hangs it (see
+    /// hangSpace) if that call wraps before putting anything on the line.
+    hanging_space: ?HangingSpace = null,
     // Track all fonts used across document
     used_fonts: std.AutoHashMapUnmanaged(StandardFont, void) = .empty,
     // Track all embedded fonts
@@ -322,7 +327,10 @@ pub const Document = struct {
         }
         self.loaded_svgs.deinit(self.allocator);
         self.svg_owned.deinit(self.allocator);
-        // Clean up gradients
+        // Clean up gradients (each owns a copy of its stops)
+        for (self.gradients.items) |g| switch (g) {
+            inline else => |grad| self.allocator.free(grad.stops),
+        };
         self.gradients.deinit(self.allocator);
         // Clean up outline
         if (self.outline) |*o| {
@@ -1162,9 +1170,40 @@ pub const Document = struct {
     /// - measure_only: Track cursor position without rendering (for calculating dimensions)
     /// - wrap: If false, text stays on one line without wrapping
     /// - line_height: Line height multiplier (default 1.0)
+    /// A decorated trailing space drawn by write(): the text command that
+    /// drew it, the line it is on, and how much of its width is space.
+    const HangingSpace = struct {
+        region: *const Region,
+        page: usize,
+        command: usize,
+        cursor_y: f64,
+        width: f64,
+    };
+
+    /// The line a hanging space was drawn on ends without more text: take
+    /// the space out of the decoration, as a space ending a line hangs
+    /// undecorated. Only while nothing else was drawn since.
+    fn hangSpace(self: *Document, space: HangingSpace, region: *const Region) void {
+        if (space.region != region or space.cursor_y != region.cursor_y) return;
+        if (space.page != self.current_page or space.page >= self.pages.items.len) return;
+        const commands = self.pages.items[space.page].commands.items;
+        if (space.command + 1 != commands.len) return;
+        switch (commands[space.command]) {
+            .text => |*t| t.text_width = @max(0, t.text_width - space.width),
+            else => {},
+        }
+    }
+
     pub fn write(self: *Document, region: *Region, str: []const u8, style_in: TextStyle, opts: WriteOptions) !WriteResult {
         try validate.check(.{ region.*, style_in, opts });
         try self.checkFontConformance(style_in);
+        // A previous call's decorated trailing space; hung if this call ends
+        // its line before adding to it. Measuring changes nothing
+        var hanging: ?HangingSpace = null;
+        if (!opts.measure_only) {
+            hanging = self.hanging_space;
+            self.hanging_space = null;
+        }
         // Resolve .face/.family up front so measure_only paths error on
         // invalid styles (e.g. bold on a single face) exactly like rendering
         const style = try self.normalizeStyle(style_in);
@@ -1205,7 +1244,11 @@ pub const Document = struct {
         var line_render_x: f64 = region.cursor_x; // X position for rendering the line
         var line_has_content = false;
 
-        // Helper to flush (render) the current line batch
+        // Helper to flush (render) the current line batch. A line that
+        // ends here (wrap or newline) hangs its trailing space, so an
+        // underline or strikethrough stops at the last word, as in CSS; at
+        // the end of the call the space stays, since the next write()
+        // continues this line after it.
         const flushLine = struct {
             fn call(
                 doc: *Document,
@@ -1215,9 +1258,12 @@ pub const Document = struct {
                 render_x: f64,
                 render_y: f64,
                 sty: TextStyle,
+                line_ends: bool,
             ) !void {
                 if (text_end <= text_start) return;
-                const line_text = text[text_start..text_end];
+                var line_text = text[text_start..text_end];
+                if (line_ends) line_text = std.mem.trimEnd(u8, line_text, " \t");
+                if (line_text.len == 0) return;
                 try doc.writeWithWordSpacingStyled(render_x, render_y, line_text, 0, sty);
             }
         }.call;
@@ -1265,12 +1311,21 @@ pub const Document = struct {
                     // Flush current line before newline
                     if (!opts.measure_only and line_has_content) {
                         const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                        try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                        try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                     }
+                    if (hanging) |h| self.hangSpace(h, region);
+                    hanging = null;
                     region.newLine(line_height);
                     lines_written += 1;
                     line_has_content = false;
                     line_render_x = 0;
+                } else if (region.cursor_x > 0) {
+                    // A space inside the line (a double space, or one this
+                    // call starts with): part of the line as typed
+                    line_text_end = @intFromPtr(remaining.ptr) - @intFromPtr(str.ptr) + 1;
+                    region.cursor_x += space_width;
+                    remaining = remaining[1..];
+                    continue;
                 }
                 remaining = remaining[1..];
                 // Update line start for next line
@@ -1301,7 +1356,7 @@ pub const Document = struct {
                         // Explicit newline - flush line and move to next
                         if (!opts.measure_only and line_has_content) {
                             const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                         }
                         region.newLine(line_height);
                         lines_written += 1;
@@ -1417,8 +1472,10 @@ pub const Document = struct {
                 // Flush current line before wrapping
                 if (!opts.measure_only and line_has_content) {
                     const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-                    try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+                    try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, true);
                 }
+                if (hanging) |h| self.hangSpace(h, region);
+                hanging = null;
                 region.newLine(line_height);
                 lines_written += 1;
                 // Reset line state for new line
@@ -1433,7 +1490,22 @@ pub const Document = struct {
         // Flush any remaining content on the last line
         if (!opts.measure_only and line_has_content) {
             const abs_y = getYPos(region, line_height, ascender, descender, cap_height, opts.valign);
-            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style);
+            try flushLine(self, str, line_text_start, line_text_end, region.x + region.padding.left + line_render_x, abs_y, style, false);
+            // A decorated trailing space may yet end the line
+            const line_text = str[line_text_start..line_text_end];
+            const trailing = line_text.len - std.mem.trimEnd(u8, line_text, " \t").len;
+            const page = &self.pages.items[self.current_page];
+            if (trailing > 0 and trailing < line_text.len and page.commands.items.len > 0 and
+                (style.decoration.underline or style.decoration.strikethrough))
+            {
+                self.hanging_space = .{
+                    .region = region,
+                    .page = self.current_page,
+                    .command = page.commands.items.len - 1,
+                    .cursor_y = region.cursor_y,
+                    .width = @as(f64, @floatFromInt(trailing)) * space_width,
+                };
+            }
         }
 
         // Calculate actual lines - if cursor moved vertically, that's our line count
@@ -1879,6 +1951,98 @@ pub const Document = struct {
         }
     }
 
+    /// Result of a writeStyled call that stopped at `pos` (the region is full).
+    fn resumeResult(text: *const StyledText, pos: TextPosition, lines_written: usize, line_height: f64, rect_x: f64, rect_y: f64, rect_width: f64) WriteResult {
+        const word = text.words.items[pos.word];
+        const span = text.spans.items[word.start_span];
+        return .{
+            .lines_written = lines_written,
+            .overflow = span.text[word.start_offset + pos.offset ..],
+            .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+            .resume_at = pos,
+        };
+    }
+
+    const BrokenWord = struct {
+        lines: usize,
+        /// Byte offset into the word where the region filled up, or null
+        /// when the whole word was written.
+        resume_offset: ?usize,
+    };
+
+    /// Write a word wider than the line, one piece per line, starting
+    /// `from` bytes into it: up to a soft hyphen (drawing a hyphen), else
+    /// after a regular hyphen (break_on_hyphens), else between characters.
+    /// Stops when the region is full and reports where. Draws nothing under
+    /// measure_only. Null if the word spans several styles (not broken).
+    fn writeBrokenWord(self: *Document, region: *Region, text: *const StyledText, style: TextStyle, word: StyledText.Word, from: usize, opts: ParagraphOptions, line_height: f64, line_width: f64) !?BrokenWord {
+        if (word.start_span != word.end_span) return null;
+        const span = text.spans.items[word.start_span];
+        const word_text = span.text[word.start_offset..word.end_offset];
+        const render_style = span.style.resolve(style);
+        const fm = self.getFontMetricsStyled(style);
+        const hyphen_width = self.getTextWidthStyled("-", render_style);
+
+        var lines: usize = 0;
+        var pos = from;
+        while (pos < word_text.len) {
+            if (region.remainingHeight() < line_height) return .{ .lines = lines, .resume_offset = pos };
+
+            const rest = word_text[pos..];
+            var rest_buf: [512]u8 = undefined;
+            const clean_rest = styled_text.stripSoftHyphensTo(rest, &rest_buf);
+
+            // The piece for this line and where the next one starts
+            var piece = clean_rest;
+            var draw_hyphen = false;
+            var next = word_text.len;
+            if (self.getTextWidthStyled(clean_rest, render_style) > line_width + 0.01) {
+                var best_soft: ?usize = null; // offset in word_text of a fitting soft hyphen
+                if (word.break_points) |break_points| {
+                    for (break_points) |bp| {
+                        const at = bp.offset - word.start_offset;
+                        if (at <= pos) continue;
+                        var seg_buf: [512]u8 = undefined;
+                        const seg = styled_text.stripSoftHyphensTo(word_text[pos..at], &seg_buf);
+                        if (self.getTextWidthStyled(seg, render_style) + hyphen_width > line_width + 0.01) break;
+                        best_soft = at;
+                    }
+                }
+                if (best_soft) |at| {
+                    piece = styled_text.stripSoftHyphensTo(word_text[pos..at], &rest_buf);
+                    draw_hyphen = true;
+                    next = at + 2; // past the soft hyphen (2 bytes in UTF-8)
+                } else if (rest.len == clean_rest.len) {
+                    // After a regular hyphen, else between characters (at
+                    // least one character per line)
+                    const cut: usize = blk: {
+                        if (opts.break_on_hyphens) {
+                            if (self.findHyphenBreakStyled(rest, line_width, render_style)) |c| break :blk c;
+                        }
+                        break :blk self.findCharacterBreakStyled(rest, line_width, render_style) orelse
+                            @min(std.unicode.utf8ByteSequenceLength(rest[0]) catch 1, rest.len);
+                    };
+                    piece = rest[0..cut];
+                    next = pos + cut;
+                }
+                // else: soft hyphens, but no piece up to one fits; offsets
+                // in the stripped text don't map back, so the rest is
+                // drawn as-is (overflowing the line)
+            }
+
+            if (!opts.measure_only) {
+                const x = region.x + region.padding.left;
+                const y = valignBaseline(region, line_height, fm, opts.valign);
+                const r = try self.writeAt(.{ .x = x, .y = y }, piece, render_style, .{});
+                if (draw_hyphen) _ = try self.writeAt(.{ .x = x + r.width, .y = y }, "-", render_style, .{});
+            }
+            region.newLine(line_height);
+            lines += 1;
+            pos = next;
+        }
+        return .{ .lines = lines, .resume_offset = null };
+    }
+
     /// Write styled text into a region with alignment support.
     /// Uses Knuth-Plass optimal line breaking when requested.
     pub fn writeStyled(self: *Document, region: *Region, text: *StyledText, style_in: TextStyle, opts: ParagraphOptions) !WriteResult {
@@ -1908,7 +2072,15 @@ pub const Document = struct {
 
         const space_width = self.getTextWidthStyled(" ", style);
 
-        if (text.words.items.len == 0) {
+        const start_word = opts.start.word;
+        if (start_word > text.words.items.len) return error.InvalidStartPosition;
+        if (opts.start.offset != 0) {
+            // Mid-word: only a word broken over lines resumes there
+            if (start_word == text.words.items.len) return error.InvalidStartPosition;
+            const w = text.words.items[start_word];
+            if (w.start_span != w.end_span or opts.start.offset >= w.end_offset - w.start_offset) return error.InvalidStartPosition;
+        }
+        if (start_word == text.words.items.len) {
             const rect_x = region.x + region.padding.left;
             const rect_y = region.y + region.padding.top + region.cursor_y;
             return .{ .lines_written = 0, .overflow = null, .rect = .{ .x = rect_x, .y = rect_y, .width = line_width, .height = 0 } };
@@ -1916,7 +2088,7 @@ pub const Document = struct {
 
         // For middle/bottom valign, calculate block offset first
         if (opts.valign == .middle or opts.valign == .bottom) {
-            const line_count = self.countStyledLinesStyled(text, style, line_width, space_width);
+            const line_count = self.countStyledLinesStyled(text, style, line_width, space_width, start_word);
             const fm = self.getFontMetricsStyled(style);
             const ascender = fm.ascender;
             const descender = @abs(fm.descender);
@@ -1947,6 +2119,7 @@ pub const Document = struct {
             .break_on_hyphens = opts.break_on_hyphens,
             .line_breaking = opts.line_breaking,
             .line_height = opts.line_height,
+            .start = opts.start,
         };
 
         const start_cursor_y = region.cursor_y;
@@ -1955,9 +2128,28 @@ pub const Document = struct {
         const rect_width = region.contentWidth();
         var lines_written: usize = 0;
 
+        // Resuming mid-word: finish the broken word first
+        var first_word = start_word;
+        if (opts.start.offset != 0) {
+            const broken = (try self.writeBrokenWord(region, text, style, text.words.items[start_word], opts.start.offset, render_opts, line_height, line_width)).?;
+            lines_written = broken.lines;
+            if (broken.resume_offset) |offset| {
+                if (opts.measure_only) {
+                    region.cursor_x = saved_cursor_x;
+                    region.cursor_y = saved_cursor_y;
+                }
+                return resumeResult(text, .{ .word = start_word, .offset = offset }, lines_written, line_height, rect_x, rect_y, rect_width);
+            }
+            first_word = start_word + 1;
+        }
+
         // Use optimal or greedy line breaking based on options
         if (render_opts.line_breaking == .optimal) {
-            const result = try self.writeStyledOptimal(region, text, style, render_opts, line_height, space_width, line_width, start_cursor_y);
+            var rest_opts = render_opts;
+            rest_opts.start = .{ .word = first_word };
+            var result = try self.writeStyledOptimal(region, text, style, rest_opts, line_height, space_width, line_width, start_cursor_y);
+            result.lines_written += lines_written;
+            result.rect.height = @as(f64, @floatFromInt(result.lines_written)) * line_height;
             if (opts.measure_only) {
                 region.cursor_x = saved_cursor_x;
                 region.cursor_y = saved_cursor_y;
@@ -1967,7 +2159,7 @@ pub const Document = struct {
 
         // Greedy algorithm
         const n = text.words.items.len;
-        var word_idx: usize = 0;
+        var word_idx: usize = first_word;
 
         while (word_idx < n) {
             // Check if we have room for another line
@@ -1981,6 +2173,7 @@ pub const Document = struct {
                     .lines_written = lines_written,
                     .overflow = text.getTextFromWord(word_idx),
                     .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+                    .resume_at = .{ .word = word_idx },
                 };
             }
 
@@ -2001,186 +2194,23 @@ pub const Document = struct {
                 if (word.force_break) break;
             }
 
-            // Handle case where first word doesn't fit
+            // A first word wider than the line is broken over lines
             if (line_end == line_start and line_start < n) {
                 const big_word = text.words.items[line_start];
-
-                // Try to break at soft-hyphen if available
-                if (big_word.break_points) |break_points| {
-                    const hyphen_width = self.getTextWidthStyled("-", text.spans.items[big_word.start_span].style.resolve(style));
-
-                    // Find best break point that fits
-                    var best_bp: ?styled_text.BreakPoint = null;
-                    for (break_points) |bp| {
-                        if (bp.width + hyphen_width <= line_width + 0.01) {
-                            best_bp = bp;
-                        } else {
-                            break; // Break points are ordered by position
+                if (try self.writeBrokenWord(region, text, style, big_word, 0, render_opts, line_height, line_width)) |broken| {
+                    lines_written += broken.lines;
+                    if (broken.resume_offset) |offset| {
+                        if (opts.measure_only) {
+                            region.cursor_x = saved_cursor_x;
+                            region.cursor_y = saved_cursor_y;
                         }
+                        return resumeResult(text, .{ .word = line_start, .offset = offset }, lines_written, line_height, rect_x, rect_y, rect_width);
                     }
-
-                    if (best_bp) |_| {
-                        const span = text.spans.items[big_word.start_span];
-                        const fm = self.getFontMetricsStyled(style);
-
-                        const render_style = span.style.resolve(style);
-
-                        // Recursively break at soft-hyphens until the remaining fits
-                        var remaining_start: u16 = big_word.start_offset;
-
-                        while (remaining_start < big_word.end_offset) {
-                            const remaining = span.text[remaining_start..big_word.end_offset];
-                            var remaining_buf: [512]u8 = undefined;
-                            const clean_remaining = stripSoftHyphensTo(remaining, &remaining_buf);
-                            const remaining_width = self.getTextWidthStyled(clean_remaining, span.style.resolve(style));
-
-                            // If remaining fits on one line, render it and we're done
-                            if (remaining_width <= line_width + 0.01) {
-                                if (region.remainingHeight() >= line_height) {
-                                    const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style, .{});
-                                    region.newLine(line_height);
-                                    lines_written += 1;
-                                }
-                                break;
-                            }
-
-                            // Find best break point that fits, searching from remaining_start
-                            var best_break_offset: ?u16 = null;
-                            for (break_points) |bp| {
-                                if (bp.offset <= remaining_start) continue; // Skip already-used break points
-                                // Measure text from remaining_start to this break point
-                                const segment = span.text[remaining_start..bp.offset];
-                                var seg_buf: [512]u8 = undefined;
-                                const clean_seg = stripSoftHyphensTo(segment, &seg_buf);
-                                const seg_width = self.getTextWidthStyled(clean_seg, span.style.resolve(style));
-                                if (seg_width + hyphen_width <= line_width + 0.01) {
-                                    best_break_offset = bp.offset;
-                                } else {
-                                    break; // Break points are ordered, no point checking further
-                                }
-                            }
-
-                            if (best_break_offset) |break_offset| {
-                                // Render prefix + hyphen on this line
-                                const prefix = span.text[remaining_start..break_offset];
-                                var prefix_buf: [512]u8 = undefined;
-                                const clean_prefix = stripSoftHyphensTo(prefix, &prefix_buf);
-                                const prefix_width = self.getTextWidthStyled(clean_prefix, span.style.resolve(style));
-
-                                const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                const x_pos = region.x + region.padding.left;
-                                _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, clean_prefix, render_style, .{});
-                                _ = try self.writeAt(.{ .x = x_pos + prefix_width, .y = y_pos }, "-", render_style, .{});
-
-                                region.newLine(line_height);
-                                lines_written += 1;
-
-                                // Move to after the soft-hyphen (2 bytes for UTF-8)
-                                remaining_start = break_offset + 2;
-                            } else {
-                                // No break point fits, render remaining as-is (will overflow)
-                                if (region.remainingHeight() >= line_height) {
-                                    const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                                    _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos }, clean_remaining, render_style, .{});
-                                    region.newLine(line_height);
-                                    lines_written += 1;
-                                }
-                                break;
-                            }
-                        }
-
-                        word_idx = line_start + 1;
-                        continue;
-                    }
+                    word_idx = line_start + 1;
+                    continue;
                 }
 
-                // Try regular hyphen breaking if enabled (only for single-span words)
-                if (render_opts.break_on_hyphens and big_word.start_span == big_word.end_span) {
-                    const span = text.spans.items[big_word.start_span];
-                    const word_text = span.text[big_word.start_offset..big_word.end_offset];
-
-                    if (self.findHyphenBreakStyled(word_text, line_width, style)) |break_pos| {
-                        // break_pos is position after the hyphen
-                        const prefix = word_text[0..break_pos];
-                        const suffix = word_text[break_pos..];
-
-                        // CSS-style .top valign
-                        const fm = self.getFontMetricsStyled(style);
-                        const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-
-                        const render_style = span.style.resolve(style);
-
-                        const x_pos = region.x + region.padding.left;
-                        _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
-
-                        region.newLine(line_height);
-                        lines_written += 1;
-
-                        // Render suffix on next line
-                        if (suffix.len > 0 and region.remainingHeight() >= line_height) {
-                            const y_pos2 = valignBaseline(region, line_height, fm, render_opts.valign);
-                            _ = try self.writeAt(.{ .x = region.x + region.padding.left, .y = y_pos2 }, suffix, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                        }
-
-                        word_idx = line_start + 1;
-                        continue;
-                    }
-                }
-
-                // Last resort: character-level breaking (only for single-span words)
-                // Loop until entire word is consumed
-                if (big_word.start_span == big_word.end_span) {
-                    const span = text.spans.items[big_word.start_span];
-                    var remaining_text = span.text[big_word.start_offset..big_word.end_offset];
-                    // CSS-style .top valign
-                    const fm = self.getFontMetricsStyled(style);
-                    var did_break = false;
-
-                    const render_style = span.style.resolve(style);
-
-                    while (remaining_text.len > 0 and region.remainingHeight() >= line_height) {
-                        const y_pos = valignBaseline(region, line_height, fm, render_opts.valign);
-                        const x_pos = region.x + region.padding.left;
-
-                        // Check if remaining text fits on line
-                        const remaining_width = self.getTextWidthStyled(remaining_text, render_style);
-                        if (remaining_width <= line_width + 0.01) {
-                            // Fits - render it and we're done
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                            did_break = true;
-                            break;
-                        }
-
-                        // Doesn't fit - find break point
-                        if (self.findCharacterBreakStyled(remaining_text, line_width, style)) |break_pos| {
-                            const prefix = remaining_text[0..break_pos];
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, prefix, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                            remaining_text = remaining_text[break_pos..];
-                            did_break = true;
-                        } else {
-                            // Can't break (shouldn't happen) - render what we can
-                            _ = try self.writeAt(.{ .x = x_pos, .y = y_pos }, remaining_text, render_style, .{});
-                            region.newLine(line_height);
-                            lines_written += 1;
-                            did_break = true;
-                            break;
-                        }
-                    }
-
-                    if (did_break) {
-                        word_idx = line_start + 1;
-                        continue;
-                    }
-                }
-
-                // No break point found - include oversized word as-is
+                // Unbreakable (spans several styles): include it as-is
                 line_end = line_start + 1;
                 current_width = big_word.width;
             }
@@ -2218,12 +2248,12 @@ pub const Document = struct {
     }
 
     /// Count styled lines with explicit style (for styled valign calculation).
-    fn countStyledLinesStyled(self: *Document, text: *const StyledText, base_style: TextStyle, line_width: f64, space_width: f64) usize {
+    fn countStyledLinesStyled(self: *Document, text: *const StyledText, base_style: TextStyle, line_width: f64, space_width: f64, start_word: usize) usize {
         const n = text.words.items.len;
         if (n == 0) return 0;
 
         var line_count: usize = 0;
-        var word_idx: usize = 0;
+        var word_idx: usize = start_word;
 
         while (word_idx < n) {
             var current_width: f64 = 0;
@@ -2611,7 +2641,7 @@ pub const Document = struct {
         const rect_width = region.contentWidth();
 
         // Compute optimal break points using preprocessed word data
-        const breaks = try text.computeOptimalBreaks(line_width, space_width);
+        const breaks = try text.computeOptimalBreaks(line_width, space_width, opts.start.word);
         defer self.allocator.free(breaks);
 
         if (breaks.len == 0) {
@@ -2619,7 +2649,7 @@ pub const Document = struct {
         }
 
         var lines_written: usize = 0;
-        var line_start: usize = 0;
+        var line_start: usize = opts.start.word;
 
         for (breaks, 0..) |line_end, line_idx| {
             // Check if we have room
@@ -2628,7 +2658,20 @@ pub const Document = struct {
                     .lines_written = lines_written,
                     .overflow = text.getTextFromWord(line_start),
                     .rect = .{ .x = rect_x, .y = rect_y, .width = rect_width, .height = @as(f64, @floatFromInt(lines_written)) * line_height },
+                    .resume_at = .{ .word = line_start },
                 };
+            }
+
+            // A word wider than the line, alone on its line: break it
+            if (line_end == line_start + 1 and text.words.items[line_start].width > line_width + 0.01) {
+                if (try self.writeBrokenWord(region, text, style, text.words.items[line_start], 0, opts, line_height, line_width)) |broken| {
+                    lines_written += broken.lines;
+                    if (broken.resume_offset) |offset| {
+                        return resumeResult(text, .{ .word = line_start, .offset = offset }, lines_written, line_height, rect_x, rect_y, rect_width);
+                    }
+                    line_start = line_end;
+                    continue;
+                }
             }
 
             // Calculate line content width
@@ -2815,20 +2858,28 @@ pub const Document = struct {
     }
 
     /// Add a linear gradient to the document and return its index.
+    /// The document keeps its own copy of `grad.stops`.
     pub fn addLinearGradient(self: *Document, grad: LinearGradient) !usize {
         try validate.check(grad);
         try validate.checkEach(grad.stops);
+        var owned = grad;
+        owned.stops = try self.allocator.dupe(ColorStop, grad.stops);
+        errdefer self.allocator.free(owned.stops);
         const idx = self.gradients.items.len;
-        try self.gradients.append(self.allocator, .{ .linear = grad });
+        try self.gradients.append(self.allocator, .{ .linear = owned });
         return idx;
     }
 
     /// Add a radial gradient to the document and return its index.
+    /// The document keeps its own copy of `grad.stops`.
     pub fn addRadialGradient(self: *Document, grad: RadialGradient) !usize {
         try validate.check(grad);
         try validate.checkEach(grad.stops);
+        var owned = grad;
+        owned.stops = try self.allocator.dupe(ColorStop, grad.stops);
+        errdefer self.allocator.free(owned.stops);
         const idx = self.gradients.items.len;
-        try self.gradients.append(self.allocator, .{ .radial = grad });
+        try self.gradients.append(self.allocator, .{ .radial = owned });
         return idx;
     }
 
@@ -2909,22 +2960,28 @@ pub const Document = struct {
                                 if (t.char_spacing != 0) {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                                 }
-                                try cw.print("{d:.2} Tw\n", .{t.word_spacing});
-                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y);
+                                // Word spacing is in the TJ (see the CID branch)
+                                try cw.append("0.00 Tw\n");
+                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y, t.word_spacing);
                             } else {
                                 try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
 
                                 if (t.char_spacing != 0) {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
                                 }
-                                // Always emit Tw to ensure correct word spacing (state persists across text blocks)
-                                try cw.print("{d:.2} Tw\n", .{t.word_spacing});
+                                // Always emit Tw (state persists across text blocks).
+                                // Identity-H codes are 2-byte, so Tw must not apply;
+                                // the renderer puts word spacing into the TJ instead.
+                                // Tw stays 0 there: poppler applies it to code
+                                // 0x0020 anyway (e.g. a ligature subset to CID 32).
+                                const tw = if (emb.encoding == .identity) 0 else t.word_spacing;
+                                try cw.print("{d:.2} Tw\n", .{tw});
 
                                 if (emb.encoding == .identity) {
                                     // CID mode: output with ligatures, kerning, and mark positioning
                                     // Pass absolute position for Tm-based mark positioning
                                     // Use cached glyphs if available (avoids duplicate OpenType shaping)
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y);
+                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y, t.word_spacing, t.char_spacing);
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode
@@ -2950,6 +3007,9 @@ pub const Document = struct {
                         },
                     }
 
+                    // Tc is graphics state and survives ET: reset it so
+                    // later runs (which only emit Tc when non-zero) start at 0
+                    if (t.char_spacing != 0) try cw.append("0 Tc\n");
                     try cw.append("ET\n");
 
                     // Draw text decorations (underline/strikethrough)
@@ -3188,7 +3248,13 @@ pub const Document = struct {
         // Reserve IDs for embedded fonts
         // CID fonts need: Type0 + CIDFont + FontDescriptor + FontFile + ToUnicode = 5 objects
         // WinAnsi fonts need: Font + FontDescriptor + FontFile + ToUnicode = 4 objects
+        // A font no page draws with gets no objects (0 = not written):
+        // it has no glyphs to subset, so it would be embedded whole
         for (self.embedded_fonts.items) |emb_font| {
+            if (!self.isFontDrawn(emb_font)) {
+                try ids.emb_font_base_ids.append(self.allocator, 0);
+                continue;
+            }
             try ids.emb_font_base_ids.append(self.allocator, next_id);
             if (emb_font.encoding == .identity) {
                 next_id += 5; // CID font objects
@@ -3436,6 +3502,7 @@ pub const Document = struct {
             }
         }
         for (self.embedded_fonts.items) |emb_font| {
+            if (!self.isFontDrawn(emb_font)) continue; // not written
             const font_data = emb_font.getFontData();
             if (font_data.len >= Writer.min_compress_len) {
                 try jobs.append(self.allocator, .{ .data = font_data });
@@ -3474,6 +3541,16 @@ pub const Document = struct {
         }
     }
 
+    /// Whether any page draws with `emb_font` (only those are written).
+    fn isFontDrawn(self: *const Document, emb_font: *const EmbeddedFont) bool {
+        for (self.pages.items) |*page| {
+            for (page.used_embedded.items) |f| {
+                if (f == emb_font) return true;
+            }
+        }
+        return false;
+    }
+
     /// Write embedded font objects: CID fonts (Type0 + CIDFont + descriptor +
     /// font file + ToUnicode) or WinAnsi fonts (Font + descriptor + font file +
     /// ToUnicode).
@@ -3481,6 +3558,7 @@ pub const Document = struct {
         const font_write_start = pdf_output.milliTimestamp();
         for (self.embedded_fonts.items, 0..) |emb_font, i| {
             const base_id = ids.emb_font_base_ids.items[i];
+            if (base_id == 0) continue; // no page draws with it
 
             if (emb_font.encoding == .identity) {
                 // CID font: Type0, CIDFont, FontDescriptor, FontFile2, ToUnicode (5 objects)

@@ -92,6 +92,7 @@ pub const WriteAtOptions = document.WriteAtOptions;
 pub const Anchor = document.Anchor;
 pub const BlockOptions = document.BlockOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
+pub const TextPosition = document.TextPosition;
 pub const PageSize = document.PageSize;
 pub const PageOptions = document.PageOptions;
 pub const Encryption = document.Encryption;
@@ -106,6 +107,7 @@ pub const Point = document.Point;
 pub const StrokeStyle = document.StrokeStyle;
 pub const FillStyle = document.FillStyle;
 pub const ShapeStyle = document.ShapeStyle;
+pub const Path = document.Path;
 
 // Re-export gradient types
 pub const LinearGradient = document.LinearGradient;
@@ -181,6 +183,8 @@ test {
     _ = @import("resource_names_test.zig");
     _ = @import("pdfa_conformance_test.zig");
     _ = @import("styled_span_test.zig");
+    _ = @import("shaping_test.zig");
+    _ = @import("gsub.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");
@@ -189,4 +193,5 @@ test {
     _ = @import("bitmap_glyphs.zig");
     _ = @import("svg_table.zig");
     _ = @import("encrypt.zig");
+    _ = @import("unicode_compose.zig");
 }

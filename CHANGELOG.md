@@ -1,5 +1,161 @@
 # Changelog
 
+## 0.13.0 — 2026-10-22
+
+### Added
+
+- **Continuing styled text across regions:** `WriteResult.resume_at` (a
+  `TextPosition`: word index plus byte offset, where writing stopped) and
+  `ParagraphOptions.start`. Call `writeStyled` again with the same
+  `StyledText` and `start = resume_at` to continue in the next column or page with
+  every span and style intact. Before, the only continuation was
+  `overflow`, which for styled text holds just the rest of one span -
+  later spans were silently lost.
+- `platen.Path`: the path builder type returned by `doc.createPath()` is
+  now exported, so helpers can take a `*platen.Path`.
+- **Complete GSUB:** every lookup type - single, multiple, alternate,
+  ligature, context (formats 1-3), chained context (formats 1-3),
+  extension, reverse chained - with lookup flags (ignore base glyphs /
+  ligatures / marks, mark attachment classes, mark filtering sets, via
+  GDEF), applied in lookup-list order over the whole run as HarfBuzz does,
+  for any feature. Before, only single, ligature and chained context
+  format 3 lookups were read, each wired to a few features. New default
+  features, as in HarfBuzz: `ccmp`, `locl`, `rlig`, `clig` (turn off with
+  `setFeature`). `ccmp` gives dotless i/j under accents (Gentium, Inter:
+  `j́`, `ị́`, Lithuanian `į́`) and joins emoji ZWJ sequences, skin tones
+  and flags into one glyph (Noto Color Emoji).
+- **Default ignorables are removed:** U+FE0F/U+FE0E, ZWJ, ZWNJ, zero-width
+  space, soft hyphen, word joiner, BOM and the other Default_Ignorable code
+  points no longer draw (U+FE0F was .notdef in Noto Color Emoji, a soft
+  hyphen passed to `writeAt` a visible hyphen) and add no width. During
+  GSUB they are skipped where HarfBuzz skips them - ZWJ always, ZWNJ only
+  in context - so keycaps (`1️⃣`), `❤️` and `🏳️‍🌈` join, `f`+ZWJ+`i` still
+  ligates and ZWNJ still blocks ligatures. Their code points stay out of
+  extracted text.
+- **Variation sequences** (cmap format 14): a character followed by a
+  variation selector draws as the glyph the font lists for the pair - CJK
+  ideograph variants, text-style emoji with U+FE0E in Noto Emoji - as
+  HarfBuzz does; unlisted selectors are dropped as before. `font-info`
+  shows whether a font has them.
+- CLI `shape <font> [+feat|-feat]...`: glyph IDs for each stdin line, as
+  rendering shapes it.
+
+### Fixed
+
+- **Shaping differed from HarfBuzz** (found by the new differential
+  test): Inter's `<->` became `<-` plus `>`, `case` together with `tnum`
+  gave tabular but not case forms (features ran in a fixed order, not the
+  font's lookup order), and Satoshi's `frac` gave no numerators or
+  denominators.
+- **CFF fonts lost contextual alternates:** a subset of a `.otf` font kept
+  only the first glyph drawn for each character, so a contextual variant
+  of a character already drawn plainly (Inter's raised hyphen in `A-B`
+  after `a-b`) rendered as .notdef. Every drawn glyph is kept now, as for
+  TrueType.
+- **Translucent color-font gradients painted opaque:** COLRv1 gradient
+  stops carry an alpha, which was dropped, so overlays meant to fade out
+  covered the glyph - Noto's rainbow flag 🏳️‍🌈 came out grey, and about
+  2,000 Noto Color Emoji glyphs had such gradients. Stop alpha is now
+  drawn through a soft mask (or `/ca` when it is constant).
+- **A color glyph without an outline painted the whole page:** Bungee
+  Spice's space is a color glyph whose clip glyph has no contours; the
+  empty clip was written as `W n` with no path, which sets no clip, so its
+  gradient covered the page from that point on. Such paints are now
+  skipped (an empty clip shows nothing).
+- **Underlines and strikethroughs ran into the space a line wraps at**
+  (`write()`): the line was drawn with its trailing space, and the
+  decoration with it. The space now hangs past the line end, as in CSS,
+  also when it ends one write() call and the next call's first word
+  wraps; spaces inside the line stay decorated.
+- **`write()` lost text before a double space:** line batching reset
+  the line at every space it skipped, so `write("aa  bb")` drew only
+  "bb" (at aa's place), and a call starting with a space mid-line lost
+  it (`" over"` after `"jumps"` gave "jumpsover"). Spaces inside a line
+  are kept as typed now.
+- **SVG hairlines were rounded:** stroke widths were written with two
+  decimals in SVG units (the tiger's 0.172 became 0.17); now four.
+- **Bitmap-only fonts had an empty `FontBBox`:** an OTB pixel font's head
+  box is 0 wide, so every glyph fell outside its Type3 font's box
+  (poppler warned on each). Such fonts now get `[0 0 0 0]`, which tells
+  viewers to make no assumptions about glyph sizes.
+- **Color emoji ligatures extracted as U+FFFD:** the Type3 ToUnicode of
+  a color font mapped only single code points, so a joined emoji (ZWJ
+  family, flag, keycap) copied as a replacement character. It maps to the
+  whole sequence now.
+- **Text extraction of substituted glyphs:** ToUnicode now follows the
+  shaped glyphs' clusters - a ligature maps to its characters, a glyph a
+  multiple substitution produced to its own character of the
+  decomposition - instead of re-guessing ligatures after shaping.
+- **Words wider than the line lost their end at a region boundary:** a
+  word broken over lines (soft hyphens, regular hyphens, or between
+  characters) that reached the bottom of the region was cut off and
+  layout went on with the next word. Writing now stops mid-word and
+  `resume_at` carries the byte offset, so the next region continues the
+  word (lines are the unit, as in TeX and CSS fragmentation). Pieces are
+  measured in the span's own style (bold words were broken with regular
+  widths).
+- **Knuth-Plass put a too-wide word on one endless line:** with
+  `.line_breaking = .optimal`, a word wider than the line made every
+  break infeasible and the whole paragraph came out as a single line
+  running past the region. Such a word now gets a line of its own and is
+  broken into pieces, as with greedy breaking.
+- **`measure_only` drew broken words:** measuring a paragraph containing
+  a word wider than the line drew that word's pieces on the page.
+- **Combining marks compose to the font's precomposed glyphs:** a base
+  followed by combining marks (e.g. `i` + U+0308) was drawn as separate
+  glyphs positioned by GPOS - or simply overprinted in fonts without mark
+  positioning - giving a dotted i under a diaeresis. Like HarfBuzz,
+  shaping now composes the sequence into the precomposed character
+  (U+00EF) when the font has a glyph for it; otherwise it stays
+  decomposed. Measurement and rendering share the decoding, and the
+  ToUnicode text of such a glyph is the sequence as typed.
+- **Unused fonts were embedded whole:** a font loaded into a document but
+  never drawn with (only measured, or not used at all) has no glyphs to
+  subset, so `output()` wrote the complete original font file as orphan
+  objects - 25 MB for Noto Color Emoji. Only fonts some page draws with
+  are written now.
+- **Justified text in embedded Unicode fonts:** lines set in a single
+  style were justified only through the PDF `Tw` operator, which applies
+  to the single-byte code 32 and never to 2-byte Identity-H codes (nor to
+  color-font runs), so those lines came out ragged in every
+  `.identity` font. The extra word space is now emitted after each space
+  glyph as a `TJ` adjustment (or `Tm` offset in the mark-positioning
+  path), and `Tw` is 0 for these runs (poppler applies it to the 2-byte
+  code 0x0020 anyway, e.g. a ligature subset to CID 32). New fpdf2
+  reference `justify_embedded`.
+- **`char_spacing` in runs with combining marks:** runs with GPOS mark
+  positioning place every glyph with `Tm`, so `Tc` never applied and the
+  text came out unspaced while `measureStyled` included the spacing. The
+  spacing is now added per glyph in that path.
+- **`char_spacing` leaked into later text:** a run with non-zero
+  `char_spacing` set the PDF `Tc` operator but never reset it, and `Tc`
+  survives `ET`, so every later text run on the page was letter-spaced
+  too, while layout measured it without the spacing (overlapping spans,
+  text overrunning its region). The run now resets `Tc` before `ET`.
+- **Gradient stops are copied:** `addLinearGradient`/`addRadialGradient`
+  kept a pointer to the caller's `stops` slice until `output()`; stops in
+  a stack frame that had returned were read after free (garbage colors or
+  a panic). The document now keeps its own copy.
+
+### Internal
+
+- GSUB differential test: `test/shaping/harfbuzz.txt` holds HarfBuzz's
+  glyphs for Latin, diacritic, default-ignorable and emoji texts in Inter,
+  Satoshi, Gentium, Bungee, Charter and Noto Emoji under several feature
+  sets (HarfBuzz removing default ignorables, as platen does), plus a synthetic font
+  with one scenario per lookup type and flag
+  (`scripts/gen_gsub_test_font.py`); `scripts/gen_shaping_reference.py`
+  regenerates it.
+- `zig build test -Dtest-filter=NAME` runs only matching tests.
+- The 19 references platen generates itself (color fonts, SVG,
+  decorations, line breaking, transforms, diacritics) are now also
+  compared rendered, pixel for pixel (`compare_pdfs.py --compare-render`,
+  poppler): the text-and-position comparison missed drawing changes.
+  Seven had drifted - three from bugs fixed here (`color_v1_gradient` had
+  the page-filling space baked in), the rest from intended changes
+  (`svg_embedding` predated per-path stroke widths: its tiger had 3x
+  thick whisker outlines).
+
 ## 0.12.0 — 2026-10-17
 
 ### Added

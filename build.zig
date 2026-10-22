@@ -67,8 +67,10 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{.{ .name = "build_options", .module = build_options_mod }},
     });
+    const test_filters = b.option([]const []const u8, "test-filter", "Run only tests whose name contains this (repeatable)") orelse &.{};
     const lib_tests = b.addTest(.{
         .root_module = test_mod,
+        .filters = test_filters,
     });
 
     const run_lib_tests = b.addRunArtifact(lib_tests);
@@ -124,6 +126,26 @@ pub fn build(b: *std.Build) void {
 
     const invoice_bench_step = b.step("bench-invoice", "Run invoice throughput benchmark (use -Doptimize=ReleaseFast)");
     invoice_bench_step.dependOn(&run_invoice_bench.step);
+
+    // Feature showcase (source of the README gallery images)
+    // Run with: zig build showcase -- [--output=PATH]
+    const showcase_exe = b.addExecutable(.{
+        .name = "platen-showcase",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/showcase.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "platen", .module = platen_mod },
+            },
+        }),
+    });
+
+    const run_showcase = b.addRunArtifact(showcase_exe);
+    run_showcase.addPassthruArgs();
+
+    const showcase_step = b.step("showcase", "Render the feature showcase PDFs (examples/showcase_*.pdf)");
+    showcase_step.dependOn(&run_showcase.step);
 }
 
 /// Declare every file under `dir` (relative to the build root) as an input

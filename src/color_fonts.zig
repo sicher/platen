@@ -18,6 +18,7 @@ const svg = @import("svg.zig");
 const format = @import("format.zig");
 const colr = @import("colr.zig");
 const pagemod = @import("page.zig");
+const text_render = @import("text_render.zig");
 
 const Document = @import("document.zig").Document;
 const Writer = @import("writer.zig").Writer;
@@ -47,6 +48,7 @@ pub const ColorFontPlan = struct {
     first_charproc_id: ObjectId = 0, // contiguous block, one stream per gid
     image_obj_ids: std.ArrayListUnmanaged(ObjectId) = .empty, // one per image
     image_smask_ids: std.ArrayListUnmanaged(?ObjectId) = .empty, // per image, if it has alpha
+    first_soft_mask_id: ObjectId = 0, // contiguous block, one form per res.soft_masks entry
 
     /// Subfont index + single-byte PDF code of a color glyph.
     const Slot = struct { sub: usize, code: u8 };
@@ -427,6 +429,23 @@ pub fn writeColorFont(doc: *Document, w: *Writer, plan: *ColorFontPlan) !void {
         try writePlanImage(doc, w, img, plan.image_obj_ids.items[i], plan.image_smask_ids.items[i]);
     }
 
+    // 1c. Soft-mask forms (gradient stop alpha): a gray transparency group
+    // painting the mask's shading over any glyph's extent.
+    for (plan.res.soft_masks.items, 0..) |shading, i| {
+        try w.beginObject(plan.first_soft_mask_id + @as(ObjectId, @intCast(i)));
+        var form = Dict.init(doc.allocator);
+        defer form.deinit();
+        const resources = try std.fmt.allocPrint(doc.allocator, "<< /Shading << /Sh1 {s} >> >>", .{shading});
+        defer doc.allocator.free(resources);
+        try form.put("Type", Value.name("XObject"));
+        try form.put("Subtype", Value.name("Form"));
+        try form.put("BBox", Value.literal("[-32768 -32768 32768 32768]"));
+        try form.put("Group", Value.literal("<< /S /Transparency /CS /DeviceGray >>"));
+        try form.put("Resources", Value.literal(resources));
+        try w.writeStreamCompressed(&form, "/Sh1 sh\n");
+        try w.endObject();
+    }
+
     // 2. Font dictionaries. Composite entries are built as literal strings
     // in an arena so their backing memory outlives writeDict.
     var arena_state = std.heap.ArenaAllocator.init(doc.allocator);
@@ -438,7 +457,13 @@ pub fn writeColorFont(doc: *Document, w: *Writer, plan: *ColorFontPlan) !void {
     const inv = 1.0 / upem;
 
     const font_matrix = try std.fmt.allocPrint(arena, "[{d:.10} 0 0 {d:.10} 0 0]", .{ inv, inv });
-    const font_bbox = try std.fmt.allocPrint(arena, "[{d} {d} {d} {d}]", .{ head.x_min, head.y_min, head.x_max, head.y_max });
+    // A font without outlines (bitmap-only, e.g. OTB pixel fonts) has an
+    // empty head box that no glyph fits; all zeros tells the viewer to make
+    // no assumptions about glyph sizes (PDF 32000 9.6.5)
+    const font_bbox = if (head.x_min < head.x_max and head.y_min < head.y_max)
+        try std.fmt.allocPrint(arena, "[{d} {d} {d} {d}]", .{ head.x_min, head.y_min, head.x_max, head.y_max })
+    else
+        "[0 0 0 0]";
 
     // All subfonts share the plan's accumulated shadings/ExtGStates.
     const resources = try buildColorFontResources(arena, plan);
@@ -524,9 +549,10 @@ pub fn writeColorFont(doc: *Document, w: *Writer, plan: *ColorFontPlan) !void {
 }
 
 /// Build a single-byte ToUnicode CMap for one subfont's gid range
-/// [lo, hi), mapping each color glyph's PDF code to the Unicode codepoint
-/// it was shaped from (astral codepoints emitted as UTF-16 surrogate
-/// pairs).
+/// [lo, hi), mapping each color glyph's PDF code to the text it was shaped
+/// from - one code point, or the whole sequence of a ligature (emoji ZWJ
+/// sequences, flags, keycaps) - in UTF-16 (astral code points as
+/// surrogate pairs).
 fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: usize, hi: usize) ![]u8 {
     var w = std.Io.Writer.Allocating.init(arena);
     try w.writer.writeAll(
@@ -548,15 +574,23 @@ fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: u
     try w.writer.print("{d} beginbfchar\n", .{hi - lo});
     for (plan.gids.items[lo..hi], 0..) |gid, i| {
         const code = ColorFontPlan.localCode(i);
-        const cp = plan.emb.glyph_to_codepoint.get(gid) orelse 0xFFFD;
-        if (cp > 0xFFFF) {
-            const adjusted = cp - 0x10000;
-            const high: u16 = @intCast(0xD800 + (adjusted >> 10));
-            const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
-            try w.writer.print("<{X:0>2}> <{X:0>4}{X:0>4}>\n", .{ code, high, low });
-        } else {
-            try w.writer.print("<{X:0>2}> <{X:0>4}>\n", .{ code, cp });
+        var single: [1]u21 = .{0xFFFD};
+        const text: []const u21 = if (plan.emb.glyph_to_codepoint.get(gid)) |cp| blk: {
+            single[0] = cp;
+            break :blk &single;
+        } else plan.emb.ligature_codepoints.get(gid) orelse &single;
+        try w.writer.print("<{X:0>2}> <", .{code});
+        for (text) |cp| {
+            if (cp > 0xFFFF) {
+                const adjusted = cp - 0x10000;
+                const high: u16 = @intCast(0xD800 + (adjusted >> 10));
+                const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
+                try w.writer.print("{X:0>4}{X:0>4}", .{ high, low });
+            } else {
+                try w.writer.print("{X:0>4}", .{cp});
+            }
         }
+        try w.writer.writeAll(">\n");
     }
     try w.writer.writeAll(
         \\endbfchar
@@ -569,7 +603,8 @@ fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: u
 }
 
 /// Build the Type3 font's /Resources literal from the plan's accumulated
-/// shadings (/Sh{n}), ExtGStates (/Ga{n}) and bitmap images (/Im{n}).
+/// shadings (/Sh{n}), ExtGStates (/Ga{n}, soft masks /Gm{n}) and bitmap
+/// images (/Im{n}).
 fn buildColorFontResources(arena: std.mem.Allocator, plan: *ColorFontPlan) ![]u8 {
     var r = std.Io.Writer.Allocating.init(arena);
     try r.writer.writeAll("<<");
@@ -587,10 +622,13 @@ fn buildColorFontResources(arena: std.mem.Allocator, plan: *ColorFontPlan) ![]u8
         }
         try r.writer.writeAll(" >>");
     }
-    if (plan.res.ext_gstates.items.len > 0) {
+    if (plan.res.ext_gstates.items.len > 0 or plan.res.soft_masks.items.len > 0) {
         try r.writer.writeAll(" /ExtGState <<");
         for (plan.res.ext_gstates.items, 0..) |body, i| {
             try r.writer.print(" /Ga{d} {s}", .{ i + 1, body });
+        }
+        for (0..plan.res.soft_masks.items.len) |i| {
+            try r.writer.print(" /Gm{d} << /Type /ExtGState /SMask << /S /Luminosity /G {d} 0 R >> >>", .{ i + 1, plan.first_soft_mask_id + i });
         }
         try r.writer.writeAll(" >>");
     }
@@ -612,10 +650,16 @@ pub fn renderColorText(
     font_size: f64,
     x: f64,
     y: f64,
+    word_spacing: f64,
 ) !void {
     if (glyphs.len == 0) return;
     const cid_res = plan.font_index + 1; // /E{n}
     const has_remap = emb.gid_remap.count() > 0;
+    // Tw never reaches these runs (2-byte CID codes; code 32 is unassigned
+    // in the Type3 subfonts), so word spacing goes after space glyphs as
+    // TJ adjustments in the mono segments
+    const space_gid = text_render.spaceGlyph(emb, glyphs, word_spacing);
+    const ws_1000 = text_render.wordSpacing1000(word_spacing, font_size);
 
     try cw.print("{d:.2} {d:.2} Td\n", .{ x, y });
 
@@ -640,21 +684,27 @@ pub fn renderColorText(
             try cw.append("> Tj\n");
         } else {
             try cw.print("/E{d} {d:.2} Tf\n", .{ cid_res, font_size });
-            try cw.append("<");
-            for (glyphs[i..j]) |g| {
+            // A space ending the segment still widens the gap: the next
+            // segment continues from the advanced position
+            const widen = if (space_gid) |sp| std.mem.indexOfScalar(u16, glyphs[i..@min(j, glyphs.len - 1)], sp) != null else false;
+            try cw.append(if (widen) "[<" else "<");
+            for (glyphs[i..j], i..) |g, k| {
                 const final_gid = if (has_remap) emb.gid_remap.get(g) orelse 0 else g;
                 format.writeHex4(&hex_buf, final_gid);
                 try cw.append(&hex_buf);
+                if (widen and g == space_gid.? and k + 1 < glyphs.len) {
+                    try cw.writeKernAdjust(-ws_1000);
+                }
             }
-            try cw.append("> Tj\n");
+            try cw.append(if (widen) ">] TJ\n" else "> Tj\n");
         }
         i = j;
     }
 }
 /// Reserve object IDs for all color-font plans, starting at `next_id`:
 /// per 255-glyph subfont a font dict + ToUnicode CMap, one stream per
-/// CharProc (color glyph), and for bitmap glyphs an image XObject (+ SMask
-/// when it has alpha). Returns the next free object ID.
+/// CharProc (color glyph), one form per gradient soft mask, and for bitmap
+/// glyphs an image XObject (+ SMask when it has alpha). Returns the next free object ID.
 pub fn reserveIds(doc: *Document, start_id: ObjectId) !ObjectId {
     var next_id = start_id;
     for (doc.color_plans.items) |plan| {
@@ -665,6 +715,8 @@ pub fn reserveIds(doc: *Document, start_id: ObjectId) !ObjectId {
         }
         plan.first_charproc_id = next_id;
         next_id += @intCast(plan.gids.items.len);
+        plan.first_soft_mask_id = next_id;
+        next_id += @intCast(plan.res.soft_masks.items.len);
         for (plan.images.items) |img| {
             try plan.image_obj_ids.append(doc.allocator, next_id);
             next_id += 1;

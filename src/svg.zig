@@ -1501,7 +1501,7 @@ fn applyStyle(writer: *ContentWriter, style: Style) !void {
         if (!stroke.isNone()) {
             const rgb = stroke.toPdfRgb();
             try writer.print("{d:.3} {d:.3} {d:.3} RG\n", .{ rgb.r, rgb.g, rgb.b });
-            try writer.print("{d:.2} w\n", .{style.getStrokeWidth()});
+            try writer.print("{d:.4} w\n", .{style.getStrokeWidth()});
             try writer.print("{d} J\n", .{style.getStrokeLinecap().toPdfValue()});
             try writer.print("{d} j\n", .{style.getStrokeLinejoin().toPdfValue()});
         }
@@ -2318,6 +2318,21 @@ test "generate PDF content" {
     try std.testing.expect(std.mem.indexOf(u8, content, "1 0 0 -1 0 100") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "re") != null);
     try std.testing.expect(std.mem.indexOf(u8, content, "f") != null);
+}
+
+test "stroke widths keep their precision" {
+    // Widths are in user units, which the drawing scales: two decimals
+    // turned the tiger's 0.172 hairlines into 0.17
+    const allocator = std.testing.allocator;
+    const svg = try Svg.fromMemory(allocator,
+        \\<svg width="10" height="10"><path d="M0 0 L5 5" stroke="black" stroke-width="0.172"/></svg>
+    );
+    defer svg.deinit();
+    var states = std.ArrayListUnmanaged(OpacityState).empty;
+    defer states.deinit(allocator);
+    const content = try svg.toPdfContent(allocator, &states);
+    defer allocator.free(content);
+    try std.testing.expect(std.mem.indexOf(u8, content, "0.1720 w\n") != null);
 }
 
 test "percentage root dimensions fall back to viewBox" {

@@ -45,5 +45,40 @@ class QpdfFailures(unittest.TestCase):
                 c.extract_fonts_qpdf(f.name)
 
 
+def square_pdf(path: Path, color: str) -> str:
+    """A one-page PDF with a filled square in `color` ("r g b") and no
+    text: the text/position comparison sees nothing to tell apart."""
+    content = f"{color} rg 20 20 40 40 re f".encode()
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 80 80] /Contents 4 0 R >>",
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content)]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for n, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (n, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    path.write_bytes(out)
+    return str(path)
+
+
+class RenderComparison(unittest.TestCase):
+    def test_a_drawing_change_is_a_difference(self):
+        # References platen generated itself: a change in how something is
+        # drawn (a color glyph, a gradient) leaves text and positions alone
+        with tempfile.TemporaryDirectory() as tmp:
+            red = square_pdf(Path(tmp) / "red.pdf", "1 0 0")
+            blue = square_pdf(Path(tmp) / "blue.pdf", "0 0 1")
+            self.assertTrue(c.compare_pdfs(red, blue, 1.0)[0])
+            diffs = c.compare_renders(red, blue)
+            self.assertEqual(1, len(diffs), diffs)
+            self.assertIn("pixels differ", diffs[0])
+            self.assertEqual([], c.compare_renders(red, red))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -318,9 +318,20 @@ pub fn writeGlyphOutline(
     gid: u16,
     xf: Transform,
 ) !void {
+    try writeOutline(w, try glyphOutline(arena, ctx, gid, xf));
+}
+
+/// The contours of a glyph outline transformed by `xf` (empty for a glyph
+/// with no outline, such as a space). Allocated in `arena`.
+pub fn glyphOutline(arena: std.mem.Allocator, ctx: GlyfContext, gid: u16, xf: Transform) ![]const []Pt {
     var contours: std.ArrayListUnmanaged([]Pt) = .empty;
     try collectContours(arena, ctx, gid, xf, 0, &contours);
-    for (contours.items) |pts| {
+    return contours.items;
+}
+
+/// Emit PDF path operators for contours from glyphOutline.
+fn writeOutline(w: *std.Io.Writer, contours: []const []Pt) !void {
+    for (contours) |pts| {
         try writeContour(w, pts);
     }
 }
@@ -468,11 +479,19 @@ pub const PaintFormat = enum(u8) {
     _,
 };
 
-/// A single gradient color stop resolved to an RGB color + alpha.
-pub const GradientStop = struct {
-    offset: f64,
-    color: Color,
-    alpha: f64,
+/// A gradient's color stops, sorted by offset, with each stop's alpha
+/// (stop alpha × palette entry alpha) alongside.
+const ColorLine = struct {
+    stops: []gradient.ColorStop,
+    alphas: []f64,
+
+    /// The alpha shared by every stop, or null if it varies along the line.
+    fn constantAlpha(self: ColorLine) ?f64 {
+        for (self.alphas[1..]) |a| {
+            if (@abs(a - self.alphas[0]) > 0.001) return null;
+        }
+        return self.alphas[0];
+    }
 };
 
 /// Extend mode for a COLR color line.
@@ -629,6 +648,10 @@ pub const ColorResources = struct {
     allocator: std.mem.Allocator,
     shadings: std.ArrayListUnmanaged([]u8) = .empty,
     ext_gstates: std.ArrayListUnmanaged([]u8) = .empty,
+    /// Gray shading dicts of luminosity soft masks (gradient stop alpha).
+    /// Each becomes a transparency-group form XObject, set by an ExtGState
+    /// named "Gm{index+1}" (color_fonts.zig writes both).
+    soft_masks: std.ArrayListUnmanaged([]u8) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) ColorResources {
         return .{ .allocator = allocator };
@@ -637,8 +660,10 @@ pub const ColorResources = struct {
     pub fn deinit(self: *ColorResources) void {
         for (self.shadings.items) |s| self.allocator.free(s);
         for (self.ext_gstates.items) |s| self.allocator.free(s);
+        for (self.soft_masks.items) |s| self.allocator.free(s);
         self.shadings.deinit(self.allocator);
         self.ext_gstates.deinit(self.allocator);
+        self.soft_masks.deinit(self.allocator);
     }
 
     /// Register a shading dict body (owned copy taken). Returns 0-based index;
@@ -650,11 +675,23 @@ pub const ColorResources = struct {
     }
 
     /// Register an ExtGState dict body (owned copy taken). Returns 0-based
-    /// index; resource name is "Ga{index+1}".
+    /// index; resource name is "Ga{index+1}". An identical dict already
+    /// registered is reused (alphas repeat across glyphs and sweep wedges).
     fn addExtGState(self: *ColorResources, dict: []const u8) !usize {
+        for (self.ext_gstates.items, 0..) |existing, i| {
+            if (std.mem.eql(u8, existing, dict)) return i;
+        }
         const owned = try self.allocator.dupe(u8, dict);
         try self.ext_gstates.append(self.allocator, owned);
         return self.ext_gstates.items.len - 1;
+    }
+
+    /// Register a soft mask's gray shading dict body (owned copy taken).
+    /// Returns 0-based index; the ExtGState setting it is "Gm{index+1}".
+    fn addSoftMask(self: *ColorResources, dict: []const u8) !usize {
+        const owned = try self.allocator.dupe(u8, dict);
+        try self.soft_masks.append(self.allocator, owned);
+        return self.soft_masks.items.len - 1;
     }
 };
 
@@ -849,11 +886,16 @@ pub const PaintInterp = struct {
         const child = abs + readU24(self.colr.data, abs + 1);
         const gid = readU16(self.colr.data, abs + 4);
         const child_fmt = self.colr.paintFormat(child);
+        // An empty outline clips everything away. It must not reach the
+        // output: `W n` without a path sets no clip, so the child would
+        // cover the page
+        const outline = try glyphOutline(self.arena, self.glyf, gid, Transform.identity);
+        if (outline.len == 0) return;
 
         if (child_fmt == .solid or child_fmt == .var_solid) {
             // Fill the outline directly with the solid color.
             try self.beginSolid(child);
-            try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
+            try writeOutline(self.w, outline);
             try self.w.writeAll("f\n");
             try self.endSolid(child);
             return;
@@ -861,7 +903,7 @@ pub const PaintInterp = struct {
 
         // General case: set clip to the outline, then paint child into it.
         try self.w.writeAll("q\n");
-        try writeGlyphOutline(self.w, self.arena, self.glyf, gid, Transform.identity);
+        try writeOutline(self.w, outline);
         try self.w.writeAll("W n\n");
         self.clip_depth +|= 1;
         try self.renderPaint(child, depth + 1);
@@ -949,8 +991,10 @@ pub const PaintInterp = struct {
             if (self.ops_budget == 0) return;
             self.ops_budget -= 1;
             const layer = self.colr.v0Layer(i) orelse continue;
+            const outline = try glyphOutline(self.arena, self.glyf, layer.gid, Transform.identity);
+            if (outline.len == 0) continue; // `f` needs a path
             try self.beginSolidColor(layer.palette, 1.0);
-            try writeGlyphOutline(self.w, self.arena, self.glyf, layer.gid, Transform.identity);
+            try writeOutline(self.w, outline);
             try self.w.writeAll("f\n");
             try self.endSolidColor(layer.palette, 1.0);
         }
@@ -979,10 +1023,11 @@ pub const PaintInterp = struct {
     fn renderGradient(self: *PaintInterp, abs: usize, is_radial: bool) !void {
         if (self.clip_depth == 0) return; // unbounded fill: skip
         const color_line_abs = abs + readU24(self.colr.data, abs + 1);
-        const stops = try self.readColorLine(color_line_abs);
-        if (stops.len < 2) return;
+        const line = try self.readColorLine(color_line_abs);
+        if (line.stops.len < 2) return;
 
-        var dict: std.Io.Writer.Allocating = .init(self.arena);
+        // Geometry shared by the color shading and its soft mask
+        var geometry: std.Io.Writer.Allocating = .init(self.arena);
         if (is_radial) {
             const x0: f64 = @floatFromInt(readI16(self.colr.data, abs + 4));
             const y0: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
@@ -990,7 +1035,7 @@ pub const PaintInterp = struct {
             const x1: f64 = @floatFromInt(readI16(self.colr.data, abs + 10));
             const y1: f64 = @floatFromInt(readI16(self.colr.data, abs + 12));
             const r1: f64 = @floatFromInt(readU16(self.colr.data, abs + 14));
-            try dict.writer.print("<< /ShadingType 3 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}] /Extend [true true] /Function ", .{ x0, y0, r0, x1, y1, r1 });
+            try geometry.writer.print("/ShadingType 3 /Coords [{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2}] /Extend [true true]", .{ x0, y0, r0, x1, y1, r1 });
         } else {
             // Three-point form → two-point axial gradient. The iso-color lines
             // are parallel to (p2-p0); the axis runs from p0 to the projection
@@ -1002,13 +1047,41 @@ pub const PaintInterp = struct {
             const p2x: f64 = @floatFromInt(readI16(self.colr.data, abs + 12));
             const p2y: f64 = @floatFromInt(readI16(self.colr.data, abs + 14));
             const end = axialEndpoint(p0x, p0y, p1x, p1y, p2x, p2y);
-            try dict.writer.print("<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{d:.2} {d:.2} {d:.2} {d:.2}] /Extend [true true] /Function ", .{ p0x, p0y, end.x, end.y });
+            try geometry.writer.print("/ShadingType 2 /Coords [{d:.2} {d:.2} {d:.2} {d:.2}] /Extend [true true]", .{ p0x, p0y, end.x, end.y });
         }
-        try gradient.writeFunctionDict(stops, &dict.writer);
-        try dict.writer.writeAll(" >>");
+        const geom = geometry.writer.buffered();
 
+        // Stop alpha: a constant one is /ca (replacing, so it carries the
+        // enclosing composite's alpha_scale); a varying one is a luminosity
+        // soft mask drawing the same gradient in gray, which leaves the
+        // enclosing /ca in place
+        var mask: ?usize = null;
+        var ca: ?usize = null;
+        if (line.constantAlpha()) |a| {
+            const total = a * self.alpha_scale;
+            if (total < 0.001) return;
+            if (total < 0.999) {
+                const gs = try std.fmt.allocPrint(self.arena, "<< /Type /ExtGState /ca {d:.3} >>", .{total});
+                ca = try self.res.addExtGState(gs);
+            }
+        } else {
+            var m: std.Io.Writer.Allocating = .init(self.arena);
+            try m.writer.print("<< {s} /ColorSpace /DeviceGray /Function ", .{geom});
+            try gradient.writeChannelFunctionDict(line.stops, .{ .gray = line.alphas }, &m.writer);
+            try m.writer.writeAll(" >>");
+            mask = try self.res.addSoftMask(m.writer.buffered());
+        }
+
+        var dict: std.Io.Writer.Allocating = .init(self.arena);
+        try dict.writer.print("<< {s} /ColorSpace /DeviceRGB /Function ", .{geom});
+        try gradient.writeFunctionDict(line.stops, &dict.writer);
+        try dict.writer.writeAll(" >>");
         const idx = try self.res.addShading(dict.writer.buffered());
+
+        if (mask) |i| try self.w.print("q\n/Gm{d} gs\n", .{i + 1});
+        if (ca) |i| try self.w.print("q\n/Ga{d} gs\n", .{i + 1});
         try self.w.print("/Sh{d} sh\n", .{idx + 1});
+        if (mask != null or ca != null) try self.w.writeAll("Q\n");
     }
 
     /// Render a sweep (conic) gradient. PDF has no conic shading type, so
@@ -1021,8 +1094,8 @@ pub const PaintInterp = struct {
         // centerX/centerY(FWORD), startAngle/endAngle(F2Dot14, biased).
         const color_line_abs = abs + readU24(self.colr.data, abs + 1);
         const extend: Extend = @fromBackingInt(@intCast(readU8(self.colr.data, color_line_abs)));
-        const stops = try self.readColorLine(color_line_abs);
-        if (stops.len < 2) return;
+        const line = try self.readColorLine(color_line_abs);
+        if (line.stops.len < 2) return;
 
         const cx: f64 = @floatFromInt(readI16(self.colr.data, abs + 4));
         const cy: f64 = @floatFromInt(readI16(self.colr.data, abs + 6));
@@ -1048,7 +1121,15 @@ pub const PaintInterp = struct {
             const a1 = 360.0 * @as(f64, @floatFromInt(i + 1)) / wedges;
             const mid = (a0 + a1) / 2.0;
             const t = sweepExtendT((mid - start) / span, extend);
-            const c = sampleColorLine(stops, t);
+            const c = sampleColorLine(line.stops, t);
+            // Each wedge is flat, so its alpha is a plain /ca
+            const alpha = sampleValues(line.stops, line.alphas, t) * self.alpha_scale;
+            if (alpha < 0.001) continue;
+            const translucent = alpha < 0.999;
+            if (translucent) {
+                const gs = try std.fmt.allocPrint(self.arena, "<< /Type /ExtGState /ca {d:.3} >>", .{alpha});
+                try self.w.print("q\n/Ga{d} gs\n", .{try self.res.addExtGState(gs) + 1});
+            }
             try self.w.print("{d:.3} {d:.3} {d:.3} rg\n", .{ c.r, c.g, c.b });
             try self.w.print("{d:.2} {d:.2} m {d:.2} {d:.2} l {d:.2} {d:.2} l h f\n", .{
                 cx - back * @cos(std.math.degreesToRadians(mid)),
@@ -1058,31 +1139,44 @@ pub const PaintInterp = struct {
                 cx + radius * @cos(std.math.degreesToRadians(a1)),
                 cy + radius * @sin(std.math.degreesToRadians(a1)),
             });
+            if (translucent) try self.w.writeAll("Q\n");
         }
     }
 
-    fn readColorLine(self: *PaintInterp, abs: usize) ![]gradient.ColorStop {
+    fn readColorLine(self: *PaintInterp, abs: usize) !ColorLine {
         // ColorLine: uint8 extend; uint16 numStops; ColorStop[numStops].
         // ColorStop: F2Dot14 stopOffset; uint16 paletteIndex; F2Dot14 alpha.
+        const Stop = struct { stop: gradient.ColorStop, alpha: f64 };
         const num = readU16(self.colr.data, abs + 1);
-        if (num == 0) return &.{};
-        const stops = try self.arena.alloc(gradient.ColorStop, num);
-        var i: usize = 0;
-        while (i < num) : (i += 1) {
+        if (num == 0) return .{ .stops = &.{}, .alphas = &.{} };
+        const read = try self.arena.alloc(Stop, num);
+        for (read, 0..) |*stop, i| {
             const s = abs + 3 + i * 6;
             const off = readF2Dot14(self.colr.data, s);
             const pal = readU16(self.colr.data, s + 2);
             const resolved = self.cpal.color(pal);
             const c = if (resolved) |r| r.c else self.fg;
-            stops[i] = .{ .offset = std.math.clamp(off, 0.0, 1.0), .color = c };
+            const entry_alpha: f64 = if (resolved) |r| @as(f64, @floatFromInt(r.alpha)) / 255.0 else 1.0;
+            stop.* = .{
+                .stop = .{ .offset = std.math.clamp(off, 0.0, 1.0), .color = c },
+                .alpha = std.math.clamp(readF2Dot14(self.colr.data, s + 4) * entry_alpha, 0.0, 1.0),
+            };
         }
         // PDF stitching functions need non-decreasing, in-range offsets.
-        std.sort.pdq(gradient.ColorStop, stops, {}, struct {
-            fn lt(_: void, a: gradient.ColorStop, b: gradient.ColorStop) bool {
-                return a.offset < b.offset;
+        std.sort.pdq(Stop, read, {}, struct {
+            fn lt(_: void, a: Stop, b: Stop) bool {
+                return a.stop.offset < b.stop.offset;
             }
         }.lt);
-        return stops;
+        const line: ColorLine = .{
+            .stops = try self.arena.alloc(gradient.ColorStop, num),
+            .alphas = try self.arena.alloc(f64, num),
+        };
+        for (read, line.stops, line.alphas) |r, *stop, *alpha| {
+            stop.* = r.stop;
+            alpha.* = r.alpha;
+        }
+        return line;
     }
 };
 
@@ -1147,6 +1241,22 @@ fn sampleColorLine(stops: []const gradient.ColorStop, t: f64) Color.Rgbf {
         }
     }
     return last.color.toRgbf();
+}
+
+/// Piecewise-linear evaluation of per-stop `values` (in the order of the
+/// sorted `stops`) at t ∈ [0, 1].
+fn sampleValues(stops: []const gradient.ColorStop, values: []const f64, t: f64) f64 {
+    if (t <= stops[0].offset) return values[0];
+    if (t >= stops[stops.len - 1].offset) return values[values.len - 1];
+    for (0..stops.len - 1) |i| {
+        const b = stops[i + 1];
+        if (t <= b.offset) {
+            const seg = b.offset - stops[i].offset;
+            const u = if (seg < 1e-9) 1.0 else (t - stops[i].offset) / seg;
+            return values[i] + (values[i + 1] - values[i]) * u;
+        }
+    }
+    return values[values.len - 1];
 }
 
 /// Map a COLR CompositeMode to a PDF /BM blend-mode name, or null for modes
@@ -1329,6 +1439,56 @@ test "paint interpreter emits a shading for a gradient glyph" {
     try testing.expect(std.mem.indexOf(u8, fx.res.shadings.items[0], "/ShadingType 2") != null);
     try testing.expect(std.mem.indexOf(u8, out, "W n") != null);
     try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
+}
+
+test "gradient stop alpha becomes a luminosity soft mask" {
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
+
+    var interp = fx.interp();
+    // gid 2236 = U+1F4E3 megaphone: one linear gradient of a single palette
+    // color fading from alpha 1 (offset 0) to alpha 0 (offset 1), per fontTools
+    try interp.render(2236);
+    const out = fx.output();
+
+    try testing.expectEqual(@as(usize, 1), fx.res.shadings.items.len);
+    try testing.expectEqual(@as(usize, 1), fx.res.soft_masks.items.len);
+    // The mask is the same axial geometry in gray, carrying the alpha ramp
+    const fill = fx.res.shadings.items[0];
+    const mask = fx.res.soft_masks.items[0];
+    try testing.expect(std.mem.indexOf(u8, mask, "/ShadingType 2") != null);
+    try testing.expect(std.mem.indexOf(u8, mask, "/ColorSpace /DeviceGray") != null);
+    try testing.expect(std.mem.indexOf(u8, mask, "/C0 [1.000] /C1 [0.000]") != null or
+        std.mem.indexOf(u8, mask, "/C0 [1.000]\n/C1 [0.000]") != null);
+    const coords = std.mem.indexOf(u8, fill, "/Coords").?;
+    const coords_end = std.mem.indexOfScalarPos(u8, fill, coords, ']').?;
+    try testing.expect(std.mem.indexOf(u8, mask, fill[coords .. coords_end + 1]) != null);
+    // The shading is painted under the mask, inside its own q/Q
+    try testing.expect(std.mem.indexOf(u8, out, "q\n/Gm1 gs\n/Sh1 sh\nQ\n") != null);
+}
+
+test "constant gradient stop alpha becomes /ca, scaled by an enclosing composite" {
+    var fx = try InterpFixture.init("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf");
+    defer fx.deinit();
+    var interp = fx.interp();
+    interp.alpha_scale = 0.5;
+    interp.clip_depth = 1;
+    // PaintLinearGradient (format 4) with an inline ColorLine of two stops,
+    // both at alpha 0.5 (F2Dot14 0x2000)
+    const paint = [_]u8{
+        4, 0, 0, 16, // format, colorLineOffset 16
+        0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 100, 0, // p0 (0,0) p1 (0,100) p2 (100,0)
+        0, 0, 2, // extend pad, 2 stops
+        0x00, 0x00, 0, 0, 0x20, 0x00, // offset 0, palette 0, alpha 0.5
+        0x40, 0x00, 0, 0, 0x20, 0x00, // offset 1, palette 0, alpha 0.5
+    };
+    interp.colr = std.mem.zeroes(Colr);
+    interp.colr.data = &paint;
+    try interp.renderPaint(0, 0);
+    try testing.expectEqual(@as(usize, 0), fx.res.soft_masks.items.len);
+    try testing.expectEqual(@as(usize, 1), fx.res.ext_gstates.items.len);
+    try testing.expectEqualStrings("<< /Type /ExtGState /ca 0.250 >>", fx.res.ext_gstates.items[0]);
+    try testing.expectEqualStrings("q\n/Ga1 gs\n/Sh1 sh\nQ\n", fx.output());
 }
 
 test "all-off-curve contour walks as four smooth quadratic segments" {
@@ -1538,6 +1698,19 @@ test "COLR v1 linear gradients on a non-emoji font (Bungee Spice)" {
     try testing.expect(std.mem.indexOf(u8, out, "/Sh1 sh") != null);
     try testing.expect(std.mem.indexOf(u8, out, "/Sh2 sh") != null);
     try testing.expectEqual(@as(usize, 0), std.mem.count(u8, out, "f\n"));
+}
+
+test "PaintGlyph of an empty outline paints nothing (Bungee Spice space)" {
+    var fx = try InterpFixture.init("test/fonts/Bungee Color/BungeeSpice-Regular-COLRv1.ttf");
+    defer fx.deinit();
+
+    var interp = fx.interp();
+    // gid 1 = space: two layers of PaintGlyph(space, no contours) over a
+    // linear gradient. An empty clip shows nothing; `W n` without a path
+    // would leave the gradient unclipped over the whole page
+    try interp.render(1);
+    try testing.expectEqualStrings("", fx.output());
+    try testing.expectEqual(@as(usize, 0), fx.res.shadings.items.len);
 }
 
 test "COLR v0 paint interpreter fills layers with palette colors (Bungee)" {
