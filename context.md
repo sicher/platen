@@ -1,15 +1,16 @@
 # platen Context
 
 ## Current Focus
-**0.12.0 released (2026-10-17)**: font collections, system font lookup,
-legacy `kern` table, PDF/A date and file ID fixes.
+**0.13.0 released (2026-10-22)**: complete GSUB engine checked against
+HarfBuzz (ccmp/locl/rlig/clig on by default), default ignorables,
+variation sequences, COLRv1 gradient alpha, continuing styled text,
+Unicode composition, pixel check for platen-made references, and a batch
+of write()/decoration fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
 user decision. Zig **0.17**, zero dependencies, 569 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
-Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
-continuing styled text across regions, Unicode composition, and a batch
-of rendering fixes found by the showcase (session #31); a complete GSUB
-engine checked against HarfBuzz (session #32).
+Since 0.13.0 on dev: nothing yet (CHANGELOG needs a new `## Unreleased`
+section when work lands).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
 `.tools/devkit/devkit release X.Y.Z` (merge dev, date the notes, set the
