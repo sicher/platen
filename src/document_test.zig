@@ -4378,3 +4378,21 @@ test "CFF subsets keep every drawn glyph, contextual variants included" {
         }
     }
 }
+
+test "color emoji ligatures extract as their whole sequence" {
+    // ccmp joins ZWJ sequences and flags into one color glyph; its Type3
+    // ToUnicode must give the sequence, not U+FFFD
+    var doc = Document.init(std.testing.allocator, std.testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0; // keep streams searchable
+    try doc.addPage(.{});
+    const emoji = doc.loadFont(noto_color_emoji_path, .identity) catch return error.SkipZigTest;
+    // Family (man ZWJ woman ZWJ girl), Swedish flag
+    _ = try doc.writeAt(.{ .x = 50, .y = 100 }, "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{1F1F8}\u{1F1EA}", .{ .font = emoji, .size = 12 }, .{});
+    const pdf = try doc.output();
+    defer doc.allocator.free(pdf);
+    // Once in the mono CID font's map, once in the Type3 color font's
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<D83DDC68200DD83DDC69200DD83DDC67>"));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, pdf, "<D83CDDF8D83CDDEA>"));
+    try std.testing.expect(std.mem.indexOf(u8, pdf, "<FFFD>") == null);
+}

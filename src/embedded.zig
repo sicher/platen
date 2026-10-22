@@ -8,12 +8,15 @@
 const std = @import("std");
 const ttf = @import("ttf.zig");
 const unicode_compose = @import("unicode_compose.zig");
+const gsub = @import("gsub.zig");
 
-/// Whether `text` may contain a combining mark: UTF-8 lead bytes below
-/// 0xCC encode code points below U+0300 (unicode_compose.first_mark).
-fn mayCompose(text: []const u8) bool {
+/// Whether `text` may contain a combining mark or a default ignorable,
+/// i.e. needs decodeText before measuring: UTF-8 lead bytes below 0xCC
+/// encode code points below U+0300 (unicode_compose.first_mark); 0xC2
+/// leads the soft hyphen U+00AD, the one ignorable below that.
+fn mayNeedDecoding(text: []const u8) bool {
     for (text) |b| {
-        if (b >= 0xCC) return true;
+        if (b >= 0xCC or b == 0xC2) return true;
     }
     return false;
 }
@@ -250,6 +253,9 @@ pub const EmbeddedFont = struct {
     scratch_codepoints: std.ArrayListUnmanaged(u21) = .empty,
     // Per scratch code point: composed from a decomposed sequence (decodeText)
     scratch_composed: std.ArrayListUnmanaged(bool) = .empty,
+    /// decodeText found a default ignorable (U+FE0F, ZWJ, soft hyphen...):
+    /// the text must go through the shaper, which removes them
+    scratch_ignorables: bool = false,
     scratch_glyphs: std.ArrayListUnmanaged(u16) = .empty,
 
     // COLR/CPAL color-font support (lazily probed). All slices in ColorInfo
@@ -593,6 +599,7 @@ pub const EmbeddedFont = struct {
         try self.scratch_glyphs.ensureTotalCapacity(self.allocator, text.len);
 
         var may_compose = false;
+        self.scratch_ignorables = false;
         var i: usize = 0;
         while (i < text.len) {
             const byte = text[i];
@@ -608,6 +615,7 @@ pub const EmbeddedFont = struct {
                 continue;
             };
             if (codepoint >= unicode_compose.first_mark) may_compose = true;
+            if (gsub.Ignorable.of(codepoint) != .none) self.scratch_ignorables = true;
             self.scratch_codepoints.appendAssumeCapacity(codepoint);
             i += len;
         }
@@ -660,15 +668,16 @@ pub const EmbeddedFont = struct {
         const codepoints = &self.scratch_codepoints;
         const base_glyphs = &self.scratch_glyphs;
 
-        // Initialize OpenType features if any GSUB/GPOS feature is enabled
-        if (self.anyShapingFeatureEnabled()) {
+        // Initialize OpenType features if any GSUB/GPOS feature is enabled,
+        // or the shaper has ignorables to remove
+        if (self.anyShapingFeatureEnabled() or self.scratch_ignorables) {
             try self.initOpenTypeFeatures();
         }
 
         // Apply GSUB substitutions if enabled (any substitution feature)
         if (base_glyphs.items.len > 0) {
             if (self.ot_features) |ot| {
-                if (try self.hasActiveGsub(ot)) {
+                if (self.scratch_ignorables or try self.hasActiveGsub(ot)) {
                     // Apply GSUB substitutions, track results, and return glyphs
                     return try self.applyGSUBAndTrack(codepoints.items, self.scratch_composed.items, base_glyphs.items, scale, out_alloc);
                 }
@@ -716,10 +725,28 @@ pub const EmbeddedFont = struct {
             const next = if (end < shaped.len) shaped[end].cluster else codepoints.len;
             const first: usize = @min(cluster, codepoints.len);
             const last: usize = @max(first, @min(next, codepoints.len));
-            if (last > first) try self.trackClusterText(result[k..end], codepoints[first..last], composed[first..last]);
+            if (last > first) try self.trackClusterTextKept(result[k..end], codepoints[first..last], composed[first..last], ot.shaper.dropped.items[first..last]);
             k = end;
         }
         return result;
+    }
+
+    /// trackClusterText without the default ignorables shaping removed:
+    /// they have no glyph and are no part of a glyph's text (a soft hyphen
+    /// must not make "o" extract as "o\u{AD}"). Ignorables a ligature took
+    /// up (ZWJ in an emoji sequence) stay.
+    fn trackClusterTextKept(self: *EmbeddedFont, glyphs: []const u16, cps: []const u21, composed: []const bool, dropped: []const bool) !void {
+        if (std.mem.indexOfScalar(bool, dropped, true) == null) return self.trackClusterText(glyphs, cps, composed);
+        var kept_cps: std.ArrayListUnmanaged(u21) = .empty;
+        defer kept_cps.deinit(self.allocator);
+        var kept_composed: std.ArrayListUnmanaged(bool) = .empty;
+        defer kept_composed.deinit(self.allocator);
+        for (cps, composed, dropped) |cp, c, d| {
+            if (d) continue;
+            try kept_cps.append(self.allocator, cp);
+            try kept_composed.append(self.allocator, c);
+        }
+        if (kept_cps.items.len > 0) try self.trackClusterText(glyphs, kept_cps.items, kept_composed.items);
     }
 
     fn trackGlyphWidth(self: *EmbeddedFont, gid: u16, scale: f64) !void {
@@ -778,8 +805,9 @@ pub const EmbeddedFont = struct {
     /// Returns allocated slice that caller must free
     pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {
         try self.decodeText(text);
+        if (self.scratch_ignorables) try self.initOpenTypeFeatures();
         if (self.ot_features) |ot| {
-            if (try self.hasActiveGsub(ot)) {
+            if (self.scratch_ignorables or try self.hasActiveGsub(ot)) {
                 return ot.glyphIds(self.scratch_glyphs.items, self.scratch_codepoints.items, self.feature_flags);
             }
         }
@@ -1058,10 +1086,18 @@ pub const EmbeddedFont = struct {
                 } else |_| {} // OOM etc: fall through to unshaped estimate
             }
         }
-        // Combining marks may compose into precomposed glyphs (decodeText);
-        // lead bytes below 0xCC encode code points below U+0300 and never do
-        if (mayCompose(text)) {
+        // Combining marks may compose into precomposed glyphs, and default
+        // ignorables are removed by the shaper (decodeText finds both)
+        if (mayNeedDecoding(text)) {
             if (self.decodeText(text)) {
+                if (self.scratch_ignorables) {
+                    self.initOpenTypeFeatures() catch {};
+                    if (self.ot_features) |ot| {
+                        if (self.measureShaped(text, size, char_spacing, ot)) |width| {
+                            return width;
+                        } else |_| {}
+                    }
+                }
                 return self.glyphSequenceWidth(self.scratch_glyphs.items, size, char_spacing);
             } else |_| {} // OOM: fall through to unshaped estimate
         }
@@ -3022,6 +3058,55 @@ test "ccmp output maps back to the text as typed" {
         try expected.appendSlice(std.testing.allocator, unicode_compose.decompose(cp, &buf));
     }
     try std.testing.expectEqualSlices(u21, expected.items, extracted.items);
+}
+
+test "default ignorables are removed and stay out of the text" {
+    var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf");
+    defer font.deinit();
+    // Soft hyphen and ZWSP vanish; ZWJ between f and i does not block the
+    // ligature (Inter has none for "fi" by default, so check text only)
+    const text = "co\u{00AD}op a\u{200B}b f\u{200D}i";
+    const glyphs = try font.markUnicodeCharsUsed(text, null);
+    defer font.allocator.free(glyphs);
+    const plain = try font.markUnicodeCharsUsed("coop ab fi", null);
+    defer font.allocator.free(plain);
+    try std.testing.expectEqualSlices(u16, plain, glyphs);
+
+    // No glyph's text picked up an ignorable ("o" must not become "o" + SHY)
+    var extracted: std.ArrayListUnmanaged(u21) = .empty;
+    defer extracted.deinit(std.testing.allocator);
+    try textOfGlyphs(font, glyphs, &extracted);
+    var expected: std.ArrayListUnmanaged(u21) = .empty;
+    defer expected.deinit(std.testing.allocator);
+    var it = (try std.unicode.Utf8View.init("coop ab fi")).iterator();
+    while (it.nextCodepoint()) |cp| try expected.append(std.testing.allocator, cp);
+    try std.testing.expectEqualSlices(u21, expected.items, extracted.items);
+}
+
+test "a ZWJ taken up by an emoji ligature stays in its text" {
+    var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Noto Emoji/NotoEmoji-Regular.ttf");
+    defer font.deinit();
+    const family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+    const glyphs = try font.markUnicodeCharsUsed(family, null);
+    defer font.allocator.free(glyphs);
+    try std.testing.expectEqual(@as(usize, 1), glyphs.len);
+    try std.testing.expectEqualSlices(u21, &.{ 0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467 }, font.ligature_codepoints.get(glyphs[0]).?);
+
+    // U+FE0F after a heart: removed, so the heart maps to itself alone
+    const heart = try font.markUnicodeCharsUsed("\u{2764}\u{FE0F}", null);
+    defer font.allocator.free(heart);
+    try std.testing.expectEqual(@as(usize, 1), heart.len);
+    try std.testing.expectEqual(@as(?u21, 0x2764), font.glyph_to_codepoint.get(heart[0]));
+}
+
+test "default ignorables measure as nothing, with and without GSUB" {
+    for ([_][]const u8{ "test/fonts/Charter/Charter Regular.ttf", "test/fonts/Inter/Inter-Regular.ttf" }) |path| {
+        var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, path);
+        defer font.deinit();
+        const with = font.measureTextWidthSpaced("co\u{00AD}op a\u{200B}b\u{FEFF}", 12, 0);
+        const without = font.measureTextWidthSpaced("coop ab", 12, 0);
+        try std.testing.expectEqual(without, with);
+    }
 }
 
 /// A parsed font file: one weight/style of one typeface. Caller-owned and

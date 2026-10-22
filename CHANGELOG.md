@@ -24,6 +24,14 @@
   `setFeature`). `ccmp` gives dotless i/j under accents (Gentium, Inter:
   `j́`, `ị́`, Lithuanian `į́`) and joins emoji ZWJ sequences, skin tones
   and flags into one glyph (Noto Color Emoji).
+- **Default ignorables are removed:** U+FE0F/U+FE0E, ZWJ, ZWNJ, zero-width
+  space, soft hyphen, word joiner, BOM and the other Default_Ignorable code
+  points no longer draw (U+FE0F was .notdef in Noto Color Emoji, a soft
+  hyphen passed to `writeAt` a visible hyphen) and add no width. During
+  GSUB they are skipped where HarfBuzz skips them - ZWJ always, ZWNJ only
+  in context - so keycaps (`1️⃣`), `❤️` and `🏳️‍🌈` join, `f`+ZWJ+`i` still
+  ligates and ZWNJ still blocks ligatures. Their code points stay out of
+  extracted text.
 - CLI `shape <font> [+feat|-feat]...`: glyph IDs for each stdin line, as
   rendering shapes it.
 
@@ -39,6 +47,10 @@
   of a character already drawn plainly (Inter's raised hyphen in `A-B`
   after `a-b`) rendered as .notdef. Every drawn glyph is kept now, as for
   TrueType.
+- **Color emoji ligatures extracted as U+FFFD:** the Type3 ToUnicode of
+  a color font mapped only single code points, so a joined emoji (ZWJ
+  family, flag, keycap) copied as a replacement character. It maps to the
+  whole sequence now.
 - **Text extraction of substituted glyphs:** ToUnicode now follows the
   shaped glyphs' clusters - a ligature maps to its characters, a glyph a
   multiple substitution produced to its own character of the
@@ -97,8 +109,9 @@
 ### Internal
 
 - GSUB differential test: `test/shaping/harfbuzz.txt` holds HarfBuzz's
-  glyphs for Latin, diacritic and emoji texts in Inter, Satoshi, Gentium,
-  Bungee and Noto Emoji under several feature sets, plus a synthetic font
+  glyphs for Latin, diacritic, default-ignorable and emoji texts in Inter,
+  Satoshi, Gentium, Bungee, Charter and Noto Emoji under several feature
+  sets (HarfBuzz removing default ignorables, as platen does), plus a synthetic font
   with one scenario per lookup type and flag
   (`scripts/gen_gsub_test_font.py`); `scripts/gen_shaping_reference.py`
   regenerates it.

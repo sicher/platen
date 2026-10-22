@@ -4,7 +4,7 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 555 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 559 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
@@ -22,11 +22,9 @@ sync-dev` on dev. Never commit to main directly (config bootstrap for
 CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 
 ## What's Next
-- Next (session #32 follow-up, TODO.md): default ignorables in shaping -
-  skip U+FE0F/ZWJ while matching, then remove them (HarfBuzz with
-  REMOVE_DEFAULT_IGNORABLES as the oracle); maybe cmap format 14. Its
-  failing test: put the U+FE0F emoji texts back into
-  scripts/gen_shaping_reference.py (keycaps, ❤️, 🏳️‍🌈).
+- Open from session #32 (TODO.md): COLRv1 gradient stop alpha (Noto
+  rainbow flag renders grey); `clig` default (user decision); cmap
+  format 14.
 - TODO.md roadmap: text render modes (`Tr`), Form XObject stamps, the
   opt-in 16-bit -> 8-bit flag for PDF/A-1b, splitting document.zig
   (~4,400 lines), parallel page rendering, metadata encryption; post-1.0:
@@ -62,6 +60,9 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 - **ToUnicode from clusters**; multi-glyph clusters map glyph by glyph
   when the decomposition fits (test: ccmp text extracts as typed, NFD for
   precomposed input that ccmp splits).
+- **Default ignorables** (U+FE0F, ZWJ, soft hyphen...) skipped in
+  matching and removed after shaping, HarfBuzz as oracle; color-font
+  ToUnicode now maps emoji ligatures to their sequence (was U+FFFD).
 - **Performance:** first version was 25% slower in the shared-face
   invoice bench (more work: ccmp now runs). Profiled with `sample`; fixes
   in DESIGN.md "GSUB engine". Now on par (shared, 8 threads) and +20%

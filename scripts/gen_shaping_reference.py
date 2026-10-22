@@ -9,7 +9,8 @@ GSUB lookups of every type, applied in lookup order, with lookup flags.
 Only glyph IDs are compared (substitution), not positions.
 
 HarfBuzz runs with script Zyyy, so it selects the DFLT script like platen
-(no script itemization), and left-to-right.
+(no script itemization), left-to-right, and removes default ignorables
+(as platen does).
 
 File format:
     font <path>
@@ -44,6 +45,10 @@ LATIN = [
     "į́ i̇̀ ị́ é̂ à́̂",
     "Á Ë Õ ñ ç ǧ",
     "ﬁ ﬂ Æ œ ß ẞ Ð þ",
+    # Default ignorables: removed after shaping, skipped while matching
+    # (ZWJ; ZWNJ only in context), so f<ZWJ>i still ligates and f<ZWNJ>i
+    # does not
+    "co\u00ADop a\u200Bb f\u200Di f\u200Ci \u2060x\uFEFF -\u200D>",
 ]
 
 # Synthetic font with every lookup type (scripts/gen_gsub_test_font.py):
@@ -70,9 +75,13 @@ ALL_SCENARIO_TEXTS = [t for texts in GSUB_SCENARIOS.values() for t in texts]
 EMOJI = [
     "\U0001F600 \U0001F44D\U0001F3FD \U0001F1F8\U0001F1EA \U0001F1FA\U0001F1F8",
     "\U0001F468\u200D\U0001F469\u200D\U0001F467 \U0001F9D1\U0001F3FF\u200D\U0001F4BB",
+    "\U0001F3F3\uFE0F\u200D\U0001F308 \u2764\uFE0F \u263A\uFE0E",
+    "1\uFE0F\u20E3 #\uFE0F\u20E3 \U0001F9D1\U0001F3FF\u200D\U0001F4BB\uFE0F",
 ]
 
 CASES = [
+    # No GSUB: ignorables are removed on the unshaped path too
+    ("test/fonts/Charter/Charter Regular.ttf", [], LATIN),
     ("test/fonts/Noto Emoji/NotoEmoji-Regular.ttf", [], EMOJI),
     ("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", [], EMOJI),
     (GSUB_TEST, [], ALL_SCENARIO_TEXTS),
@@ -111,6 +120,9 @@ def shape(font, text, features):
     buf.direction = "ltr"
     buf.script = "Zyyy"
     buf.language = "en"
+    # platen drops default ignorables (U+FE0F, ZWJ, soft hyphen...) that
+    # survive shaping instead of drawing them as zero-width glyphs
+    buf.flags = hb.BufferFlags.REMOVE_DEFAULT_IGNORABLES
     hb.shape(font, buf, features)
     return [info.codepoint for info in buf.glyph_infos]
 

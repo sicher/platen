@@ -1174,10 +1174,20 @@ stays DFLT, else latn; default language system.
   with script Zyyy so it picks DFLT like platen, and clig/rclt/... off).
   `test/fonts/gsub/GsubTest.ttf` (`scripts/gen_gsub_test_font.py`) has one
   stylistic set per lookup type/flag scenario.
-- Not done: default ignorables (U+FE0F, ZWJ, ...) are neither skipped in
-  matching nor hidden afterwards, and cmap format 14 variation glyphs are
-  not looked up - emoji with U+FE0F (keycaps, ❤️, 🏳️‍🌈) differ from
-  HarfBuzz (U+FE0F draws .notdef, as before).
+- Default ignorables (session #32, `gsub.Ignorable`, HarfBuzz's set
+  without U+115F/1160/3164/FFA0): skipped while matching as HarfBuzz's
+  skippy_iter "maybe" - taken if they match, else skipped; ZWJ always,
+  ZWNJ only in backtrack/lookahead, "hidden" ones (CGJ, Mongolian FVS,
+  tags) never. Once substituted they are ordinary glyphs. After GSUB the
+  rest are removed (REMOVE_DEFAULT_IGNORABLES, the oracle's flag) and
+  marked in `Shaper.dropped` by original code point index (`Glyph.cp`,
+  never merged), so `trackClusterTextKept` leaves them out of ToUnicode
+  while a ZWJ inside an emoji ligature stays. Text with ignorables always
+  goes through the shaper (`scratch_ignorables` from decodeText), also in
+  fonts without GSUB and in measurement (`mayNeedDecoding`: lead bytes
+  >= 0xCC or 0xC2 for the soft hyphen).
+- Not done: cmap format 14 variation glyphs (none of the test fonts need
+  them).
 
 ### Concurrency model
 - **Documents share nothing** — one Document per thread renders

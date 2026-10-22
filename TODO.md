@@ -194,15 +194,16 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 
 ## Open after the GSUB engine (2026-10-22)
 
-- [ ] **Default ignorables in shaping.** U+FE0F, ZWJ and other
-  Default_Ignorable code points are matched like any glyph and drawn
-  afterwards (U+FE0F as .notdef in Noto Color Emoji), so keycaps, ❤️ and
-  🏳️‍🌈 differ from HarfBuzz. HarfBuzz skips them while matching (ZWJ always,
-  ZWNJ only in context, not "hidden" ones like CGJ or tags) and hides
-  them afterwards; platen should remove them (HarfBuzz's
-  REMOVE_DEFAULT_IGNORABLES, a ready oracle), with the code point joining
-  the previous cluster's ToUnicode text. Fonts without active GSUB need
-  the same removal. Then cmap format 14 variation glyphs.
+- [x] **Default ignorables in shaping.** (done 2026-10-22: skipped while
+  matching as HarfBuzz does, removed afterwards; HarfBuzz with
+  REMOVE_DEFAULT_IGNORABLES is the differential test's oracle) Still
+  open: cmap format 14 variation glyphs.
+- [ ] **COLRv1 gradient stops ignore alpha.** `readColorLine` keeps only
+  the color: a stop's alpha (and the palette entry's) is dropped, so
+  translucent gradient overlays paint opaque - Noto's rainbow flag 🏳️‍🌈
+  comes out as a grey gradient over the stripes. Needs a soft mask with
+  an alpha shading (PDF shadings carry no alpha). Found 2026-10-22, when
+  ccmp made such sequences render as one glyph.
 - [ ] **`clig` is off by default** while HarfBuzz enables it. Behavior
   change for fonts with clig lookups; decide before 1.0.0.
 

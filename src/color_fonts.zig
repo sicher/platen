@@ -525,9 +525,10 @@ pub fn writeColorFont(doc: *Document, w: *Writer, plan: *ColorFontPlan) !void {
 }
 
 /// Build a single-byte ToUnicode CMap for one subfont's gid range
-/// [lo, hi), mapping each color glyph's PDF code to the Unicode codepoint
-/// it was shaped from (astral codepoints emitted as UTF-16 surrogate
-/// pairs).
+/// [lo, hi), mapping each color glyph's PDF code to the text it was shaped
+/// from - one code point, or the whole sequence of a ligature (emoji ZWJ
+/// sequences, flags, keycaps) - in UTF-16 (astral code points as
+/// surrogate pairs).
 fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: usize, hi: usize) ![]u8 {
     var w = std.Io.Writer.Allocating.init(arena);
     try w.writer.writeAll(
@@ -549,15 +550,23 @@ fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: u
     try w.writer.print("{d} beginbfchar\n", .{hi - lo});
     for (plan.gids.items[lo..hi], 0..) |gid, i| {
         const code = ColorFontPlan.localCode(i);
-        const cp = plan.emb.glyph_to_codepoint.get(gid) orelse 0xFFFD;
-        if (cp > 0xFFFF) {
-            const adjusted = cp - 0x10000;
-            const high: u16 = @intCast(0xD800 + (adjusted >> 10));
-            const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
-            try w.writer.print("<{X:0>2}> <{X:0>4}{X:0>4}>\n", .{ code, high, low });
-        } else {
-            try w.writer.print("<{X:0>2}> <{X:0>4}>\n", .{ code, cp });
+        var single: [1]u21 = .{0xFFFD};
+        const text: []const u21 = if (plan.emb.glyph_to_codepoint.get(gid)) |cp| blk: {
+            single[0] = cp;
+            break :blk &single;
+        } else plan.emb.ligature_codepoints.get(gid) orelse &single;
+        try w.writer.print("<{X:0>2}> <", .{code});
+        for (text) |cp| {
+            if (cp > 0xFFFF) {
+                const adjusted = cp - 0x10000;
+                const high: u16 = @intCast(0xD800 + (adjusted >> 10));
+                const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
+                try w.writer.print("{X:0>4}{X:0>4}", .{ high, low });
+            } else {
+                try w.writer.print("{X:0>4}", .{cp});
+            }
         }
+        try w.writer.writeAll(">\n");
     }
     try w.writer.writeAll(
         \\endbfchar

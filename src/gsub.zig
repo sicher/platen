@@ -515,7 +515,48 @@ pub const Glyph = struct {
     lig_id: u8 = 0,
     lig_comp: u8 = 0,
     lig_comps: u8 = 0,
+    /// Index of the code point this glyph was decoded from (never merged,
+    /// unlike `cluster`)
+    cp: u32 = 0,
+    /// Default-ignorable code point (U+FE0F, ZWJ, soft hyphen...): may be
+    /// skipped while matching, and is removed after shaping unless a
+    /// lookup substituted it
+    ignorable: Ignorable = .none,
+    substituted: bool = false,
+};
 
+/// Default_Ignorable_Code_Point, as HarfBuzz classifies it. ZWJ and ZWNJ
+/// are skipped under different rules; "hidden" ones (CGJ, Mongolian free
+/// variation selectors, tag characters) are not skipped in GSUB at all.
+/// Like HarfBuzz, U+115F, U+1160, U+3164, U+FFA0 and U+1BCA0..3 are not
+/// treated as ignorable (fonts draw them as spacing glyphs).
+pub const Ignorable = enum(u8) {
+    none,
+    zwj,
+    zwnj,
+    hidden,
+    other,
+
+    pub fn of(cp: u21) Ignorable {
+        const ignorable = switch (cp >> 8) {
+            0x00 => cp == 0x00AD,
+            0x03 => cp == 0x034F,
+            0x06 => cp == 0x061C,
+            0x17 => cp == 0x17B4 or cp == 0x17B5,
+            0x18 => cp >= 0x180B and cp <= 0x180F,
+            0x20 => (cp >= 0x200B and cp <= 0x200F) or (cp >= 0x202A and cp <= 0x202E) or (cp >= 0x2060 and cp <= 0x206F),
+            0xFE => (cp >= 0xFE00 and cp <= 0xFE0F) or cp == 0xFEFF,
+            0xFF => cp >= 0xFFF0 and cp <= 0xFFF8,
+            else => (cp >= 0x1D173 and cp <= 0x1D17A) or (cp >= 0xE0000 and cp <= 0xE0FFF),
+        };
+        if (!ignorable) return .none;
+        return switch (cp) {
+            0x200D => .zwj,
+            0x200C => .zwnj,
+            0x034F, 0x180B...0x180D, 0x180F, 0xE0020...0xE007F => .hidden,
+            else => .other,
+        };
+    }
 };
 
 /// Per-font-instance shaping state: the glyph buffer and the lookup list
@@ -524,10 +565,15 @@ pub const Shaper = struct {
     buf: std.ArrayListUnmanaged(Glyph) = .empty,
     active: std.ArrayListUnmanaged(u16) = .empty,
     active_flags: ?FeatureFlags = null,
+    /// Per input code point of the last shape call: true if it was a
+    /// default ignorable that shaping removed (it has no glyph and belongs
+    /// in no glyph's text)
+    dropped: std.ArrayListUnmanaged(bool) = .empty,
 
     pub fn deinit(self: *Shaper, allocator: std.mem.Allocator) void {
         self.buf.deinit(allocator);
         self.active.deinit(allocator);
+        self.dropped.deinit(allocator);
     }
 
     /// Lookups the flags enable (cached per flags).
@@ -543,7 +589,9 @@ pub const Shaper = struct {
 
     /// Substitute `glyphs` (one per code point; cluster = index). The
     /// result is valid until the next call. `codepoints` (same length)
-    /// classify glyphs as marks when the font has no GDEF classes.
+    /// classify glyphs as marks when the font has no GDEF classes, and as
+    /// default ignorables: those are skipped while matching where
+    /// HarfBuzz skips them, and removed afterwards (`dropped`).
     pub fn shape(
         self: *Shaper,
         allocator: std.mem.Allocator,
@@ -556,6 +604,7 @@ pub const Shaper = struct {
         self.buf.clearRetainingCapacity();
         // Growth room for multiple substitutions; capped in applyMultiple
         try self.buf.ensureTotalCapacity(allocator, maxLen(glyphs.len));
+        var any_ignorable = false;
         for (glyphs, 0..) |gid, i| {
             var props = props_unknown;
             if (table.gdef.glyph_class == null) {
@@ -564,7 +613,15 @@ pub const Shaper = struct {
                 const is_mark = if (codepoints) |cps| unicode_compose.combiningClass(cps[i]) != 0 else false;
                 props = @intFromEnum(if (is_mark) GlyphClass.mark else GlyphClass.base);
             }
-            self.buf.appendAssumeCapacity(.{ .id = gid, .cluster = @intCast(i), .props = props });
+            const ignorable: Ignorable = if (codepoints) |cps| (if (cps[i] < 0xAD) .none else Ignorable.of(cps[i])) else .none;
+            any_ignorable = any_ignorable or ignorable != .none;
+            self.buf.appendAssumeCapacity(.{
+                .id = gid,
+                .cluster = @intCast(i),
+                .cp = @intCast(i),
+                .props = props,
+                .ignorable = ignorable,
+            });
         }
         var ctx: Context = .{ .table = table, .buf = &self.buf, .max_len = maxLen(glyphs.len) };
         // Lookups that cover no glyph of the run are skipped whole (as
@@ -579,6 +636,23 @@ pub const Shaper = struct {
                 for (self.buf.items) |g| run.addGlyph(g.id);
             }
         }
+
+        // Remove the default ignorables no lookup took up (HarfBuzz's
+        // REMOVE_DEFAULT_IGNORABLES; drawn they would be .notdef or a
+        // visible glyph for an invisible character)
+        try self.dropped.resize(allocator, glyphs.len);
+        @memset(self.dropped.items, false);
+        if (!any_ignorable) return self.buf.items;
+        var n: usize = 0;
+        for (self.buf.items) |g| {
+            if (g.ignorable != .none and !g.substituted) {
+                self.dropped.items[g.cp] = true;
+                continue;
+            }
+            self.buf.items[n] = g;
+            n += 1;
+        }
+        self.buf.shrinkRetainingCapacity(n);
         return self.buf.items;
     }
 
@@ -658,21 +732,58 @@ const Context = struct {
         }
     }
 
-    fn nextUnskipped(self: *Context, lookup: *const Lookup, pos: usize) ?usize {
-        var p = pos + 1;
-        while (p < self.buf.items.len) : (p += 1) {
-            if (!self.skips(lookup, p)) return p;
-        }
-        return null;
+    /// HarfBuzz's may_skip: `yes` for glyphs the lookup flags ignore;
+    /// `maybe` for default ignorables not yet substituted - skipped
+    /// unless they match. ZWJ is always a maybe, ZWNJ only in backtrack
+    /// and lookahead (so it blocks ligatures), hidden ones never.
+    fn skipKind(self: *Context, lookup: *const Lookup, p: usize, context: bool) enum { no, yes, maybe } {
+        if (self.skips(lookup, p)) return .yes;
+        const g = self.buf.items[p];
+        if (g.substituted) return .no;
+        return switch (g.ignorable) {
+            .none, .hidden => .no,
+            .zwj, .other => .maybe,
+            .zwnj => if (context) .maybe else .no,
+        };
     }
 
-    fn prevUnskipped(self: *Context, lookup: *const Lookup, pos: usize) ?usize {
-        var p = pos;
-        while (p > 0) {
-            p -= 1;
-            if (!self.skips(lookup, p)) return p;
+    /// The next glyph from `from` in `dir` that the matcher accepts as
+    /// item `k`, skipping what may be skipped; null if a glyph that may
+    /// not be skipped doesn't match (HarfBuzz's skippy_iter).
+    fn nextMatch(self: *Context, lookup: *const Lookup, m: Matcher, k: usize, from: usize, dir: Direction, context: bool) ?usize {
+        var p = from;
+        while (true) {
+            if (dir == .back) {
+                if (p == 0) return null;
+                p -= 1;
+            } else {
+                p += 1;
+                if (p >= self.buf.items.len) return null;
+            }
+            const kind = self.skipKind(lookup, p, context);
+            if (kind == .yes) continue;
+            if (m.matches(self, k, self.buf.items[p].id)) return p;
+            if (kind == .no) return null;
         }
-        return null;
+    }
+
+    const Direction = enum { back, ahead };
+
+    /// What follows position i for a ligature's second component: a
+    /// glyph that can't be skipped, nothing, or unknown (a skippable
+    /// ignorable comes first, which might match or be skipped).
+    const Follow = union(enum) { none, glyph: u16, unknown };
+
+    fn following(self: *Context, lookup: *const Lookup, i: usize) Follow {
+        var p = i + 1;
+        while (p < self.buf.items.len) : (p += 1) {
+            switch (self.skipKind(lookup, p, false)) {
+                .yes => continue,
+                .maybe => return .unknown,
+                .no => return .{ .glyph = self.buf.items[p].id },
+            }
+        }
+        return .none;
     }
 
     /// Try the lookup's subtables at position i; the first that applies
@@ -680,7 +791,7 @@ const Context = struct {
     fn applyAt(self: *Context, lookup: *const Lookup, li: u16, i: usize, depth: u8) ?usize {
         const gid = self.buf.items[i].id;
         // Ligatures: the glyph matching would compare second components to
-        const second: ?u16 = if (lookup.type == 4) if (self.nextUnskipped(lookup, i)) |p| self.buf.items[p].id else null else null;
+        const second: Follow = if (lookup.type == 4) self.following(lookup, i) else .unknown;
         if (lookup.index) |index| {
             for (index.subtablesFor(gid)) |k| {
                 if (lookup.type == 4 and !mayFollow(lookup.second_digests[k], second)) continue;
@@ -697,11 +808,14 @@ const Context = struct {
     }
 
     /// Can a ligature subtable whose second components are `seconds`
-    /// match when `second` follows? (null: nothing follows; then only
-    /// single-component ligatures could, which make the digest full)
-    fn mayFollow(seconds: Digest, second: ?u16) bool {
-        if (second) |g| return seconds.mayHave(g);
-        return std.mem.allEqual(u64, &seconds.masks, std.math.maxInt(u64));
+    /// match when `second` follows? (Nothing follows: only
+    /// single-component ligatures could, which make the digest full.)
+    fn mayFollow(seconds: Digest, second: Follow) bool {
+        return switch (second) {
+            .glyph => |g| seconds.mayHave(g),
+            .none => std.mem.allEqual(u64, &seconds.masks, std.math.maxInt(u64)),
+            .unknown => true,
+        };
     }
 
     fn applySubtable(self: *Context, lookup: *const Lookup, li: u16, addr: usize, i: usize, depth: u8) ?usize {
@@ -719,6 +833,7 @@ const Context = struct {
     fn replace(self: *Context, i: usize, gid: u16) void {
         const g = &self.buf.items[i];
         g.id = gid;
+        g.substituted = true;
         if (self.table.gdef.glyph_class != null) g.props = props_unknown;
     }
 
@@ -763,6 +878,7 @@ const Context = struct {
         for (0..n) |k| {
             var g = src;
             g.id = readU16(d, seq + 2 + k * 2);
+            g.substituted = true;
             if (self.table.gdef.glyph_class != null) {
                 g.props = props_unknown;
             } else if (src_class == .ligature) {
@@ -792,11 +908,15 @@ const Context = struct {
         var positions: [max_context]usize = undefined;
         // Most ligatures of a set fail on their second component: compare
         // it first, against the glyph matching would reach
-        const second: ?u16 = if (self.nextUnskipped(lookup, i)) |p| self.buf.items[p].id else null;
+        const second = self.following(lookup, i);
         for (0..lig_count) |k| {
             const lig = set + readU16(d, set + 2 + k * 2);
             const comp_count = readU16(d, lig + 2);
-            if (comp_count >= 2 and (second == null or readU16(d, lig + 4) != second.?)) continue;
+            if (comp_count >= 2) switch (second) {
+                .none => continue,
+                .glyph => |g| if (readU16(d, lig + 4) != g) continue,
+                .unknown => {},
+            };
             if (!self.matchInput(lookup, .{ .kind = .glyph, .values = lig + 4 }, comp_count, false, i, &positions)) continue;
             self.ligate(readU16(d, lig), positions[0..comp_count]);
             return i + 1;
@@ -899,8 +1019,7 @@ const Context = struct {
         var ligbase: enum { unchecked, may_not_skip, may_skip } = .unchecked;
         positions[0] = i;
         for (1..count) |k| {
-            const p = self.nextUnskipped(lookup, positions[k - 1]) orelse return false;
-            if (!m.matches(self, if (first_listed) k else k - 1, items[p].id)) return false;
+            const p = self.nextMatch(lookup, m, if (first_listed) k else k - 1, positions[k - 1], .ahead, false) orelse return false;
             const this = items[p];
             if (first.lig_id != 0 and first.lig_comp != 0) {
                 // Attached to a ligature component: the others must be on
@@ -931,11 +1050,10 @@ const Context = struct {
 
     /// Match `count` context glyphs going back from `from` (backtrack,
     /// nearest first) or forward from it (lookahead).
-    fn matchContext(self: *Context, lookup: *const Lookup, m: Matcher, count: usize, from: usize, dir: enum { back, ahead }) bool {
+    fn matchContext(self: *Context, lookup: *const Lookup, m: Matcher, count: usize, from: usize, dir: Direction) bool {
         var p = from;
         for (0..count) |k| {
-            p = (if (dir == .back) self.prevUnskipped(lookup, p) else self.nextUnskipped(lookup, p)) orelse return false;
-            if (!m.matches(self, k, self.buf.items[p].id)) return false;
+            p = self.nextMatch(lookup, m, k, p, dir, true) orelse return false;
         }
         return true;
     }
