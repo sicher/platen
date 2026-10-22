@@ -2636,13 +2636,17 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
 
     // Styled text box using write() for flowing text with inline styles
     _ = try doc.writeAt(.{ .x = 50, .y = y }, "Styled Text in Box (using write()):", header_12, .{});
-    y += 20;
+    y += 14;
+    // Each write() call below passes its trailing space with its own
+    // style, so a decorated call decorates its space (as in CSS)
+    _ = try doc.writeAt(.{ .x = 50, .y = y }, "A space passed with decorated text is decorated too; one passed outside it is not.", .{ .font = platen.Font.helvetica, .size = 9, .color = platen.Color.greyscale(0.4) }, .{});
+    y += 10;
 
     // Draw a bordered box with light gray fill
     const box_x: f64 = 50;
     const box_y = y;
     const box_width: f64 = 400;
-    const box_height: f64 = 80;
+    const box_height: f64 = 135;
     const padding: f64 = 10;
 
     try doc.drawRegion(.{
@@ -2678,6 +2682,24 @@ fn generateTextStylePdf(allocator: std.mem.Allocator) ![]u8 {
     _ = try doc.write(&region, "and ", base_style, .{ .valign = .top_leading });
     _ = try doc.write(&region, "decorations ", platen.TextStyle{ .font = platen.Font.helvetica, .size = 11, .color = platen.Color.rgbf(0, 0.5, 0), .decoration = .{ .strikethrough = true } }, .{ .valign = .top_leading });
     _ = try doc.write(&region, "within the same wrapped paragraph.", base_style, .{ .valign = .top_leading });
+
+    // The variations, one per line: where the space goes decides whether
+    // it is decorated
+    const underlined = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11, .decoration = .{ .underline = true } };
+    const struck = platen.TextStyle{ .font = platen.Font.helvetica, .size = 11, .decoration = .{ .strikethrough = true } };
+    const variations = [_]struct { label: []const u8, styled: []const u8, after: []const u8, style: platen.TextStyle }{
+        .{ .label = "\n\nSpace inside the underlined text: ", .styled = "jumps ", .after = "over", .style = underlined },
+        .{ .label = "\nSpace outside it: ", .styled = "jumps", .after = " over", .style = underlined },
+        .{ .label = "\nSpaces between underlined words: ", .styled = "two words", .after = " here", .style = underlined },
+        .{ .label = "\nStruck, space inside / outside: ", .styled = "lazy ", .after = "dog / ", .style = struck },
+    };
+    for (variations) |v| {
+        _ = try doc.write(&region, v.label, base_style, .{ .valign = .top_leading });
+        _ = try doc.write(&region, v.styled, v.style, .{ .valign = .top_leading });
+        _ = try doc.write(&region, v.after, base_style, .{ .valign = .top_leading });
+    }
+    _ = try doc.write(&region, "lazy", struck, .{ .valign = .top_leading });
+    _ = try doc.write(&region, " dog", base_style, .{ .valign = .top_leading });
 
     // Decorations at line ends: a space a line wraps at hangs undecorated,
     // whether the wrap comes inside one write() call (left) or with the

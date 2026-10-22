@@ -4,7 +4,7 @@
 **0.12.0 released (2026-10-17)**: font collections, system font lookup,
 legacy `kern` table, PDF/A date and file ID fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
-user decision. Zig **0.17**, zero dependencies, 568 tests, silent clean
+user decision. Zig **0.17**, zero dependencies, 569 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
 continuing styled text across regions, Unicode composition, and a batch
@@ -83,6 +83,9 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
 - Fixed: a write() call's decorated trailing space now hangs when the
   next write() wraps at once (`Document.hanging_space`); SVG stroke
   widths keep four decimals.
+- Fixed: write() dropped the words before a double space (and a call's
+  leading space mid-line) since f8663cb; found by text_style's new
+  decoration variations (space inside / outside the decorated text).
 - Next: TODO.md roadmap (Tr, Form XObject stamps, split document.zig).
 
 ## What We Did (Session 2026-10-21 #31 - showcase, text flow, composition)

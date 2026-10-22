@@ -67,6 +67,11 @@
   decoration with it. The space now hangs past the line end, as in CSS,
   also when it ends one write() call and the next call's first word
   wraps; spaces inside the line stay decorated.
+- **`write()` lost text before a double space:** line batching reset
+  the line at every space it skipped, so `write("aa  bb")` drew only
+  "bb" (at aa's place), and a call starting with a space mid-line lost
+  it (`" over"` after `"jumps"` gave "jumpsover"). Spaces inside a line
+  are kept as typed now.
 - **SVG hairlines were rounded:** stroke widths were written with two
   decimals in SVG units (the tiger's 0.172 became 0.17); now four.
 - **Bitmap-only fonts had an empty `FontBBox`:** an OTB pixel font's head
