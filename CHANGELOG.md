@@ -17,6 +17,13 @@
 - **`Color.hex` also reads the alpha forms** (`#RRGGBBAA`, `#RGBA`) when opaque,
   and returns null for a translucent one: a `Color` has no alpha to keep.
 
+### Fixed
+
+- **`Color.fromName("lightgoldenrodyellow")` was null**: the hand-written
+  lookup table had lost it, though the constant was there. The table is now
+  built at compile time from the constants, and a test checks all 148 against
+  CSS Color 4 through ochre.
+
 ## 0.13.0 — 2026-10-22
 
 ### Added

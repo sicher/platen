@@ -11,9 +11,9 @@ user decision. Zig **0.17**, zero dependencies, 569 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
 Since 0.13.0 on dev: ochre (color parsing) vendored in `src/ochre/` by
 `scripts/vendor-ochre vX.Y.Z` (never edit those files; update ochre and
-re-run). SVG fill/stroke and `Color.hex` parse through it. Next for ochre
-in platen: the 148 named constants and `fromName`, then perceptual
-gradients via `ochre.ramp(...).stops()`. Found: DESIGN/README list SVG
+re-run). SVG fill/stroke and `Color.hex` parse through it; `fromName`'s
+table is built from the 148 constants, checked against ochre's. Next for
+ochre in platen: perceptual gradients via `ochre.ramp(...).stops()`. Found: DESIGN/README list SVG
 gradients, but platen has no `linearGradient`/`stop-color` code; the
 `examples/showcase_*.pdf` files are still from 0.12.0.
 

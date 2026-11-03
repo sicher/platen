@@ -284,168 +284,22 @@ pub const Color = union(enum) {
         };
     }
 
-    /// Comptime-optimized lookup table for named CSS/SVG colors.
-    const named_colors = std.StaticStringMap(Color).initComptime(.{
-        // Blacks and Grays
-        .{ "black", black },
-        .{ "white", white },
-        .{ "gray", gray },
-        .{ "grey", grey },
-        .{ "silver", silver },
-        .{ "darkgray", darkgray },
-        .{ "darkgrey", darkgrey },
-        .{ "dimgray", dimgray },
-        .{ "dimgrey", dimgrey },
-        .{ "lightgray", lightgray },
-        .{ "lightgrey", lightgrey },
-        .{ "gainsboro", gainsboro },
-        .{ "whitesmoke", whitesmoke },
-        // Slate grays
-        .{ "slategray", slategray },
-        .{ "slategrey", slategrey },
-        .{ "lightslategray", lightslategray },
-        .{ "lightslategrey", lightslategrey },
-        .{ "darkslategray", darkslategray },
-        .{ "darkslategrey", darkslategrey },
-        // Reds
-        .{ "red", red },
-        .{ "darkred", darkred },
-        .{ "firebrick", firebrick },
-        .{ "indianred", indianred },
-        .{ "lightcoral", lightcoral },
-        .{ "crimson", crimson },
-        .{ "maroon", maroon },
-        // Pinks
-        .{ "pink", pink },
-        .{ "lightpink", lightpink },
-        .{ "hotpink", hotpink },
-        .{ "deeppink", deeppink },
-        .{ "palevioletred", palevioletred },
-        .{ "mediumvioletred", mediumvioletred },
-        // Oranges
-        .{ "orange", orange },
-        .{ "darkorange", darkorange },
-        .{ "orangered", orangered },
-        .{ "tomato", tomato },
-        .{ "coral", coral },
-        .{ "salmon", salmon },
-        .{ "lightsalmon", lightsalmon },
-        .{ "darksalmon", darksalmon },
-        // Yellows
-        .{ "yellow", yellow },
-        .{ "lightyellow", lightyellow },
-        .{ "gold", gold },
-        .{ "khaki", khaki },
-        .{ "darkkhaki", darkkhaki },
-        .{ "palegoldenrod", palegoldenrod },
-        .{ "moccasin", moccasin },
-        .{ "peachpuff", peachpuff },
-        .{ "papayawhip", papayawhip },
-        .{ "lemonchiffon", lemonchiffon },
-        .{ "cornsilk", cornsilk },
-        // Browns
-        .{ "brown", brown },
-        .{ "saddlebrown", saddlebrown },
-        .{ "sienna", sienna },
-        .{ "chocolate", chocolate },
-        .{ "peru", peru },
-        .{ "sandybrown", sandybrown },
-        .{ "burlywood", burlywood },
-        .{ "tan", tan },
-        .{ "rosybrown", rosybrown },
-        .{ "goldenrod", goldenrod },
-        .{ "darkgoldenrod", darkgoldenrod },
-        // Greens
-        .{ "green", green },
-        .{ "lime", lime },
-        .{ "limegreen", limegreen },
-        .{ "lightgreen", lightgreen },
-        .{ "palegreen", palegreen },
-        .{ "darkgreen", darkgreen },
-        .{ "forestgreen", forestgreen },
-        .{ "seagreen", seagreen },
-        .{ "mediumseagreen", mediumseagreen },
-        .{ "springgreen", springgreen },
-        .{ "mediumspringgreen", mediumspringgreen },
-        .{ "mediumaquamarine", mediumaquamarine },
-        .{ "aquamarine", aquamarine },
-        .{ "darkseagreen", darkseagreen },
-        .{ "yellowgreen", yellowgreen },
-        .{ "greenyellow", greenyellow },
-        .{ "chartreuse", chartreuse },
-        .{ "lawngreen", lawngreen },
-        .{ "olive", olive },
-        .{ "olivedrab", olivedrab },
-        .{ "darkolivegreen", darkolivegreen },
-        // Cyans
-        .{ "cyan", cyan },
-        .{ "aqua", aqua },
-        .{ "lightcyan", lightcyan },
-        .{ "paleturquoise", paleturquoise },
-        .{ "turquoise", turquoise },
-        .{ "mediumturquoise", mediumturquoise },
-        .{ "darkturquoise", darkturquoise },
-        .{ "darkcyan", darkcyan },
-        .{ "teal", teal },
-        .{ "lightseagreen", lightseagreen },
-        .{ "cadetblue", cadetblue },
-        // Blues
-        .{ "blue", blue },
-        .{ "navy", navy },
-        .{ "darkblue", darkblue },
-        .{ "mediumblue", mediumblue },
-        .{ "midnightblue", midnightblue },
-        .{ "royalblue", royalblue },
-        .{ "steelblue", steelblue },
-        .{ "dodgerblue", dodgerblue },
-        .{ "deepskyblue", deepskyblue },
-        .{ "cornflowerblue", cornflowerblue },
-        .{ "skyblue", skyblue },
-        .{ "lightskyblue", lightskyblue },
-        .{ "lightblue", lightblue },
-        .{ "lightsteelblue", lightsteelblue },
-        .{ "powderblue", powderblue },
-        .{ "aliceblue", aliceblue },
-        // Purples
-        .{ "purple", purple },
-        .{ "magenta", magenta },
-        .{ "fuchsia", fuchsia },
-        .{ "darkmagenta", darkmagenta },
-        .{ "indigo", indigo },
-        .{ "darkslateblue", darkslateblue },
-        .{ "slateblue", slateblue },
-        .{ "mediumslateblue", mediumslateblue },
-        .{ "mediumpurple", mediumpurple },
-        .{ "blueviolet", blueviolet },
-        .{ "darkviolet", darkviolet },
-        .{ "darkorchid", darkorchid },
-        .{ "mediumorchid", mediumorchid },
-        .{ "orchid", orchid },
-        .{ "violet", violet },
-        .{ "plum", plum },
-        .{ "thistle", thistle },
-        .{ "lavender", lavender },
-        .{ "rebeccapurple", rebeccapurple },
-        // Whites and off-whites
-        .{ "snow", snow },
-        .{ "honeydew", honeydew },
-        .{ "mintcream", mintcream },
-        .{ "azure", azure },
-        .{ "ghostwhite", ghostwhite },
-        .{ "floralwhite", floralwhite },
-        .{ "ivory", ivory },
-        .{ "beige", beige },
-        .{ "linen", linen },
-        .{ "oldlace", oldlace },
-        .{ "antiquewhite", antiquewhite },
-        .{ "bisque", bisque },
-        .{ "blanchedalmond", blanchedalmond },
-        .{ "navajowhite", navajowhite },
-        .{ "wheat", wheat },
-        .{ "seashell", seashell },
-        .{ "lavenderblush", lavenderblush },
-        .{ "mistyrose", mistyrose },
-    });
+    /// Every named color constant above, by name, built from the declarations
+    /// so the two cannot drift apart. Their values are checked against CSS
+    /// Color 4 (ochre's table) in the tests.
+    const named_colors = build: {
+        const names = @typeInfo(Color).@"union".decl_names;
+        var entries: [names.len]struct { []const u8, Color } = undefined;
+        var count = 0;
+        for (names) |name| {
+            // This table is a declaration too, and cannot read itself.
+            if (std.mem.eql(u8, name, "named_colors")) continue;
+            if (@TypeOf(@field(Color, name)) != Color) continue;
+            entries[count] = .{ name, @field(Color, name) };
+            count += 1;
+        }
+        break :build std.StaticStringMap(Color).initComptime(entries[0..count]);
+    };
 
     /// Look up a named CSS/SVG color by name (case-sensitive).
     /// Returns null if the name is not recognized.
@@ -599,6 +453,25 @@ test "Color hex" {
     try std.testing.expect(Color.hex("F00F").?.eql(red));
     try std.testing.expect(Color.hex("#FF000080") == null);
     try std.testing.expect(Color.hex("#F008") == null);
+}
+
+test "the named colors are CSS Color 4's, all 148, and fromName finds each" {
+    var count: usize = 0;
+    inline for (@typeInfo(Color).@"union".decl_names) |name| {
+        if (comptime std.mem.eql(u8, name, "named_colors")) continue;
+        const named = @field(Color, name);
+        if (@TypeOf(named) != Color) continue;
+        count += 1;
+        const css = try ochre.parse(name, .{ .as = ochre.Rgba8 });
+        try std.testing.expectEqual(Color.Rgb{ .r = css.r, .g = css.g, .b = css.b }, named.toRgb());
+        try std.testing.expect(Color.fromName(name).?.eql(named));
+    }
+    try std.testing.expectEqual(148, count);
+    // The hand-written table this replaced had lost one.
+    try std.testing.expect(Color.fromName("lightgoldenrodyellow").?.eql(Color.lightgoldenrodyellow));
+    try std.testing.expect(Color.fromName("transparent") == null);
+    try std.testing.expect(Color.fromName("Red") == null);
+    try std.testing.expect(Color.fromName("hex") == null);
 }
 
 test "Color presets" {
