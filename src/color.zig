@@ -1,4 +1,5 @@
 const std = @import("std");
+const ochre = @import("ochre");
 
 /// Color with support for multiple color spaces.
 /// All values are normalized to 0.0-1.0 range.
@@ -219,44 +220,20 @@ pub const Color = union(enum) {
         return .{ .cmyk_val = .{ .c = c, .m = m, .y = y, .k = k } };
     }
 
-    /// Create RGB color from hex string (e.g., "#FF0000", "FF0000", "#F00", "F00")
-    /// Returns null if the string is invalid.
+    /// Create RGB color from hex string (e.g., "#FF0000", "FF0000", "#F00", "F00"),
+    /// by ochre's CSS parser. The forms with alpha ("#FF0000FF", "#F00F") are
+    /// read too, but only opaque: a Color has no alpha to keep it in.
+    /// Returns null if the string is invalid or translucent.
     pub fn hex(hex_str: []const u8) ?Color {
-        var s = hex_str;
-        // Skip leading #
-        if (s.len > 0 and s[0] == '#') {
-            s = s[1..];
-        }
-
-        if (s.len == 3) {
-            // Short form: "F00" -> "FF0000"
-            const r = parseHexDigit(s[0]) orelse return null;
-            const g = parseHexDigit(s[1]) orelse return null;
-            const b = parseHexDigit(s[2]) orelse return null;
-            return rgb(r * 17, g * 17, b * 17);
-        } else if (s.len == 6) {
-            // Full form: "FF0000"
-            const r = parseHexByte(s[0..2]) orelse return null;
-            const g = parseHexByte(s[2..4]) orelse return null;
-            const b = parseHexByte(s[4..6]) orelse return null;
-            return rgb(r, g, b);
-        }
-        return null;
-    }
-
-    fn parseHexDigit(c: u8) ?u8 {
-        return switch (c) {
-            '0'...'9' => c - '0',
-            'a'...'f' => c - 'a' + 10,
-            'A'...'F' => c - 'A' + 10,
-            else => null,
-        };
-    }
-
-    fn parseHexByte(s: *const [2]u8) ?u8 {
-        const high = parseHexDigit(s[0]) orelse return null;
-        const low = parseHexDigit(s[1]) orelse return null;
-        return high * 16 + low;
+        // ochre reads CSS, where hex has its `#`.
+        const digits = if (std.mem.startsWith(u8, hex_str, "#")) hex_str[1..] else hex_str;
+        if (digits.len > 8) return null;
+        var css: [9]u8 = undefined;
+        css[0] = '#';
+        @memcpy(css[1..][0..digits.len], digits);
+        const pixel = ochre.parse(css[0 .. digits.len + 1], .{ .as = ochre.Rgba8 }) catch return null;
+        if (pixel.alpha != 255) return null;
+        return rgb(pixel.r, pixel.g, pixel.b);
     }
 
     /// Format color as PDF fill operator (g, rg, or k)
@@ -612,6 +589,16 @@ test "Color hex" {
     try std.testing.expect(Color.hex("#") == null);
     try std.testing.expect(Color.hex("GG0000") == null);
     try std.testing.expect(Color.hex("#12345") == null);
+    try std.testing.expect(Color.hex("#123456789") == null);
+    try std.testing.expect(Color.hex("#1234567890") == null);
+    try std.testing.expect(Color.hex("red") == null);
+    try std.testing.expect(Color.hex("#rgb(1, 2, 3)") == null);
+
+    // Alpha only when opaque: a Color cannot keep it
+    try std.testing.expect(Color.hex("#FF0000FF").?.eql(red));
+    try std.testing.expect(Color.hex("F00F").?.eql(red));
+    try std.testing.expect(Color.hex("#FF000080") == null);
+    try std.testing.expect(Color.hex("#F008") == null);
 }
 
 test "Color presets" {

@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const xml = @import("xml.zig");
-const color_module = @import("color.zig");
+const ochre = @import("ochre");
 const layout = @import("layout.zig");
 const graphics = @import("graphics.zig");
 
@@ -1800,100 +1800,15 @@ const NumberIterator = struct {
     }
 };
 
-/// Clamp a float value to 0-255 and convert to u8.
-fn clampToU8(val: f64) u8 {
-    return @intFromFloat(@max(0, @min(255, val)));
-}
-
-/// Parse SVG color value
+/// Parse an SVG color: `none`, or any CSS color ochre reads (hex with or
+/// without alpha, the CSS names, `rgb()`, `hsl()`, `oklab()`, `oklch()`).
+/// Values outside sRGB are clipped, as browsers do for CSS colors.
 fn parseColor(str: []const u8) ?Color {
-    if (str.len == 0) return null;
-
-    // "none" - transparent
-    if (std.mem.eql(u8, str, "none")) {
-        return Color.none;
-    }
-
-    // Hex colors
-    if (str[0] == '#') {
-        if (str.len == 4) {
-            // #RGB
-            const r = parseHexDigit(str[1]) orelse return null;
-            const g = parseHexDigit(str[2]) orelse return null;
-            const b = parseHexDigit(str[3]) orelse return null;
-            return Color{ .r = r * 17, .g = g * 17, .b = b * 17 };
-        } else if (str.len == 7) {
-            // #RRGGBB
-            const r = parseHexByte(str[1..3]) orelse return null;
-            const g = parseHexByte(str[3..5]) orelse return null;
-            const b = parseHexByte(str[5..7]) orelse return null;
-            return Color{ .r = r, .g = g, .b = b };
-        }
-        return null;
-    }
-
-    // rgb(r, g, b) or rgb(r%, g%, b%)
-    if (std.mem.startsWith(u8, str, "rgb(") and str[str.len - 1] == ')') {
-        var iter = NumberIterator.init(str[4 .. str.len - 1]);
-        const r_val = iter.next() orelse return null;
-        const g_val = iter.next() orelse return null;
-        const b_val = iter.next() orelse return null;
-
-        // Check if percentages (simple heuristic: look for %)
-        const mult: f64 = if (std.mem.indexOf(u8, str, "%") != null) 2.55 else 1.0;
-        return Color{
-            .r = clampToU8(r_val * mult),
-            .g = clampToU8(g_val * mult),
-            .b = clampToU8(b_val * mult),
-        };
-    }
-
-    // rgba(r, g, b, a) - alpha is 0.0-1.0
-    if (std.mem.startsWith(u8, str, "rgba(") and str[str.len - 1] == ')') {
-        var iter = NumberIterator.init(str[5 .. str.len - 1]);
-        const r_val = iter.next() orelse return null;
-        const g_val = iter.next() orelse return null;
-        const b_val = iter.next() orelse return null;
-        const a_val = iter.next() orelse 1.0;
-
-        // Check if percentages for RGB values
-        const mult: f64 = if (std.mem.indexOf(u8, str, "%") != null) 2.55 else 1.0;
-        return Color{
-            .r = clampToU8(r_val * mult),
-            .g = clampToU8(g_val * mult),
-            .b = clampToU8(b_val * mult),
-            .a = clampToU8(a_val * 255),
-        };
-    }
-
-    // Named colors (common subset)
-    return namedColor(str);
-}
-
-fn namedColor(name: []const u8) ?Color {
-    // Handle special SVG value
-    if (std.mem.eql(u8, name, "transparent")) {
-        return Color{ .a = 0 };
-    }
-
-    // Look up from shared CSS/SVG color definitions (148 colors)
-    const css_color = color_module.Color.fromName(name) orelse return null;
-    const rgb = css_color.toRgb();
-    return Color{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
-}
-
-fn parseHexDigit(c: u8) ?u8 {
-    if (c >= '0' and c <= '9') return c - '0';
-    if (c >= 'a' and c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' and c <= 'F') return c - 'A' + 10;
-    return null;
-}
-
-fn parseHexByte(str: []const u8) ?u8 {
-    if (str.len != 2) return null;
-    const hi = parseHexDigit(str[0]) orelse return null;
-    const lo = parseHexDigit(str[1]) orelse return null;
-    return hi * 16 + lo;
+    if (std.mem.eql(u8, str, "none")) return Color.none;
+    const parsed = ochre.parse(str, .{ .as = ochre.Srgb(f64) }) catch return null;
+    // Only NaN survives the clip, which no text gives; null all the same.
+    const pixel = ochre.Rgba8.from(parsed.fit(.clip)) catch return null;
+    return .{ .r = pixel.r, .g = pixel.g, .b = pixel.b, .a = pixel.alpha };
 }
 
 /// Parse style attribute
@@ -2249,6 +2164,24 @@ test "parse color" {
 
     // none
     try std.testing.expect(parseColor("none").?.isNone());
+
+    // What ochre adds: the modern syntax, hex with alpha, any case, hsl()
+    // and oklch(), each rounded and clamped as browsers do
+    try std.testing.expectEqual(Color{ .r = 128, .g = 64, .b = 32 }, parseColor("rgb(128 64 32)").?);
+    try std.testing.expectEqual(Color{ .r = 255, .g = 0, .b = 0, .a = 128 }, parseColor("#ff000080").?);
+    try std.testing.expectEqual(Color{ .r = 255, .g = 0, .b = 0, .a = 128 }, parseColor("rgba(255, 0, 0, 0.5)").?);
+    try std.testing.expectEqual(Color{ .r = 255, .g = 0, .b = 0 }, parseColor("RED").?);
+    try std.testing.expectEqual(Color{ .r = 0, .g = 128, .b = 0 }, parseColor("hsl(120, 100%, 25.1%)").?);
+    try std.testing.expectEqual(Color{ .r = 255, .g = 0, .b = 0 }, parseColor("oklch(0.628 0.2577 29.23)").?);
+    try std.testing.expectEqual(Color{ .r = 128, .g = 26, .b = 0 }, parseColor("rgb(50%, 10%, 0%)").?);
+    try std.testing.expectEqual(Color{ .r = 255, .g = 0, .b = 0 }, parseColor("rgb(300, 0, -20)").?);
+    try std.testing.expect(parseColor("transparent").?.isNone());
+
+    // Not colors, or not ones platen can know
+    try std.testing.expect(parseColor("") == null);
+    try std.testing.expect(parseColor("currentColor") == null);
+    try std.testing.expect(parseColor("rgb(1, 2)") == null);
+    try std.testing.expect(parseColor("#12") == null);
 }
 
 test "parse transform" {

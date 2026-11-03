@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Color parsing is ochre's**: platen vendors
+  [ochre](https://git.urverk.org/urverk/ochre) (color math and CSS color
+  parsing, MIT) in `src/ochre/`, copied by `scripts/vendor-ochre vX.Y.Z` and
+  compiled as its own module. platen still has no dependencies. SVG `fill` and
+  `stroke` and `Color.hex` parse through it.
+- **SVG colors read all of CSS Color 4**: `hsl()`, `oklab()`, `oklch()`, the
+  modern `rgb(r g b / a)` syntax, `#RGBA` and `#RRGGBBAA`, and names in any
+  case. Out-of-range values are clipped, as browsers do, and now rounded rather
+  than truncated: `rgb(50%, 10%, 0%)` is 128, 26, 0 (it was 127, 25, 0). A
+  color's alpha still counts only as `none` at 0, as for `rgba()` before.
+- **`Color.hex` also reads the alpha forms** (`#RRGGBBAA`, `#RGBA`) when opaque,
+  and returns null for a translucent one: a `Color` has no alpha to keep.
+
 ## 0.13.0 — 2026-10-22
 
 ### Added

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Copy ochre's library into src/ochre/, from a release tag:
+#
+#   scripts/vendor-ochre v0.2.0
+#
+# platen has no dependencies, so ochre (https://git.urverk.org/urverk/ochre,
+# color math and parsing) is vendored rather than fetched. Only the library
+# files come over: ochre's tests and generated test vectors (1.7 MB) stay in
+# ochre, whose CI runs them. build.zig compiles src/ochre/root.zig as its own
+# module, so the test block there, which imports those tests, is never built
+# here. Do not edit src/ochre/: change ochre, release, and run this again.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+tag=${1:?usage: scripts/vendor-ochre vX.Y.Z}
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$tag" https://git.urverk.org/urverk/ochre.git "$work/ochre"
+commit=$(git -C "$work/ochre" rev-parse HEAD)
+
+rm -rf src/ochre
+mkdir -p src/ochre
+for file in "$work"/ochre/src/*.zig; do
+    case $(basename "$file") in
+        tests.zig | *_test.zig | *vectors.zig | css_cases.zig) continue ;;
+    esac
+    cp "$file" src/ochre/
+done
+cp "$work/ochre/LICENSE" src/ochre/LICENSE
+
+cat > src/ochre/VERSION <<EOF
+ochre $tag ($commit), vendored by scripts/vendor-ochre. Do not edit these
+files: change ochre, release, and run the script again.
+EOF
+
+echo "vendored ochre $tag ($commit): $(ls src/ochre/*.zig | wc -l | tr -d ' ') files"

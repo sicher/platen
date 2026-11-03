@@ -50,7 +50,7 @@ The first three are made by [`src/showcase.zig`](src/showcase.zig) (`zig build s
 - **Graphics**: lines, rectangles, circles, ellipses, polygons
 - **Path API**: moveTo, lineTo, curveTo, quadTo for custom shapes
 - **Images**: JPEG and PNG embedding (with alpha channel support)
-- **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`
+- **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`, colors in any CSS Color 4 syntax
 - **Transforms**: translate/rotate/scale with graphics-state push/pop; page rotation
 - **Clipping**: rectangle and path clipping
 - **Gradients**: linear and radial
@@ -1118,7 +1118,8 @@ Known gaps, documented so you don't discover them the hard way:
 ## Requirements
 
 - Zig 0.17
-- No dependencies — compression uses `std.compress.flate`
+- No dependencies — compression uses `std.compress.flate`, and color parsing
+  is [ochre](https://git.urverk.org/urverk/ochre), vendored in `src/ochre/`
 
 ## License
 

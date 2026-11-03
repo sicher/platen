@@ -898,7 +898,9 @@ try doc.drawSvg(svg, x, y, width, height);
 - Text elements with font families (serif, sans-serif, monospace)
 - Transforms: translate, scale, rotate, skewX, skewY, matrix
 - Styling: fill, stroke, stroke-width, opacity, stroke-linecap/linejoin
-- Colors: hex (#RGB, #RRGGBB), rgb(), rgba(), named colors
+- Colors: any CSS Color 4 color, parsed by ochre (`src/ochre/`, vendored): hex
+  with or without alpha, the 148 names, rgb(), rgba(), hsl(), oklab(), oklch().
+  Out-of-range values are clipped as browsers do. Alpha counts only as `none` at 0
 - Gradients: linearGradient, radialGradient with stops
 - Reuse: `<defs>` and `<use>` elements with href/xlink:href
 
