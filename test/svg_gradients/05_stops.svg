@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <!-- stops: not starting at 0 or ending at 1, out of order, a hard
+       edge (two stops at one offset), percentages and style -->
+  <!-- probes: 10,20 60,20 100,20 140,20 190,20 10,70 50,70 110,70 190,70 20,120 90,120 110,120 180,120 20,170 70,170 100,170 130,170 180,170 -->
+  <defs>
+    <linearGradient id="inset"><stop offset="0.25" stop-color="red"/><stop offset="0.75" stop-color="blue"/></linearGradient>
+    <linearGradient id="order"><stop offset="0.6" stop-color="red"/><stop offset="0.3" stop-color="lime"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="hard"><stop offset="0" stop-color="black"/><stop offset="50%" stop-color="#888"/><stop offset="50%" stop-color="yellow"/><stop offset="100%" stop-color="orange"/></linearGradient>
+    <linearGradient id="many"><stop offset="0" style="stop-color:red"/><stop offset=".25" style="stop-color:yellow"/><stop offset=".5" style="stop-color: lime"/><stop offset=".75" style="stop-color:cyan"/><stop offset="1" style="stop-color:blue"/></linearGradient>
+  </defs>
+  <rect x="0" y="0" width="200" height="40" fill="url(#inset)"/>
+  <rect x="0" y="50" width="200" height="40" fill="url(#order)"/>
+  <rect x="0" y="100" width="200" height="40" fill="url(#hard)"/>
+  <rect x="0" y="150" width="200" height="40" fill="url(#many)"/>
+</svg>

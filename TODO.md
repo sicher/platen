@@ -221,3 +221,15 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   error.BitDepthNotAllowed and the caller converts - user decision
   2026-10-05: no silent conversion by default)
 - [ ] OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+- [ ] SVG gradients, rest (steps 5-7 of the 2026-11-03 plan): `href`
+  inheritance between gradients (attributes and stops; cycles), `stop-opacity`
+  (soft mask, as COLRv1), `spreadMethod` reflect/repeat (repeat the stops over
+  a wider domain). Also `fr` (SVG 2 focal radius).
+- [ ] SVG: `<polyline>` is never filled (SVG fills it, as if closed).
+- [ ] SVG: `S` after a `Q` reflects the quadratic's control point (SVG uses
+  the current point unless the previous command was C/S); `T` after `C` too.
+- [ ] SVG: path coordinates are written with 2 decimals, so a tiny viewBox
+  (`0 0 1 1` scaled up) loses its shape.
+- [ ] Document gradients (`gradient.zig`): stops must start at 0 and end at
+  1 (a first stop at 0.2 stretches over the whole range), and Bounds are
+  written with 3 decimals.

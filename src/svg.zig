@@ -8,6 +8,9 @@ const xml = @import("xml.zig");
 const ochre = @import("ochre");
 const layout = @import("layout.zig");
 const graphics = @import("graphics.zig");
+const gradient = @import("svg_gradient.zig");
+const svg_path = @import("svg_path.zig");
+pub const Gradient = gradient.Gradient;
 
 // ============================================================================
 // Types
@@ -101,10 +104,24 @@ pub const TextAnchor = enum {
 
 pub const Point = layout.Point;
 
+/// A fill or stroke: a color (`Color.none` for `none`), or a reference to a
+/// paint server (`url(#id)`, resolved when rendering, so it may point
+/// forward in the document).
+pub const Paint = union(enum) {
+    color: Color,
+    server: struct {
+        /// Index into Svg.paint_refs (the referenced id).
+        ref: u32,
+        /// Used when the reference does not name a gradient; null when the
+        /// value gave none (the paint is then `none`).
+        fallback: ?Color = null,
+    },
+};
+
 /// Style properties for SVG elements
 pub const Style = struct {
-    fill: ?Color = null, // null = unspecified (inherits from parent, or black if root)
-    stroke: ?Color = null,
+    fill: ?Paint = null, // null = unspecified (inherits from parent, or black if root)
+    stroke: ?Paint = null,
     stroke_width: ?f64 = null, // null = unspecified
     stroke_linecap: ?LineCap = null,
     stroke_linejoin: ?LineJoin = null,
@@ -130,14 +147,14 @@ pub const Style = struct {
         };
     }
 
-    /// Get fill color, defaulting to black if unspecified (SVG default)
-    pub fn getFill(self: Style) ?Color {
-        return self.fill orelse Color.black;
+    /// Get fill paint, defaulting to black if unspecified (SVG default)
+    pub fn getFill(self: Style) Paint {
+        return self.fill orelse .{ .color = Color.black };
     }
 
-    /// Get stroke color (null if unspecified - no stroke)
-    pub fn getStroke(self: Style) ?Color {
-        return self.stroke;
+    /// Get stroke paint (none if unspecified - no stroke)
+    pub fn getStroke(self: Style) Paint {
+        return self.stroke orelse .{ .color = Color.none };
     }
 
     /// Get stroke width, defaulting to 1.0 if unspecified
@@ -399,6 +416,10 @@ pub const SvgElement = union(enum) {
 /// Opacity state for PDF ExtGState (imported from layout)
 pub const OpacityState = layout.OpacityState;
 
+/// A gradient paint, as a shading pattern the SVG's form needs.
+pub const PatternSpec = gradient.PatternSpec;
+pub const writePattern = gradient.writePattern;
+
 /// Parsed SVG document
 /// Font used in SVG text elements
 pub const UsedFont = struct {
@@ -462,6 +483,12 @@ pub const Svg = struct {
     elements: std.ArrayListUnmanaged(SvgElement),
     used_fonts: std.ArrayListUnmanaged(UsedFont) = .empty,
     defs: std.StringHashMapUnmanaged(SvgElement) = .empty, // Elements defined in <defs> by ID
+    /// Gradients by id (owned keys), inside <defs> or not; a later
+    /// duplicate id replaces the earlier one, as for `defs`.
+    gradients: std.StringHashMapUnmanaged(Gradient) = .empty,
+    /// The ids url() paints reference (owned, each once); Paint.server.ref
+    /// indexes this list.
+    paint_refs: std.ArrayListUnmanaged([]u8) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) Svg {
         return .{
@@ -487,6 +514,14 @@ pub const Svg = struct {
             entry.value_ptr.deinit(self.allocator);
         }
         self.defs.deinit(self.allocator);
+        var git = self.gradients.iterator();
+        while (git.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.gradients.deinit(self.allocator);
+        for (self.paint_refs.items) |id| self.allocator.free(id);
+        self.paint_refs.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -497,6 +532,20 @@ pub const Svg = struct {
         }
         try self.used_fonts.append(self.allocator, font);
         return self.used_fonts.items.len - 1;
+    }
+
+    const parseStyleAttribute = parseStyleAttributeFn;
+
+    /// The index of `id` in paint_refs, adding a copy when it is new.
+    fn internPaintRef(self: *Svg, id: []const u8) !u32 {
+        for (self.paint_refs.items, 0..) |existing, i| {
+            if (std.mem.eql(u8, existing, id)) return @intCast(i);
+        }
+        if (self.paint_refs.items.len >= std.math.maxInt(u32)) return error.InvalidSvg;
+        const owned = try self.allocator.dupe(u8, id);
+        errdefer self.allocator.free(owned);
+        try self.paint_refs.append(self.allocator, owned);
+        return @intCast(self.paint_refs.items.len - 1);
     }
 
     /// Check if this SVG uses any text
@@ -543,7 +592,43 @@ pub const Svg = struct {
         // Track when inside <defs> block
         var defs_depth: usize = 0;
 
+        // The gradient element being read (its <stop>s follow until its end
+        // tag), and how many gradient elements are open inside it (invalid,
+        // ignored with their stops).
+        var open_gradient: ?OpenGradient = null;
+        defer if (open_gradient) |*g| g.gradient.deinit(self.allocator);
+        var nested_gradients: usize = 0;
+
         while (parser.nextElement()) |elem| {
+            if (isGradientTag(elem.tag)) {
+                if (elem.is_end_tag) {
+                    if (nested_gradients > 0) {
+                        nested_gradients -= 1;
+                    } else if (open_gradient) |g| {
+                        open_gradient = null;
+                        try self.storeGradient(g);
+                    }
+                } else if (open_gradient != null) {
+                    if (!elem.is_self_closing) nested_gradients += 1;
+                } else {
+                    const g = try self.parseGradientElement(elem);
+                    if (elem.is_self_closing) {
+                        try self.storeGradient(g);
+                    } else {
+                        open_gradient = g;
+                    }
+                }
+                continue;
+            }
+            if (std.mem.eql(u8, elem.tag, "stop")) {
+                if (!elem.is_end_tag and nested_gradients == 0) {
+                    if (open_gradient) |*g| {
+                        try g.gradient.stops.append(self.allocator, parseStop(elem));
+                    }
+                }
+                continue;
+            }
+
             if (elem.is_end_tag) {
                 // Track defs end
                 if (std.mem.eql(u8, elem.tag, "defs")) {
@@ -611,7 +696,7 @@ pub const Svg = struct {
                         const t = parseTransform(attr.value);
                         group_transform = try composeTransform(group_transform, t);
                     } else {
-                        parseStyleAttribute(attr.name, attr.value, &group_style);
+                        try self.parseStyleAttribute(attr.name, attr.value, &group_style);
                     }
                 }
                 try transform_stack.append(self.allocator, group_transform);
@@ -659,6 +744,73 @@ pub const Svg = struct {
     }
 
     /// Store an element either in defs (by id) or in elements list
+    const OpenGradient = struct {
+        id: ?[]const u8, // into the source data
+        gradient: Gradient,
+    };
+
+    fn isGradientTag(tag: []const u8) bool {
+        return std.mem.eql(u8, tag, "linearGradient") or std.mem.eql(u8, tag, "radialGradient");
+    }
+
+    /// Read a gradient element's attributes (its stops come later).
+    fn parseGradientElement(self: *Svg, elem: xml.Element) !OpenGradient {
+        var g = Gradient{ .kind = if (std.mem.eql(u8, elem.tag, "radialGradient")) .radial else .linear };
+        errdefer g.deinit(self.allocator);
+        var id: ?[]const u8 = null;
+        var attrs = elem.attributes();
+        while (attrs.next()) |attr| {
+            const name = attr.name;
+            const value = attr.value;
+            if (std.mem.eql(u8, name, "id")) {
+                id = value;
+            } else if (std.mem.eql(u8, name, "href") or std.mem.eql(u8, name, "xlink:href")) {
+                if (gradient.parseHref(value)) |target| {
+                    if (g.href) |old| self.allocator.free(old);
+                    g.href = null;
+                    g.href = try self.allocator.dupe(u8, target);
+                }
+            } else if (std.mem.eql(u8, name, "gradientUnits")) {
+                g.units = gradient.parseUnits(value) orelse g.units;
+            } else if (std.mem.eql(u8, name, "spreadMethod")) {
+                g.spread = gradient.parseSpread(value) orelse g.spread;
+            } else if (std.mem.eql(u8, name, "gradientTransform")) {
+                g.transform = try composeTransform(Transform.identity, parseTransform(value));
+            } else {
+                const slot: ?*?gradient.Length = switch (g.kind) {
+                    .linear => if (std.mem.eql(u8, name, "x1")) &g.x1 else if (std.mem.eql(u8, name, "y1")) &g.y1 else if (std.mem.eql(u8, name, "x2")) &g.x2 else if (std.mem.eql(u8, name, "y2")) &g.y2 else null,
+                    .radial => if (std.mem.eql(u8, name, "cx")) &g.cx else if (std.mem.eql(u8, name, "cy")) &g.cy else if (std.mem.eql(u8, name, "r")) &g.r else if (std.mem.eql(u8, name, "fx")) &g.fx else if (std.mem.eql(u8, name, "fy")) &g.fy else null,
+                };
+                if (slot) |dst| dst.* = gradient.parseLength(value) orelse dst.*;
+            }
+        }
+        return .{ .id = id, .gradient = g };
+    }
+
+    /// Keep a finished gradient under its id (a gradient without one can
+    /// never be referenced: dropped). Takes ownership of `open.gradient`.
+    fn storeGradient(self: *Svg, open: OpenGradient) !void {
+        var g = open.gradient;
+        const id = open.id orelse {
+            g.deinit(self.allocator);
+            return;
+        };
+        const gop = self.gradients.getOrPut(self.allocator, id) catch |err| {
+            g.deinit(self.allocator);
+            return err;
+        };
+        if (gop.found_existing) {
+            gop.value_ptr.deinit(self.allocator);
+        } else {
+            gop.key_ptr.* = self.allocator.dupe(u8, id) catch |err| {
+                self.gradients.removeByPtr(gop.key_ptr);
+                g.deinit(self.allocator);
+                return err;
+            };
+        }
+        gop.value_ptr.* = g;
+    }
+
     fn storeElement(
         self: *Svg,
         element: SvgElement,
@@ -714,7 +866,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -742,7 +894,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -772,7 +924,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -802,7 +954,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -827,7 +979,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -852,7 +1004,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -877,7 +1029,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -911,7 +1063,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -955,7 +1107,7 @@ pub const Svg = struct {
             } else if (std.mem.eql(u8, attr.name, "transform")) {
                 local_transform = parseTransform(attr.value);
             } else {
-                parseStyleAttribute(attr.name, attr.value, &local_style);
+                try self.parseStyleAttribute(attr.name, attr.value, &local_style);
             }
         }
 
@@ -1033,18 +1185,36 @@ pub const Svg = struct {
     }
 
     /// Generate PDF content stream for this SVG. The Svg itself is not
-    /// mutated (safe to share across documents and threads); opacity pairs
-    /// discovered during rendering are appended to `opacity_states`, which
-    /// the caller owns and uses to build the /GS{n} ExtGState resources.
-    pub fn toPdfContent(self: *const Svg, allocator: std.mem.Allocator, opacity_states: *std.ArrayListUnmanaged(OpacityState)) ![]u8 {
+    /// mutated (safe to share across documents and threads); what the
+    /// content needs is appended to lists the caller owns and builds the
+    /// form's resources from: opacity pairs to `opacity_states` (the
+    /// /GS{n} ExtGState resources), gradient paints to `patterns` (the
+    /// /P{n} Pattern resources, written by svg_gradient.writePattern; the
+    /// specs borrow this Svg's stops).
+    pub fn toPdfContent(
+        self: *const Svg,
+        allocator: std.mem.Allocator,
+        opacity_states: *std.ArrayListUnmanaged(OpacityState),
+        patterns: *std.ArrayListUnmanaged(PatternSpec),
+    ) ![]u8 {
         var content = std.ArrayListUnmanaged(u8).empty;
         errdefer content.deinit(allocator);
 
-        var writer = ContentWriter{ .buffer = &content, .allocator = allocator, .opacity_states = opacity_states };
+        var writer = ContentWriter{
+            .buffer = &content,
+            .allocator = allocator,
+            .opacity_states = opacity_states,
+            .patterns = patterns,
+            .viewport = if (self.viewbox_width > 0 and self.viewbox_height > 0)
+                .{ .width = self.viewbox_width, .height = self.viewbox_height }
+            else
+                .{ .width = self.width, .height = self.height },
+        };
 
         // Apply coordinate flip (SVG Y-down to PDF Y-up)
         // Matrix: 1 0 0 -1 0 height
         try writer.print("1 0 0 -1 0 {d:.2} cm\n", .{self.height});
+        writer.base = .{ .d = -1, .f = asPrinted(2, self.height) };
 
         // Apply viewBox transform if needed
         if (self.viewbox_width > 0 and self.viewbox_height > 0) {
@@ -1057,6 +1227,12 @@ pub const Svg = struct {
                     sy,
                     -self.viewbox_x * sx,
                     -self.viewbox_y * sy,
+                });
+                writer.base = writer.base.multiply(.{
+                    .a = asPrinted(4, sx),
+                    .d = asPrinted(4, sy),
+                    .e = asPrinted(2, -self.viewbox_x * sx),
+                    .f = asPrinted(2, -self.viewbox_y * sy),
                 });
             }
         }
@@ -1098,6 +1274,22 @@ const ContentWriter = struct {
     /// Opacity pairs discovered while rendering; owned by the caller of
     /// toPdfContent. Indexes name the /GS{n} ExtGState resources.
     opacity_states: *std.ArrayListUnmanaged(OpacityState),
+    /// Gradient paints discovered while rendering; owned by the caller of
+    /// toPdfContent. Indexes name the /P{n} Pattern resources.
+    patterns: *std.ArrayListUnmanaged(PatternSpec),
+    /// The SVG viewport, for gradient percentages in userSpaceOnUse.
+    viewport: gradient.Viewport,
+    /// The flip and viewBox transforms, as written: user space (before an
+    /// element's own transform) to the form's space.
+    base: Transform = .identity,
+
+    fn getOrAddPattern(self: *ContentWriter, spec: PatternSpec) !usize {
+        for (self.patterns.items, 0..) |p, i| {
+            if (p.eql(spec)) return i;
+        }
+        try self.patterns.append(self.allocator, spec);
+        return self.patterns.items.len - 1;
+    }
 
     fn getOrAddOpacityState(self: *ContentWriter, fill_op: f64, stroke_op: f64) !usize {
         const state = OpacityState{ .fill_opacity = fill_op, .stroke_opacity = stroke_op };
@@ -1125,9 +1317,11 @@ const ContentWriter = struct {
 };
 
 fn renderRect(svg: *const Svg, writer: *ContentWriter, rect: anytype) !void {
-    _ = svg;
     try applyTransform(writer, rect.transform);
-    try applyStyle(writer, rect.style);
+    const painted = try applyStyle(svg, writer, rect.style, .{
+        .transform = rect.transform,
+        .bbox = .{ .x = rect.x, .y = rect.y, .width = rect.width, .height = rect.height },
+    });
 
     if (rect.rx == 0 and rect.ry == 0) {
         // Simple rectangle
@@ -1141,7 +1335,7 @@ fn renderRect(svg: *const Svg, writer: *ContentWriter, rect: anytype) !void {
         try renderRoundedRect(writer, rect.x, rect.y, rect.width, rect.height, rx, ry);
     }
 
-    try finishPath(writer, rect.style);
+    try finishPath(writer, painted);
     try restoreTransform(writer, rect.transform);
 }
 
@@ -1213,41 +1407,50 @@ fn renderCircle(svg: *const Svg, writer: *ContentWriter, circle: anytype) !void 
 }
 
 fn renderEllipse(svg: *const Svg, writer: *ContentWriter, ellipse: anytype) !void {
-    _ = svg;
     try applyTransform(writer, ellipse.transform);
-    try applyStyle(writer, ellipse.style);
+    const painted = try applyStyle(svg, writer, ellipse.style, .{
+        .transform = ellipse.transform,
+        .bbox = .{ .x = ellipse.cx - ellipse.rx, .y = ellipse.cy - ellipse.ry, .width = 2 * ellipse.rx, .height = 2 * ellipse.ry },
+    });
 
     // Use shared ellipse path generator
     var buf: [512]u8 = undefined;
     const len = graphics.writeEllipsePath(&buf, ellipse.cx, ellipse.cy, ellipse.rx, ellipse.ry);
     try writer.append(buf[0..len]);
 
-    try finishPath(writer, ellipse.style);
+    try finishPath(writer, painted);
     try restoreTransform(writer, ellipse.transform);
 }
 
 fn renderLine(svg: *const Svg, writer: *ContentWriter, line: anytype) !void {
-    _ = svg;
     try applyTransform(writer, line.transform);
-    try applyStyle(writer, line.style);
+    const painted = try applyStyle(svg, writer, line.style, .{
+        .transform = line.transform,
+        .bbox = .{
+            .x = @min(line.x1, line.x2),
+            .y = @min(line.y1, line.y2),
+            .width = @abs(line.x2 - line.x1),
+            .height = @abs(line.y2 - line.y1),
+        },
+    });
 
     try writer.print("{d:.2} {d:.2} m\n", .{ line.x1, line.y1 });
     try writer.print("{d:.2} {d:.2} l\n", .{ line.x2, line.y2 });
 
     // Lines only have stroke
-    if (line.style.stroke) |_| {
-        try writer.append("S\n");
-    }
+    try finishStroke(writer, painted);
 
     try restoreTransform(writer, line.transform);
 }
 
 fn renderPolyline(svg: *const Svg, writer: *ContentWriter, polyline: anytype) !void {
-    _ = svg;
     if (polyline.points.items.len == 0) return;
 
     try applyTransform(writer, polyline.transform);
-    try applyStyle(writer, polyline.style);
+    const painted = try applyStyle(svg, writer, polyline.style, .{
+        .transform = polyline.transform,
+        .bbox = pointsBox(polyline.points.items),
+    });
 
     const first = polyline.points.items[0];
     try writer.print("{d:.2} {d:.2} m\n", .{ first.x, first.y });
@@ -1257,19 +1460,19 @@ fn renderPolyline(svg: *const Svg, writer: *ContentWriter, polyline: anytype) !v
     }
 
     // Polyline doesn't close, only stroke
-    if (polyline.style.stroke) |_| {
-        try writer.append("S\n");
-    }
+    try finishStroke(writer, painted);
 
     try restoreTransform(writer, polyline.transform);
 }
 
 fn renderPolygon(svg: *const Svg, writer: *ContentWriter, polygon: anytype) !void {
-    _ = svg;
     if (polygon.points.items.len == 0) return;
 
     try applyTransform(writer, polygon.transform);
-    try applyStyle(writer, polygon.style);
+    const painted = try applyStyle(svg, writer, polygon.style, .{
+        .transform = polygon.transform,
+        .bbox = pointsBox(polygon.points.items),
+    });
 
     const first = polygon.points.items[0];
     try writer.print("{d:.2} {d:.2} m\n", .{ first.x, first.y });
@@ -1279,121 +1482,45 @@ fn renderPolygon(svg: *const Svg, writer: *ContentWriter, polygon: anytype) !voi
     }
 
     try writer.append("h\n"); // Close path
-    try finishPath(writer, polygon.style);
+    try finishPath(writer, painted);
     try restoreTransform(writer, polygon.transform);
 }
 
-fn renderPath(svg: *const Svg, writer: *ContentWriter, path: anytype) !void {
-    _ = svg;
-    try applyTransform(writer, path.transform);
-    try applyStyle(writer, path.style);
+/// The bounding box of a point list (null when empty).
+fn pointsBox(points: []const Point) ?gradient.Box {
+    var bounds = svg_path.Bounds{};
+    for (points) |pt| bounds.include(pt.x, pt.y);
+    return bounds.box();
+}
 
-    var cur_x: f64 = 0;
-    var cur_y: f64 = 0;
-    var start_x: f64 = 0;
-    var start_y: f64 = 0;
-    var last_ctrl_x: f64 = 0;
-    var last_ctrl_y: f64 = 0;
-    var last_cmd_was_curve = false;
+/// Writes path geometry as PDF path operators.
+const PdfPathSink = struct {
+    writer: *ContentWriter,
 
-    for (path.commands.items) |cmd| {
-        switch (cmd) {
-            .move_to => |m| {
-                try writer.print("{d:.2} {d:.2} m\n", .{ m.x, m.y });
-                cur_x = m.x;
-                cur_y = m.y;
-                start_x = m.x;
-                start_y = m.y;
-                last_cmd_was_curve = false;
-            },
-            .line_to => |l| {
-                try writer.print("{d:.2} {d:.2} l\n", .{ l.x, l.y });
-                cur_x = l.x;
-                cur_y = l.y;
-                last_cmd_was_curve = false;
-            },
-            .horiz_to => |h| {
-                try writer.print("{d:.2} {d:.2} l\n", .{ h.x, cur_y });
-                cur_x = h.x;
-                last_cmd_was_curve = false;
-            },
-            .vert_to => |v| {
-                try writer.print("{d:.2} {d:.2} l\n", .{ cur_x, v.y });
-                cur_y = v.y;
-                last_cmd_was_curve = false;
-            },
-            .curve_to => |c| {
-                try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-                    c.x1, c.y1, c.x2, c.y2, c.x, c.y,
-                });
-                last_ctrl_x = c.x2;
-                last_ctrl_y = c.y2;
-                cur_x = c.x;
-                cur_y = c.y;
-                last_cmd_was_curve = true;
-            },
-            .smooth_curve => |s| {
-                // Reflect last control point
-                const x1 = if (last_cmd_was_curve) 2 * cur_x - last_ctrl_x else cur_x;
-                const y1 = if (last_cmd_was_curve) 2 * cur_y - last_ctrl_y else cur_y;
-                try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-                    x1, y1, s.x2, s.y2, s.x, s.y,
-                });
-                last_ctrl_x = s.x2;
-                last_ctrl_y = s.y2;
-                cur_x = s.x;
-                cur_y = s.y;
-                last_cmd_was_curve = true;
-            },
-            .quad_to => |q| {
-                // Convert quadratic to cubic bezier
-                const cp1_x = cur_x + 2.0 / 3.0 * (q.x1 - cur_x);
-                const cp1_y = cur_y + 2.0 / 3.0 * (q.y1 - cur_y);
-                const cp2_x = q.x + 2.0 / 3.0 * (q.x1 - q.x);
-                const cp2_y = q.y + 2.0 / 3.0 * (q.y1 - q.y);
-                try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-                    cp1_x, cp1_y, cp2_x, cp2_y, q.x, q.y,
-                });
-                last_ctrl_x = q.x1;
-                last_ctrl_y = q.y1;
-                cur_x = q.x;
-                cur_y = q.y;
-                last_cmd_was_curve = true;
-            },
-            .smooth_quad => |t| {
-                // Reflect last quadratic control point
-                const x1 = if (last_cmd_was_curve) 2 * cur_x - last_ctrl_x else cur_x;
-                const y1 = if (last_cmd_was_curve) 2 * cur_y - last_ctrl_y else cur_y;
-                // Convert quadratic to cubic
-                const cp1_x = cur_x + 2.0 / 3.0 * (x1 - cur_x);
-                const cp1_y = cur_y + 2.0 / 3.0 * (y1 - cur_y);
-                const cp2_x = t.x + 2.0 / 3.0 * (x1 - t.x);
-                const cp2_y = t.y + 2.0 / 3.0 * (y1 - t.y);
-                try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-                    cp1_x, cp1_y, cp2_x, cp2_y, t.x, t.y,
-                });
-                last_ctrl_x = x1;
-                last_ctrl_y = y1;
-                cur_x = t.x;
-                cur_y = t.y;
-                last_cmd_was_curve = true;
-            },
-            .arc_to => |a| {
-                try renderArc(writer, cur_x, cur_y, a.rx, a.ry, a.angle, a.large_arc, a.sweep, a.x, a.y);
-                cur_x = a.x;
-                cur_y = a.y;
-                last_cmd_was_curve = false;
-            },
-            .close_path => {
-                try writer.append("h\n");
-                cur_x = start_x;
-                cur_y = start_y;
-                last_cmd_was_curve = false;
-            },
-        }
+    pub fn moveTo(self: *PdfPathSink, x: f64, y: f64) !void {
+        try self.writer.print("{d:.2} {d:.2} m\n", .{ x, y });
     }
+    pub fn lineTo(self: *PdfPathSink, x: f64, y: f64) !void {
+        try self.writer.print("{d:.2} {d:.2} l\n", .{ x, y });
+    }
+    pub fn curveTo(self: *PdfPathSink, x1: f64, y1: f64, x2: f64, y2: f64, x: f64, y: f64) !void {
+        try self.writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{ x1, y1, x2, y2, x, y });
+    }
+    pub fn close(self: *PdfPathSink) !void {
+        try self.writer.append("h\n");
+    }
+};
 
-    try finishPath(writer, path.style);
+fn renderPath(svg: *const Svg, writer: *ContentWriter, path: anytype) !void {
+    try applyTransform(writer, path.transform);
+    var bounds = svg_path.Bounds{};
+    try svg_path.walk(path.commands.items, &bounds);
+    const painted = try applyStyle(svg, writer, path.style, .{ .transform = path.transform, .bbox = bounds.box() });
+
+    var sink = PdfPathSink{ .writer = writer };
+    try svg_path.walk(path.commands.items, &sink);
+
+    try finishPath(writer, painted);
     try restoreTransform(writer, path.transform);
 }
 
@@ -1430,13 +1557,19 @@ fn renderText(svg: *const Svg, writer: *ContentWriter, text: anytype) !void {
         .end => x -= text_width,
     }
 
-    // Apply fill color
-    const fill = text.style.getFill();
-    if (fill) |c| {
-        if (!c.isNone()) {
+    // Apply fill color. A gradient spans the text's box, estimated like its
+    // width: ascent 0.8 and descent 0.2 of the size over the run.
+    const fill = try preparePaint(svg, writer, text.style.getFill(), .{
+        .transform = text.transform,
+        .bbox = .{ .x = x, .y = text.y - 0.8 * text.font_size, .width = text_width, .height = text.font_size },
+    });
+    switch (fill) {
+        .none => {},
+        .color => |c| {
             const rgb = c.toPdfRgb();
             try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{ rgb.r, rgb.g, rgb.b });
-        }
+        },
+        .pattern => |n| try writer.print("/Pattern cs /P{d} scn\n", .{n + 1}),
     }
 
     // PDF text operators
@@ -1479,7 +1612,65 @@ fn restoreTransform(writer: *ContentWriter, transform: Transform) !void {
     try writer.append("Q\n");
 }
 
-fn applyStyle(writer: *ContentWriter, style: Style) !void {
+/// What a paint comes to when rendered.
+const ResolvedPaint = union(enum) {
+    none,
+    color: Color,
+    gradient: *const Gradient,
+};
+
+/// Resolve a paint: a url() that names no gradient uses its fallback, or
+/// paints nothing without one.
+fn resolvePaint(svg: *const Svg, paint: Paint) ResolvedPaint {
+    switch (paint) {
+        .color => |c| return if (c.isNone()) .none else .{ .color = c },
+        .server => |server| {
+            if (svg.gradients.getPtr(svg.paint_refs.items[server.ref])) |g| return .{ .gradient = g };
+            const fallback = server.fallback orelse return .none;
+            return if (fallback.isNone()) .none else .{ .color = fallback };
+        },
+    }
+}
+
+/// How an element's paint is set: nothing, a color, or pattern /P{n+1}.
+const PaintOp = union(enum) {
+    none,
+    color: Color,
+    pattern: usize,
+};
+
+/// What applyStyle set up, for finishPath / finishStroke.
+const Painted = struct {
+    fill: bool,
+    stroke: bool,
+};
+
+/// Where an element is, for the gradients it paints with: its own
+/// transform and its geometry's bounding box in its user space (null when
+/// it has no geometry).
+const Geometry = struct {
+    transform: Transform,
+    bbox: ?gradient.Box,
+};
+
+fn preparePaint(svg: *const Svg, writer: *ContentWriter, paint: Paint, geometry: Geometry) !PaintOp {
+    switch (resolvePaint(svg, paint)) {
+        .none => return .none,
+        .color => |c| return .{ .color = c },
+        .gradient => |g| {
+            const ctm = writer.base.multiply(asPrintedTransform(geometry.transform));
+            switch (gradient.prepare(g, geometry.bbox, ctm, writer.viewport)) {
+                .none => return .none,
+                .color => |c| return .{ .color = c },
+                .pattern => |spec| return .{ .pattern = try writer.getOrAddPattern(spec) },
+            }
+        },
+    }
+}
+
+/// Set the opacity, fill and stroke for an element; returns which of fill
+/// and stroke paint anything.
+fn applyStyle(svg: *const Svg, writer: *ContentWriter, style: Style, geometry: Geometry) !Painted {
     // Apply opacity via ExtGState if not fully opaque
     const fill_op = style.getFillOpacity();
     const stroke_op = style.getStrokeOpacity();
@@ -1489,163 +1680,76 @@ fn applyStyle(writer: *ContentWriter, style: Style) !void {
     }
 
     // Set fill color (default to black if unspecified)
-    if (style.getFill()) |fill| {
-        if (!fill.isNone()) {
-            const rgb = fill.toPdfRgb();
+    const fill = try preparePaint(svg, writer, style.getFill(), geometry);
+    switch (fill) {
+        .none => {},
+        .color => |c| {
+            const rgb = c.toPdfRgb();
             try writer.print("{d:.3} {d:.3} {d:.3} rg\n", .{ rgb.r, rgb.g, rgb.b });
-        }
+        },
+        .pattern => |n| try writer.print("/Pattern cs /P{d} scn\n", .{n + 1}),
     }
 
     // Set stroke color
-    if (style.getStroke()) |stroke| {
-        if (!stroke.isNone()) {
-            const rgb = stroke.toPdfRgb();
+    const stroke = try preparePaint(svg, writer, style.getStroke(), geometry);
+    switch (stroke) {
+        .none => {},
+        .color => |c| {
+            const rgb = c.toPdfRgb();
             try writer.print("{d:.3} {d:.3} {d:.3} RG\n", .{ rgb.r, rgb.g, rgb.b });
-            try writer.print("{d:.4} w\n", .{style.getStrokeWidth()});
-            try writer.print("{d} J\n", .{style.getStrokeLinecap().toPdfValue()});
-            try writer.print("{d} j\n", .{style.getStrokeLinejoin().toPdfValue()});
-        }
+        },
+        .pattern => |n| try writer.print("/Pattern CS /P{d} SCN\n", .{n + 1}),
     }
+    if (stroke != .none) {
+        try writer.print("{d:.4} w\n", .{style.getStrokeWidth()});
+        try writer.print("{d} J\n", .{style.getStrokeLinecap().toPdfValue()});
+        try writer.print("{d} j\n", .{style.getStrokeLinejoin().toPdfValue()});
+    }
+    return .{ .fill = fill != .none, .stroke = stroke != .none };
 }
 
-fn finishPath(writer: *ContentWriter, style: Style) !void {
-    const has_fill = if (style.getFill()) |f| !f.isNone() else false;
-    const has_stroke = if (style.getStroke()) |s| !s.isNone() else false;
+/// End an open path that is only stroked (line, polyline).
+fn finishStroke(writer: *ContentWriter, painted: Painted) !void {
+    try writer.append(if (painted.stroke) "S\n" else "n\n");
+}
 
-    if (has_fill and has_stroke) {
+fn finishPath(writer: *ContentWriter, painted: Painted) !void {
+    if (painted.fill and painted.stroke) {
         try writer.append("B\n"); // Fill and stroke
-    } else if (has_fill) {
+    } else if (painted.fill) {
         try writer.append("f\n"); // Fill only
-    } else if (has_stroke) {
+    } else if (painted.stroke) {
         try writer.append("S\n"); // Stroke only
     } else {
         try writer.append("n\n"); // No-op (end path without painting)
     }
 }
 
+/// `v` as the content stream has it: written with `decimals` digits (the
+/// same {d:.N} formatting) and read back, so a pattern matrix built from
+/// it matches the transforms the geometry is drawn with.
+fn asPrinted(comptime decimals: u8, v: f64) f64 {
+    var buf: [400]u8 = undefined;
+    const text = std.fmt.bufPrint(&buf, std.fmt.comptimePrint("{{d:.{d}}}", .{decimals}), .{v}) catch return v;
+    return std.fmt.parseFloat(f64, text) catch v;
+}
+
+/// A transform as applyTransform writes it (4 decimals, 2 for e and f).
+fn asPrintedTransform(t: Transform) Transform {
+    return .{
+        .a = asPrinted(4, t.a),
+        .b = asPrinted(4, t.b),
+        .c = asPrinted(4, t.c),
+        .d = asPrinted(4, t.d),
+        .e = asPrinted(2, t.e),
+        .f = asPrinted(2, t.f),
+    };
+}
+
 // ============================================================================
 // Arc to Bezier Conversion
 // ============================================================================
 
-/// Convert SVG arc to PDF bezier curves
-fn renderArc(
-    writer: *ContentWriter,
-    x1: f64,
-    y1: f64,
-    rx_in: f64,
-    ry_in: f64,
-    angle: f64,
-    large_arc: bool,
-    sweep: bool,
-    x2: f64,
-    y2: f64,
-) !void {
-    // Handle degenerate cases
-    if (x1 == x2 and y1 == y2) return;
-
-    var rx = @abs(rx_in);
-    var ry = @abs(ry_in);
-
-    if (rx == 0 or ry == 0) {
-        // Treat as line
-        try writer.print("{d:.2} {d:.2} l\n", .{ x2, y2 });
-        return;
-    }
-
-    const phi = angle * std.math.pi / 180.0;
-    const cos_phi = @cos(phi);
-    const sin_phi = @sin(phi);
-
-    // Step 1: Compute (x1', y1')
-    const dx = (x1 - x2) / 2;
-    const dy = (y1 - y2) / 2;
-    const x1p = cos_phi * dx + sin_phi * dy;
-    const y1p = -sin_phi * dx + cos_phi * dy;
-
-    // Step 2: Compute (cx', cy')
-    // Scale radii if necessary
-    var lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
-    if (lambda > 1) {
-        const sqrt_lambda = @sqrt(lambda);
-        rx *= sqrt_lambda;
-        ry *= sqrt_lambda;
-        lambda = 1;
-    }
-
-    const rx2 = rx * rx;
-    const ry2 = ry * ry;
-    const x1p2 = x1p * x1p;
-    const y1p2 = y1p * y1p;
-
-    var sq = (rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2) / (rx2 * y1p2 + ry2 * x1p2);
-    if (sq < 0) sq = 0;
-    var coef = @sqrt(sq);
-    if (large_arc == sweep) coef = -coef;
-
-    const cxp = coef * rx * y1p / ry;
-    const cyp = -coef * ry * x1p / rx;
-
-    // Step 3: Compute (cx, cy) from (cx', cy')
-    const cx = cos_phi * cxp - sin_phi * cyp + (x1 + x2) / 2;
-    const cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) / 2;
-
-    // Step 4: Compute angles
-    const theta1 = vectorAngle(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
-    var dtheta = vectorAngle((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
-
-    if (!sweep and dtheta > 0) {
-        dtheta -= 2 * std.math.pi;
-    } else if (sweep and dtheta < 0) {
-        dtheta += 2 * std.math.pi;
-    }
-
-    // Step 5: Draw arc as bezier curves (split into 90-degree segments)
-    const n_segs = @as(usize, @intFromFloat(@ceil(@abs(dtheta) / (std.math.pi / 2.0))));
-    if (n_segs == 0) return;
-
-    const delta = dtheta / @as(f64, @floatFromInt(n_segs));
-    const t = 4.0 / 3.0 * @tan(delta / 4.0);
-
-    var theta = theta1;
-    for (0..n_segs) |_| {
-        const cos_t1 = @cos(theta);
-        const sin_t1 = @sin(theta);
-        const cos_t2 = @cos(theta + delta);
-        const sin_t2 = @sin(theta + delta);
-
-        // Control point 1
-        const p1x = cx + (rx * cos_t1 - t * rx * sin_t1) * cos_phi - (ry * sin_t1 + t * ry * cos_t1) * sin_phi;
-        const p1y = cy + (rx * cos_t1 - t * rx * sin_t1) * sin_phi + (ry * sin_t1 + t * ry * cos_t1) * cos_phi;
-
-        // Control point 2
-        const p2x = cx + (rx * cos_t2 + t * rx * sin_t2) * cos_phi - (ry * sin_t2 - t * ry * cos_t2) * sin_phi;
-        const p2y = cy + (rx * cos_t2 + t * rx * sin_t2) * sin_phi + (ry * sin_t2 - t * ry * cos_t2) * cos_phi;
-
-        // End point
-        const ex = cx + rx * cos_t2 * cos_phi - ry * sin_t2 * sin_phi;
-        const ey = cy + rx * cos_t2 * sin_phi + ry * sin_t2 * cos_phi;
-
-        try writer.print("{d:.2} {d:.2} {d:.2} {d:.2} {d:.2} {d:.2} c\n", .{
-            p1x, p1y, p2x, p2y, ex, ey,
-        });
-
-        theta += delta;
-    }
-}
-
-fn vectorAngle(ux: f64, uy: f64, vx: f64, vy: f64) f64 {
-    const n = @sqrt(ux * ux + uy * uy) * @sqrt(vx * vx + vy * vy);
-    if (n == 0) return 0;
-
-    var c = (ux * vx + uy * vy) / n;
-    c = @max(-1, @min(1, c)); // Clamp to [-1, 1]
-
-    const angle = std.math.acos(c);
-    if (ux * vy - uy * vx < 0) {
-        return -angle;
-    }
-    return angle;
-}
 
 // ============================================================================
 // Parsing Helpers
@@ -1811,12 +1915,61 @@ fn parseColor(str: []const u8) ?Color {
     return .{ .r = pixel.r, .g = pixel.g, .b = pixel.b, .a = pixel.alpha };
 }
 
+/// Read a `<stop>`: offset, stop-color and stop-opacity, as attributes or
+/// in `style` (which wins, being applied last). A stop-color that does not
+/// parse is black, its initial value; its alpha multiplies stop-opacity.
+fn parseStop(elem: xml.Element) gradient.Stop {
+    var color: Color = Color.black;
+    var opacity: f64 = 1;
+    var offset: f64 = 0;
+    var style: []const u8 = "";
+    var attrs = elem.attributes();
+    while (attrs.next()) |attr| {
+        if (std.mem.eql(u8, attr.name, "offset")) {
+            offset = gradient.parseOffset(attr.value);
+        } else if (std.mem.eql(u8, attr.name, "style")) {
+            style = attr.value;
+        } else {
+            applyStopProperty(attr.name, attr.value, &color, &opacity);
+        }
+    }
+    var props = std.mem.splitScalar(u8, style, ';');
+    while (props.next()) |prop| {
+        const colon = std.mem.indexOfScalar(u8, prop, ':') orelse continue;
+        const name = std.mem.trim(u8, prop[0..colon], " \t\n\r");
+        applyStopProperty(name, std.mem.trim(u8, prop[colon + 1 ..], " \t\n\r"), &color, &opacity);
+    }
+    const alpha = @as(f64, @floatFromInt(color.a)) / 255.0;
+    return .{ .offset = offset, .color = .{ .r = color.r, .g = color.g, .b = color.b }, .opacity = opacity * alpha };
+}
+
+fn applyStopProperty(name: []const u8, value: []const u8, color: *Color, opacity: *f64) void {
+    if (std.mem.eql(u8, name, "stop-color")) {
+        // `none` is not a color here (parseColor reads it as transparent).
+        color.* = if (std.mem.eql(u8, std.mem.trim(u8, value, " \t\n\r"), "none")) Color.black else parseColor(value) orelse Color.black;
+    } else if (std.mem.eql(u8, name, "stop-opacity")) {
+        opacity.* = gradient.parseOpacity(value) orelse opacity.*;
+    }
+}
+
+/// Parse a fill/stroke value: a color, `none`, or `url(#id) [fallback]`.
+/// Null when it is none of these (the property is then unspecified).
+fn parsePaint(svg: *Svg, value: []const u8) !?Paint {
+    if (gradient.parseUrlPaint(value)) |url| {
+        return .{ .server = .{
+            .ref = try svg.internPaintRef(url.id),
+            .fallback = if (url.fallback.len > 0) parseColor(url.fallback) else null,
+        } };
+    }
+    return .{ .color = parseColor(value) orelse return null };
+}
+
 /// Parse style attribute
-fn parseStyleAttribute(name: []const u8, value: []const u8, style: *Style) void {
+fn parseStyleAttributeFn(svg: *Svg, name: []const u8, value: []const u8, style: *Style) !void {
     if (std.mem.eql(u8, name, "fill")) {
-        style.fill = parseColor(value);
+        style.fill = try parsePaint(svg, value);
     } else if (std.mem.eql(u8, name, "stroke")) {
-        style.stroke = parseColor(value);
+        style.stroke = try parsePaint(svg, value);
     } else if (std.mem.eql(u8, name, "stroke-width")) {
         const w = parseFloat(value);
         if (w > 0) style.stroke_width = w;
@@ -1853,7 +2006,7 @@ fn parseStyleAttribute(name: []const u8, value: []const u8, style: *Style) void 
             if (std.mem.indexOf(u8, trimmed, ":")) |colon_pos| {
                 const prop_name = std.mem.trim(u8, trimmed[0..colon_pos], " \t");
                 const prop_value = std.mem.trim(u8, trimmed[colon_pos + 1 ..], " \t");
-                parseStyleAttribute(prop_name, prop_value, style);
+                try parseStyleAttributeFn(svg, prop_name, prop_value, style);
             }
         }
     }
@@ -2147,7 +2300,7 @@ test "parse simple SVG" {
     try std.testing.expectEqual(@as(f64, 10), rect.y);
     try std.testing.expectEqual(@as(f64, 80), rect.width);
     try std.testing.expectEqual(@as(f64, 80), rect.height);
-    try std.testing.expectEqual(@as(u8, 255), rect.style.fill.?.r);
+    try std.testing.expectEqual(@as(u8, 255), rect.style.fill.?.color.r);
 }
 
 test "parse color" {
@@ -2244,7 +2397,9 @@ test "generate PDF content" {
 
     var states = std.ArrayListUnmanaged(OpacityState).empty;
     defer states.deinit(allocator);
-    const content = try svg.toPdfContent(allocator, &states);
+    var patterns: std.ArrayListUnmanaged(PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = try svg.toPdfContent(allocator, &states, &patterns);
     defer allocator.free(content);
 
     // Should contain coordinate flip and rectangle commands
@@ -2263,7 +2418,9 @@ test "stroke widths keep their precision" {
     defer svg.deinit();
     var states = std.ArrayListUnmanaged(OpacityState).empty;
     defer states.deinit(allocator);
-    const content = try svg.toPdfContent(allocator, &states);
+    var patterns: std.ArrayListUnmanaged(PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = try svg.toPdfContent(allocator, &states, &patterns);
     defer allocator.free(content);
     try std.testing.expect(std.mem.indexOf(u8, content, "0.1720 w\n") != null);
 }
@@ -2404,7 +2561,9 @@ test "parse MathJax equation SVG with xlink:href" {
     // Generate PDF content to verify rendering works
     var states = std.ArrayListUnmanaged(OpacityState).empty;
     defer states.deinit(allocator);
-    const content = try svg.toPdfContent(allocator, &states);
+    var patterns: std.ArrayListUnmanaged(PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = try svg.toPdfContent(allocator, &states, &patterns);
     defer allocator.free(content);
     try std.testing.expect(content.len > 0);
 }
@@ -2436,7 +2595,9 @@ test "hostile SVG numbers never reach the PDF content as nan/inf" {
         defer svg.deinit();
         var states: std.ArrayListUnmanaged(OpacityState) = .empty;
         defer states.deinit(a);
-        const content = try svg.toPdfContent(a, &states);
+        var patterns: std.ArrayListUnmanaged(PatternSpec) = .empty;
+        defer patterns.deinit(a);
+        const content = try svg.toPdfContent(a, &states, &patterns);
         defer a.free(content);
         if (std.mem.indexOf(u8, content, "nan") != null or std.mem.indexOf(u8, content, "inf") != null) {
             std.debug.print("non-finite number in content for {s}:\n{s}\n", .{ text, content });

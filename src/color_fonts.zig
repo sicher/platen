@@ -284,12 +284,14 @@ fn renderSvgGlyphCharProc(doc: *Document, emb: *EmbeddedFont, gid: u16) ![]u8 {
 
     var opacity_states = std.ArrayListUnmanaged(svg.OpacityState).empty;
     defer opacity_states.deinit(doc.allocator);
-    const ops = try s.toPdfContent(doc.allocator, &opacity_states);
+    var patterns = std.ArrayListUnmanaged(svg.PatternSpec).empty;
+    defer patterns.deinit(doc.allocator);
+    const ops = try s.toPdfContent(doc.allocator, &opacity_states, &patterns);
     defer doc.allocator.free(ops);
-    // Transparency/text usage is only known after rendering (the ops
-    // would reference /GS{n} or font resources that the Type3 font's
-    // shared Resources dict does not carry).
-    if (opacity_states.items.len > 0 or s.hasText()) return error.NotAColorGlyph;
+    // Transparency/gradient/text usage is only known after rendering (the
+    // ops would reference /GS{n}, /P{n} or font resources that the Type3
+    // font's shared Resources dict does not carry).
+    if (opacity_states.items.len > 0 or patterns.items.len > 0 or s.hasText()) return error.NotAColorGlyph;
 
     const wx = emb.glyphAdvanceFontUnits(gid);
     return std.fmt.allocPrint(doc.allocator, "{d} 0 d0\n{s}", .{ wx, ops });

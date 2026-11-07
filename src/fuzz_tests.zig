@@ -182,7 +182,9 @@ fn fuzzSvgFromMemory(_: void, smith: *Smith) !void {
     // Also exercise rendering of whatever parsed.
     var states = std.ArrayListUnmanaged(svg.OpacityState).empty;
     defer states.deinit(allocator);
-    const content = s.toPdfContent(allocator, &states) catch return;
+    var patterns: std.ArrayListUnmanaged(svg.PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = s.toPdfContent(allocator, &states, &patterns) catch return;
     allocator.free(content);
 }
 
@@ -475,7 +477,9 @@ fn exerciseSvgDoc(allocator: std.mem.Allocator, maybe_doc: ?[]const u8) void {
     }
     var states = std.ArrayListUnmanaged(svg.OpacityState).empty;
     defer states.deinit(allocator);
-    const content = s.toPdfContent(allocator, &states) catch return;
+    var patterns: std.ArrayListUnmanaged(svg.PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = s.toPdfContent(allocator, &states, &patterns) catch return;
     allocator.free(content);
 }
 

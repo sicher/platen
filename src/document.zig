@@ -3782,7 +3782,9 @@ pub const Document = struct {
             // per-render list this document owns.
             var opacity_states = std.ArrayListUnmanaged(svg.OpacityState).empty;
             defer opacity_states.deinit(self.allocator);
-            const svg_content = try s.toPdfContent(self.allocator, &opacity_states);
+            var patterns = std.ArrayListUnmanaged(svg.PatternSpec).empty;
+            defer patterns.deinit(self.allocator);
+            const svg_content = try s.toPdfContent(self.allocator, &opacity_states, &patterns);
             defer self.allocator.free(svg_content);
 
             try w.beginObject(svg_id);
@@ -3800,11 +3802,12 @@ pub const Document = struct {
             try bbox.append(Value.real(s.height));
             try form_dict.put("BBox", .{ .array_val = &bbox });
 
-            // Build resources dictionary (may include ExtGState, Font, or both)
+            // Build resources dictionary (ExtGState, Pattern, Font, as used)
             const has_transparency = opacity_states.items.len > 0;
+            const has_patterns = patterns.items.len > 0;
             const has_text = s.used_fonts.items.len > 0;
 
-            if (has_transparency or has_text) {
+            if (has_transparency or has_patterns or has_text) {
                 var resources = Dict.init(self.allocator);
                 defer resources.deinit();
 
@@ -3832,6 +3835,27 @@ pub const Document = struct {
                         try extgstate.put(try ownedResourceName(self.allocator, &gs_names, "GS", idx), .{ .dict_val = &gs_dicts[idx] });
                     }
                     try resources.put("ExtGState", .{ .dict_val = &extgstate });
+                }
+
+                // Gradient paints: shading patterns, inline (/P1, /P2, ...)
+                var pattern_res = Dict.init(self.allocator);
+                defer pattern_res.deinit();
+                var pattern_strs: std.ArrayListUnmanaged([]u8) = .empty; // names and dicts
+                defer {
+                    for (pattern_strs.items) |str| self.allocator.free(str);
+                    pattern_strs.deinit(self.allocator);
+                }
+                if (has_patterns) {
+                    for (patterns.items, 0..) |spec, idx| {
+                        var dict: std.Io.Writer.Allocating = .init(self.allocator);
+                        defer dict.deinit();
+                        try svg.writePattern(self.allocator, spec, &dict.writer);
+                        try pattern_strs.ensureUnusedCapacity(self.allocator, 1);
+                        const dict_str = try dict.toOwnedSlice();
+                        pattern_strs.appendAssumeCapacity(dict_str);
+                        try pattern_res.put(try ownedResourceName(self.allocator, &pattern_strs, "P", idx), Value.literal(dict_str));
+                    }
+                    try resources.put("Pattern", .{ .dict_val = &pattern_res });
                 }
 
                 // Add Font resources for SVG text elements

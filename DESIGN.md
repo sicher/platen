@@ -901,10 +901,60 @@ try doc.drawSvg(svg, x, y, width, height);
 - Colors: any CSS Color 4 color, parsed by ochre (`src/ochre/`, vendored): hex
   with or without alpha, the 148 names, rgb(), rgba(), hsl(), oklab(), oklch().
   Out-of-range values are clipped as browsers do. Alpha counts only as `none` at 0
-- Gradients: linearGradient, radialGradient with stops
+- Gradients: linearGradient, radialGradient as fill and stroke (`url(#id)`
+  with fallback), both units, gradientTransform, focal point. Not yet: href
+  inheritance, stop-opacity, spreadMethod reflect/repeat (see below)
 - Reuse: `<defs>` and `<use>` elements with href/xlink:href
 
 **Use cases:** matplotlib, Inkscape, Illustrator, R/ggplot2, MathJax equations.
+
+**SVG gradients** (`src/svg_gradient.zig`; path geometry and bounding boxes
+in `src/svg_path.zig`):
+
+- Parsing keeps every gradient attribute optional (null = not set) so `href`
+  inheritance can be added without reparsing; defaults apply in `prepare`.
+  `Style.fill`/`stroke` are a `Paint`: a color, or `url(#id)` as an index into
+  `Svg.paint_refs` plus a fallback. References resolve at render time, so a
+  gradient may follow its first use. A later duplicate id replaces the
+  earlier gradient (as for `defs`).
+- Each painted element becomes a **shading pattern** (PatternType 2) in the
+  SVG form's `/Pattern` resources (`/P{n}`, inline dicts), set with
+  `/Pattern cs /Pn scn` (`CS`/`SCN` for strokes). `toPdfContent` reports them
+  in a `patterns` out-list beside `opacity_states`. A pattern's space is the
+  form's, so its matrix is `base x element transform x bbox x gradientTransform`,
+  where base is the flip and viewBox `cm`s. Those transforms are written
+  rounded (`{d:.2}`/`{d:.4}`), so the matrix uses them *as printed*
+  (`asPrinted`: format, parse back) and gradient and geometry line up exactly.
+- The bounding box is the fill geometry's (stroke width left out), tight:
+  curves by their extrema (`svg_path.Bounds`). Text's is estimated (ascent
+  0.8, descent 0.2 of the size over the estimated width).
+- Stops are made non-decreasing, held out to 0 and 1, and zero-width spans
+  (hard edges) left out of the stitching function; numbers are written with
+  up to 6 decimals (gradient.zig's 3-decimal Bounds would merge close stops).
+  `gradient.zig`'s own function writer assumes stops at exactly 0 and 1.
+- Extend is always `[true true]` (spreadMethod pad); reflect/repeat would need
+  the stops repeated over a wider domain. stop-opacity would need a soft mask
+  (as COLRv1 gradients have).
+- A focal point outside the circle draws a cone in PDF, which is SVG 2's (and
+  resvg's) behaviour, not SVG 1.1's clamp.
+- OT-SVG glyphs that need patterns fall back to the outline (the Type3 font's
+  shared resources do not carry them).
+
+**Testing SVG gradients** (`test/svg_gradients/`): neither fpdf2's SVG import
+nor MuPDF supports gradients, so **resvg** is the reference (`resvg-py` in
+`.venv`; `pip install resvg-py`). `scripts/gen_svg_probes.py` records resvg's
+colors at the probe points each SVG lists (`<!-- probes: x,y ... -->`) in
+`probes.json` (committed; CI needs only pdftoppm), and
+`scripts/check_svg_probes.py` holds pdftoppm's render of platen's PDF to them
+within 3 levels. Probes must sit where the color changes slowly (5x5 spread
+<= 24 levels, enforced by the generator), because rasterizers sample up to half
+a pixel apart: on edges, hard stops, and near a radial focal point the
+difference is real but the rasterizer's. Near a focal point pdftoppm and MuPDF
+both approximate (checked by hand: resvg's (243,249,243) at one pixel is the
+exact value; poppler gave t = 0.067 for 0.049). MuPDF also draws a one-pixel
+seam along the focal-to-center axis of a radial shading; poppler does not. The
+exact pixel check against the platen-made `test/reference/svg_gradients.pdf`
+catches any later drift.
 
 ### Drawing Primitives
 

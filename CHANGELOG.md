@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **SVG gradients**: `<linearGradient>` and `<radialGradient>` fill and stroke
+  shapes, paths and text through `url(#id)`, with an optional fallback color
+  (`url(#g) red`). Both `gradientUnits` (`objectBoundingBox`, the default, and
+  `userSpaceOnUse` with percentages of the viewport), `gradientTransform`, a
+  radial focal point (`fx`, `fy`; outside the circle it draws a cone, as in
+  SVG 2), and stops given as attributes or in `style`, at percentages, out of
+  order or at one offset (a hard edge). Where SVG says a gradient paints a
+  solid color (one stop; equal end points or zero radius: the last stop) or
+  nothing (no stops; a missing reference without a fallback; a box without
+  width or height, e.g. a horizontal line's), so does platen. Each is a PDF
+  shading pattern in the SVG's form; colors are checked against resvg. Not yet:
+  `href` between gradients, `stop-opacity`, and `spreadMethod` `reflect` and
+  `repeat` (drawn as `pad`).
+- **`platen svg <in.svg> [out.pdf]`**: renders an SVG on a page of its own size
+  (1 px = 1 pt).
+
 ### Changed
 
 - **Color parsing is ochre's**: platen vendors
@@ -19,6 +37,14 @@
 
 ### Fixed
 
+- **SVG gradient paint was black**: `fill="url(#g)"` counted as an unknown
+  color, so the shape took its parent's fill, black by default, though the
+  documentation listed gradients as supported.
+- **SVG `<line>` and `<polyline>` with `stroke="none"` were stroked** (in the
+  current stroke color), and without a stroke their path was left unpainted
+  and open; it is now ended with `n`.
+- An OT-SVG color glyph that uses a gradient now falls back to the plain
+  outline, as one using transparency does (it was drawn black).
 - **`Color.fromName("lightgoldenrodyellow")` was null**: the hand-written
   lookup table had lost it, though the constant was there. The table is now
   built at compile time from the constants, and a test checks all 148 against

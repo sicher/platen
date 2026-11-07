@@ -192,6 +192,8 @@ test {
     _ = @import("colr.zig");
     _ = @import("bitmap_glyphs.zig");
     _ = @import("svg_table.zig");
+    _ = @import("svg_gradient.zig");
+    _ = @import("svg_path.zig");
     _ = @import("encrypt.zig");
     _ = @import("unicode_compose.zig");
 }

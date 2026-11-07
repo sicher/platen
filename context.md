@@ -13,9 +13,11 @@ Since 0.13.0 on dev: ochre (color parsing) vendored in `src/ochre/` by
 `scripts/vendor-ochre vX.Y.Z` (never edit those files; update ochre and
 re-run). SVG fill/stroke and `Color.hex` parse through it; `fromName`'s
 table is built from the 148 constants, checked against ochre's. Next for
-ochre in platen: perceptual gradients via `ochre.ramp(...).stops()`. Found: DESIGN/README list SVG
-gradients, but platen has no `linearGradient`/`stop-color` code; the
+ochre in platen: perceptual gradients via `ochre.ramp(...).stops()`. The
 `examples/showcase_*.pdf` files are still from 0.12.0.
+**SVG gradients (session #33, uncommitted on dev)**: steps 1-4 done (parse,
+`url()` paint + fallback, shading patterns, units/gradientTransform/focal);
+steps 5-7 next (href inheritance, stop-opacity, reflect/repeat) - TODO.md.
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
 `.tools/devkit/devkit release X.Y.Z` (merge dev, date the notes, set the
@@ -47,6 +49,28 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   idle. Deferred by the user.
 - Other urverk projects need the 0.17 migration: DESIGN.md "Zig
   Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
+
+## What We Did (Session 2026-11-03 #33 - SVG gradients 1-4)
+- Found the docs claimed SVG gradients that did not exist (`url(#g)` was an
+  unknown color: black). Plan agreed with the user: 1 parse, 2 url() +
+  fallback, 3 render, 4 units/transform/focal; then 5 href, 6 stop-opacity,
+  7 reflect/repeat.
+- New `src/svg_gradient.zig` (types, parsers, `prepare`, `writePattern`) and
+  `src/svg_path.zig` (path walk into a sink, arcs, tight `Bounds`; renderPath
+  refactored onto it, output byte-identical). `Style.fill/stroke` are `Paint`.
+  `toPdfContent` gained a `patterns` out-list (document writes `/Pattern`,
+  color_fonts rejects glyphs needing it). Design notes in DESIGN.md "SVG
+  gradients".
+- **Oracle decision (user)**: resvg (`resvg-py` installed in .venv) at probe
+  points, +-3 levels, probes only where 5x5 spread <= 24 (generator enforces);
+  plus exact pixel check vs platen-made `test/reference/svg_gradients.pdf`.
+  fpdf2 and MuPDF cannot render SVG gradients. Near a radial focal point
+  pdftoppm/MuPDF approximate (resvg verified exact by hand); MuPDF has a
+  seam on the focal-center axis.
+- CLI: `platen svg <in.svg> [out.pdf]`. Fixed on the way: line/polyline with
+  `stroke="none"` were stroked. Found (TODO.md): polyline never filled,
+  S-after-Q reflection, 2-decimal path coordinates, document gradients assume
+  stops at 0 and 1.
 
 ## What We Did (Session 2026-10-22 #32 - GSUB engine)
 - **New `src/gsub.zig`** replaces the per-feature GSUB code in
@@ -147,29 +171,6 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   mode (pdftotext) can't see blank glyphs, so a render/pixel check is
   needed. Kerning (kern format 0 / GPOS pairs) exposed for measuring is
   fdxview's "nice to have", not started.
-
-## What We Did (Session 2026-10-06 #28 - releases, devkit, spans)
-- **Releases 0.10.0, 0.10.1, 0.11.0.** Adopted the devkit main/dev model;
-  version single-sourced from build.zig.zon (build option -> version.zig).
-- **devkit** (separate repo, pushed 6fe0aba): opt-in `CHANGELOG=` -
-  `release` requires and dates `## Unreleased`, `publish` uses it as the
-  release text (assets optional). Opt-in, so other repos are unaffected.
-- **Package size:** `.paths` in build.zig.zon + `.gitattributes`
-  export-ignore: dependents fetch 0.4 MB (was 45) and cache 1.8 MB.
-- **CI first ran** (platen's workflow had never been pushed): runner
-  lacked poppler/qpdf -> installed; workflow prints `--summary all`.
-- **Test infrastructure:** the comparator compared fonts only when both
-  pages had some and read qpdf failures as "no fonts" - fixed, with its
-  own tests; test/ fixtures and comparator scripts are declared inputs of
-  the test run, so a changed reference re-runs (a corrupted one used to
-  pass from cache).
-- **StyledText spans:** fields are optional overrides of the base style
-  (writeBlock/writeStyled ignored the base color/decoration - fixed), and
-  spans take bold/italic, resolved through the font family, with widths
-  measured per span.
-- **Benchmarks re-measured** (M1 Pro, medians of 3): 70 ms / 54 ms for
-  110 pages; invoices 2,060 / 3,350 shared / 9,500 at 8 threads / ~17,700
-  at 8 threads shared (README said ~19,000).
 
 ## Older sessions (pruned 2026-10-22)
 Session #27 (2026-10-04/05): Zig 0.17 migration, number contract

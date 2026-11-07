@@ -102,6 +102,15 @@ pub fn main(init: std.process.Init) !void {
         const output_path = if (args.len > 2) args[2] else "gradient_test.pdf";
         try generateGradientTestPdf(allocator, output_path);
         try print("Generated: {s}\n", .{output_path});
+    } else if (std.mem.eql(u8, cmd, "svg")) {
+        // Render an SVG file on a page of its own size
+        if (args.len < 3) {
+            try print("Usage: platen svg <in.svg> [out.pdf]\n", .{});
+            return;
+        }
+        const output_path = if (args.len > 3) args[3] else "svg.pdf";
+        try generateSvgPdf(allocator, args[2], output_path);
+        try print("Generated: {s}\n", .{output_path});
     } else if (std.mem.eql(u8, cmd, "opacity-test")) {
         // Test opacity API (fill/stroke alpha)
         const output_path = if (args.len > 2) args[2] else "opacity_test.pdf";
@@ -162,6 +171,7 @@ fn printUsage() !void {
         \\  calt-test [ttf] [out]   Test GSUB contextual alternates (arrows, ligatures)
         \\  path-test [out]         Test path API (moveTo, lineTo, curveTo)
         \\  gradient-test [out]     Test gradient API (linear, radial)
+        \\  svg <in.svg> [out]      Render an SVG on a page of its size (1 px = 1 pt)
         \\  opacity-test [out]      Test opacity API (fill/stroke alpha)
         \\  pdfa-test [out]         Test PDF/A-1b conformance output
         \\  optical-test [out]      Test optical alignment of text in boxes
@@ -709,6 +719,19 @@ fn generatePathTestPdf(allocator: std.mem.Allocator, output_path: []const u8) !v
     const pdf = try doc.output();
     defer allocator.free(pdf);
 
+    try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
+}
+
+/// One page the size of the SVG (1 px = 1 pt), the SVG drawn over all of it.
+fn generateSvgPdf(allocator: std.mem.Allocator, svg_path: []const u8, output_path: []const u8) !void {
+    var doc = platen.Document.init(allocator, app_io);
+    defer doc.deinit();
+    const s = try doc.loadSvg(svg_path);
+    if (!(s.width > 0 and s.height > 0)) return error.InvalidSvg;
+    try doc.addPage(.{ .size = .{ .width = s.width, .height = s.height } });
+    try doc.drawSvg(s, .{ .x = 0, .y = 0, .width = s.width, .height = s.height });
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
     try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 }
 
