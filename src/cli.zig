@@ -65,6 +65,8 @@ pub fn main(init: std.process.Init) !void {
         try cli_fonts.fontFaces(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "shape")) {
         try cli_fonts.shape(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "fallback")) {
+        try cli_fonts.fallback(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "extract-face")) {
         try cli_fonts.extractFace(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "find-font")) {
@@ -164,6 +166,8 @@ fn printUsage() !void {
         \\  font-faces <file>    List the faces of a font or collection (.ttc)
         \\  extract-face <ttc> <index> <out>  Write one face as a standalone font
         \\  shape <font> [+feat|-feat]...  Shape stdin lines (one text per line); print glyph IDs
+        \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--bold] [--italic] [--size PT]
+        \\                       Write stdin lines with per-character fallback fonts
         \\  find-font <family> [--bold] [--italic] [--dir DIR]... [--out FILE]
         \\                       Find an installed font (whole family without flags)
         \\  embed-test [ttf] [out]  Generate PDF with embedded font

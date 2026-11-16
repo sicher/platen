@@ -1,5 +1,5 @@
 //! CLI commands for font collections and system font lookup:
-//! font-faces, extract-face, find-font, shape.
+//! font-faces, extract-face, find-font, shape, fallback.
 
 const std = @import("std");
 const platen = @import("platen.zig");
@@ -124,4 +124,57 @@ fn printFound(out: *std.Io.Writer, label: []const u8, f: platen.FoundFont) !void
     try out.print("{s:<12} {s} | {s} | {s} | {s} #{d} ({d} bytes)\n", .{
         label, f.family, f.subfamily, f.postscript_name, f.path, f.face_index, f.data.len,
     });
+}
+
+/// fallback <out.pdf> <font> [--fallback FONT]... [--monospace] [--bold]
+///          [--italic] [--size PT]: write each stdin line in <font>, with
+///          the characters it lacks drawn from the fallback fonts in order
+///          (TextStyle.fallback); prints each line's width. --bold/--italic
+///          apply to the fallbacks (synthesized, as these are single faces),
+///          so <font> itself must then be a family member that has them.
+pub fn fallback(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
+    if (args.len < 2) return out.writeAll(
+        \\Usage: platen fallback <out.pdf> <font> [--fallback FONT]... [--monospace]
+        \\                       [--bold] [--italic] [--size PT] < lines
+        \\
+    );
+    var doc = platen.Document.init(allocator, io);
+    defer doc.deinit();
+    const primary = try doc.loadFont(args[1], .identity);
+    var fallbacks: std.ArrayList(platen.Font) = .empty;
+    defer fallbacks.deinit(allocator);
+    var style: platen.TextStyle = .{ .font = primary, .size = 12 };
+    var i: usize = 2;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--fallback") and i + 1 < args.len) {
+            i += 1;
+            try fallbacks.append(allocator, try doc.loadFont(args[i], .identity));
+        } else if (std.mem.eql(u8, a, "--monospace")) {
+            style.fallback_advance = .monospace;
+        } else if (std.mem.eql(u8, a, "--bold")) {
+            style.bold = true;
+        } else if (std.mem.eql(u8, a, "--italic")) {
+            style.italic = true;
+        } else if (std.mem.eql(u8, a, "--size") and i + 1 < args.len) {
+            i += 1;
+            style.size = try std.fmt.parseFloat(f64, args[i]);
+        } else {
+            return out.print("Unknown option: {s}\n", .{a});
+        }
+    }
+    style.fallback = fallbacks.items;
+
+    try doc.addPage(.{});
+    var y: f64 = 72;
+    var in_buffer: [64 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &in_buffer);
+    while (try stdin.interface.takeDelimiter('\n')) |line| {
+        const rect = try doc.writeAt(.{ .x = 72, .y = y }, line, style, .{});
+        try out.print("{d:.3}\t{s}\n", .{ rect.width, line });
+        y += style.size * 1.2;
+    }
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = args[0], .data = pdf });
 }

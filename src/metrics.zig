@@ -6,6 +6,7 @@
 const std = @import("std");
 const fonts = @import("fonts.zig");
 const layout = @import("layout.zig");
+const fallback = @import("fallback.zig");
 
 pub const TextStyle = layout.TextStyle;
 
@@ -138,7 +139,16 @@ pub fn measureText(text: []const u8, style: FontStyle) TextMetrics {
 }
 
 /// Measure text width using TextStyle (handles both embedded and standard fonts).
+/// A style with fallback fonts measures each run in its own font; one whose
+/// fonts cannot fall back (see TextStyle.fallback) measures as if it had no
+/// fallback list, as writing it fails anyway.
 pub fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
+    if (style.fallback.len > 0) {
+        var plain = style;
+        plain.fallback = &.{};
+        const plan = fallback.Plan.init(style) catch return measureTextStyled(str, plain);
+        return plan.measure(str, style, PrototypeWidth{});
+    }
     switch (style.font) {
         .embedded => |emb| {
             return emb.measureTextWidthSpaced(str, style.size, style.char_spacing);
@@ -170,6 +180,13 @@ pub fn measureTextStyled(str: []const u8, style: TextStyle) f64 {
         },
     }
 }
+
+/// Run widths for fallback measurement without a Document.
+const PrototypeWidth = struct {
+    pub fn width(_: PrototypeWidth, run: []const u8, style: TextStyle) f64 {
+        return measureTextStyled(run, style);
+    }
+};
 
 /// Get the width table for a font
 fn getWidthTable(font: fonts.StandardFont) *const [256]u16 {

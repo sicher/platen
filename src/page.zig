@@ -51,6 +51,16 @@ pub const TextCommand = struct {
     underline: bool = false,
     /// Draw strikethrough
     strikethrough: bool = false,
+    /// Glyphs start this far right of x; decorations still start at x (a
+    /// `.monospace` fallback glyph centered in its cell).
+    glyph_dx: f64 = 0,
+    /// Synthesized bold: the outline is stroked too (fallback.embolden_per_em).
+    synth_bold: bool = false,
+    /// Synthesized italic: the text matrix is slanted (fallback.oblique_shear).
+    synth_italic: bool = false,
+    /// Decoration metrics come from this font rather than `font`, so a
+    /// fallback run is underlined like the text around it.
+    decoration_font: ?*EmbeddedFont = null,
 };
 
 /// Content command for deferred rendering (enables glyph ID remapping)
@@ -243,6 +253,20 @@ pub const ContentWriter = struct {
         var buf: [64]u8 = undefined;
         @memcpy(buf[0..8], "1 0 0 1 ");
         const len = 8 + format.writeCoord2Suffix(buf[8..], x, y, " Tm ");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "1 0 shear 1 x y Tm ": the text matrix with a horizontal shear
+    /// (slanted text), or writeTm's plain matrix when shear is 0.
+    pub fn writeTmShear(self: *ContentWriter, x: f64, y: f64, shear: f64) !void {
+        if (shear == 0) return self.writeTm(x, y);
+        var buf: [96]u8 = undefined;
+        @memcpy(buf[0..4], "1 0 ");
+        var len: usize = 4;
+        len += format.writeF64_3(buf[len..], shear).len;
+        @memcpy(buf[len..][0..3], " 1 ");
+        len += 3;
+        len += format.writeCoord2Suffix(buf[len..], x, y, " Tm ");
         try self.append(buf[0..len]);
     }
 

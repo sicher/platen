@@ -96,6 +96,16 @@ pub const Font = union(enum) {
     }
 };
 
+/// Advance of characters drawn from a `TextStyle.fallback` font.
+pub const FallbackAdvance = enum {
+    /// The fallback glyph's own width.
+    natural,
+    /// The width of a space in `font`, with the glyph centered in it:
+    /// monospaced text keeps every character on its column whatever font
+    /// draws it. Each character with its combining marks takes one cell.
+    monospace,
+};
+
 /// Complete text style (font, size, weight, color, decoration).
 pub const TextStyle = struct {
     font: Font,
@@ -115,6 +125,17 @@ pub const TextStyle = struct {
     /// 1.0 = fully opaque. Values < 1.0 require transparency support
     /// (rejected by PDF/A-1b). Applies to glyphs and text decorations.
     opacity: f64 = 1.0,
+    /// Fonts for the characters `font` has no glyph for, tried in order:
+    /// each character is drawn in the first font that has it (`font`
+    /// itself when none does). Combining marks and default ignorables stay
+    /// in their base character's font. Every font involved must be
+    /// embedded with Unicode (identity) encoding: error.InvalidFallbackFont
+    /// otherwise. Bold/italic pick each fallback's own variant where it
+    /// has one, and are synthesized where it does not (stroked outline,
+    /// slanted text matrix).
+    fallback: []const Font = &.{},
+    /// How far a character drawn from a fallback font advances.
+    fallback_advance: FallbackAdvance = .natural,
 
     /// Get the resolved StandardFont if this is a standard font.
     pub fn standardFont(self: TextStyle) ?StandardFont {

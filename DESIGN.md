@@ -1190,12 +1190,41 @@ draws. Three rules keep it true:
   (`anyShapingFeatureEnabled`) so pre-render measurements don't miss
   kerning.
 - `writeAt` never measures separately: `writeTextStyled` returns the
-  width computed from its own shaped run, and anchoring (.center/.right)
-  shifts the just-appended deferred command. Every string is shaped
+  width computed from its own shaped run(s), and anchoring (.center/.right)
+  shifts every deferred command it appended. Every string is shaped
   exactly once.
+- A glyph's advance in 1/1000 em is rounded the same way everywhere
+  (`EmbeddedFont.thousandths`, the /W and /Widths arrays): viewers advance
+  by the array value, so measurement sums exactly those.
 - Every identity UTF-8 -> glyph path (rendering, shaped and unshaped
   measurement, getGlyphsForText) decodes through `EmbeddedFont.decodeText`,
   which also does Unicode composition - never decode text elsewhere.
+
+### Fallback fonts (`src/fallback.zig`)
+`TextStyle.fallback` cuts text into runs, one font each (slot 0 =
+`font`, i+1 = `fallback[i]`): a character goes to the first slot whose
+cmap has it, else slot 0 (.notdef shows the gap). Combining marks
+(ccc != 0) and default ignorables join the run before them when its font
+has them. `writeTextStyled` routes a fallback style to
+`writeFallbackRuns`, which writes each run through `writeOneFont` (one
+`TextCommand` per run) and patches the fallback commands: `synth_bold`,
+`synth_italic`, `decoration_font` (the primary: one underline position
+across runs) and, for `.monospace`, `glyph_dx` (centering) and
+`text_width` = one cell. `.monospace` makes each fallback cluster its own
+run; cell = the primary's space advance.
+- Synthesis matches FreeType so a PDF looks like the screen: bold is
+  `2 Tr` with line width size/24 (FT_GlyphSlot_Embolden grows the
+  outline em/48 a side) inside q/Q, italic is a `1 0 0.213 1 x y Tm`
+  shear (FT_GlyphSlot_Oblique). A family's own variant wins; bold-italic
+  missing keeps italic (synth bold), then bold (synth italic). A single
+  face synthesizes what its OS/2 fsSelection (else macStyle) lacks
+  (`ttf.Font.style`).
+- `normalizeStyle` leaves a `.family` with fallbacks unresolved: resolving
+  clears bold/italic, which the fallback variants still need.
+- Measurement: `Plan.measure` with a width callback (Document: its own
+  clones via `getTextWidthStyled`; `metrics.measureTextStyled`: the
+  prototypes). A style whose fonts cannot fall back measures plain, and
+  writing it errors.
 
 ### Unicode composition (session #31)
 Before shaping, a base + combining marks becomes the precomposed

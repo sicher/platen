@@ -272,6 +272,34 @@ The CLI exposes the same: `platen font-faces <file>`, `platen
 extract-face <ttc> <index> <out>`, `platen find-font <family> [--bold]
 [--italic] [--dir DIR]... [--out FILE]`.
 
+### Fallback Fonts
+
+A font without a glyph for a character can hand it to the next font in
+`TextStyle.fallback`; each character is drawn in the first font that has it:
+
+```zig
+const courier = try doc.loadFontFamily(.{ .regular = "CourierPrime-Regular.ttf", ... });
+const cyrillic = try doc.loadFont("/System/Library/Fonts/Supplemental/Courier New.ttf", .identity);
+const style = platen.TextStyle{
+    .font = courier,
+    .size = 12,
+    .fallback = &.{cyrillic},       // tried in order
+    .fallback_advance = .monospace, // keep Courier's columns
+};
+_ = try doc.writeAt(.{ .x = 72, .y = 72 }, "INT. КУХНЯ — ДЕНЬ", style, .{});
+```
+
+- Fallbacks are fonts loaded into the document (single faces or families,
+  Unicode encoding); a standard font in the chain is
+  `error.InvalidFallbackFont`.
+- Combining marks stay in their base character's font.
+- `bold`/`italic` pick a fallback family's own variant; what a fallback lacks
+  is synthesized (stroked outline, slanted text) as FreeType does on screen.
+- `.natural` (default) advances by the fallback glyph's own width;
+  `.monospace` by the width of a space in `font`, glyph centered, so every
+  character keeps one column.
+- Measurement, wrapping, anchoring and underlines follow the runs.
+
 ### Text Flow with Word Wrapping
 
 ```zig
@@ -862,6 +890,8 @@ const style = platen.TextStyle{
     .decoration = .{ .underline = true }, // and/or .strikethrough
     .char_spacing = 0,             // extra points between characters
     .opacity = 0.5,                // fill alpha: 0.0 transparent .. 1.0 opaque
+    .fallback = &.{other_font},    // for characters `font` lacks (Fallback Fonts)
+    .fallback_advance = .natural,  // or .monospace
 };
 ```
 

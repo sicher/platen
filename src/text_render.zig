@@ -25,6 +25,7 @@ const writeHex4 = format.writeHex4;
 /// only to the single-byte code 32, never to 2-byte Identity-H codes.
 /// char_spacing is applied by Tc, except in the per-glyph Tm path, which
 /// adds it itself
+/// shear slants the glyphs (synthesized italic); 0 for upright text
 pub fn renderCIDTextWithKerning(
     cw: *ContentWriter,
     emb: *EmbeddedFont,
@@ -35,6 +36,7 @@ pub fn renderCIDTextWithKerning(
     start_y: f64,
     word_spacing: f64,
     char_spacing: f64,
+    shear: f64,
 ) !bool {
     // Use cached glyphs if available, otherwise compute
     const glyphs_to_free: ?[]u16 = if (cached_glyphs == null) try emb.getGlyphsForText(str) else null;
@@ -70,11 +72,11 @@ pub fn renderCIDTextWithKerning(
 
     // If we have marks with y-offsets, use Tm-based absolute positioning (like LibreOffice)
     if (has_marks) {
-        return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y, space_gid, word_spacing, char_spacing);
+        return try renderWithMarkPositioning(cw, emb, glyphs, font_size, units_per_em, has_remap, start_x, start_y, space_gid, word_spacing, char_spacing, shear);
     }
 
-    // No marks - use Td for initial position
-    try cw.writeTd(start_x, start_y);
+    // No marks - use Td for initial position (Tm when slanted)
+    if (shear != 0) try cw.writeTmShear(start_x, start_y, shear) else try cw.writeTd(start_x, start_y);
 
     if (!has_kerning and space_gid == null) {
         // No kerning - use simple hex string
@@ -146,6 +148,7 @@ fn renderWithMarkPositioning(
     space_gid: ?u16,
     word_spacing: f64,
     char_spacing: f64,
+    shear: f64,
 ) !bool {
     // Track absolute position for each glyph
     var abs_x = start_x;
@@ -185,7 +188,7 @@ fn renderWithMarkPositioning(
         const base_y = abs_y;
 
         // Position and output base glyph using Tm (absolute positioning)
-        try cw.writeTm(abs_x, abs_y);
+        try cw.writeTmShear(abs_x, abs_y, shear);
         var hex_buf: [4]u8 = undefined;
         writeHex4(&hex_buf, final_gid);
         try cw.append("<");
@@ -231,7 +234,7 @@ fn renderWithMarkPositioning(
                     const mark_y = ref_y + dy_pts;
 
                     // Position and output mark using Tm (absolute positioning)
-                    try cw.writeTm(mark_x, mark_y);
+                    try cw.writeTmShear(mark_x, mark_y, shear);
                     var mark_hex_buf: [4]u8 = undefined;
                     writeHex4(&mark_hex_buf, mark_final_gid);
                     try cw.append("<");

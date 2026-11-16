@@ -75,6 +75,7 @@ pub const Align = document.Align;
 pub const VAlign = document.VAlign;
 pub const LineBreaking = document.LineBreaking;
 pub const TextDecoration = document.TextDecoration;
+pub const FallbackAdvance = document.FallbackAdvance;
 pub const TextStyle = document.TextStyle;
 pub const TextStyleOptions = document.TextStyleOptions;
 pub const Margins = document.Margins;
@@ -183,6 +184,8 @@ test {
     _ = @import("resource_names_test.zig");
     _ = @import("pdfa_conformance_test.zig");
     _ = @import("styled_span_test.zig");
+    _ = @import("fallback_test.zig");
+    _ = @import("fallback.zig");
     _ = @import("shaping_test.zig");
     _ = @import("gsub.zig");
     _ = @import("validate.zig");

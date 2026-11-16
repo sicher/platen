@@ -25,6 +25,9 @@ pub const Font = struct {
     maxp: ?MaxpTable = null,
     post: ?PostTable = null,
     os2: ?Os2Table = null,
+    /// The face's own style: OS/2 fsSelection, else head.macStyle (as
+    /// font_collection.describeFace reads it).
+    style: FaceStyle = .{},
 
     // Cached cmap lookup (avoids subtable search on every glyph lookup)
     cmap_subtable_offset: u32 = 0,
@@ -80,6 +83,7 @@ pub const Font = struct {
         font.maxp = font.parseMaxp();
         font.post = font.parsePost();
         font.os2 = font.parseOs2();
+        font.style = font.parseStyle();
 
         // Initialize cmap cache for fast glyph lookups
         font.initCmapCache();
@@ -262,6 +266,18 @@ pub const Font = struct {
     }
 
     /// Parse 'OS/2' table (strikethrough metrics)
+    fn parseStyle(self: *const Font) FaceStyle {
+        if (self.getTable("OS/2".*)) |os2| {
+            if (os2.len < 64) return .{};
+            const sel = readU16(os2, 62);
+            return .{ .bold = sel & (1 << 5) != 0, .italic = sel & 1 != 0 };
+        }
+        const head = self.getTable("head".*) orelse return .{};
+        if (head.len < 46) return .{};
+        const mac = readU16(head, 44);
+        return .{ .bold = mac & 1 != 0, .italic = mac & 2 != 0 };
+    }
+
     fn parseOs2(self: *const Font) ?Os2Table {
         const data = self.getTable("OS/2".*) orelse return null;
         if (data.len < 30) return null;
@@ -488,6 +504,12 @@ pub const TableEntry = struct {
     checksum: u32,
     offset: u32,
     length: u32,
+};
+
+/// Bold and italic as a face declares them about itself.
+pub const FaceStyle = struct {
+    bold: bool = false,
+    italic: bool = false,
 };
 
 /// 'head' table - font header
@@ -774,6 +796,20 @@ test "parse Courier Prime" {
     const width_a = font.getCharWidth('A');
     try std.testing.expect(width_a != null);
     try std.testing.expect(width_a.? > 0);
+}
+
+test "a face reports its own bold and italic" {
+    const cases = [_]struct { path: []const u8, style: FaceStyle }{
+        .{ .path = "test/fonts/Courier Prime/Courier Prime.ttf", .style = .{} },
+        .{ .path = "test/fonts/Courier Prime/Courier Prime Bold.ttf", .style = .{ .bold = true } },
+        .{ .path = "test/fonts/Courier Prime/Courier Prime Italic.ttf", .style = .{ .italic = true } },
+        .{ .path = "test/fonts/Courier Prime/Courier Prime Bold Italic.ttf", .style = .{ .bold = true, .italic = true } },
+    };
+    for (cases) |c| {
+        const result = try Font.fromFile(std.testing.io, std.testing.allocator, c.path);
+        defer std.testing.allocator.free(result.data);
+        try std.testing.expectEqual(c.style, result.font.style);
+    }
 }
 
 test "read big-endian" {

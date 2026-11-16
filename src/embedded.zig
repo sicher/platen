@@ -1189,7 +1189,7 @@ pub const EmbeddedFont = struct {
             }
 
             // Add glyph width (scaled to 1/1000 em)
-            total += @divTrunc(@as(i64, width) * 1000, em);
+            total += thousandths(width, em);
             glyph_count += 1;
 
             // Add kerning from previous glyph
@@ -1226,6 +1226,14 @@ pub const EmbeddedFont = struct {
     /// Width in points of an already-shaped glyph sequence (advances +
     /// kerning + char_spacing). Used by measureShaped and by writeAt, which
     /// already has the shaped run and must not shape a second time.
+    /// A glyph advance in 1/1000 em, rounded exactly as the PDF width
+    /// arrays (/W, /Widths) store it: measurement sums the widths viewers
+    /// advance by.
+    fn thousandths(width: u16, em: i64) i64 {
+        const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(em));
+        return @intFromFloat(@round(@as(f64, @floatFromInt(width)) * scale));
+    }
+
     pub fn glyphSequenceWidth(self: *EmbeddedFont, glyphs: []const u16, size: f64, char_spacing: f64) f64 {
         const em: i64 = self.font.head.?.units_per_em;
         const do_kerning = self.feature_flags.isEnabled(.kern) and self.has_kern_data and self.ot_features != null;
@@ -1235,7 +1243,7 @@ pub const EmbeddedFont = struct {
         var has_prev: bool = false;
         for (glyphs) |gid| {
             const width = self.font.getGlyphWidth(gid) orelse 0;
-            total += @divTrunc(@as(i64, width) * 1000, em);
+            total += thousandths(width, em);
             if (do_kerning and has_prev) {
                 total += @divTrunc(@as(i64, self.ot_features.?.getKerning(prev_gid, gid)) * 1000, em);
             }

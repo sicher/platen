@@ -17,6 +17,17 @@
   shading pattern in the SVG's form; colors are checked against resvg. Not yet:
   `href` between gradients, `stop-opacity`, and `spreadMethod` `reflect` and
   `repeat` (drawn as `pad`).
+- **Fallback fonts**: `TextStyle.fallback` lists fonts for the characters
+  `font` has no glyph for; each character is drawn in the first font that has
+  it, combining marks staying with their base. Bold and italic use each
+  fallback's own variant, and are synthesized where it has none (stroked
+  outline, slanted text matrix, at FreeType's strengths). With
+  `fallback_advance = .monospace` a fallback character takes the width of a
+  space in `font`, centered: monospaced text, e.g. a screenplay in Courier
+  with Cyrillic from another font, stays on its columns. Measurement,
+  wrapping, anchoring and decorations follow the runs.
+- **`platen fallback <out> <font> [--fallback FONT]... [--monospace]`**: writes
+  stdin lines with fallback fonts and prints their widths.
 - **`platen svg <in.svg> [out.pdf]`**: renders an SVG on a page of its own size
   (1 px = 1 pt).
 
@@ -37,6 +48,11 @@
 
 ### Fixed
 
+- **Embedded text measured narrower than it was drawn**: measurement
+  truncated each glyph's advance to 1/1000 em while the PDF's width arrays
+  round it, so a Courier Prime character (599.6) measured 0.012 pt short at
+  12 pt; anchored and aligned text drifted by that per character. Both now
+  round the same way.
 - **SVG gradient paint was black**: `fill="url(#g)"` counted as an unknown
   color, so the shape took its parent's fill, black by default, though the
   documentation listed gradients as supported.

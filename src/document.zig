@@ -34,6 +34,7 @@ const validate = @import("validate.zig");
 pub const Encryption = encrypt.Encryption;
 pub const Permissions = encrypt.Permissions;
 const color_fonts = @import("color_fonts.zig");
+const fallback = @import("fallback.zig");
 pub const colr = @import("colr.zig");
 
 const ObjectId = objects.ObjectId;
@@ -70,6 +71,7 @@ pub const Align = layout.Align;
 pub const VAlign = layout.VAlign;
 pub const LineBreaking = layout.LineBreaking;
 pub const TextDecoration = layout.TextDecoration;
+pub const FallbackAdvance = layout.FallbackAdvance;
 pub const TextStyleOptions = layout.TextStyleOptions;
 pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
@@ -608,6 +610,9 @@ pub const Document = struct {
                 return s;
             },
             .family => |fam| {
+                // Fallback fonts still need the requested bold/italic: the
+                // runs resolve the family themselves (writeFallbackRuns)
+                if (style.fallback.len > 0) return style;
                 const f = try fam.resolve(style.bold, style.italic);
                 var s = style;
                 s.font = .{ .embedded = try self.faceInstance(f) };
@@ -919,7 +924,7 @@ pub const Document = struct {
         // overrides are reflected in measurement
         const s = try self.normalizeStyle(style);
         return .{
-            .width = metrics.measureTextStyled(text_str, s),
+            .width = self.measureNormalized(text_str, s),
             .height = s.size * 1.2,
             .char_count = text_str.len,
         };
@@ -1007,6 +1012,7 @@ pub const Document = struct {
     pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle, opts: WriteAtOptions) !Rect {
         try validate.check(.{ pos, style });
         try self.checkFontConformance(style);
+        const first_command = if (self.pages.items.len > 0) self.pages.items[self.current_page].commands.items.len else 0;
         const width = try self.writeTextStyled(pos, str, style, 0);
 
         // Anchoring: writeTextStyled shapes the text (which is where the
@@ -1018,8 +1024,11 @@ pub const Document = struct {
             .right => pos.x - width,
         };
         if (opts.anchor != .left) {
-            var page = &self.pages.items[self.current_page];
-            page.commands.items[page.commands.items.len - 1].text.x = x_left;
+            const page = &self.pages.items[self.current_page];
+            for (page.commands.items[first_command..]) |*cmd| switch (cmd.*) {
+                .text => |*t| t.x += x_left - pos.x,
+                .raw => {},
+            };
         }
 
         const m = self.getFontMetricsStyled(style);
@@ -1037,6 +1046,12 @@ pub const Document = struct {
     /// embedded fonts (no second shaping pass), measured otherwise.
     fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style_in: TextStyle, word_spacing: f64) !f64 {
         if (self.pages.items.len == 0) return error.NoPage;
+        if (style_in.fallback.len > 0) return self.writeFallbackRuns(pos, str, style_in, word_spacing);
+        return self.writeOneFont(pos, str, style_in, word_spacing);
+    }
+
+    /// writeTextStyled for a style without fallback fonts: one command.
+    fn writeOneFont(self: *Document, pos: Point, str: []const u8, style_in: TextStyle, word_spacing: f64) !f64 {
         const style = try self.normalizeStyle(style_in);
 
         var page = &self.pages.items[self.current_page];
@@ -1127,6 +1142,60 @@ pub const Document = struct {
         return text_width;
     }
 
+    /// One text command per fallback run (see fallback.zig), each in its
+    /// own font, laid end to end. Returns the total width.
+    fn writeFallbackRuns(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !f64 {
+        const plan = try fallback.Plan.init(style);
+        const page_alloc = self.pages.items[self.current_page].pageAllocator();
+        const text = try stripSoftHyphens(page_alloc, str);
+        const cell = plan.cell(style.size);
+        var x = pos.x;
+        var i: usize = 0;
+        while (i < text.len) {
+            const run = plan.nextRun(text, i);
+            const run_style = plan.runStyle(style, run.slot);
+            const natural = try self.writeOneFont(.{ .x = x, .y = pos.y }, text[i..run.end], run_style, word_spacing);
+            i = run.end;
+            if (run.slot == 0) {
+                x += natural;
+                continue;
+            }
+            const items = self.pages.items[self.current_page].commands.items;
+            const t = &items[items.len - 1].text;
+            const f = plan.faces[run.slot - 1];
+            t.synth_bold = f.synth_bold;
+            t.synth_italic = f.synth_italic;
+            t.decoration_font = plan.primary;
+            if (plan.monospace) {
+                // Centered by the glyphs' own advance, without spacing
+                const own = switch (t.font) {
+                    .embedded => |emb| if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
+                    .standard => natural,
+                };
+                t.glyph_dx = (cell - own) / 2;
+                t.text_width = cell + style.char_spacing;
+            }
+            x += t.text_width;
+        }
+        return x - pos.x;
+    }
+
+    /// Text width in an already-normalized style, fallback runs included.
+    fn measureNormalized(self: *Document, str: []const u8, style: TextStyle) f64 {
+        if (style.fallback.len == 0) return measureTextStyled(str, style);
+        var plain = style;
+        plain.fallback = &.{};
+        const plan = fallback.Plan.init(style) catch return self.getTextWidthStyled(str, plain);
+        return plan.measure(str, style, DocumentWidth{ .doc = self });
+    }
+
+    const DocumentWidth = struct {
+        doc: *Document,
+        pub fn width(self: DocumentWidth, run: []const u8, style: TextStyle) f64 {
+            return self.doc.getTextWidthStyled(run, style);
+        }
+    };
+
     /// Measures text width with explicit style.
     /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
     fn getTextWidthStyled(self: *Document, str: []const u8, style_in: TextStyle) f64 {
@@ -1141,7 +1210,7 @@ pub const Document = struct {
 
         // Fast path: no soft-hyphens
         if (!containsSoftHyphens(str)) {
-            return measureTextStyled(str, style);
+            return self.measureNormalized(str, style);
         }
 
         // Slow path: filter out soft-hyphens using stack buffer
@@ -1157,7 +1226,7 @@ pub const Document = struct {
                 i += 1;
             }
         }
-        return measureTextStyled(buf[0..j], style);
+        return self.measureNormalized(buf[0..j], style);
     }
 
     /// Writes flowing text into a region with word wrapping.
@@ -2924,8 +2993,9 @@ pub const Document = struct {
                     // Apply fill (non-stroking) opacity via ExtGState if not fully opaque.
                     // Wrap the whole text object (and its decorations) in q/Q so the
                     // alpha does not leak into subsequent content.
+                    // Synthesized bold strokes the glyphs: the stroke fades with the fill
                     const opacity_gs: ?usize = if (t.opacity < 1.0)
-                        try page.getOrAddOpacityState(self.allocator, t.opacity, 1.0)
+                        try page.getOrAddOpacityState(self.allocator, t.opacity, if (t.synth_bold) t.opacity else 1.0)
                     else
                         null;
                     if (opacity_gs) |idx| {
@@ -2935,10 +3005,20 @@ pub const Document = struct {
                         try cw.append(gs_buf[0..gs_len]);
                     }
 
+                    // Synthesized bold: fill and stroke the outline. Line
+                    // width and stroke color are graphics state, scoped by
+                    // q/Q (which also restores the render mode)
+                    const embolden = t.synth_bold and t.font == .embedded;
+                    if (embolden) {
+                        try cw.print("q\n{d:.3} w\n", .{t.font_size * fallback.embolden_per_em});
+                        try t.text_color.writeStroke(&cw);
+                    }
+
                     // Begin text block
                     try cw.append("BT\n");
                     // Set text color
                     try t.text_color.writeFill(&cw);
+                    if (embolden) try cw.append("2 Tr\n");
 
                     switch (t.font) {
                         .embedded => |emb| {
@@ -2981,7 +3061,8 @@ pub const Document = struct {
                                     // CID mode: output with ligatures, kerning, and mark positioning
                                     // Pass absolute position for Tm-based mark positioning
                                     // Use cached glyphs if available (avoids duplicate OpenType shaping)
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y, t.word_spacing, t.char_spacing);
+                                    const shear: f64 = if (t.synth_italic) fallback.oblique_shear else 0;
+                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode
@@ -3011,6 +3092,7 @@ pub const Document = struct {
                     // later runs (which only emit Tc when non-zero) start at 0
                     if (t.char_spacing != 0) try cw.append("0 Tc\n");
                     try cw.append("ET\n");
+                    if (embolden) try cw.append("Q\n");
 
                     // Draw text decorations (underline/strikethrough)
                     // These must be outside the text block (BT/ET)
@@ -3040,7 +3122,8 @@ pub const Document = struct {
         var strikeout_pos: f64 = 250;
         var strikeout_thick: f64 = 50;
 
-        switch (t.font) {
+        const decoration_font: FontRef = if (t.decoration_font) |f| .{ .embedded = f } else t.font;
+        switch (decoration_font) {
             .embedded => |emb| {
                 underline_pos = @floatFromInt(emb.underline_position);
                 underline_thick = @floatFromInt(emb.underline_thickness);
