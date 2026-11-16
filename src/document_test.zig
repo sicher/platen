@@ -4493,3 +4493,28 @@ test "write() keeps text before a double space, and a call's leading space" {
     try std.testing.expectEqualStrings(" cc", cmds[2].text.text_data);
     try std.testing.expectApproxEqAbs(50 + first_width, cmds[2].text.x, 1e-9);
 }
+
+test "a run of ligatures alone is subset like any text" {
+    // "ffi" is one glyph that no single code point maps to: the font used
+    // to look unused to the subsetter and was embedded whole.
+    for ([_]struct { []const u8, []const u8 }{
+        .{ "test/fonts/Gentium/Gentium-Regular.ttf", "ffi" }, // TrueType, 971 KB
+        .{ "test/fonts/Satoshi/Satoshi-Regular.otf", "fi" }, // CFF
+    }) |c| {
+        var doc = Document.init(std.testing.allocator, std.testing.io);
+        defer doc.deinit();
+        try doc.addPage(.{});
+        const font = try doc.loadFont(c[0], .identity);
+        _ = try doc.writeAt(.{ .x = 50, .y = 100 }, c[1], .{ .font = font, .size = 12 }, .{});
+        const pdf = try doc.output();
+        defer std.testing.allocator.free(pdf);
+        const emb = font.embedded;
+        // One ligature glyph drawn, and it is in the subset
+        try std.testing.expectEqual(@as(usize, 1), emb.cid_glyph_widths.count());
+        const lig = emb.cid_glyph_widths.keys()[0];
+        try std.testing.expect(emb.ligature_codepoints.contains(lig));
+        try std.testing.expect(emb.subset_data != null);
+        try std.testing.expect(emb.gid_remap.contains(lig));
+        try std.testing.expect(pdf.len < 30 * 1024);
+    }
+}

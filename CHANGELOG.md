@@ -61,6 +61,9 @@
 
 ### Fixed
 
+- **Text made only of ligatures was embedded unsubset**: a font whose drawn
+  text was all multi-character glyphs ("ffi" alone) looked unused to the
+  subsetter, so the whole font file went into the PDF (Gentium: 971 KB).
 - **A face platen cannot embed loaded anyway** and failed at output with
   `MissingTable`: outlines only in a table platen does not read (Apple's
   `hvgl`, as in PingFang UI). Loading now refuses it with

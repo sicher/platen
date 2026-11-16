@@ -1062,9 +1062,11 @@ pub const EmbeddedFont = struct {
         // If already generated, skip
         if (self.subset_data != null) return;
 
-        // Check if any chars are used
+        // Check if any chars are used. Every drawn CID glyph has a width
+        // entry; cid_used_glyphs only maps single code points, so a run of
+        // ligatures alone ("ffi") leaves it empty
         const has_winansi_chars = self.countUsedChars() > 0;
-        const has_cid_chars = self.countUsedGlyphs() > 0;
+        const has_cid_chars = self.countUsedGlyphs() > 0 or self.cid_glyph_widths.count() > 0;
         if (!has_winansi_chars and !has_cid_chars) return;
 
         // CFF fonts: use compact CFF subsetting with glyph ID remapping
