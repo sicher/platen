@@ -60,15 +60,17 @@ pub fn extractFace(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: 
 
 /// find-font <family> [--bold] [--italic] [--all] [--no-prefilter]
 ///           [--dir DIR]... [--out FILE]
-/// Without --bold/--italic/--out, lists the whole family.
+/// Without --bold/--italic/--out, shows the four faces findFamily picks;
+/// --all lists every face of the family (listFamily), any weight or width.
 pub fn findFont(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8, home: ?[]const u8) !void {
     if (args.len < 1) return out.writeAll(
-        \\Usage: platen find-font <family> [--bold] [--italic] [--no-prefilter]
+        \\Usage: platen find-font <family> [--bold] [--italic] [--all] [--no-prefilter]
         \\                        [--dir DIR]... [--out FILE]
         \\
     );
     var style: platen.system_fonts.Style = .{};
     var single = false;
+    var all = false;
     var opts: platen.SystemFontOptions = .{ .home = home };
     var dirs: std.ArrayList([]const u8) = .empty;
     defer dirs.deinit(allocator);
@@ -82,6 +84,8 @@ pub fn findFont(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []c
         } else if (std.mem.eql(u8, a, "--italic")) {
             style.italic = true;
             single = true;
+        } else if (std.mem.eql(u8, a, "--all")) {
+            all = true;
         } else if (std.mem.eql(u8, a, "--no-prefilter")) {
             opts.prefilter = false;
         } else if (std.mem.eql(u8, a, "--dir") and i + 1 < args.len) {
@@ -97,6 +101,16 @@ pub fn findFont(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []c
     }
     if (dirs.items.len > 0) opts.dirs = dirs.items;
 
+    if (all) {
+        if (single) return out.writeAll("--all lists faces; it takes no --bold, --italic or --out\n");
+        const faces = try platen.listSystemFontFaces(io, allocator, args[0], opts);
+        defer platen.system_fonts.freeFamilyFaces(allocator, faces);
+        if (faces.len == 0) return out.print("Not found: {s}\n", .{args[0]});
+        for (faces) |f| try out.print("{s} | {s} | {s} | weight {d} width {d}{s} | {s} #{d}\n", .{
+            f.info.family, f.info.subfamily, f.info.postscript_name, f.info.weight, f.info.width, if (f.info.italic) " italic" else "", f.path, f.info.index,
+        });
+        return;
+    }
     if (single) {
         const f = try platen.findSystemFont(io, allocator, args[0], style, opts) orelse
             return out.print("Not found: {s}\n", .{args[0]});

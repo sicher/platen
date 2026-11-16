@@ -266,11 +266,20 @@ const font = try doc.loadFontFamilyFromMemory(georgia.memoryOptions(.identity).?
 
 // Or a single face: .data is a standalone sfnt for loadFontFromMemory.
 const bold = try platen.findSystemFont(io, allocator, "Helvetica", .{ .bold = true }, .{});
+
+// Or every face, any weight or width (Light, Condensed...), to pick yourself.
+const faces = try platen.listSystemFontFaces(io, allocator, "Helvetica", .{});
+defer platen.system_fonts.freeFamilyFaces(allocator, faces);
+for (faces) |f| {
+    if (f.info.weight != 300 or f.info.italic) continue;
+    const light = try f.load(io, allocator); // standalone sfnt
+    defer allocator.free(light);
+}
 ```
 
 The CLI exposes the same: `platen font-faces <file>`, `platen
 extract-face <ttc> <index> <out>`, `platen find-font <family> [--bold]
-[--italic] [--dir DIR]... [--out FILE]`.
+[--italic] [--all] [--dir DIR]... [--out FILE]`.
 
 ### Fallback Fonts
 

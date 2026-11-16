@@ -228,6 +228,13 @@ returns **standalone sfnt bytes**, not a loaded Font.
   weight 400/700 at width 5 (italic from fsSelection). Light, Black,
   Condensed etc. never match. Ties: earlier folder, then smaller path,
   then lower face index - independent of directory iteration order.
+- **All faces** (`system_fonts.listFamily`): the same walk (`walk` feeds
+  both it and `find`), no `classify`. A face is a subfamily name (ASCII
+  case ignored); of several copies the best-ranked wins, and the list is in
+  rank order. No extraction: `FamilyFace.load` re-reads the file and
+  refuses (error.FaceChanged) when the index no longer holds the same
+  family/subfamily/PostScript name. Callers with their own rule (courier:
+  Final Draft takes a family's lightest upright face) pick from the list.
 - **Prefilter** (`nameMayMatch`): the squashed file stem starts with the
   squashed family, or an 8.3-style stem (<= 8 chars, Windows "timesbd",
   "cour") shares the family's first 4 chars. `prefilter = false` scans

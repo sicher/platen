@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Every face of an installed family:** `platen.listSystemFontFaces(io,
+  allocator, family, opts)` returns each face whose typographic family
+  matches, whatever its weight or width (Light, Condensed, Black...), with its
+  names, OS/2 weight and width, italic flag, file and face index, so the
+  caller picks the face itself. `FamilyFace.load` reads its standalone sfnt
+  bytes when needed. Matching, folders and tie-breaks between copies of a face
+  are `findSystemFont`'s. CLI: `find-font <family> --all`.
 - **SVG gradients**: `<linearGradient>` and `<radialGradient>` fill and stroke
   shapes, paths and text through `url(#id)`, with an optional fallback color
   (`url(#g) red`). Both `gradientUnits` (`objectBoundingBox`, the default, and

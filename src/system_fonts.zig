@@ -41,7 +41,9 @@ pub const Options = struct {
     /// file name has nothing to do with their family name.
     prefilter: bool = true,
     /// Larger font files are skipped.
-    max_file_size: usize = 256 << 20,
+    max_file_size: usize = default_max_file_size,
+
+    pub const default_max_file_size: usize = 256 << 20;
 };
 
 /// One face, owned by the caller (free with `deinit`).
@@ -115,6 +117,120 @@ pub fn findFamily(io: std.Io, allocator: Allocator, family: []const u8, opts: Op
     const fam = try scan(io, allocator, family, null, opts);
     if (fam.regular == null and fam.bold == null and fam.italic == null and fam.bold_italic == null) return null;
     return fam;
+}
+
+/// One installed face of a family, as listed by `listFamily`. Owned by the
+/// caller (free with `deinit`, or the whole list with `freeFamilyFaces`).
+pub const FamilyFace = struct {
+    /// Names, OS/2 weight/width and style; `info.index` is the face index
+    /// within `path`.
+    info: font_collection.FaceInfo,
+    /// File the face lives in.
+    path: []u8,
+
+    pub fn deinit(self: FamilyFace, allocator: Allocator) void {
+        self.info.deinit(allocator);
+        allocator.free(self.path);
+    }
+
+    /// Reads `path` and returns this face as a standalone sfnt (free with
+    /// `allocator`). error.FaceChanged if the file no longer holds this
+    /// face (same family, subfamily and PostScript name at the index).
+    pub fn load(self: FamilyFace, io: std.Io, allocator: Allocator) ![]u8 {
+        const data = try std.Io.Dir.cwd().readFileAlloc(io, self.path, allocator, .limited(Options.default_max_file_size));
+        defer allocator.free(data);
+        const now = font_collection.describeFace(allocator, data, self.info.index) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.FaceChanged,
+        };
+        defer now.deinit(allocator);
+        if (!std.mem.eql(u8, now.family, self.info.family) or
+            !std.mem.eql(u8, now.subfamily, self.info.subfamily) or
+            !std.mem.eql(u8, now.postscript_name, self.info.postscript_name)) return error.FaceChanged;
+        return font_collection.extractFace(allocator, data, self.info.index);
+    }
+};
+
+pub fn freeFamilyFaces(allocator: Allocator, faces: []const FamilyFace) void {
+    for (faces) |f| f.deinit(allocator);
+    allocator.free(faces);
+}
+
+/// Every installed face of `family`, whatever its weight, width or style
+/// (Thin, Light, Condensed, Black Italic... included), unlike `findFamily`.
+/// Family matching, prefilter and folders are the same as `find`'s. A face
+/// is one subfamily name (ASCII case ignored): when several files hold it,
+/// the copy `find` would pick wins (earlier folder, smaller path, lower face
+/// index). The list is in that order too. Faces are not extracted; call
+/// `FamilyFace.load` for the bytes. Empty if the family is not installed.
+pub fn listFamily(io: std.Io, allocator: Allocator, family: []const u8, opts: Options) ![]FamilyFace {
+    var ctx: ListCtx = .{ .allocator = allocator };
+    defer ctx.ranks.deinit(allocator);
+    errdefer freeList(allocator, &ctx.faces);
+    try walk(io, allocator, family, opts, &ctx);
+
+    const Pair = struct { face: FamilyFace, rank: Rank };
+    const pairs = try allocator.alloc(Pair, ctx.faces.items.len);
+    defer allocator.free(pairs);
+    for (pairs, ctx.faces.items, ctx.ranks.items) |*p, f, r| p.* = .{ .face = f, .rank = r };
+    std.mem.sort(Pair, pairs, {}, struct {
+        fn lt(_: void, a: Pair, b: Pair) bool {
+            return a.rank.lessThan(b.rank);
+        }
+    }.lt);
+    for (ctx.faces.items, pairs) |*f, p| f.* = p.face;
+    return ctx.faces.toOwnedSlice(allocator);
+}
+
+fn freeList(allocator: Allocator, list: *std.ArrayList(FamilyFace)) void {
+    for (list.items) |f| f.deinit(allocator);
+    list.deinit(allocator);
+}
+
+/// Keeps the best-ranked copy of each subfamily.
+const ListCtx = struct {
+    allocator: Allocator,
+    faces: std.ArrayList(FamilyFace) = .empty,
+    /// Parallel to `faces`; each `path` points into that face's own path.
+    ranks: std.ArrayList(Rank) = .empty,
+
+    fn visit(self: *ListCtx, c: Candidate) !void {
+        const rank: Rank = .{ .inexact = false, .dir = c.dir_rank, .path = c.rel, .face = c.info.index };
+        const at: ?usize = for (self.faces.items, 0..) |f, i| {
+            if (std.ascii.eqlIgnoreCase(f.info.subfamily, c.info.subfamily)) break i;
+        } else null;
+        if (at) |i| if (!rank.lessThan(self.ranks.items[i])) return;
+
+        const face = try makeFamilyFace(self.allocator, c);
+        if (at) |i| {
+            self.faces.items[i].deinit(self.allocator);
+            self.faces.items[i] = face;
+        } else {
+            errdefer face.deinit(self.allocator);
+            try self.ranks.ensureUnusedCapacity(self.allocator, 1);
+            try self.faces.append(self.allocator, face);
+            self.ranks.appendAssumeCapacity(undefined);
+        }
+        const i = at orelse self.faces.items.len - 1;
+        self.ranks.items[i] = rank;
+        // The rank must outlive the walker's path buffer.
+        self.ranks.items[i].path = face.path[face.path.len - c.rel.len ..];
+    }
+};
+
+fn makeFamilyFace(allocator: Allocator, c: Candidate) !FamilyFace {
+    const family = try allocator.dupe(u8, c.info.family);
+    errdefer allocator.free(family);
+    const subfamily = try allocator.dupe(u8, c.info.subfamily);
+    errdefer allocator.free(subfamily);
+    const ps = try allocator.dupe(u8, c.info.postscript_name);
+    errdefer allocator.free(ps);
+    const path = try std.fs.path.join(allocator, &.{ c.dir, c.rel });
+    var info = c.info;
+    info.family = family;
+    info.subfamily = subfamily;
+    info.postscript_name = ps;
+    return .{ .info = info, .path = path };
 }
 
 const mac_dirs = [_][]const u8{ "/System/Library/Fonts", "/System/Library/Fonts/Supplemental", "/Library/Fonts" };
@@ -228,13 +344,21 @@ const Rank = struct {
     }
 };
 
-/// Walks the folders and keeps the best face per style (only `want` when
-/// given).
-fn scan(io: std.Io, allocator: Allocator, family: []const u8, want: ?Style, opts: Options) !FoundFamily {
-    var result: FoundFamily = .{};
-    errdefer result.deinit(allocator);
-    var ranks: [4]Rank = undefined;
+/// A face of the requested family met while walking the folders. All
+/// slices are valid only during the `visit` call.
+const Candidate = struct {
+    /// The whole file (a collection or a single sfnt).
+    data: []const u8,
+    info: font_collection.FaceInfo,
+    dir: []const u8,
+    /// Path below `dir`.
+    rel: []const u8,
+    dir_rank: usize,
+};
 
+/// Walks the folders and calls `ctx.visit(candidate)` for every face whose
+/// typographic family equals `family` (ASCII case ignored).
+fn walk(io: std.Io, allocator: Allocator, family: []const u8, opts: Options, ctx: anytype) !void {
     const owned_dirs: ?[][]u8 = if (opts.dirs == null) try defaultDirs(allocator, opts.home) else null;
     defer if (owned_dirs) |d| freeDirs(allocator, d);
     const dirs: []const []const u8 = opts.dirs orelse owned_dirs.?;
@@ -274,30 +398,47 @@ fn scan(io: std.Io, allocator: Allocator, family: []const u8, want: ?Style, opts
             };
             const n = font_collection.faceCount(data) catch continue;
             for (0..n) |i| {
-                const index: u32 = @intCast(i);
-                const info = font_collection.describeFace(fa, data, index) catch |err| switch (err) {
+                const info = font_collection.describeFace(fa, data, @intCast(i)) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => continue,
                 };
                 if (!std.ascii.eqlIgnoreCase(info.family, family)) continue;
-                const m = classify(info) orelse continue;
-                if (want) |w| if (w.bold != m.style.bold or w.italic != m.style.italic) continue;
-
-                const slot = result.face(m.style);
-                const slot_i = @as(usize, @intFromBool(m.style.bold)) + 2 * @as(usize, @intFromBool(m.style.italic));
-                const rank: Rank = .{ .inexact = !m.exact, .dir = dir_rank, .path = e.path, .face = index };
-                if (slot.* != null and !rank.lessThan(ranks[slot_i])) continue;
-
-                const found = try makeFound(allocator, data, info, dir_path, e.path, m.style);
-                if (slot.*) |old| old.deinit(allocator);
-                slot.* = found;
-                ranks[slot_i] = rank;
-                // The rank must outlive the walker's path buffer.
-                ranks[slot_i].path = found.path[found.path.len - e.path.len ..];
+                try ctx.visit(.{ .data = data, .info = info, .dir = dir_path, .rel = e.path, .dir_rank = dir_rank });
             }
         }
     }
-    return result;
+}
+
+/// Keeps the best face per style (only `want` when given).
+const ScanCtx = struct {
+    allocator: Allocator,
+    want: ?Style,
+    result: FoundFamily = .{},
+    ranks: [4]Rank = undefined,
+
+    fn visit(self: *ScanCtx, c: Candidate) !void {
+        const m = classify(c.info) orelse return;
+        if (self.want) |w| if (w.bold != m.style.bold or w.italic != m.style.italic) return;
+
+        const slot = self.result.face(m.style);
+        const slot_i = @as(usize, @intFromBool(m.style.bold)) + 2 * @as(usize, @intFromBool(m.style.italic));
+        const rank: Rank = .{ .inexact = !m.exact, .dir = c.dir_rank, .path = c.rel, .face = c.info.index };
+        if (slot.* != null and !rank.lessThan(self.ranks[slot_i])) return;
+
+        const found = try makeFound(self.allocator, c.data, c.info, c.dir, c.rel, m.style);
+        if (slot.*) |old| old.deinit(self.allocator);
+        slot.* = found;
+        self.ranks[slot_i] = rank;
+        // The rank must outlive the walker's path buffer.
+        self.ranks[slot_i].path = found.path[found.path.len - c.rel.len ..];
+    }
+};
+
+fn scan(io: std.Io, allocator: Allocator, family: []const u8, want: ?Style, opts: Options) !FoundFamily {
+    var ctx: ScanCtx = .{ .allocator = allocator, .want = want };
+    errdefer ctx.result.deinit(allocator);
+    try walk(io, allocator, family, opts, &ctx);
+    return ctx.result;
 }
 
 fn makeFound(allocator: Allocator, data: []const u8, info: font_collection.FaceInfo, dir: []const u8, rel: []const u8, style: Style) !FoundFont {
@@ -404,4 +545,58 @@ test "find searches folders recursively, earlier folders first" {
     defer c.deinit(testing.allocator);
     try testing.expect(std.mem.startsWith(u8, c.path, "test/fonts/Charter/"));
     try testing.expect(std.mem.endsWith(u8, c.path, "Charter Regular.otf"));
+}
+
+test "listFamily: every weight once, the copy find would pick, in rank order" {
+    const opts: Options = .{ .dirs = &.{"test/fonts/Inter"} };
+    const faces = try listFamily(testing.io, testing.allocator, "inter", opts);
+    defer freeFamilyFaces(testing.allocator, faces);
+    // Regular/Bold/Italic/BoldItalic come from the .otf files (smallest
+    // paths), the other 14 from Inter.ttc in face order; Inter Display and
+    // Inter Variable are other families.
+    const expect = [_]struct { []const u8, []const u8, u32 }{
+        .{ "Inter-Bold", "Inter-Bold.otf", 0 },     .{ "Inter-BoldItalic", "Inter-BoldItalic.otf", 0 },
+        .{ "Inter-Italic", "Inter-Italic.otf", 0 }, .{ "Inter-Regular", "Inter-Regular.otf", 0 },
+        .{ "Inter-Black", "Inter.ttc", 1 },         .{ "Inter-BlackItalic", "Inter.ttc", 2 },
+        .{ "Inter-Thin", "Inter.ttc", 4 },          .{ "Inter-ThinItalic", "Inter.ttc", 5 },
+        .{ "Inter-Light", "Inter.ttc", 6 },         .{ "Inter-LightItalic", "Inter.ttc", 7 },
+        .{ "Inter-ExtraLight", "Inter.ttc", 8 },    .{ "Inter-ExtraLightItalic", "Inter.ttc", 9 },
+        .{ "Inter-Medium", "Inter.ttc", 10 },       .{ "Inter-MediumItalic", "Inter.ttc", 11 },
+        .{ "Inter-SemiBold", "Inter.ttc", 12 },     .{ "Inter-SemiBoldItalic", "Inter.ttc", 13 },
+        .{ "Inter-ExtraBold", "Inter.ttc", 16 },    .{ "Inter-ExtraBoldItalic", "Inter.ttc", 17 },
+    };
+    try testing.expectEqual(expect.len, faces.len);
+    for (expect, faces) |x, f| {
+        try testing.expectEqualStrings(x[0], f.info.postscript_name);
+        try testing.expectEqualStrings(x[1], std.fs.path.basename(f.path));
+        try testing.expectEqual(x[2], f.info.index);
+        try testing.expectEqualStrings("Inter", f.info.family);
+    }
+    // Weight and italic come through for the caller's own choice.
+    try testing.expectEqual(@as(u16, 300), faces[8].info.weight);
+    try testing.expect(!faces[8].info.italic and faces[9].info.italic);
+
+    const missing = try listFamily(testing.io, testing.allocator, "No Such Family", opts);
+    defer freeFamilyFaces(testing.allocator, missing);
+    try testing.expectEqual(@as(usize, 0), missing.len);
+}
+
+test "FamilyFace.load extracts the face; a changed file is refused" {
+    const opts: Options = .{ .dirs = &.{"test/fonts/Inter"} };
+    const faces = try listFamily(testing.io, testing.allocator, "Inter", opts);
+    defer freeFamilyFaces(testing.allocator, faces);
+    const light = faces[8];
+    const data = try light.load(testing.io, testing.allocator);
+    defer testing.allocator.free(data);
+    try testing.expectEqual(@as(u32, 1), try font_collection.faceCount(data));
+    const info = try font_collection.describeFace(testing.allocator, data, 0);
+    defer info.deinit(testing.allocator);
+    try testing.expectEqualStrings("Inter-Light", info.postscript_name);
+
+    // Index 8 of Inter.ttc is ExtraLight, not Light.
+    var moved = light;
+    moved.info.index = 8;
+    try testing.expectError(error.FaceChanged, moved.load(testing.io, testing.allocator));
+    moved.info.index = 99;
+    try testing.expectError(error.FaceChanged, moved.load(testing.io, testing.allocator));
 }

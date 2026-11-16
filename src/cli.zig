@@ -168,7 +168,7 @@ fn printUsage() !void {
         \\  shape <font> [+feat|-feat]...  Shape stdin lines (one text per line); print glyph IDs
         \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--bold] [--italic] [--size PT]
         \\                       Write stdin lines with per-character fallback fonts
-        \\  find-font <family> [--bold] [--italic] [--dir DIR]... [--out FILE]
+        \\  find-font <family> [--bold] [--italic] [--all] [--dir DIR]... [--out FILE]
         \\                       Find an installed font (whole family without flags)
         \\  embed-test [ttf] [out]  Generate PDF with embedded font
         \\  mark-test [ttf] [out]   Test GPOS mark positioning (diacritics)

@@ -52,6 +52,8 @@ pub const FoundFamily = system_fonts.FoundFamily;
 pub const SystemFontOptions = system_fonts.Options;
 pub const findSystemFont = system_fonts.find;
 pub const findSystemFontFamily = system_fonts.findFamily;
+pub const FamilyFace = system_fonts.FamilyFace;
+pub const listSystemFontFaces = system_fonts.listFamily;
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
