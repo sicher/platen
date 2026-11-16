@@ -195,7 +195,9 @@ fn showFontInfo(allocator: std.mem.Allocator, path: []const u8) !void {
     const font = result.font;
 
     try print("Font: {s}\n", .{path});
-    try print("Size: {d} bytes\n\n", .{result.data.len});
+    try print("Size: {d} bytes\n", .{result.data.len});
+    try print("Style: {s}{s}\n", .{ if (result.font.style.bold) "bold " else "", if (result.font.style.italic) "italic" else "" });
+    try print("Embedding: fsType 0x{x:0>4} ({s})\n\n", .{ result.font.fs_type, if (result.font.mayEmbed()) "allowed" else "not allowed" });
 
     if (font.head) |head| {
         try print("head table:\n", .{});

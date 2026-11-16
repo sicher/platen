@@ -28,6 +28,9 @@ pub const Font = struct {
     /// The face's own style: OS/2 fsSelection, else head.macStyle (as
     /// font_collection.describeFace reads it).
     style: FaceStyle = .{},
+    /// OS/2 fsType: the embedding permissions the face's licence grants
+    /// (0 = installable, also without an OS/2 table). See `mayEmbed`.
+    fs_type: u16 = 0,
 
     // Cached cmap lookup (avoids subtable search on every glyph lookup)
     cmap_subtable_offset: u32 = 0,
@@ -84,6 +87,9 @@ pub const Font = struct {
         font.post = font.parsePost();
         font.os2 = font.parseOs2();
         font.style = font.parseStyle();
+        if (font.getTable("OS/2".*)) |os2| {
+            if (os2.len >= 10) font.fs_type = readU16(os2, 8);
+        }
 
         // Initialize cmap cache for fast glyph lookups
         font.initCmapCache();
@@ -266,6 +272,16 @@ pub const Font = struct {
     }
 
     /// Parse 'OS/2' table (strikethrough metrics)
+    /// Whether the licence lets a document embed the face's outlines: not
+    /// Restricted License (bits 0-3 exactly 0x2; with several bits set the
+    /// least restrictive applies) and not Bitmap Embedding Only (bit 9).
+    /// platen embeds whatever it is given; callers choosing fonts on their
+    /// own (system fallback) ask this first.
+    pub fn mayEmbed(self: *const Font) bool {
+        if (self.fs_type & 0x000F == 0x0002) return false;
+        return self.fs_type & 0x0200 == 0;
+    }
+
     fn parseStyle(self: *const Font) FaceStyle {
         if (self.getTable("OS/2".*)) |os2| {
             if (os2.len < 64) return .{};
@@ -810,6 +826,24 @@ test "a face reports its own bold and italic" {
         defer std.testing.allocator.free(result.data);
         try std.testing.expectEqual(c.style, result.font.style);
     }
+}
+
+test "embedding permissions follow fsType" {
+    var f: Font = .{ .data = &.{}, .tables = undefined };
+    for ([_]struct { u16, bool }{
+        .{ 0x0000, true }, // installable
+        .{ 0x0002, false }, // restricted
+        .{ 0x0004, true }, // preview & print
+        .{ 0x0008, true }, // editable
+        .{ 0x0006, true }, // restricted + preview: the less restrictive wins
+        .{ 0x0208, false }, // bitmap embedding only
+    }) |c| {
+        f.fs_type = c[0];
+        try std.testing.expectEqual(c[1], f.mayEmbed());
+    }
+    const courier = try Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    defer std.testing.allocator.free(courier.data);
+    try std.testing.expect(courier.font.mayEmbed());
 }
 
 test "read big-endian" {

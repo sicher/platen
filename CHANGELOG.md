@@ -26,6 +26,11 @@
   space in `font`, centered: monospaced text, e.g. a screenplay in Courier
   with Cyrillic from another font, stays on its columns. Measurement,
   wrapping, anchoring and decorations follow the runs.
+- **A font's own style and embedding permission**: `ttf.Font.style` (OS/2
+  fsSelection, else head.macStyle) and `ttf.Font.fs_type` with `mayEmbed()`
+  (false for Restricted License and Bitmap Embedding Only), so a caller
+  picking system fonts can skip what may not be embedded. `platen font-info`
+  prints both.
 - **`platen fallback <out> <font> [--fallback FONT]... [--monospace]`**: writes
   stdin lines with fallback fonts and prints their widths.
 - **`platen svg <in.svg> [out.pdf]`**: renders an SVG on a page of its own size
