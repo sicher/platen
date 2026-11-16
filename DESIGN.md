@@ -1202,10 +1202,12 @@ draws. Three rules keep it true:
 
 ### Fallback fonts (`src/fallback.zig`)
 `TextStyle.fallback` cuts text into runs, one font each (slot 0 =
-`font`, i+1 = `fallback[i]`): a character goes to the first slot whose
-cmap has it, else slot 0 (.notdef shows the gap). Combining marks
-(ccc != 0) and default ignorables join the run before them when its font
-has them. `writeTextStyled` routes a fallback style to
+`font`, i+1 = `fallback[i]`), chosen per cluster: a character with the
+combining marks (ccc != 0) and default ignorables after it goes to the
+first slot that draws all of it, as its codepoints or composed into a
+precomposed letter (`drawsCluster`: "e" + U+0301 stays in a font with
+"é" though it lacks a lone U+0301); else the first slot with the base;
+else slot 0 (.notdef shows the gap). `writeTextStyled` routes a fallback style to
 `writeFallbackRuns`, which writes each run through `writeOneFont` (one
 `TextCommand` per run) and patches the fallback commands: `synth_bold`,
 `synth_italic`, `decoration_font` (the primary: one underline position

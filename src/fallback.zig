@@ -2,9 +2,11 @@
 //!
 //! Text is cut into runs, each drawn in one font: a character goes to the
 //! first of `font`, `fallback[0]`, `fallback[1]`, ... that has a glyph for
-//! it, and to `font` when none does (its .notdef marks the gap). Combining
-//! marks and default ignorables join the run before them when that run's
-//! font has them, so a base and its accents are shaped in one font.
+//! it, and to `font` when none does (its .notdef marks the gap). The unit
+//! is a cluster: a character with the combining marks and default
+//! ignorables after it, drawn in the first font that has all of them or
+//! the precomposed letter they make ("e" + U+0301 in a font with "é"), so
+//! a base and its accents are always shaped in one font.
 //!
 //! Slot 0 is the primary font, slot i+1 is `fallback[i]`. A primary run is
 //! written with the style as given (minus the fallback list); a fallback
@@ -138,25 +140,43 @@ pub const Plan = struct {
         return (emb.font.getGlyphId(cp) orelse 0) != 0;
     }
 
-    fn pick(self: *const Plan, cp: u21) usize {
-        if (self.has(0, cp)) return 0;
-        for (1..self.n + 1) |slot| {
-            if (self.has(slot, cp)) return slot;
+    /// Whether `slot` can draw a cluster: every codepoint as it is, or
+    /// the base composed with marks into a precomposed letter it has (as
+    /// platen's shaping composes, e.g. "e" + U+0301 -> "é").
+    fn drawsCluster(self: *const Plan, slot: usize, cluster: []const u21) bool {
+        var acc = cluster[0];
+        for (cluster[1..]) |mark| {
+            if (unicode_compose.compose(acc, mark)) |c| if (self.has(slot, c)) {
+                acc = c;
+                continue;
+            };
+            if (!self.has(slot, mark)) return false;
+        }
+        return self.has(slot, acc);
+    }
+
+    /// The first slot that draws the whole cluster; else the first that has
+    /// its base (its marks then show as that font's .notdef or not at all).
+    fn pick(self: *const Plan, cluster: []const u21) usize {
+        for (0..self.n + 1) |slot| {
+            if (self.drawsCluster(slot, cluster)) return slot;
+        }
+        for (0..self.n + 1) |slot| {
+            if (self.has(slot, cluster[0])) return slot;
         }
         return 0;
     }
 
-    /// The run starting at `start`.
+    /// The run starting at `start`: whole clusters (a character and the
+    /// marks and ignorables after it), each in the font `pick` chooses.
     pub fn nextRun(self: *const Plan, text: []const u8, start: usize) Run {
+        var buf: [max_cluster]u21 = undefined;
         var i = start;
-        const first = decode(text, &i);
-        const slot = self.pick(first);
+        const slot = self.pick(nextCluster(text, &i, &buf));
         const one_cell = self.monospace and slot != 0;
-        while (i < text.len) {
+        while (i < text.len and !one_cell) {
             var j = i;
-            const cp = decode(text, &j);
-            const joins = sticky(cp) and self.has(slot, cp);
-            if (!joins and (one_cell or self.pick(cp) != slot)) break;
+            if (self.pick(nextCluster(text, &j, &buf)) != slot) break;
             i = j;
         }
         return .{ .end = i, .slot = slot };
@@ -204,7 +224,29 @@ pub const Run = struct {
     slot: usize,
 };
 
-/// Joins the run before it rather than starting one.
+/// Codepoints of a cluster weighed when picking its font; marks beyond
+/// these still belong to the cluster.
+const max_cluster = 16;
+
+/// The cluster at `i.*` (a codepoint and the sticky ones after it),
+/// advancing past it; its first `max_cluster` codepoints.
+fn nextCluster(text: []const u8, i: *usize, buf: *[max_cluster]u21) []const u21 {
+    buf[0] = decode(text, i);
+    var n: usize = 1;
+    while (i.* < text.len) {
+        var j = i.*;
+        const cp = decode(text, &j);
+        if (!sticky(cp)) break;
+        if (n < buf.len) {
+            buf[n] = cp;
+            n += 1;
+        }
+        i.* = j;
+    }
+    return buf[0..n];
+}
+
+/// Belongs to the cluster before it rather than starting one.
 fn sticky(cp: u21) bool {
     return unicode_compose.combiningClass(cp) != 0 or gsub.Ignorable.of(cp) != .none;
 }

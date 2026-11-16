@@ -189,6 +189,21 @@ test "a base and its combining marks share one font and one cell" {
     try testing.expectApproxEqAbs(try width(&doc, decomposed, .{ .font = gen, .size = 12 }), try width(&doc, decomposed, natural), 1e-9);
 }
 
+test "a base and a mark the primary lacks compose in the primary" {
+    // Courier Prime has no lone U+0301 but has "é": the pair stays in it,
+    // composed, instead of the accent drifting into a fallback of its own
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const mono: platen.TextStyle = .{ .font = cp, .size = 12, .fallback = &.{try gentium(&doc)}, .fallback_advance = .monospace };
+    try testing.expectApproxEqAbs(try width(&doc, "café", .{ .font = cp, .size = 12 }), try width(&doc, "cafe\u{0301}", mono), 1e-9);
+    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, "cafe\u{0301}", mono, .{});
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    var buf: [16][]const u8 = undefined;
+    try testing.expectEqual(@as(usize, 1), fontsUsed(pdf, &buf).len);
+}
+
 fn renderOne(bold: bool, italic: bool, comptime family: bool, text: []const u8) ![]u8 {
     var doc = try newDoc();
     defer doc.deinit();
