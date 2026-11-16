@@ -68,3 +68,99 @@ test "GSUB shaping matches HarfBuzz (test/shaping/harfbuzz.txt)" {
     try std.testing.expect(checked > 0);
     try std.testing.expectEqual(@as(usize, 0), mismatches);
 }
+
+const shaping = @import("shaping.zig");
+const FontFace = @import("embedded.zig").FontFace;
+
+const positions_path = "test/shaping/harfbuzz_positions.txt";
+const gaps_path = "test/shaping/position_gaps.txt";
+
+/// hb-shape's serialization of a run (see scripts/gen_shaping_reference.py).
+fn serialize(allocator: std.mem.Allocator, glyphs: []const shaping.ShapedGlyph) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    for (glyphs, 0..) |g, i| {
+        try out.writer.print("{s}{d}={d}", .{ if (i == 0) "" else "|", g.id, g.cluster });
+        if (g.x_offset != 0 or g.y_offset != 0) try out.writer.print("@{d},{d}", .{ g.x_offset, g.y_offset });
+        try out.writer.print("+{d}", .{g.x_advance});
+    }
+    return out.toOwnedSlice();
+}
+
+/// A known difference: "font<TAB>features<TAB>text<TAB>reason" per line.
+fn isKnownGap(gaps: []const u8, font: []const u8, features: []const u8, text: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, gaps, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0 or line[0] == '#') continue;
+        var f = std.mem.splitScalar(u8, line, '\t');
+        if (std.mem.eql(u8, f.next() orelse continue, font) and
+            std.mem.eql(u8, f.next() orelse continue, features) and
+            std.mem.eql(u8, f.next() orelse continue, text)) return true;
+    }
+    return false;
+}
+
+test "shapeText matches HarfBuzz: glyphs, clusters, advances, offsets" {
+    // Every run must equal HarfBuzz's, except the known gaps listed (with
+    // their reason) in test/shaping/position_gaps.txt - and those must
+    // still differ, so a fixed gap is taken off the list.
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    const data = try std.Io.Dir.cwd().readFileAlloc(io, positions_path, allocator, .limited(16 << 20));
+    defer allocator.free(data);
+    const gaps = try std.Io.Dir.cwd().readFileAlloc(io, gaps_path, allocator, .limited(1 << 20));
+    defer allocator.free(gaps);
+
+    var face: ?FontFace = null;
+    defer if (face) |*f| f.deinit();
+    var font_path: []const u8 = "";
+    var features_line: []const u8 = "";
+    var features: std.ArrayListUnmanaged(shaping.FeatureSetting) = .empty;
+    defer features.deinit(allocator);
+    var checked: usize = 0;
+    var mismatches: usize = 0;
+    var fixed_gaps: usize = 0;
+
+    var lines = std.mem.splitScalar(u8, data, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (std.mem.startsWith(u8, line, "font ")) {
+            if (face) |*f| f.deinit();
+            face = null;
+            font_path = line[5..];
+            face = try FontFace.fromFile(io, allocator, font_path);
+            continue;
+        }
+        if (std.mem.startsWith(u8, line, "features")) {
+            features_line = std.mem.trim(u8, line[8..], " ");
+            features.clearRetainingCapacity();
+            var it = std.mem.tokenizeScalar(u8, features_line, ' ');
+            while (it.next()) |t| {
+                const feature = opentype.Feature.fromTag(std.mem.readInt(u32, t[1..5], .big)) orelse return error.UnknownFeature;
+                try features.append(allocator, .{ .feature = feature, .enabled = t[0] == '+' });
+            }
+            continue;
+        }
+        const tab = std.mem.indexOfScalar(u8, line, '\t') orelse return error.BadReferenceLine;
+        const text = line[0..tab];
+        const expected = line[tab + 1 ..];
+        const glyphs = try shaping.shape(allocator, &face.?, text, .{ .features = features.items });
+        defer allocator.free(glyphs);
+        const actual = try serialize(allocator, glyphs);
+        defer allocator.free(actual);
+        checked += 1;
+        const same = std.mem.eql(u8, expected, actual);
+        const gap = isKnownGap(gaps, font_path, features_line, text);
+        if (same and gap) {
+            fixed_gaps += 1;
+            std.debug.print("\nnow matches HarfBuzz, remove from {s}: {s} [{s}] \"{s}\"\n", .{ gaps_path, font_path, features_line, text });
+        } else if (!same and !gap) {
+            mismatches += 1;
+            std.debug.print("\n{s} [{s}] \"{s}\"\n  harfbuzz: {s}\n  platen:   {s}\n", .{ font_path, features_line, text, expected, actual });
+        }
+    }
+    if (mismatches > 0) std.debug.print("\n{d} of {d} runs differ from HarfBuzz\n", .{ mismatches, checked });
+    try std.testing.expect(checked > 0);
+    try std.testing.expectEqual(@as(usize, 0), mismatches);
+    try std.testing.expectEqual(@as(usize, 0), fixed_gaps);
+}

@@ -189,6 +189,20 @@ pub const Anchor = enum {
     right,
 };
 
+/// A glyph drawn by ID (Document.drawGlyphs), e.g. one of shapeText's.
+pub const PlacedGlyph = struct {
+    /// Glyph ID in the font (not a subset's).
+    id: u16,
+    /// Where the glyph's origin goes, in points from the page's top-left
+    /// corner; y is the baseline. For shapeText output: the pen position
+    /// plus (x_offset, -y_offset), scaled by size / unitsPerEm.
+    x: f64,
+    y: f64,
+    /// Byte offset in the drawn text of this glyph's cluster
+    /// (ShapedGlyph.cluster): it gives the glyph its ToUnicode text.
+    cluster: u32,
+};
+
 /// Options for writeAt (point-positioned text).
 pub const WriteAtOptions = struct {
     /// Which part of the text sits at pos.x.

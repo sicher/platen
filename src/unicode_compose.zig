@@ -76,12 +76,13 @@ pub fn decompose(c: u21, buf: []u21) []u21 {
 /// only when `ctx.hasGlyph(composite)`. Input is expected in canonical
 /// order (as typed text is); nothing is reordered. If given, `composed`
 /// (same length as `cps`) gets, per output position, whether that code
-/// point was composed from a decomposed sequence.
-pub fn composeInPlace(cps: []u21, composed: ?[]bool, ctx: anytype) usize {
+/// point was composed from a decomposed sequence. `offsets` (same length,
+/// optional) moves with the code points: a composite keeps its base's.
+pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, ctx: anytype) usize {
     var out: usize = 0;
     var starter: ?usize = null;
     var last_ccc: u8 = 0; // class of the last uncomposed mark after the starter
-    for (cps) |cp| {
+    for (cps, 0..) |cp, in| {
         const ccc = combiningClass(cp);
         if (ccc != 0) {
             if (starter) |s| {
@@ -103,6 +104,7 @@ pub fn composeInPlace(cps: []u21, composed: ?[]bool, ctx: anytype) usize {
         }
         cps[out] = cp;
         if (composed) |flags| flags[out] = false;
+        if (offsets) |o| o[out] = o[in];
         out += 1;
     }
     return out;
@@ -117,7 +119,7 @@ const AllGlyphs = struct {
 fn expectComposed(input: []const u21, expected: []const u21, ctx: anytype) !void {
     var buf: [16]u21 = undefined;
     @memcpy(buf[0..input.len], input);
-    const n = composeInPlace(buf[0..input.len], null, ctx);
+    const n = composeInPlace(buf[0..input.len], null, null, ctx);
     try std.testing.expectEqualSlices(u21, expected, buf[0..n]);
 }
 
@@ -149,12 +151,16 @@ test "composeInPlace composes, chains, and respects blocking" {
     try expectComposed(&.{ 'q', 0x0301, 0x0300, 'a', 0x0300 }, &.{ 'q', 0x0301, 0x0300, 0x00E0 }, all);
 }
 
-test "composeInPlace reports composed positions" {
+test "composeInPlace reports composed positions and moves offsets" {
     var cps = [_]u21{ 0x00E9, 'e', 0x0301, 'x' }; // é typed precomposed, then e + acute
     var flags: [4]bool = undefined;
-    const n = composeInPlace(&cps, &flags, AllGlyphs{});
+    // UTF-8 byte offsets of "\u{E9}e\u{301}x"
+    var offsets = [_]u32{ 0, 2, 3, 5 };
+    const n = composeInPlace(&cps, &flags, &offsets, AllGlyphs{});
     try std.testing.expectEqualSlices(u21, &.{ 0x00E9, 0x00E9, 'x' }, cps[0..n]);
     try std.testing.expectEqualSlices(bool, &.{ false, true, false }, flags[0..n]);
+    // The composite keeps its base's offset; the acute's is gone
+    try std.testing.expectEqualSlices(u32, &.{ 0, 2, 5 }, offsets[0..n]);
 }
 
 test "decompose inverts chained compositions" {

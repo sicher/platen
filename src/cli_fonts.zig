@@ -46,6 +46,92 @@ pub fn shape(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []cons
     }
 }
 
+/// shape-text <font> [+feat|-feat]...: shape each stdin line with the pure
+/// shapeText call and print its glyphs as HarfBuzz's hb-shape does
+/// (--no-glyph-names): gid=cluster@x_offset,y_offset+x_advance, joined by
+/// "|", the @ part only when an offset is nonzero; font units, clusters as
+/// byte offsets. Used by scripts/compare_shaping.py against HarfBuzz.
+pub fn shapeText(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
+    if (args.len < 1) return out.writeAll("Usage: platen shape-text <font> [+feat|-feat]... < lines\n");
+    var face = try platen.FontFace.fromFile(io, allocator, args[0]);
+    defer face.deinit();
+    var features: std.ArrayList(platen.shaping.FeatureSetting) = .empty;
+    defer features.deinit(allocator);
+    for (args[1..]) |arg| {
+        if (arg.len != 5 or (arg[0] != '+' and arg[0] != '-')) return out.print("Bad feature: {s} (use +liga or -liga)\n", .{arg});
+        const feature = platen.opentype.Feature.fromTag(std.mem.readInt(u32, arg[1..5], .big)) orelse
+            return out.print("Unknown feature: {s}\n", .{arg[1..]});
+        try features.append(allocator, .{ .feature = feature, .enabled = arg[0] == '+' });
+    }
+
+    var in_buffer: [64 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &in_buffer);
+    while (try stdin.interface.takeDelimiter('\n')) |line| {
+        const glyphs = try platen.shapeText(allocator, &face, line, .{ .features = features.items });
+        defer allocator.free(glyphs);
+        for (glyphs, 0..) |g, i| {
+            try out.print("{s}{d}={d}", .{ if (i == 0) "" else "|", g.id, g.cluster });
+            if (g.x_offset != 0 or g.y_offset != 0) try out.print("@{d},{d}", .{ g.x_offset, g.y_offset });
+            try out.print("+{d}", .{g.x_advance});
+        }
+        try out.writeAll("\n");
+    }
+}
+
+/// glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...: shape each stdin
+/// line with shapeText and draw it glyph by glyph with drawGlyphs, one line
+/// per baseline; prints each line's glyph count and width.
+pub fn drawGlyphs(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
+    if (args.len < 2) return out.writeAll("Usage: platen glyphs <out.pdf> <font> [--size PT] [+feat|-feat]... < lines\n");
+    var face = try platen.FontFace.fromFile(io, allocator, args[1]);
+    defer face.deinit();
+    var size: f64 = 14;
+    var features: std.ArrayList(platen.shaping.FeatureSetting) = .empty;
+    defer features.deinit(allocator);
+    var i: usize = 2;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--size") and i + 1 < args.len) {
+            i += 1;
+            size = try std.fmt.parseFloat(f64, args[i]);
+        } else if (a.len == 5 and (a[0] == '+' or a[0] == '-')) {
+            const feature = platen.opentype.Feature.fromTag(std.mem.readInt(u32, a[1..5], .big)) orelse
+                return out.print("Unknown feature: {s}\n", .{a[1..]});
+            try features.append(allocator, .{ .feature = feature, .enabled = a[0] == '+' });
+        } else return out.print("Unknown option: {s}\n", .{a});
+    }
+
+    var doc = platen.Document.init(allocator, io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const scale = size / @as(f64, @floatFromInt(platen.shaping.unitsPerEm(&face)));
+    var y: f64 = 72;
+    var in_buffer: [64 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &in_buffer);
+    while (try stdin.interface.takeDelimiter('\n')) |line| {
+        const shaped = try platen.shapeText(allocator, &face, line, .{ .features = features.items });
+        defer allocator.free(shaped);
+        const placed = try allocator.alloc(platen.PlacedGlyph, shaped.len);
+        defer allocator.free(placed);
+        var pen: f64 = 72;
+        for (shaped, placed) |g, *p| {
+            p.* = .{
+                .id = g.id,
+                .x = pen + @as(f64, @floatFromInt(g.x_offset)) * scale,
+                .y = y - @as(f64, @floatFromInt(g.y_offset)) * scale,
+                .cluster = g.cluster,
+            };
+            pen += @as(f64, @floatFromInt(g.x_advance)) * scale;
+        }
+        try doc.drawGlyphs(line, placed, .{ .font = .{ .face = &face }, .size = size });
+        try out.print("{d} glyphs, {d:.3} pt\n", .{ shaped.len, pen - 72 });
+        y += size * 1.5;
+    }
+    const pdf = try doc.output();
+    defer allocator.free(pdf);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = args[0], .data = pdf });
+}
+
 /// extract-face <file> <index> <out.ttf>: write face N as a standalone sfnt.
 pub fn extractFace(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
     if (args.len < 3) return out.writeAll("Usage: platen extract-face <font.ttc> <index> <out.ttf>\n");

@@ -204,6 +204,22 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 - [x] **`clig` is off by default** while HarfBuzz enables it. (done
   2026-10-22: on by default; GsubTest has a clig scenario)
 
+## Open after shapeText / drawGlyphs (2026-11-16, for courier)
+
+- [ ] **GPOS engine** (like gsub.zig): all lookup types (single, pair,
+  cursive, mark-base, mark-lig, mark-mark, context/chained, extension),
+  feature/lookup order, lookup flags (IgnoreMarks, mark filtering sets),
+  GDEF mark advance zeroing, and HarfBuzz's fallback mark positioning for
+  fonts without GPOS. Then shapeText and write()'s renderer both use it.
+  Known gaps: test/shaping/position_gaps.txt (Satoshi marks without
+  anchors; Inter `f\u0323f` kerning across a mark outside the filter set).
+- [ ] **Indic (Devanagari) shaping** in shapeText: script selection
+  (dev2, then deva), syllables, reordering (pre-base matra, reph), the
+  feature stages (nukt akhn rphf blwf half pstf vatu cjct, then pres abvs
+  blws psts haln), checked against HarfBuzz with Kohinoor Devanagari and
+  Devanagari Sangam MN (courier: FD_RULES.md 3.1, 9.6). Needs Indic
+  syllabic/positional categories in unicode_props_data.zig.
+
 ## Code health
 
 - [ ] **Split document.zig** (4200+ lines): output phase, text layout, and

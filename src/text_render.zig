@@ -271,3 +271,23 @@ fn renderWithMarkPositioning(
 
     return true;
 }
+
+/// Glyphs by ID, each placed with its own text matrix (Document.drawGlyphs).
+/// `font_index` names the font resource (/E<index+1>).
+pub fn renderPlacedGlyphs(cw: *ContentWriter, g: pagemod.GlyphsCommand, font_index: usize) !void {
+    if (g.ids.len == 0) return;
+    const emb = g.font;
+    const has_remap = emb.gid_remap.count() > 0;
+    try cw.append("BT\n");
+    try g.text_color.writeFill(cw);
+    try cw.print("/E{d} {d:.3} Tf\n", .{ font_index + 1, g.font_size });
+    var hex_buf: [4]u8 = undefined;
+    for (g.ids, g.xs, g.ys) |gid, x, y| {
+        try cw.writeTm3(x, y);
+        writeHex4(&hex_buf, if (has_remap) emb.gid_remap.get(gid) orelse 0 else gid);
+        try cw.append("<");
+        try cw.append(&hex_buf);
+        try cw.append("> Tj\n");
+    }
+    try cw.append("ET\n");
+}

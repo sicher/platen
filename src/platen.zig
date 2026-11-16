@@ -54,6 +54,9 @@ pub const findSystemFont = system_fonts.find;
 pub const findSystemFontFamily = system_fonts.findFamily;
 pub const FamilyFace = system_fonts.FamilyFace;
 pub const listSystemFontFaces = system_fonts.listFamily;
+pub const shaping = @import("shaping.zig");
+pub const ShapedGlyph = shaping.ShapedGlyph;
+pub const shapeText = shaping.shape;
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
@@ -92,6 +95,7 @@ pub const PageLabel = document.PageLabel;
 pub const WriteResult = document.WriteResult;
 pub const WriteOptions = document.WriteOptions;
 pub const WriteAtOptions = document.WriteAtOptions;
+pub const PlacedGlyph = document.PlacedGlyph;
 pub const Anchor = document.Anchor;
 pub const BlockOptions = document.BlockOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
@@ -189,6 +193,10 @@ test {
     _ = @import("fallback_test.zig");
     _ = @import("fallback.zig");
     _ = @import("shaping_test.zig");
+    _ = @import("glyphs_test.zig");
+    _ = shaping;
+    _ = @import("decode.zig");
+    _ = @import("unicode_props.zig");
     _ = @import("gsub.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");

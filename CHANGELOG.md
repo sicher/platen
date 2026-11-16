@@ -11,6 +11,18 @@
   caller picks the face itself. `FamilyFace.load` reads its standalone sfnt
   bytes when needed. Matching, folders and tie-breaks between copies of a face
   are `findSystemFont`'s. CLI: `find-font <family> --all`.
+- **Shaping without a document, and drawing glyphs by ID:**
+  `platen.shapeText(allocator, &face, text, .{ .features = ... })` turns
+  text into glyph IDs with advances, offsets (font units) and clusters (byte
+  offsets into the text), reading the `FontFace` only (no Document, no I/O,
+  any thread). `doc.drawGlyphs(text, glyphs, style)` draws glyphs by ID, each
+  at its own position, and maps each to its cluster's text in ToUnicode, so a
+  ligature or conjunct copies out as its characters. For layout engines that
+  place every glyph themselves. Glyphs, clusters and positions are checked
+  against HarfBuzz (test/shaping/harfbuzz_positions.txt); positioning is
+  still pair kerning and mark attachment, without script-specific shaping.
+  CLI: `shape-text <font>` (HarfBuzz's serialization), `glyphs <out.pdf>
+  <font>`.
 - **SVG gradients**: `<linearGradient>` and `<radialGradient>` fill and stroke
   shapes, paths and text through `url(#id)`, with an optional fallback color
   (`url(#g) red`). Both `gradientUnits` (`objectBoundingBox`, the default, and

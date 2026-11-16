@@ -66,10 +66,25 @@ pub const TextCommand = struct {
     decoration_font: ?*EmbeddedFont = null,
 };
 
+/// Glyphs drawn by ID at absolute positions (Document.drawGlyphs).
+pub const GlyphsCommand = struct {
+    font: *EmbeddedFont,
+    font_size: f64,
+    /// Glyph IDs (unremapped) and their origins in PDF coordinates
+    /// (bottom-left origin); owned by the page arena.
+    ids: []const u16,
+    xs: []const f64,
+    ys: []const f64,
+    text_color: Color,
+    opacity: f64 = 1.0,
+};
+
 /// Content command for deferred rendering (enables glyph ID remapping)
 pub const ContentCommand = union(enum) {
     /// Text command with all rendering parameters
     text: TextCommand,
+    /// Glyphs by ID
+    glyphs: GlyphsCommand,
     /// Raw content (for non-text operations that don't need deferred processing)
     raw: []const u8, // Owned copy
 };
@@ -256,6 +271,21 @@ pub const ContentWriter = struct {
         var buf: [64]u8 = undefined;
         @memcpy(buf[0..8], "1 0 0 1 ");
         const len = 8 + format.writeCoord2Suffix(buf[8..], x, y, " Tm ");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "1 0 0 1 x y Tm " with 3 decimals (glyphs placed by ID keep
+    /// their position to a thousandth of a point).
+    pub fn writeTm3(self: *ContentWriter, x: f64, y: f64) !void {
+        var buf: [80]u8 = undefined;
+        @memcpy(buf[0..8], "1 0 0 1 ");
+        var len: usize = 8;
+        len += format.writeF64_3(buf[len..], x).len;
+        buf[len] = ' ';
+        len += 1;
+        len += format.writeF64_3(buf[len..], y).len;
+        @memcpy(buf[len..][0..4], " Tm ");
+        len += 4;
         try self.append(buf[0..len]);
     }
 

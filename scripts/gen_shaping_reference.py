@@ -17,6 +17,13 @@ File format:
     features <+feat|-feat>...      toggles relative to platen's defaults
     <text>\t<gid> <gid> ...         one shaped text per line
 
+Positions (test/shaping/harfbuzz_positions.txt, src/shaping.zig's
+shapeText): for the POSITION_CASES fonts, each text's whole glyph run as
+hb-shape --no-glyph-names prints it: gid=cluster@x_offset,y_offset+x_advance
+joined by "|" (the @ part only when an offset is nonzero), in font units,
+clusters as UTF-8 byte offsets at HarfBuzz's default cluster level. Known
+differences are listed, with their reason, in test/shaping/position_gaps.txt.
+
 Run with: .venv/bin/python scripts/gen_shaping_reference.py
 """
 
@@ -25,6 +32,7 @@ from pathlib import Path
 import uharfbuzz as hb
 
 OUT = Path("test/shaping/harfbuzz.txt")
+OUT_POSITIONS = Path("test/shaping/harfbuzz_positions.txt")
 
 # Features platen enables by default (opentype.Feature.defaultEnabled)
 PLATEN_DEFAULTS = {"ccmp", "locl", "rlig", "liga", "clig", "calt", "kern", "mark", "mkmk"}
@@ -115,6 +123,20 @@ CASES = [
 ]
 
 
+# Fonts with GPOS (kerning, mark attachment). Fonts without one get
+# HarfBuzz's fallback mark positioning, which platen does not do yet.
+POSITION_CASES = [
+    ("test/fonts/Inter/Inter-Regular.otf", [], LATIN),
+    ("test/fonts/Inter/Inter-Regular.otf", ["-kern"], LATIN),
+    ("test/fonts/Inter/Inter-Regular.otf", ["+frac", "+dlig"], LATIN),
+    ("test/fonts/Inter/Inter-Bold.ttf", [], LATIN),
+    ("test/fonts/Satoshi/Satoshi-Regular.otf", [], LATIN),
+    ("test/fonts/Gentium/Gentium-Regular.ttf", [], LATIN),
+    ("test/fonts/Gentium/Gentium-Regular.ttf", ["-mark", "-mkmk"], LATIN),
+    ("test/fonts/Gentium/Gentium-Italic.ttf", [], LATIN),
+]
+
+
 def hb_features(toggles):
     on = set(PLATEN_DEFAULTS)
     for t in toggles:
@@ -137,20 +159,41 @@ def shape(font, text, features):
     return [info.codepoint for info in buf.glyph_infos]
 
 
-def main():
+def shape_positions(font, text, features):
+    buf = hb.Buffer()
+    buf.add_utf8(text.encode("utf-8"))
+    buf.direction = "ltr"
+    buf.script = "Zyyy"
+    buf.language = "en"
+    buf.flags = hb.BufferFlags.REMOVE_DEFAULT_IGNORABLES
+    hb.shape(font, buf, features)
+    parts = []
+    for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
+        g = f"{info.codepoint}={info.cluster}"
+        if pos.x_offset or pos.y_offset:
+            g += f"@{pos.x_offset},{pos.y_offset}"
+        parts.append(g + f"+{pos.x_advance}")
+    return "|".join(parts)
+
+
+def write_cases(out, cases, shape_text):
     lines = []
-    for path, toggles, texts in CASES:
+    for path, toggles, texts in cases:
         font = hb.Font(hb.Face(Path(path).read_bytes()))
         features = hb_features(toggles)
         lines.append(f"font {path}")
         lines.append("features " + " ".join(toggles))
         for text in texts:
             assert "\t" not in text and "\n" not in text
-            gids = shape(font, text, features)
-            lines.append(text + "\t" + " ".join(map(str, gids)))
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text("\n".join(lines) + "\n")
-    print(f"{OUT}: {len(CASES)} cases")
+            lines.append(text + "\t" + shape_text(font, text, features))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n")
+    print(f"{out}: {len(cases)} cases")
+
+
+def main():
+    write_cases(OUT, CASES, lambda font, text, features: " ".join(map(str, shape(font, text, features))))
+    write_cases(OUT_POSITIONS, POSITION_CASES, shape_positions)
 
 
 if __name__ == "__main__":

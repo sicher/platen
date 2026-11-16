@@ -309,6 +309,43 @@ _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "INT. КУХНЯ — ДЕНЬ", style
   to fit when wider), so every character keeps one column.
 - Measurement, wrapping, anchoring and underlines follow the runs.
 
+### Shaping and Placing Glyphs Yourself
+
+A layout engine that measures, breaks and positions text itself can shape
+without a document and draw the result glyph by glyph:
+
+```zig
+var face = try platen.FontFace.fromFile(io, allocator, "Gentium-Regular.ttf");
+defer face.deinit();
+// Pure: reads the face only - no Document, no I/O, safe from any thread
+const shaped = try platen.shapeText(allocator, &face, "office", .{});
+defer allocator.free(shaped);
+
+const scale = 12.0 / @as(f64, @floatFromInt(platen.shaping.unitsPerEm(&face)));
+var placed: [64]platen.PlacedGlyph = undefined;
+var pen: f64 = 72;
+for (shaped, placed[0..shaped.len]) |g, *p| {
+    p.* = .{
+        .id = g.id,
+        .x = pen + @as(f64, @floatFromInt(g.x_offset)) * scale,
+        .y = 100 - @as(f64, @floatFromInt(g.y_offset)) * scale, // baseline at 100
+        .cluster = g.cluster,
+    };
+    pen += @as(f64, @floatFromInt(g.x_advance)) * scale;
+}
+try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face }, .size = 12 });
+```
+
+- `ShapedGlyph`: glyph ID, `x_advance`, `x_offset`, `y_offset` (font units,
+  y up) and `cluster`, the byte offset of its cluster in the text. Clusters
+  are HarfBuzz's (default level): a ligature or a base with its marks shares
+  one; they never decrease.
+- `drawGlyphs` writes each glyph at its position (to 0.001 pt) and gives it
+  its cluster's text for copy and paste: the "ffi" ligature extracts as
+  "ffi".
+- Shaping is platen's GSUB plus pair kerning and mark attachment, checked
+  against HarfBuzz; no script-specific shaping yet (Indic, Arabic, bidi).
+
 ### Text Flow with Word Wrapping
 
 ```zig
@@ -871,6 +908,7 @@ document. For fonts shared across documents, see
 | Method | Description |
 |--------|-------------|
 | `writeAt(Point, str, TextStyle, WriteAtOptions) -> Rect` | Write text at absolute position |
+| `drawGlyphs(text, []const PlacedGlyph, TextStyle)` | Draw glyphs by ID at their own positions (e.g. `shapeText`'s), ToUnicode from their clusters |
 | `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Incremental write with word wrapping (cursor advances) |
 | `writeBlock(*Region, str, TextStyle, BlockOptions) -> WriteResult` | Wrapped block with alignment (cursor to next line) |
 | `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping and alignment |

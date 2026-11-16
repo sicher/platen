@@ -12,7 +12,7 @@ const KernTable = @import("kern_table.zig").KernTable;
 const gsub_mod = @import("gsub.zig");
 
 /// GSUB of a font without one: shaping maps code points 1:1.
-const empty_gsub: gsub_mod.Table = .{
+pub const empty_gsub: gsub_mod.Table = .{
     .data = &.{},
     .gdef = .{},
     .lookups = &.{},
@@ -1299,18 +1299,24 @@ pub const OpenTypeFeatures = struct {
             return self.kern_cache_values[slot];
         }
 
-        // Cache miss - do the full lookup
+        const kern = self.kerningUncached(glyph1, glyph2);
+
+        // Cache the result (even if 0, to avoid repeated lookups);
+        // colliding pairs simply overwrite each other
+        self.kern_cache_keys[slot] = key;
+        self.kern_cache_values[slot] = kern;
+        return kern;
+    }
+
+    /// getKerning without the cache: reads the tables only, so it is safe
+    /// on a shared (frozen) face from any thread.
+    pub fn kerningUncached(self: *const OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
         var kern: i16 = 0;
         for (self.kern_lookups.items) |lookup| {
             kern = lookup.getKerning(glyph1, glyph2);
             if (kern != 0) break;
         }
         if (self.legacy_kern) |*t| kern = t.get(glyph1, glyph2);
-
-        // Cache the result (even if 0, to avoid repeated lookups);
-        // colliding pairs simply overwrite each other
-        self.kern_cache_keys[slot] = key;
-        self.kern_cache_values[slot] = kern;
         return kern;
     }
 
@@ -1350,7 +1356,7 @@ pub const OpenTypeFeatures = struct {
 
     /// Get mark positioning offset for a mark glyph following a base glyph
     /// Returns (dx, dy) in design units, or null if no positioning applies
-    pub fn getMarkOffset(self: *OpenTypeFeatures, base_glyph: u16, mark_glyph: u16) ?MarkOffset {
+    pub fn getMarkOffset(self: *const OpenTypeFeatures, base_glyph: u16, mark_glyph: u16) ?MarkOffset {
         // First try mark-to-base
         for (self.mark_base_lookups.items) |lookup| {
             if (lookup.getAttachment(mark_glyph, base_glyph)) |offset| {

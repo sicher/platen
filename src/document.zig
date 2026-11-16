@@ -86,6 +86,7 @@ pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WriteOptions = layout.WriteOptions;
 pub const WriteAtOptions = layout.WriteAtOptions;
+pub const PlacedGlyph = layout.PlacedGlyph;
 pub const Anchor = layout.Anchor;
 pub const BlockOptions = layout.BlockOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
@@ -1027,7 +1028,7 @@ pub const Document = struct {
             const page = &self.pages.items[self.current_page];
             for (page.commands.items[first_command..]) |*cmd| switch (cmd.*) {
                 .text => |*t| t.x += x_left - pos.x,
-                .raw => {},
+                .raw, .glyphs => {},
             };
         }
 
@@ -1038,6 +1039,68 @@ pub const Document = struct {
             .width = width,
             .height = m.ascender - m.descender,
         };
+    }
+
+    /// Draws glyphs by ID, each at its own position: for a layout engine
+    /// that shapes text itself (shapeText) and places every glyph. `text`
+    /// is what the glyphs show, and each glyph's `cluster` is a byte offset
+    /// into it: copying the text out of the PDF (ToUnicode) gives `text`,
+    /// a ligature or conjunct mapping to all of its characters.
+    ///
+    /// `style` supplies the font, size, color and opacity, and bold/italic
+    /// to pick a family's variant. The font must be embedded with Unicode
+    /// (identity) encoding: error.GlyphsNeedIdentityFont otherwise. Glyph
+    /// IDs are the font's own (error.InvalidGlyphId past its glyph count).
+    /// Fallback fonts, decorations and character spacing do not apply to
+    /// placed glyphs: error.UnsupportedStyle when set. Color glyphs
+    /// (COLR, bitmaps, SVG) draw as their plain outlines.
+    pub fn drawGlyphs(self: *Document, text: []const u8, glyphs: []const PlacedGlyph, style_in: TextStyle) !void {
+        try validate.check(style_in);
+        try validate.checkEach(glyphs);
+        if (self.pages.items.len == 0) return error.NoPage;
+        if (style_in.fallback.len > 0 or style_in.char_spacing != 0 or
+            style_in.decoration.underline or style_in.decoration.strikethrough) return error.UnsupportedStyle;
+        try self.checkFontConformance(style_in);
+        const style = try self.normalizeStyle(style_in);
+        const emb: *EmbeddedFont = switch (style.font) {
+            .embedded => |e| blk: {
+                if (style.bold or style.italic) return error.FontVariantNotLoaded;
+                break :blk e;
+            },
+            .embedded_family => |fam| try fam.resolve(style.bold, style.italic),
+            .face, .family => unreachable, // normalized
+            .standard, .symbol, .zapf_dingbats => return error.GlyphsNeedIdentityFont,
+        };
+        if (emb.encoding != .identity) return error.GlyphsNeedIdentityFont;
+        if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
+        const glyph_count = emb.font.maxp.?.num_glyphs;
+        for (glyphs) |g| if (g.id >= glyph_count) return error.InvalidGlyphId;
+        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
+
+        var page = &self.pages.items[self.current_page];
+        const page_alloc = page.pageAllocator();
+        try page.markEmbeddedUsed(self.allocator, emb);
+        const ids = try page_alloc.alloc(u16, glyphs.len);
+        const clusters = try page_alloc.alloc(u32, glyphs.len);
+        const xs = try page_alloc.alloc(f64, glyphs.len);
+        const ys = try page_alloc.alloc(f64, glyphs.len);
+        const height = self.currentPageSize().height;
+        for (glyphs, ids, clusters, xs, ys) |g, *id, *c, *x, *y| {
+            id.* = g.id;
+            c.* = g.cluster;
+            x.* = g.x;
+            y.* = height - g.y;
+        }
+        try emb.markPlacedGlyphsUsed(text, ids, clusters);
+        try page.commands.append(self.allocator, .{ .glyphs = .{
+            .font = emb,
+            .font_size = style.size,
+            .ids = ids,
+            .xs = xs,
+            .ys = ys,
+            .text_color = style.color,
+            .opacity = style.opacity,
+        } });
     }
 
     /// Internal: Write text at position with explicit style and word spacing.
@@ -3110,6 +3173,21 @@ pub const Document = struct {
                     if (opacity_gs != null) {
                         try cw.append("Q\n");
                     }
+                },
+                .glyphs => |g| {
+                    const idx = self.getEmbeddedFontIndex(g.font) orelse continue;
+                    const opacity_gs: ?usize = if (g.opacity < 1.0)
+                        try page.getOrAddOpacityState(self.allocator, g.opacity, 1.0)
+                    else
+                        null;
+                    if (opacity_gs) |gs| {
+                        try cw.append("q\n");
+                        var gs_buf: [16]u8 = undefined;
+                        const gs_len = graphics.writeExtGStateRef(&gs_buf, gs);
+                        try cw.append(gs_buf[0..gs_len]);
+                    }
+                    try text_render.renderPlacedGlyphs(&cw, g, idx);
+                    if (opacity_gs != null) try cw.append("Q\n");
                 },
                 .raw => |data| {
                     try cw.append(data);

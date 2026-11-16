@@ -65,6 +65,10 @@ pub fn main(init: std.process.Init) !void {
         try cli_fonts.fontFaces(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "shape")) {
         try cli_fonts.shape(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "glyphs")) {
+        try cli_fonts.drawGlyphs(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "shape-text")) {
+        try cli_fonts.shapeText(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "fallback")) {
         try cli_fonts.fallback(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "extract-face")) {
@@ -166,6 +170,10 @@ fn printUsage() !void {
         \\  font-faces <file>    List the faces of a font or collection (.ttc)
         \\  extract-face <ttc> <index> <out>  Write one face as a standalone font
         \\  shape <font> [+feat|-feat]...  Shape stdin lines (one text per line); print glyph IDs
+        \\  shape-text <font> [+feat|-feat]...  Pure shaping (shapeText) of stdin lines;
+        \\                                 print gid=cluster@xoff,yoff+advance (font units)
+        \\  glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...  Draw stdin lines glyph by
+        \\                                 glyph (shapeText + drawGlyphs)
         \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--bold] [--italic] [--size PT]
         \\                       Write stdin lines with per-character fallback fonts
         \\  find-font <family> [--bold] [--italic] [--all] [--dir DIR]... [--out FILE]
