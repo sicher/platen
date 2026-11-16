@@ -4030,6 +4030,12 @@ test "integration: svg_gradients match resvg at the probe points" {
     const pdf = try generateSvgGradientsPdf(allocator);
     defer allocator.free(pdf);
     const pdf_path = "test/output/svg_gradients_probes.pdf";
+    // A fresh clone has no test/output yet, and this may be the first test
+    // to write there.
+    std.Io.Dir.cwd().createDir(app_io, "test/output", .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
     try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = pdf_path, .data = pdf });
 
     var argv: std.ArrayListUnmanaged([]const u8) = .empty;
