@@ -23,8 +23,9 @@
   fallback's own variant, and are synthesized where it has none (stroked
   outline, slanted text matrix, at FreeType's strengths). With
   `fallback_advance = .monospace` a fallback character takes the width of a
-  space in `font`, centered: monospaced text, e.g. a screenplay in Courier
-  with Cyrillic from another font, stays on its columns. Measurement,
+  space in `font`, centered (shrunk to fit when wider, as a CJK ideograph
+  is): monospaced text, e.g. a screenplay in Courier with Cyrillic from
+  another font, stays on its columns. Measurement,
   wrapping, anchoring and decorations follow the runs.
 - **A font's own style and embedding permission**: `ttf.Font.style` (OS/2
   fsSelection, else head.macStyle) and `ttf.Font.fs_type` with `mayEmbed()`
@@ -53,6 +54,10 @@
 
 ### Fixed
 
+- **A face platen cannot embed loaded anyway** and failed at output with
+  `MissingTable`: outlines only in a table platen does not read (Apple's
+  `hvgl`, as in PingFang UI). Loading now refuses it with
+  `error.UnsupportedOutlines`, so a caller can pick another face.
 - **Embedded text measured narrower than it was drawn**: measurement
   truncated each glyph's advance to 1/1000 em while the PDF's width arrays
   round it, so a Courier Prime character (599.6) measured 0.012 pt short at

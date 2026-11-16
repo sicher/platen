@@ -302,6 +302,16 @@ pub const EmbeddedFont = struct {
         const head = font.head orelse return error.MissingTable;
         const hhea = font.hhea orelse return error.MissingTable;
 
+        // Glyphs platen can embed: TrueType outlines, CFF/CFF2, or bitmaps
+        // (embedded through a Type3 companion). A face with none of them -
+        // Apple's private 'hvgl' outlines, e.g. PingFang UI - would load and
+        // then fail when subset at output: refuse it here, where a caller
+        // choosing among system fonts can still take another.
+        const has_outlines = (font.getTable("glyf".*) != null and font.getTable("loca".*) != null) or font.isCFF();
+        const has_bitmaps = font.getTable("CBLC".*) != null or font.getTable("sbix".*) != null or
+            font.getTable("EBLC".*) != null;
+        if (!has_outlines and !has_bitmaps) return error.UnsupportedOutlines;
+
         // OpenType allows unitsPerEm 16..16384. Outside it the 1000-unit
         // scale (up to 62.5x) overflows the u16/i16 metrics below.
         const units_per_em = head.units_per_em;

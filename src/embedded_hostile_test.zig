@@ -250,3 +250,27 @@ test "CharString ending past the CFF data is not sliced" {
     var buf: [64]u8 = undefined;
     try expectCffSubsetError(testCff(&buf, &.{ 0, 1, 1, 1, 200 }), error.InvalidCFF);
 }
+
+test "a face whose outlines platen cannot embed is refused at load" {
+    // Courier Prime with its 'glyf' renamed: outlines in a table platen
+    // does not read (as Apple's 'hvgl'), so nothing could be subset later.
+    const a = std.testing.allocator;
+    const original = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Courier Prime/Courier Prime.ttf", a, .limited(1 << 20));
+    defer a.free(original);
+    const ok = try EmbeddedFont.fromMemory(a, original, false);
+    ok.deinit();
+
+    const data = try a.dupe(u8, original);
+    defer a.free(data);
+    const num_tables = std.mem.readInt(u16, data[4..6], .big);
+    var renamed = false;
+    for (0..num_tables) |i| {
+        const tag = data[12 + 16 * i ..][0..4];
+        if (std.mem.eql(u8, tag, "glyf")) {
+            @memcpy(tag, "hvgl");
+            renamed = true;
+        }
+    }
+    try std.testing.expect(renamed);
+    try std.testing.expectError(error.UnsupportedOutlines, EmbeddedFont.fromMemory(a, data, false));
+}

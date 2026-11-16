@@ -102,7 +102,9 @@ pub const FallbackAdvance = enum {
     natural,
     /// The width of a space in `font`, with the glyph centered in it:
     /// monospaced text keeps every character on its column whatever font
-    /// draws it. Each character with its combining marks takes one cell.
+    /// draws it. Each character with its combining marks takes one cell; a
+    /// glyph wider than the cell (a CJK ideograph beside Courier) is drawn
+    /// smaller to fit it.
     monospace,
 };
 

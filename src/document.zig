@@ -1172,7 +1172,13 @@ pub const Document = struct {
                     .embedded => |emb| if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
                     .standard => natural,
                 };
-                t.glyph_dx = (cell - own) / 2;
+                // Too wide for its cell (a CJK ideograph beside Courier):
+                // shrink it to fit, as the screen does; else center it
+                if (own > cell) {
+                    t.glyph_scale = cell / own;
+                } else {
+                    t.glyph_dx = (cell - own) / 2;
+                }
                 t.text_width = cell + style.char_spacing;
             }
             x += t.text_width;
@@ -3010,7 +3016,7 @@ pub const Document = struct {
                     // q/Q (which also restores the render mode)
                     const embolden = t.synth_bold and t.font == .embedded;
                     if (embolden) {
-                        try cw.print("q\n{d:.3} w\n", .{t.font_size * fallback.embolden_per_em});
+                        try cw.print("q\n{d:.3} w\n", .{t.font_size * t.glyph_scale * fallback.embolden_per_em});
                         try t.text_color.writeStroke(&cw);
                     }
 
@@ -3042,9 +3048,9 @@ pub const Document = struct {
                                 }
                                 // Word spacing is in the TJ (see the CID branch)
                                 try cw.append("0.00 Tw\n");
-                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y, t.word_spacing);
+                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing);
                             } else {
-                                try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
+                                try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size * t.glyph_scale });
 
                                 if (t.char_spacing != 0) {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
@@ -3062,7 +3068,7 @@ pub const Document = struct {
                                     // Pass absolute position for Tm-based mark positioning
                                     // Use cached glyphs if available (avoids duplicate OpenType shaping)
                                     const shear: f64 = if (t.synth_italic) fallback.oblique_shear else 0;
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
+                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode

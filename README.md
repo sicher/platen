@@ -296,8 +296,8 @@ _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "INT. КУХНЯ — ДЕНЬ", style
 - `bold`/`italic` pick a fallback family's own variant; what a fallback lacks
   is synthesized (stroked outline, slanted text) as FreeType does on screen.
 - `.natural` (default) advances by the fallback glyph's own width;
-  `.monospace` by the width of a space in `font`, glyph centered, so every
-  character keeps one column.
+  `.monospace` by the width of a space in `font`, glyph centered (or shrunk
+  to fit when wider), so every character keeps one column.
 - Measurement, wrapping, anchoring and underlines follow the runs.
 
 ### Text Flow with Word Wrapping

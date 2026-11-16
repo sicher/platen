@@ -54,6 +54,9 @@ pub const TextCommand = struct {
     /// Glyphs start this far right of x; decorations still start at x (a
     /// `.monospace` fallback glyph centered in its cell).
     glyph_dx: f64 = 0,
+    /// Glyphs are drawn at font_size * glyph_scale (a `.monospace` fallback
+    /// glyph shrunk to its cell); decorations keep font_size.
+    glyph_scale: f64 = 1,
     /// Synthesized bold: the outline is stroked too (fallback.embolden_per_em).
     synth_bold: bool = false,
     /// Synthesized italic: the text matrix is slanted (fallback.oblique_shear).

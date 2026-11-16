@@ -1210,8 +1210,14 @@ has them. `writeTextStyled` routes a fallback style to
 `TextCommand` per run) and patches the fallback commands: `synth_bold`,
 `synth_italic`, `decoration_font` (the primary: one underline position
 across runs) and, for `.monospace`, `glyph_dx` (centering) and
-`text_width` = one cell. `.monospace` makes each fallback cluster its own
-run; cell = the primary's space advance.
+`text_width` = one cell; a glyph wider than the cell gets `glyph_scale`
+(drawn at size * cell / width, decorations at the style's size) instead
+of centering - CJK beside Courier, as dvui fits it on screen.
+`.monospace` makes each fallback cluster its own run; cell = the
+primary's space advance.
+- A face with no outlines platen can subset (glyf+loca, CFF/CFF2) and no
+  bitmaps is refused at load (`error.UnsupportedOutlines`): Apple's
+  `hvgl` faces (PingFang UI) otherwise load and fail at output.
 - Synthesis matches FreeType so a PDF looks like the screen: bold is
   `2 Tr` with line width size/24 (FT_GlyphSlot_Embolden grows the
   outline em/48 a side) inside q/Q, italic is a `1 0 0.213 1 x y Tm`

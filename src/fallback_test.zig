@@ -136,22 +136,44 @@ test "monospace keeps every character on its column" {
     const style: platen.TextStyle = .{ .font = cp, .size = 12, .fallback = &.{gen}, .fallback_advance = .monospace };
     const cell = try width(&doc, " ", .{ .font = cp, .size = 12 });
 
-    try testing.expectApproxEqAbs(5 * cell, try width(&doc, "AЖ Bж", style), 1e-9);
-    const rect = try doc.writeAt(.{ .x = 72, .y = 100 }, "AЖ Bж", style, .{});
+    try testing.expectApproxEqAbs(5 * cell, try width(&doc, "AЖ Bа", style), 1e-9);
+    const rect = try doc.writeAt(.{ .x = 72, .y = 100 }, "AЖ Bа", style, .{});
     try testing.expectApproxEqAbs(5 * cell, rect.width, 1e-9);
 
-    // Runs: "A" at 72, "Ж" centered in cell 1, " B" at cell 2, "ж" centered in cell 4
+    // Runs: "A" at 72; "Ж", wider than a cell, shrunk to fill cell 1;
+    // " B" at cell 2; "а", narrower, at its own size centered in cell 4
     const pdf = try doc.output();
     defer a.free(pdf);
     var xs_buf: [8]f64 = undefined;
     const xs = textX(pdf, &xs_buf);
     try testing.expectEqual(@as(usize, 4), xs.len);
-    const w_big = try width(&doc, "Ж", .{ .font = gen, .size = 12 });
-    const w_small = try width(&doc, "ж", .{ .font = gen, .size = 12 });
+    const w_wide = try width(&doc, "Ж", .{ .font = gen, .size = 12 });
+    const w_narrow = try width(&doc, "а", .{ .font = gen, .size = 12 });
+    try testing.expect(w_wide > cell and w_narrow < cell);
     try testing.expectApproxEqAbs(72.0, xs[0], 0.006);
-    try testing.expectApproxEqAbs(72 + cell + (cell - w_big) / 2, xs[1], 0.006);
+    try testing.expectApproxEqAbs(72 + cell, xs[1], 0.006);
     try testing.expectApproxEqAbs(72 + 2 * cell, xs[2], 0.006);
-    try testing.expectApproxEqAbs(72 + 4 * cell + (cell - w_small) / 2, xs[3], 0.006);
+    try testing.expectApproxEqAbs(72 + 4 * cell + (cell - w_narrow) / 2, xs[3], 0.006);
+
+    var sizes_buf: [8]f64 = undefined;
+    const sizes = fontSizes(pdf, &sizes_buf);
+    try testing.expectEqual(@as(usize, 4), sizes.len);
+    try testing.expectApproxEqAbs(12 * cell / w_wide, sizes[1], 0.005);
+    for ([_]usize{ 0, 2, 3 }) |k| try testing.expectApproxEqAbs(12.0, sizes[k], 1e-9);
+}
+
+/// The size of every `Tf`, in order.
+fn fontSizes(pdf: []const u8, out: []f64) []f64 {
+    var n: usize = 0;
+    var lines = std.mem.splitScalar(u8, pdf, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.endsWith(u8, line, " Tf") or n == out.len) continue;
+        var it = std.mem.tokenizeScalar(u8, line, ' ');
+        _ = it.next();
+        out[n] = std.fmt.parseFloat(f64, it.next() orelse continue) catch continue;
+        n += 1;
+    }
+    return out[0..n];
 }
 
 test "a base and its combining marks share one font and one cell" {
