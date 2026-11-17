@@ -87,6 +87,15 @@
 
 ### Fixed
 
+- **CJK text in CID-keyed OpenType/CFF fonts printed as garbage** (Apple SD
+  Gothic Neo, Hiragino...: Hangul and kana showed as unrelated low glyphs,
+  in PDFKit and poppler alike). The subset kept the font's charset, which
+  in a CID-keyed font maps glyphs to CIDs, and copied FDSelect and FDArray
+  with their old offsets. It now has an identity charset (CID n = glyph n,
+  the codes the content uses), a rebuilt FDSelect and FDArray, and each
+  glyph is desubroutinized with its own Font DICT's local subroutines.
+- **A Private DICT ending in a cut-off two-byte operator crashed CFF
+  subsetting** (an out-of-bounds read on hostile fonts).
 - **Characters a font lacks precomposed now draw from their parts**, as
   HarfBuzz does: "é" in a font with "e" and U+0301 but no "é" is decomposed
   (canonically, step by step, singletons and Indic nukta forms too) instead

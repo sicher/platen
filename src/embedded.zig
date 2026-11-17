@@ -10,6 +10,7 @@ const ttf = @import("ttf.zig");
 const unicode_compose = @import("unicode_compose.zig");
 const gsub = @import("gsub.zig");
 const decode = @import("decode.zig");
+const cff_cid = @import("cff_cid.zig");
 
 /// Whether `text` may contain a combining mark or a default ignorable,
 /// i.e. needs decodeText before measuring: UTF-8 lead bytes below 0xCC
@@ -2036,6 +2037,14 @@ fn createSubsetCFF_Compact(allocator: std.mem.Allocator, emb: *EmbeddedFont) ![]
     }
 
     const num_glyphs: u16 = @intCast(glyph_list.items.len); // <= cs_count
+
+    // A CID-keyed CFF (CJK fonts) has its own subsetting: identity charset,
+    // FDSelect and FDArray rebuilt, local subrs per Font DICT
+    {
+        const top = (parseCFFIndex(cff_data, cff.topdict_start) orelse return error.InvalidCFF).getEntry(0) orelse
+            return error.InvalidCFF;
+        if (cff_cid.isCidKeyed(top)) return cff_cid.subset(allocator, cff_data, glyph_list.items);
+    }
 
     // Get Private DICT info to find Local Subrs
     const private_info = parseCFFTopDictForPrivate(cff_data, cff.topdict_start);

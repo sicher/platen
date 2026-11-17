@@ -718,6 +718,8 @@ pub fn buildPrivateDictWithoutSubrs(
             i += 1;
             operand_start = i;
         } else if (b0 == 12) {
+            // A two-byte operator cut off by the end of the DICT: stop
+            if (i + 2 > private_dict_data.len) break;
             try output.appendSlice(allocator, private_dict_data[operand_start .. i + 2]);
             i += 2;
             operand_start = i;
@@ -1308,4 +1310,12 @@ test "desubroutinizing inlines a legitimate chain" {
     // 2^3 = 8 copies of "0 0 rlineto", then endchar.
     try std.testing.expectEqual(@as(usize, 8 * 3 + 1), out.len);
     try std.testing.expectEqual(@as(u8, 14), out[out.len - 1]);
+}
+
+test "buildPrivateDictWithoutSubrs: a DICT ending in an escape byte" {
+    // BlueScale-like operand, then a lone 12 (truncated two-byte operator)
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(std.testing.allocator);
+    try buildPrivateDictWithoutSubrs(std.testing.allocator, &.{ 139, 10, 12 }, &out);
+    try std.testing.expectEqualSlices(u8, &.{ 139, 10 }, out.items);
 }

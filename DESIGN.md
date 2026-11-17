@@ -1471,6 +1471,18 @@ committed), for Devanagari:
   locally also old spec (Sangam with dev2 removed) - 0 differences. System
   fonts are skipped where not installed (CI).
 
+### CID-keyed CFF subsetting (session #35, `src/cff_cid.zig`)
+A Top DICT with ROS (12 30) is CID-keyed: charset maps GID -> CID, and
+each glyph's Private DICT / local subrs come from FDArray[FDSelect[gid]].
+`createSubsetCFF_Compact` hands those to `cff_cid.subset`: identity charset
+(format 2, CID n = new GID n, matching Identity-H codes), FDSelect format 3
+over the new GIDs, every Font DICT kept with its Private DICT minus Subrs
+(FontName SID remapped), glyphs desubroutinized with their FD's local
+subrs, offsets as fixed 5-byte ints, Top DICT rebuilt until its size
+settles. Test: test/fonts/cff (scripts/gen_cff_test_fonts.py) has the same
+outlines name-keyed and CID-keyed (CIDs != GIDs, two FDs with different
+local subrs); both must render identically (pdftoppm, grayscale bytes).
+
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,
 and **all** OpenType lookups eagerly (`parseGSUB` builds the whole

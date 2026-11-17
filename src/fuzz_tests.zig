@@ -896,3 +896,24 @@ test "mutated fixture bytes: GSUB/GPOS/GDEF through the shaping engine" {
         }
     }
 }
+
+test "mutated fixture bytes: CID-keyed CFF subsetting" {
+    const allocator = std.testing.allocator;
+    const cff_cid = @import("cff_cid.zig");
+    var prng = std.Random.DefaultPrng.init(0xc1dc1d);
+    const random = prng.random();
+    const original = try fullFontTable(allocator, "test/fonts/cff/CidKeyed.otf", "CFF ".*);
+    defer allocator.free(original);
+    const glyphs = [_]u16{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    for (0..200) |round| {
+        const mutated = try mutateCopy(allocator, random, original);
+        defer allocator.free(mutated);
+        const n = 1 + round % glyphs.len;
+        if (cff_cid.subset(allocator, mutated, glyphs[0..n])) |out| {
+            allocator.free(out);
+        } else |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => {},
+        }
+    }
+}

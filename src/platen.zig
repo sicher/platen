@@ -194,6 +194,7 @@ test {
     _ = @import("fallback.zig");
     _ = @import("shaping_test.zig");
     _ = @import("glyphs_test.zig");
+    _ = @import("cff_cid_test.zig");
     _ = shaping;
     _ = @import("decode.zig");
     _ = @import("unicode_props.zig");
