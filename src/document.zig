@@ -1142,6 +1142,7 @@ pub const Document = struct {
 
         // Determine font reference from style
         var cached_glyphs: ?[]const u16 = null;
+        var cached_positions: ?[]const EmbeddedFont.GlyphPos = null;
         const font_ref: FontRef = switch (style.font) {
             .embedded => |emb| blk: {
                 // A single embedded font has no variants: bold/italic would
@@ -1156,7 +1157,9 @@ pub const Document = struct {
                 if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
-                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                    const run = try emb.shapeRun(text_copy, page_alloc);
+                    cached_glyphs = run.glyphs;
+                    cached_positions = run.pos;
                 } else {
                     emb.markCharsUsed(text_copy);
                 }
@@ -1167,7 +1170,9 @@ pub const Document = struct {
                 if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
-                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                    const run = try emb.shapeRun(text_copy, page_alloc);
+                    cached_glyphs = run.glyphs;
+                    cached_positions = run.pos;
                 } else {
                     emb.markCharsUsed(text_copy);
                 }
@@ -1186,9 +1191,9 @@ pub const Document = struct {
         // Width of the rendered run: from the already-shaped glyphs when we
         // have them (avoids shaping the same string twice), else measured.
         const text_width = blk: {
-            if (cached_glyphs) |glyphs| {
+            if (cached_positions) |positions| {
                 switch (font_ref) {
-                    .embedded => |emb| break :blk emb.glyphSequenceWidth(glyphs, style.size, style.char_spacing),
+                    .embedded => |emb| break :blk emb.runWidth(positions, style.size, style.char_spacing),
                     else => {},
                 }
             }
@@ -1214,6 +1219,7 @@ pub const Document = struct {
                 .text_color = style.color,
                 .opacity = style.opacity,
                 .cached_glyphs = cached_glyphs,
+                .cached_positions = cached_positions,
                 .text_width = text_width,
                 .underline = style.decoration.underline,
                 .strikethrough = style.decoration.strikethrough,
@@ -1257,7 +1263,7 @@ pub const Document = struct {
             if (plan.monospace) {
                 // Centered by the glyphs' own advance, without spacing
                 const own = switch (t.font) {
-                    .embedded => |emb| if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
+                    .embedded => |emb| if (t.cached_positions) |p| emb.runWidth(p, t.font_size, 0) else if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
                     .standard => natural,
                 };
                 // Shrunk to fit its cells (as the screen does) or to the
@@ -3241,6 +3247,8 @@ pub const Document = struct {
                                     const shear: f64 = if (t.synth_italic) fallback.oblique_shear else 0;
                                     if (t.placed) |placed| {
                                         try text_render.renderPlacedOffsets(&cw, emb, placed, t.x + t.glyph_dx, t.y, shear);
+                                    } else if (t.cached_positions) |positions| {
+                                        try text_render.renderShapedRun(&cw, emb, t.cached_glyphs.?, positions, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
                                     } else {
                                         _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
                                     }

@@ -195,10 +195,13 @@ pub const Plan = struct {
     }
 
     /// Advance of a `.monospace` fallback character, before char spacing:
-    /// the primary's space.
+    /// the primary's space, exactly as shaping advances it (font units,
+    /// not the 1/1000 em /W width), so cells and primary text agree.
     pub fn cell(self: *const Plan, size: f64) f64 {
-        const gid = self.primary.font.getGlyphId(' ') orelse 0;
-        return @as(f64, @floatFromInt(self.primary.getGlyphWidth(gid))) * size / 1000.0;
+        const font = &self.primary.font;
+        const gid = font.getGlyphId(' ') orelse 0;
+        const advance: f64 = @floatFromInt(font.getGlyphWidth(gid) orelse 0);
+        return advance * size / @as(f64, @floatFromInt(font.head.?.units_per_em));
     }
 
     /// Width of `text` in `style`; `ctx.width(run, run_style)` measures one

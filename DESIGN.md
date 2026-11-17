@@ -1462,6 +1462,38 @@ marks are only zeroed (HarfBuzz would read the charstrings) - a gap.
 Checked with Courier Prime, Charter (marks it lacks), Noto Emoji and
 GsubTest (ligature components) in harfbuzz_positions.txt.
 
+### write() on the shaping engine (session #36)
+- `EmbeddedFont.shapeRun(text, alloc)` (Identity-H) shapes with
+  `shaping.shapeCached` and marks the glyphs used (`markSourcedGlyphsUsed`:
+  per-glyph source text; a glyph followed by empty-source glyphs at or
+  before its start - a multiple substitution's parts - maps as a group via
+  trackClusterText). writeOneFont stores `cached_glyphs` +
+  `cached_positions` (GlyphPos: advance, dx, dy in font units) and the run
+  width (`runWidth`: advances + char_spacing x (n-1)).
+  `measureTextWidthSpaced` uses `shapedWidth` (same shaping, no marking).
+- `text_render.renderShapedRun`: no offsets -> one TJ, adjustment after
+  each glyph = shaped advance - /W width (1/1000 em), whole part emitted,
+  fraction carried (pen error < 1/1000 em; few adjustments for /W-rounded
+  runs); word spacing after spaces in the TJ; Tc from the caller. Offsets
+  (GPOS marks) -> Tm per glyph, char spacing added by hand, a zero-advance
+  glyph stays on its base and its gap is added before the next advancing
+  glyph (measurement counts a gap per glyph).
+- `fallback.Plan.cell` is the primary's space in font units (not the /W
+  1/1000 em width), so cells and primary text agree.
+- `shaping.Cache` (EmbeddedFont.shape_cache): decode buffers, the GSUB
+  shaper (active lookups per flags), GPOS lookups per script, the Indic plan
+  and an arena for temporaries, reused between calls. A FontFace prototype
+  is `shared` (any thread may measure with it) and shapes with a temporary
+  cache; clones get their own.
+- Spans never overlap: a composite (decode) or ligature (gsub) that covers
+  an intervening mark's text takes it, the mark's span becomes empty.
+- Performance (2000 pages, old -> new ms): simple text 66 -> 105,
+  OpenType heavy 378 -> 505, Unicode/marks 219 -> 344, text flow 42 -> 139.
+  GSUB costs the same; the rest is GPOS (class-pair kerning: ClassDef
+  lookups, no pair cache as the old path had) and per-call overhead.
+- The old path (markUnicodeCharsUsed, renderCIDTextWithKerning, pair kern
+  cache, getMarkOffset) remains for `platen shape` and tests until removed.
+
 ### Indic shaper (session #35, `src/indic.zig`)
 A port of HarfBuzz 12.3.0's hb-ot-shaper-indic (source in .tools/ref, not
 committed), for Devanagari:

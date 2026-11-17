@@ -45,6 +45,9 @@ pub const TextCommand = struct {
     opacity: f64 = 1.0,
     /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
     cached_glyphs: ?[]const u16 = null,
+    /// Placement of each of `cached_glyphs` (EmbeddedFont.shapeRun): the
+    /// renderer advances by these instead of the glyphs' widths.
+    cached_positions: ?[]const EmbeddedFont.GlyphPos = null,
     /// Text width (for decoration drawing)
     text_width: f64 = 0,
     /// Draw underline

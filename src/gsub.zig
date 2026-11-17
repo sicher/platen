@@ -1327,8 +1327,9 @@ pub const Context = struct {
         var last_num_comps: usize = self.numComps(i);
         var so_far: usize = last_num_comps;
 
-        // The ligature stands for its components' text (not the marks it
-        // skipped, which keep theirs)
+        // The ligature stands for its components' text. Its range of code
+        // points also covers the marks it skipped: those give theirs up,
+        // so no character belongs to two glyphs
         var src_lo = items[i].src_lo;
         var src_hi = items[i].src_hi;
         for (positions[1..]) |p| {
@@ -1344,6 +1345,9 @@ pub const Context = struct {
         }
         items[i].src_lo = src_lo;
         items[i].src_hi = src_hi;
+        for (items[i + 1 .. last + 1]) |*g| {
+            if (g.src_lo < g.src_hi and g.src_lo >= src_lo and g.src_hi <= src_hi) g.src_lo = g.src_hi;
+        }
         // Merge the clusters of the span (skipped marks included), as
         // HarfBuzz's ligate_input
         mergeClusters(items, i, last + 1);

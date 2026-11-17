@@ -11,6 +11,7 @@ const unicode_compose = @import("unicode_compose.zig");
 const gsub = @import("gsub.zig");
 const decode = @import("decode.zig");
 const cff_cid = @import("cff_cid.zig");
+const shaping = @import("shaping.zig");
 
 /// Whether `text` may contain a combining mark or a default ignorable,
 /// i.e. needs decodeText before measuring: UTF-8 lead bytes below 0xCC
@@ -202,6 +203,12 @@ pub const EmbeddedFont = struct {
     /// True on per-document clones of a FontFace: parse-time allocations
     /// (synthetic_loca, color tables) belong to the prototype.
     borrowed: bool = false,
+    /// True on a FontFace's prototype, which any thread may measure with:
+    /// it keeps no shaping cache (each call shapes with its own).
+    shared: bool = false,
+    /// Shaping state reused between shapeRun/shapedWidth calls (not on a
+    /// shared prototype).
+    shape_cache: shaping.Cache = .{},
 
     // Metrics scaled to 1000 units (PDF standard)
     ascent: i16,
@@ -443,6 +450,7 @@ pub const EmbeddedFont = struct {
     }
 
     pub fn deinit(self: *EmbeddedFont) void {
+        self.shape_cache.deinit(self.allocator);
         self.allocator.free(self.name);
         if (self.subset_data) |subset| {
             self.allocator.free(subset);
@@ -495,6 +503,9 @@ pub const EmbeddedFont = struct {
         emb.gid_remap = .empty;
         emb.ligature_codepoints = .empty;
         emb.scratch = .{};
+        // A clone is one document's: it keeps its own shaping cache
+        emb.shared = false;
+        emb.shape_cache = .{};
         if (proto.ot_features) |proto_ot| {
             const ot = try allocator.create(opentype.OpenTypeFeatures);
             errdefer allocator.destroy(ot);
@@ -817,6 +828,74 @@ pub const EmbeddedFont = struct {
         }
     }
 
+    /// A glyph's placement in a shaped run, in font units: how far it
+    /// moves the pen, and where it sits relative to the pen (GPOS mark
+    /// attachment, cursive, fallback mark positioning).
+    pub const GlyphPos = struct { advance: i32, dx: i32 = 0, dy: i32 = 0 };
+
+    /// Text shaped for writing (shapeRun): glyph IDs and their placements.
+    pub const ShapedRun = struct {
+        glyphs: []u16,
+        pos: []GlyphPos,
+
+        pub fn deinit(self: ShapedRun, allocator: std.mem.Allocator) void {
+            allocator.free(self.glyphs);
+            allocator.free(self.pos);
+        }
+    };
+
+    /// Width in points of glyphs placed by `pos` at `size`: their advances,
+    /// plus `char_spacing` between glyphs.
+    pub fn runWidth(self: *const EmbeddedFont, pos: []const GlyphPos, size: f64, char_spacing: f64) f64 {
+        var total: i64 = 0;
+        for (pos) |p| total += p.advance;
+        return self.advanceWidth(total, pos.len, size, char_spacing);
+    }
+
+    fn advanceWidth(self: *const EmbeddedFont, total: i64, count: usize, size: f64, char_spacing: f64) f64 {
+        const em: f64 = @floatFromInt(self.font.head.?.units_per_em);
+        var result = @as(f64, @floatFromInt(total)) * size / em;
+        if (count > 1) result += char_spacing * @as(f64, @floatFromInt(count - 1));
+        return result;
+    }
+
+    /// Shapes `text` for writing, as shapeText does (GSUB, GPOS or the
+    /// kern table, fallback mark positioning, Indic shaping, with this
+    /// font's feature flags), and marks its glyphs used: subset, widths,
+    /// and each glyph's own source text in ToUnicode. Owned by
+    /// `out_alloc`.
+    pub fn shapeRun(self: *EmbeddedFont, text: []const u8, out_alloc: std.mem.Allocator) !ShapedRun {
+        try self.initOpenTypeFeatures();
+        const shaped = if (self.shared)
+            try shaping.shapeFont(self.allocator, self, self.feature_flags, text)
+        else
+            try shaping.shapeCached(self.allocator, &self.shape_cache, self.allocator, self, self.feature_flags, text);
+        defer self.allocator.free(shaped);
+        const glyphs = try out_alloc.alloc(u16, shaped.len);
+        errdefer out_alloc.free(glyphs);
+        const pos = try out_alloc.alloc(GlyphPos, shaped.len);
+        errdefer out_alloc.free(pos);
+        const sources = try self.allocator.alloc([2]u32, shaped.len);
+        defer self.allocator.free(sources);
+        for (shaped, glyphs, pos, sources) |g, *id, *p, *src| {
+            id.* = g.id;
+            p.* = .{ .advance = g.x_advance, .dx = g.x_offset, .dy = g.y_offset };
+            src.* = .{ g.text_start, g.text_end };
+        }
+        try self.markSourcedGlyphsUsed(text, glyphs, sources);
+        return .{ .glyphs = glyphs, .pos = pos };
+    }
+
+    /// Width in points of `text` as shapeRun shapes it (marks nothing).
+    pub fn shapedWidth(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64) !f64 {
+        try self.initOpenTypeFeatures();
+        var temp: shaping.Cache = .{};
+        defer temp.deinit(self.allocator);
+        const cache = if (self.shared) &temp else &self.shape_cache;
+        const r = try shaping.advanceCached(self.allocator, cache, self, self.feature_flags, text);
+        return self.advanceWidth(r.advance, r.count, size, char_spacing);
+    }
+
     /// markPlacedGlyphsUsed with each glyph's own source text: `sources`
     /// are byte ranges of `text` (empty: the glyph stands for none). The
     /// same default ignorables are left out as there.
@@ -824,9 +903,20 @@ pub const EmbeddedFont = struct {
         const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
         var cps: std.ArrayListUnmanaged(u21) = .empty;
         defer cps.deinit(self.allocator);
-        for (ids, sources) |gid, src| {
-            try self.trackGlyphWidth(gid, scale);
+        for (ids) |gid| try self.trackGlyphWidth(gid, scale);
+        var i: usize = 0;
+        while (i < ids.len) : (i += 1) {
+            const src = sources[i];
             if (src[0] >= src[1] or src[1] > text.len) continue;
+            // Glyphs a multiple substitution split it into follow with no
+            // text of their own, at its cluster (at or before its start; an
+            // inserted dotted circle sits after it): they map together, as
+            // for shaped text (trackClusterText), glyph by glyph when they
+            // are its canonical decomposition (ccmp splitting U+012F into
+            // dotless i + ogonek), else all on this one
+            var group_end = i + 1;
+            while (group_end < ids.len and sources[group_end][0] == sources[group_end][1] and sources[group_end][0] <= src[0]) group_end += 1;
+            const group = ids[i..group_end];
             cps.clearRetainingCapacity();
             var view = std.unicode.Utf8View.init(text[src[0]..src[1]]) catch continue;
             var it = view.iterator();
@@ -837,11 +927,24 @@ pub const EmbeddedFont = struct {
                 }
                 try cps.append(self.allocator, cp);
             }
+            i = group_end - 1;
             if (cps.items.len == 0) continue;
-            const composed = try self.allocator.alloc(bool, cps.items.len);
-            defer self.allocator.free(composed);
-            @memset(composed, false);
-            try self.trackClusterText(&.{gid}, cps.items, composed);
+            // The common case, one glyph for one character, without the
+            // general mapping's allocations
+            if (group.len == 1 and cps.items.len == 1) {
+                const cp = cps.items[0];
+                if (!self.cid_used_glyphs.contains(cp)) try self.cid_used_glyphs.put(self.allocator, cp, group[0]);
+                try self.trackGlyphText(group[0], cp, false);
+                continue;
+            }
+            var flags_buf: [32]bool = @splat(false);
+            const composed = if (cps.items.len <= flags_buf.len) flags_buf[0..cps.items.len] else blk: {
+                const c = try self.allocator.alloc(bool, cps.items.len);
+                @memset(c, false);
+                break :blk c;
+            };
+            defer if (cps.items.len > flags_buf.len) self.allocator.free(composed);
+            try self.trackClusterText(group, cps.items, composed);
         }
     }
 
@@ -1121,6 +1224,11 @@ pub const EmbeddedFont = struct {
             }
             return result;
         }
+
+        // Shaped as writing shapes it (shapeRun), so measure == render
+        if (self.shapedWidth(text, size, char_spacing)) |width| {
+            return width;
+        } else |_| {} // OOM: fall through to the unshaped estimate
 
         // When GSUB substitutions are active the rendered glyph sequence
         // differs from the codepoint sequence (ligatures, alternates) -
@@ -3221,6 +3329,7 @@ pub const FontFace = struct {
         const emb = try EmbeddedFont.fromMemory(allocator, data, false);
         errdefer emb.deinit();
         try emb.initOpenTypeFeatures();
+        emb.shared = true;
         return .{ .prototype = emb };
     }
 
@@ -3229,6 +3338,7 @@ pub const FontFace = struct {
         const emb = try EmbeddedFont.fromFile(io, allocator, path);
         errdefer emb.deinit();
         try emb.initOpenTypeFeatures();
+        emb.shared = true;
         return .{ .prototype = emb };
     }
 

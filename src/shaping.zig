@@ -90,50 +90,58 @@ pub fn totalAdvance(glyphs: []const ShapedGlyph) i64 {
 
 /// `shape` on a parsed font with explicit feature flags. Reads `emb` only.
 pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) ![]ShapedGlyph {
-    // GSUB always runs: GPOS needs its glyph classes and ligature
-    // components (a font without GSUB gets an empty table with its GDEF)
-    const ot = emb.ot_features;
-    var no_gsub = opentype.empty_gsub;
-    if (ot) |o| no_gsub.gdef = o.gdef;
-    const gsub_table: *const gsub.Table = if (ot) |o| (if (o.gsub) |*g| g else &no_gsub) else &no_gsub;
+    var cache: Cache = .{};
+    defer cache.deinit(allocator);
+    return shapeCached(allocator, &cache, allocator, emb, flags, text);
+}
 
-    // The script picks the language system, and Devanagari in a font with
-    // dev2/deva GSUB the Indic shaper (HarfBuzz's shaper selection)
-    const script = textScript(text);
-    var indic_plan: ?indic.Plan = null;
-    defer if (indic_plan) |p| p.deinit(allocator);
-    if (script == .devanagari and (gsub_table.devanagari.script == gsub.tag("dev2") or gsub_table.devanagari.script == gsub.tag("deva"))) {
-        indic_plan = try indic.Plan.init(allocator, gsub_table, flags, emb.font.getGlyphId(0x094D) orelse 0);
+/// Reusable shaping state for one font: buffers kept between calls, and
+/// the lookups per feature flags and script, so shaping text after text
+/// (measuring every word of a paragraph) hardly allocates. Belongs to one
+/// font and one thread (a document's EmbeddedFont); `shapeFont` uses a
+/// fresh one per call.
+pub const Cache = struct {
+    decoded: decode.Decoded = .{},
+    shaper: gsub.Shaper = .{},
+    pos: std.ArrayListUnmanaged(gpos.Position) = .empty,
+    /// Per-call temporaries, reset at each call
+    arena: std.heap.ArenaAllocator.State = .{},
+    /// GPOS lookups for `flags`, per script (default, devanagari)
+    gpos_lookups: [2]std.ArrayListUnmanaged(u16) = .{ .empty, .empty },
+    gpos_valid: [2]bool = .{ false, false },
+    indic_plan: ?indic.Plan = null,
+    /// The flags the cached lookups and plan are for
+    flags: ?opentype.FeatureFlags = null,
+
+    pub fn deinit(self: *Cache, allocator: Allocator) void {
+        self.decoded.deinit(allocator);
+        self.shaper.deinit(allocator);
+        self.pos.deinit(allocator);
+        self.arena.promote(allocator).deinit();
+        for (&self.gpos_lookups) |*l| l.deinit(allocator);
+        if (self.indic_plan) |p| p.deinit(allocator);
+        self.* = .{};
     }
 
-    var d: decode.Decoded = .{};
-    defer d.deinit(allocator);
-    try decode.decodeAs(allocator, &emb.font, text, &d, true, if (indic_plan != null) .indic else .default);
-
-    // Clusters start per grapheme, as HarfBuzz forms them before shaping;
-    // shaping merges them further (ligatures, reordering)
-    const clusters = try graphemeClusters(allocator, d.codepoints.items, d.offsets.items);
-    defer allocator.free(clusters);
-
-    var shaper: gsub.Shaper = .{};
-    defer shaper.deinit(allocator);
-    if (indic_plan) |*plan| {
-        try shaper.beginClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters);
-        _ = try indic.substitute(allocator, &shaper, plan, &emb.font, d.codepoints.items);
-    } else {
-        _ = try shaper.shapeClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters, flags);
+    fn useFlags(self: *Cache, allocator: Allocator, flags: opentype.FeatureFlags) void {
+        if (self.flags) |f| {
+            if (std.mem.eql(bool, &f.flags, &flags.flags)) return;
+        }
+        self.gpos_valid = .{ false, false };
+        if (self.indic_plan) |p| p.deinit(allocator);
+        self.indic_plan = null;
+        self.flags = flags;
     }
-    const glyphs = shaper.buf.items;
+};
 
-    const pos = try allocator.alloc(gpos.Position, glyphs.len);
-    defer allocator.free(pos);
-    for (pos, glyphs) |*p, g| p.* = .{ .x_advance = emb.font.getGlyphWidth(g.id) orelse 0 };
-    if (d.space_fallbacks.items.len > 0) spaceWidths(&emb.font, d.space_fallbacks.items, glyphs, pos);
-    if (ot) |o| try positionGlyphs(allocator, o, gsub_table, &emb.font, d.codepoints.items, flags, script, indic_plan != null, glyphs, pos);
-
-    const out = try allocator.alloc(ShapedGlyph, glyphs.len);
-    errdefer allocator.free(out);
-    for (out, glyphs, pos) |*o, g, p| {
+/// `shapeFont` with `cache` (owned by `cache_alloc`, one font's) kept
+/// between calls. The result is owned by `out_alloc`.
+pub fn shapeCached(cache_alloc: Allocator, cache: *Cache, out_alloc: Allocator, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) ![]ShapedGlyph {
+    const r = try run(cache_alloc, cache, emb, flags, text);
+    const d = &cache.decoded;
+    const out = try out_alloc.alloc(ShapedGlyph, r.glyphs.len);
+    errdefer out_alloc.free(out);
+    for (out, r.glyphs, r.pos) |*o, g, p| {
         const cluster = d.offsets.items[g.cluster];
         var start: u32 = std.math.maxInt(u32);
         var end: u32 = 0;
@@ -157,6 +165,75 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
         };
     }
     return out;
+}
+
+/// Total advance (font units) and glyph count of `text` as shapeCached
+/// shapes it, without building its glyph list.
+pub fn advanceCached(cache_alloc: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) !struct { advance: i64, count: usize } {
+    const r = try run(cache_alloc, cache, emb, flags, text);
+    var sum: i64 = 0;
+    for (r.pos) |p| sum += p.x_advance;
+    return .{ .advance = sum, .count = r.glyphs.len };
+}
+
+/// One shaping pass; its glyphs and positions live in `cache` until the
+/// next call.
+fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) !struct { glyphs: []gsub.Glyph, pos: []gpos.Position } {
+    cache.useFlags(allocator, flags);
+    var arena = cache.arena.promote(allocator);
+    defer cache.arena = arena.state;
+    _ = arena.reset(.retain_capacity);
+    const tmp = arena.allocator();
+
+    // GSUB always runs: GPOS needs its glyph classes and ligature
+    // components (a font without GSUB gets an empty table with its GDEF)
+    const ot = emb.ot_features;
+    var no_gsub = opentype.empty_gsub;
+    if (ot) |o| no_gsub.gdef = o.gdef;
+    const gsub_table: *const gsub.Table = if (ot) |o| (if (o.gsub) |*g| g else &no_gsub) else &no_gsub;
+
+    // The script picks the language system, and Devanagari in a font with
+    // dev2/deva GSUB the Indic shaper (HarfBuzz's shaper selection)
+    const script = textScript(text);
+    var indic_plan: ?*const indic.Plan = null;
+    if (script == .devanagari and (gsub_table.devanagari.script == gsub.tag("dev2") or gsub_table.devanagari.script == gsub.tag("deva"))) {
+        if (cache.indic_plan == null) cache.indic_plan = try indic.Plan.init(allocator, gsub_table, flags, emb.font.getGlyphId(0x094D) orelse 0);
+        indic_plan = &cache.indic_plan.?;
+    }
+
+    const d = &cache.decoded;
+    try decode.decodeAs(allocator, &emb.font, text, d, true, if (indic_plan != null) .indic else .default);
+
+    // Clusters start per grapheme, as HarfBuzz forms them before shaping;
+    // shaping merges them further (ligatures, reordering)
+    const clusters = try graphemeClusters(tmp, d.codepoints.items, d.offsets.items);
+
+    const shaper = &cache.shaper;
+    if (indic_plan) |plan| {
+        try shaper.beginClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters);
+        _ = try indic.substitute(allocator, shaper, plan, &emb.font, d.codepoints.items);
+    } else {
+        _ = try shaper.shapeClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters, flags);
+    }
+    const glyphs = shaper.buf.items;
+
+    try cache.pos.resize(allocator, glyphs.len);
+    const pos = cache.pos.items;
+    for (pos, glyphs) |*p, g| p.* = .{ .x_advance = emb.font.getGlyphWidth(g.id) orelse 0 };
+    if (d.space_fallbacks.items.len > 0) spaceWidths(&emb.font, d.space_fallbacks.items, glyphs, pos);
+    if (ot) |o| {
+        var lookups: []const u16 = &.{};
+        if (o.gpos) |*table| {
+            const k: usize = @intFromBool(script == .devanagari);
+            if (!cache.gpos_valid[k]) {
+                try table.collectLookupsFor(allocator, table.langSys(script), flags, &cache.gpos_lookups[k]);
+                cache.gpos_valid[k] = true;
+            }
+            lookups = cache.gpos_lookups[k].items;
+        }
+        positionGlyphs(o, gsub_table, &emb.font, d.codepoints.items, flags, indic_plan != null, glyphs, pos, lookups);
+    }
+    return .{ .glyphs = glyphs, .pos = pos };
 }
 
 /// The text's script, as HarfBuzz's guess_segment_properties finds it: the
@@ -209,13 +286,9 @@ fn spaceWidths(font: *const ttf.Font, kinds: []const unicode_props.SpaceFallback
 /// lose their advance (shifted back over the glyph before when there is no
 /// GPOS), and attached glyphs take their parents' offsets. Without GPOS,
 /// marks are then placed by glyph extents (mark_fallback.zig).
-fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, script: gsub.Script, indic_shaper: bool, glyphs: []gsub.Glyph, pos: []gpos.Position) !void {
-    if (ot.gpos) |*table| {
-        var lookups: std.ArrayListUnmanaged(u16) = .empty;
-        defer lookups.deinit(allocator);
-        try table.collectLookupsFor(allocator, table.langSys(script), flags, &lookups);
-        gpos.apply(table, glyphs, pos, lookups.items);
-    }
+/// `gpos_lookups`: the GPOS lookups for the text's script and flags.
+fn positionGlyphs(ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, indic_shaper: bool, glyphs: []gsub.Glyph, pos: []gpos.Position, gpos_lookups: []const u16) void {
+    if (ot.gpos) |*table| gpos.apply(table, glyphs, pos, gpos_lookups);
     if (ot.shaping_kern) |*kern| {
         if (flags.isEnabled(.kern)) gpos.applyKernTable(gsub_table, kern, glyphs, pos);
     }

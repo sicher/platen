@@ -190,7 +190,14 @@ pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, spans: ?[]
                         if (ctx.hasGlyph(c)) {
                             cps[s] = c;
                             if (composed) |flags| flags[s] = true;
-                            if (spans) |sp| sp[s] = .{ @min(sp[s][0], sp[in][0]), @max(sp[s][1], sp[in][1]) };
+                            if (spans) |sp| {
+                                sp[s] = .{ @min(sp[s][0], sp[in][0]), @max(sp[s][1], sp[in][1]) };
+                                // Marks composed across, inside that range
+                                // now, give their text up to the composite
+                                for (sp[s + 1 .. out]) |*m| {
+                                    if (m[0] < m[1] and m[0] >= sp[s][0] and m[1] <= sp[s][1]) m[0] = m[1];
+                                }
+                            }
                             continue;
                         }
                     }
@@ -291,4 +298,25 @@ test "reorderMarks sorts mark runs by modified combining class, stably" {
     var ar = [_]u21{ 0x0644, 0x064E, 0x0651 };
     reorderMarks(&ar, null, null);
     try std.testing.expectEqualSlices(u21, &.{ 0x0644, 0x0651, 0x064E }, &ar);
+}
+
+test "composeInPlace spans: a composite takes the marks it composed across" {
+    // O + cedilla + tilde (bytes 0, 1-2, 3-4): O + tilde compose across
+    // the cedilla (blocked by nothing: 202 < 230), whose bytes the
+    // composite now covers
+    var cps = [_]u21{ 'O', 0x0327, 0x0303 };
+    var spans = [_][2]u32{ .{ 0, 1 }, .{ 1, 3 }, .{ 3, 5 } };
+    const n = composeInPlace(&cps, null, null, &spans, AllGlyphs{});
+    try std.testing.expectEqualSlices(u21, &.{ 0x00D5, 0x0327 }, cps[0..n]);
+    try std.testing.expectEqual([2]u32{ 0, 5 }, spans[0]);
+    try std.testing.expectEqual(spans[1][0], spans[1][1]);
+
+    // Typed O + tilde + cedilla, sorted to O + cedilla + tilde: the
+    // composite covers bytes 0-2, the cedilla (3-4) keeps its own
+    var cps2 = [_]u21{ 'O', 0x0327, 0x0303 };
+    var spans2 = [_][2]u32{ .{ 0, 1 }, .{ 3, 5 }, .{ 1, 3 } };
+    const n2 = composeInPlace(&cps2, null, null, &spans2, AllGlyphs{});
+    try std.testing.expectEqual(@as(usize, 2), n2);
+    try std.testing.expectEqual([2]u32{ 0, 3 }, spans2[0]);
+    try std.testing.expectEqual([2]u32{ 3, 5 }, spans2[1]);
 }

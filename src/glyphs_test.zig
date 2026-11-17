@@ -158,3 +158,53 @@ test "drawGlyphs: with sources, each glyph maps to its own characters" {
     bad.source = .{ .start = 3, .end = 99 };
     try testing.expectError(error.InvalidGlyphSource, doc.drawGlyphs(text, &.{bad}, .{ .font = font, .size = 12 }));
 }
+
+test "written text: a glyph split by a multiple substitution maps part by part" {
+    const a = testing.allocator;
+    var doc = Document.init(a, testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const font = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    // Gentium's ccmp splits U+1ECB (i dot below) and U+012F (i ogonek)
+    // into dotless i + the mark. Dotless i first maps with i dot below;
+    // the ogonek must still get its own text (it used to get none)
+    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, "\u{1ECB}\u{0301} \u{012F}\u{0301}", .{ .font = font, .size = 12 }, .{});
+    const emb = font.embedded;
+    var face = try FontFace.fromFile(testing.io, a, "test/fonts/Gentium/Gentium-Regular.ttf");
+    defer face.deinit();
+    const shaped = try platen.shapeText(a, &face, "\u{012F}\u{0301}", .{});
+    defer a.free(shaped);
+    try testing.expectEqual(@as(usize, 3), shaped.len);
+    try testing.expectEqual(@as(u21, 0x0328), emb.glyph_to_codepoint.get(shaped[1].id).?);
+    try testing.expectEqual(@as(u21, 0x0301), emb.glyph_to_codepoint.get(shaped[2].id).?);
+}
+
+test "written text is shaped as shapeText shapes it (Devanagari, Kohinoor)" {
+    const a = testing.allocator;
+    const ttc = std.Io.Dir.cwd().readFileAlloc(testing.io, "/System/Library/Fonts/Kohinoor.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    var doc = Document.init(a, testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const font = try doc.loadFontFromCollection(ttc, 4, .identity);
+    const data = try platen.font_collection.extractFace(a, ttc, 4);
+    defer a.free(data);
+    var face = try FontFace.fromMemory(a, data);
+    defer face.deinit();
+
+    const text = "नमस्ते, कि क्ष हैं";
+    const shaped = try platen.shapeText(a, &face, text, .{});
+    defer a.free(shaped);
+    const scale = 12.0 / @as(f64, @floatFromInt(platen.shaping.unitsPerEm(&face)));
+    const expected = @as(f64, @floatFromInt(platen.shaping.totalAdvance(shaped))) * scale;
+    // Measured and written widths are the shaped advances (the sa-ta
+    // conjunct, not sa + virama + ta)
+    try testing.expectApproxEqAbs(expected, (try doc.measureStyled(text, .{ .font = font, .size = 12 })).width, 1e-9);
+    const rect = try doc.writeAt(.{ .x = 72, .y = 100 }, text, .{ .font = font, .size = 12 }, .{});
+    try testing.expectApproxEqAbs(expected, rect.width, 1e-9);
+    // The written glyphs are shapeText's
+    const page = &doc.pages.items[0];
+    const cmd = page.commands.items[page.commands.items.len - 1].text;
+    try testing.expectEqual(shaped.len, cmd.cached_glyphs.?.len);
+    for (shaped, cmd.cached_glyphs.?) |g, id| try testing.expectEqual(g.id, id);
+}

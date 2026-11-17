@@ -89,6 +89,20 @@
 
 ### Changed
 
+- **Written text is shaped as `shapeText` shapes it**: `writeAt`, `write` and
+  measurement with Unicode-encoded embedded fonts now use the shaping engine
+  (GSUB, GPOS or the kern table, fallback mark positioning, Indic shaping)
+  instead of pair kerning and a mark heuristic. Devanagari forms its
+  conjuncts and reorders its matras in documents too, measured as drawn.
+  Each glyph advances by its shaped advance (TJ adjustments carry the
+  difference from its /W width, never off by 1/1000 em or more), and each
+  glyph's ToUnicode is its own characters. Positions move by fractions of a
+  1/1000 em; the platen-made reference PDFs were regenerated.
+- **Copy text keeps every character once**: a precomposed letter composed
+  across a mark (O + cedilla + tilde) or a ligature formed across one
+  covers the mark's text, which the mark gives up; a glyph a multiple
+  substitution split off (ccmp's U+012F to dotless i + ogonek) maps to its
+  part of the character.
 - **Color parsing is ochre's**: platen vendors
   [ochre](https://git.urverk.org/urverk/ochre) (color math and CSS color
   parsing, MIT) in `src/ochre/`, copied by `scripts/vendor-ochre vX.Y.Z` and

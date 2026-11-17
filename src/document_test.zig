@@ -4048,8 +4048,11 @@ test "FontFace clones own all scratch buffers (no shared mutable state)" {
 
     var face = try embedded_mod.FontFace.fromMemory(allocator, data);
     defer face.deinit();
-    // Grow the prototype's shaping buffer (calt-heavy text)
-    try face.warmup("Warmup with arrows -> => and ligatures ffi ffl offices");
+    // Grow the prototype's GSUB shaper buffer (calt-heavy text). Writing
+    // and measuring use the shaping engine, which only reads the font;
+    // the old glyph path still owns this buffer, so it must not be shared
+    const warm = try face.prototype.markUnicodeCharsUsed("Warmup with arrows -> => and ligatures ffi ffl offices", null);
+    face.prototype.allocator.free(warm);
 
     const clone = try face.instantiate(allocator);
     defer clone.deinit();

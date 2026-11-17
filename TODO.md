@@ -213,11 +213,14 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   extents from charstrings).
 - [x] **Normalization: decompose** characters the font lacks, space
   fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul not decomposed).
-- [ ] **write() on the GPOS engine**: text_render still uses pair kerning +
-  the mark heuristic; switching moves positions in every PDF (references).
-  Measurement too: Kohinoor's sa-virama-ta measures 1216 units (no
-  conjunct) where shapeText gives 957. `.monospace` fallback clusters are
-  already on the new engine.
+- [x] **write() on the GPOS engine** (done 2026-11-17: shapeRun +
+  renderShapedRun; references regenerated).
+- [ ] **Shaping performance**: write()/measure is 1.3-3x slower on text
+  (GPOS class kerning, per-call overhead); GPOS digests or a class cache, a
+  measurement width cache.
+- [ ] **Remove the old glyph path** (markUnicodeCharsUsed,
+  renderCIDTextWithKerning, getKerning/getMarkOffset caches); `platen shape`
+  onto shapeRun.
 - [x] **Indic (Devanagari) shaping** in shapeText (done 2026-11-17,
   indic.zig; HarfBuzz-checked with Kohinoor and Sangam MN).
 - [ ] **Synthetic Indic test font** so CI covers the Indic shaper (the
