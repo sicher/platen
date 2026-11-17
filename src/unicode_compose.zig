@@ -12,6 +12,88 @@ const data = @import("unicode_compose_data.zig");
 pub const first_mark: u21 = 0x0300;
 
 /// Canonical combining class (0 for starters and unlisted code points).
+/// HarfBuzz's modified combining class (_hb_modified_combining_class), by
+/// which marks are put in order before shaping: Hebrew points in SBL
+/// order, Arabic shadda first, Telugu length marks and Thai sara u/uu
+/// before the virama, Tibetan sign u before sign i; and three special
+/// cases (Tai Tham sakot, Tibetan tsa-phru).
+pub fn modifiedCombiningClass(cp: u21) u8 {
+    switch (cp) {
+        0x1A60, 0x0FC6 => return 254,
+        0x0F39 => return 127,
+        else => {},
+    }
+    const ccc = combiningClass(cp);
+    return switch (ccc) {
+        // Hebrew
+        10 => 22,
+        11 => 15,
+        12 => 16,
+        13 => 17,
+        14 => 23,
+        15 => 18,
+        16 => 19,
+        17 => 20,
+        18 => 21,
+        19 => 14,
+        20 => 24,
+        21 => 12,
+        22 => 25,
+        23 => 13,
+        24 => 10,
+        25 => 11,
+        // Arabic: shadda (33) before the others
+        27 => 28,
+        28 => 29,
+        29 => 30,
+        30 => 31,
+        31 => 32,
+        32 => 33,
+        33 => 27,
+        // Telugu length marks, Thai sara u/uu, Tibetan sign i/u
+        84 => 4,
+        91 => 5,
+        103 => 3,
+        130 => 132,
+        132 => 131,
+        else => ccc,
+    };
+}
+
+/// HarfBuzz's mark reordering (normalization round 2): each run of code
+/// points with a nonzero modified combining class, up to 32 long, is
+/// sorted stably by that class. `offsets` (optional, same length) moves
+/// along.
+pub fn reorderMarks(cps: []u21, offsets: ?[]u32) void {
+    const max_run = 32;
+    var i: usize = 0;
+    while (i < cps.len) {
+        if (modifiedCombiningClass(cps[i]) == 0) {
+            i += 1;
+            continue;
+        }
+        var end = i + 1;
+        while (end < cps.len and modifiedCombiningClass(cps[end]) != 0) end += 1;
+        if (end - i <= max_run) {
+            // Insertion sort: stable, and runs are short
+            var k = i + 1;
+            while (k < end) : (k += 1) {
+                const cp = cps[k];
+                const off = if (offsets) |o| o[k] else 0;
+                const cc = modifiedCombiningClass(cp);
+                var j = k;
+                while (j > i and modifiedCombiningClass(cps[j - 1]) > cc) : (j -= 1) {
+                    cps[j] = cps[j - 1];
+                    if (offsets) |o| o[j] = o[j - 1];
+                }
+                cps[j] = cp;
+                if (offsets) |o| o[j] = off;
+            }
+        }
+        i = end;
+    }
+}
+
 pub fn combiningClass(cp: u21) u8 {
     if (cp < first_mark) return 0;
     const ranges = &data.ccc_ranges;
@@ -177,4 +259,17 @@ test "composeInPlace keeps sequences the font cannot show precomposed" {
         }
     };
     try expectComposed(&.{ 'i', 0x0308, 'e', 0x0301 }, &.{ 'i', 0x0308, 0x00E9 }, NoIdieresis{});
+}
+
+test "reorderMarks sorts mark runs by modified combining class, stably" {
+    // m, acute (230), dot below (220), n: the dot below goes first
+    var cps = [_]u21{ 'm', 0x0301, 0x0323, 'n', 0x0300, 0x0301 };
+    var offsets = [_]u32{ 0, 1, 3, 5, 6, 8 };
+    reorderMarks(&cps, &offsets);
+    try std.testing.expectEqualSlices(u21, &.{ 'm', 0x0323, 0x0301, 'n', 0x0300, 0x0301 }, &cps);
+    try std.testing.expectEqualSlices(u32, &.{ 0, 3, 1, 5, 6, 8 }, &offsets);
+    // Arabic: fatha (30) then shadda (33) - shadda moves first
+    var ar = [_]u21{ 0x0644, 0x064E, 0x0651 };
+    reorderMarks(&ar, null);
+    try std.testing.expectEqualSlices(u21, &.{ 0x0644, 0x0651, 0x064E }, &ar);
 }

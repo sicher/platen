@@ -198,6 +198,8 @@ test {
     _ = @import("decode.zig");
     _ = @import("unicode_props.zig");
     _ = @import("gsub.zig");
+    _ = @import("gpos.zig");
+    _ = @import("opentype.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");

@@ -81,6 +81,8 @@ pub fn decode(allocator: Allocator, font: *const ttf.Font, text: []const u8, out
                 return (c.font.getGlyphId(cp) orelse 0) != 0;
             }
         }{ .font = font };
+        // Marks in canonical order first, as HarfBuzz's normalization
+        unicode_compose.reorderMarks(out.codepoints.items, if (offsets) |o| o.items else null);
         out.composed.items.len = out.codepoints.items.len;
         const n = unicode_compose.composeInPlace(out.codepoints.items, out.composed.items, if (offsets) |o| o.items else null, ctx);
         out.codepoints.items.len = n;

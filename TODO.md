@@ -206,13 +206,15 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 
 ## Open after shapeText / drawGlyphs (2026-11-16, for courier)
 
-- [ ] **GPOS engine** (like gsub.zig): all lookup types (single, pair,
-  cursive, mark-base, mark-lig, mark-mark, context/chained, extension),
-  feature/lookup order, lookup flags (IgnoreMarks, mark filtering sets),
-  GDEF mark advance zeroing, and HarfBuzz's fallback mark positioning for
-  fonts without GPOS. Then shapeText and write()'s renderer both use it.
-  Known gaps: test/shaping/position_gaps.txt (Satoshi marks without
-  anchors; Inter `f\u0323f` kerning across a mark outside the filter set).
+- [x] **GPOS engine** (done 2026-11-17, src/gpos.zig; shapeText uses it,
+  HarfBuzz-checked with GposTest.ttf).
+- [ ] **Fallback mark positioning** for fonts without GPOS (HarfBuzz's
+  hb-ot-shape-fallback: marks stacked by glyph extents; Courier Prime).
+- [ ] **Normalization: decompose** characters the font lacks into ones it
+  has (GsubTest "é" -> e + U+0301), space fallbacks (U+2002.. as the space
+  glyph with HarfBuzz's widths), U+2011 as U+2010.
+- [ ] **write() on the GPOS engine**: text_render still uses pair kerning +
+  the mark heuristic; switching moves positions in every PDF (references).
 - [ ] **Indic (Devanagari) shaping** in shapeText: script selection
   (dev2, then deva), syllables, reordering (pre-base matra, reph), the
   feature stages (nukt akhn rphf blwf half pstf vatu cjct, then pres abvs

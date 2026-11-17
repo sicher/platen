@@ -536,14 +536,27 @@ pub const EmbeddedFont = struct {
             self.allocator.destroy(ot);
         }
 
+        const gdef_data = self.font.getTable("GDEF".*);
+        if (gdef_data) |g| ot.gdef = gsub.Gdef.parse(g);
+
         // Parse GSUB table if present (for ligatures)
         if (self.font.getTable("GSUB".*)) |gsub_data| {
-            try ot.parseGSUB(gsub_data, self.font.getTable("GDEF".*));
+            try ot.parseGSUB(gsub_data, gdef_data);
         }
 
-        // Parse GPOS table if present (for kerning)
-        if (self.font.getTable("GPOS".*)) |gpos_data| {
-            try ot.parseGPOS(gpos_data);
+        // Parse GPOS table if present: for the shaping engine, and the
+        // kerning and mark lookups text_render uses
+        const gpos_data = self.font.getTable("GPOS".*);
+        if (gpos_data) |data| {
+            try ot.parseGPOSTable(data, gdef_data);
+            try ot.parseGPOS(data);
+        }
+        // The engine applies the 'kern' table when GPOS has no kern feature
+        if (gpos_data == null or !opentype.OpenTypeFeatures.tableHasFeatureTag(gpos_data.?, std.mem.readInt(u32, "kern", .big))) {
+            if (self.font.getTable("kern".*)) |kern_data| {
+                const t = KernTable.parse(kern_data);
+                if (t.count > 0) ot.shaping_kern = t;
+            }
         }
 
         // Legacy 'kern' table only when GPOS has no kerning (as HarfBuzz)

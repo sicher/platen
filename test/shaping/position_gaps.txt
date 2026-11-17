@@ -1,4 +1,2 @@
 # Known differences between shapeText and HarfBuzz (src/shaping_test.zig).
 # font<TAB>features<TAB>text<TAB>reason
-test/fonts/Satoshi/Satoshi-Regular.otf		ı í ï ị́ j́ į́ i̇́	marks without an attachment keep their advance; HarfBuzz zeroes GDEF marks (GPOS engine)
-test/fonts/Satoshi/Satoshi-Regular.otf		į́ i̇̀ ị́ é̂ à́̂	marks without an attachment keep their advance; HarfBuzz zeroes GDEF marks (GPOS engine)

@@ -18,11 +18,16 @@
   any thread). `doc.drawGlyphs(text, glyphs, style)` draws glyphs by ID, each
   at its own position, and maps each to its cluster's text in ToUnicode, so a
   ligature or conjunct copies out as its characters. For layout engines that
-  place every glyph themselves. Glyphs, clusters and positions are checked
-  against HarfBuzz (test/shaping/harfbuzz_positions.txt); positioning is
-  still pair kerning and mark attachment, without script-specific shaping.
-  CLI: `shape-text <font>` (HarfBuzz's serialization), `glyphs <out.pdf>
-  <font>`.
+  place every glyph themselves. Positioning is a GPOS engine run the way
+  HarfBuzz's default shaper does: every lookup type (single, pair, cursive,
+  mark-to-base, -ligature and -mark, contexts, extensions) in lookup order
+  with lookup flags, `curs`, `dist`, `abvm` and `blwm` on by default, the
+  `kern` table where GPOS has no kerning, marks zeroed by GDEF class and
+  attachments propagated. Glyphs, clusters and positions are checked against
+  HarfBuzz (test/shaping/harfbuzz_positions.txt, with a synthetic font
+  holding every lookup type and flag). No script-specific shaping yet (Indic,
+  Arabic, bidi). CLI: `shape-text <font>` (HarfBuzz's serialization),
+  `glyphs <out.pdf> <font>`.
 - **SVG gradients**: `<linearGradient>` and `<radialGradient>` fill and stroke
   shapes, paths and text through `url(#id)`, with an optional fallback color
   (`url(#g) red`). Both `gradientUnits` (`objectBoundingBox`, the default, and
@@ -73,6 +78,14 @@
 
 ### Fixed
 
+- **Marks typed out of canonical order** (an acute before a dot below) are
+  put in order before shaping, as HarfBuzz does, so they compose and attach
+  the same either way.
+- **A coverage table claiming more than 10,922 ranges (32,767 glyphs)
+  crashed shaping** with an integer overflow; it is now bounded by the
+  table's data like any other.
+- **Fonts without GDEF classes** take nonspacing marks (Mn) for marks, as
+  HarfBuzz does, rather than characters with a combining class.
 - **Text made only of ligatures was embedded unsubset**: a font whose drawn
   text was all multi-character glyphs ("ffi" alone) looked unused to the
   subsetter, so the whole font file went into the PDF (Gentium: 971 KB).

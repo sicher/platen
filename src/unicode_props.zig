@@ -24,6 +24,11 @@ pub fn isMark(cp: u21) bool {
     return cp >= 0x300 and inRanges(&data.mark_ranges, cp);
 }
 
+/// General_Category Mn.
+pub fn isNonspacingMark(cp: u21) bool {
+    return cp >= 0x300 and inRanges(&data.nonspacing_mark_ranges, cp);
+}
+
 pub fn isExtendedPictographic(cp: u21) bool {
     return cp >= 0xA9 and inRanges(&data.ext_pict_ranges, cp);
 }
@@ -68,6 +73,8 @@ test "isMark: nonspacing, spacing and enclosing marks" {
     try testing.expect(!isMark('a'));
     try testing.expect(!isMark(0x0915)); // Devanagari ka
     try testing.expect(!isMark(0x200D)); // ZWJ is Cf
+    try testing.expect(isNonspacingMark(0x0902)); // Devanagari anusvara (Mn, ccc 0)
+    try testing.expect(!isNonspacingMark(0x093F)); // Mc
 }
 
 test "markContinuations follows HarfBuzz's grapheme rules" {

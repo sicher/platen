@@ -34,6 +34,10 @@ pub const Feature = enum(u32) {
     calt = tag("calt"), // Contextual Alternates
     mark = tag("mark"), // Mark Positioning
     mkmk = tag("mkmk"), // Mark-to-Mark Positioning
+    curs = tag("curs"), // Cursive Positioning
+    dist = tag("dist"), // Distances
+    abvm = tag("abvm"), // Above-base Mark Positioning
+    blwm = tag("blwm"), // Below-base Mark Positioning
     tnum = tag("tnum"), // Tabular Figures
     pnum = tag("pnum"), // Proportional Figures
     frac = tag("frac"), // Fractions
@@ -178,7 +182,7 @@ pub const Feature = enum(u32) {
         if (self.ssIndex() != null or self.cvIndex() != null) return false;
         return switch (self) {
             // HarfBuzz's defaults for horizontal text
-            .ccmp, .locl, .rlig, .liga, .clig, .kern, .calt, .mark, .mkmk => true,
+            .ccmp, .locl, .rlig, .liga, .clig, .kern, .calt, .mark, .mkmk, .curs, .dist, .abvm, .blwm => true,
             else => false,
         };
     }
@@ -451,7 +455,7 @@ pub const CoverageTable = struct {
     fn getCoverageIndexFormat1(self: CoverageTable, glyph_id: u16) ?u16 {
         if (self.data.len < 4) return null;
         // Bound the array by the data once; the search then reads freely
-        const count = @min(readU16(self.data, 2), (self.data.len - 4) / 2);
+        const count: usize = @min(readU16(self.data, 2), (self.data.len - 4) / 2);
         const glyphs = self.data[4..][0 .. count * 2];
 
         // Binary search in sorted glyph array
@@ -473,7 +477,7 @@ pub const CoverageTable = struct {
 
     fn getCoverageIndexFormat2(self: CoverageTable, glyph_id: u16) ?u16 {
         if (self.data.len < 4) return null;
-        const count = @min(readU16(self.data, 2), (self.data.len - 4) / 6);
+        const count: usize = @min(readU16(self.data, 2), (self.data.len - 4) / 6);
         const ranges = self.data[4..][0 .. count * 6];
 
         // Binary search in range records
@@ -836,6 +840,14 @@ pub const OpenTypeFeatures = struct {
     gsub: ?gsub_mod.Table = null,
     shaper: gsub_mod.Shaper = .{},
 
+    /// GDEF glyph classes (also for fonts with GPOS but no GSUB)
+    gdef: gsub_mod.Gdef = .{},
+    /// GPOS parsed for the engine (gpos.zig)
+    gpos: ?gsub_mod.Table = null,
+    /// The 'kern' table, for the shaping engine: set when there is no GPOS
+    /// 'kern' feature (HarfBuzz's apply_kern), unlike `legacy_kern`
+    shaping_kern: ?KernTable = null,
+
     // GPOS data
     gpos_data: ?[]const u8 = null,
     kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .empty,
@@ -870,6 +882,7 @@ pub const OpenTypeFeatures = struct {
         // only the prototype frees them
         if (self.borrowed_tables) return;
         if (self.gsub) |*g| g.deinit(self.allocator);
+        if (self.gpos) |*g| g.deinit(self.allocator);
         self.kern_lookups.deinit(self.allocator);
 
         // Free mark record memory
@@ -886,7 +899,28 @@ pub const OpenTypeFeatures = struct {
     pub fn parseGSUB(self: *OpenTypeFeatures, gsub_data: []const u8, gdef_data: ?[]const u8) !void {
         if (self.gsub) |*g| g.deinit(self.allocator);
         self.gsub = null;
-        self.gsub = try gsub_mod.Table.parse(self.allocator, gsub_data, gdef_data);
+        self.gsub = try gsub_mod.Table.parse(self.allocator, gsub_data, gdef_data, .gsub);
+    }
+
+    /// Parse GPOS for the shaping engine (with the font's GDEF).
+    pub fn parseGPOSTable(self: *OpenTypeFeatures, gpos_data: []const u8, gdef_data: ?[]const u8) !void {
+        if (self.gpos) |*g| g.deinit(self.allocator);
+        self.gpos = null;
+        self.gpos = try gsub_mod.Table.parse(self.allocator, gpos_data, gdef_data, .gpos);
+    }
+
+    /// True if a layout table's FeatureList has `tag` under any script
+    /// (HarfBuzz's hb_ot_layout_table_find_feature).
+    pub fn tableHasFeatureTag(data: []const u8, tag_value: u32) bool {
+        if (data.len < 10) return false;
+        const list: usize = readU16(data, 6);
+        const count = readU16(data, list);
+        for (0..count) |i| {
+            const rec = list + 2 + i * 6;
+            if (rec + 4 > data.len) return false;
+            if (std.mem.readInt(u32, data[rec..][0..4], .big) == tag_value) return true;
+        }
+        return false;
     }
 
     /// Parse GPOS table from font data
@@ -1786,4 +1820,21 @@ test "mark attachment with extreme anchors does not overflow" {
         .mark2_array_offset = 0,
     };
     try std.testing.expectEqual(@as(i32, 65535), mm.getAttachment(1, 2).?.dx);
+}
+
+test "coverage tables longer than a u16 byte count do not overflow" {
+    // 40,000 records: their byte length (240,000 / 80,000) is past u16
+    const a = std.testing.allocator;
+    for ([_]struct { u16, usize }{ .{ 2, 6 }, .{ 1, 2 } }) |c| {
+        const n = 40000;
+        const data = try a.alloc(u8, 4 + n * c[1]);
+        defer a.free(data);
+        @memset(data, 0);
+        std.mem.writeInt(u16, data[0..2], c[0], .big);
+        std.mem.writeInt(u16, data[2..4], n, .big);
+        const cov: CoverageTable = .{ .format = c[0], .data = data };
+        try std.testing.expectEqual(@as(?u16, null), cov.getCoverageIndex(5));
+        // Format 1: glyph 0 is listed (all zero), at some index
+        if (c[0] == 1) try std.testing.expect(cov.getCoverageIndex(0) != null);
+    }
 }

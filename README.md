@@ -343,8 +343,9 @@ try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face 
 - `drawGlyphs` writes each glyph at its position (to 0.001 pt) and gives it
   its cluster's text for copy and paste: the "ffi" ligature extracts as
   "ffi".
-- Shaping is platen's GSUB plus pair kerning and mark attachment, checked
-  against HarfBuzz; no script-specific shaping yet (Indic, Arabic, bidi).
+- Shaping is platen's GSUB and GPOS engines, run as HarfBuzz's default
+  shaper and checked against it; no script-specific shaping yet (Indic,
+  Arabic, bidi).
 
 ### Text Flow with Word Wrapping
 

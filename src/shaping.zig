@@ -8,12 +8,12 @@
 //! Positions are in font units (scale by size / `unitsPerEm`), as
 //! HarfBuzz reports them: a glyph is drawn at the pen position plus its
 //! offset, then the pen moves by its advance. Substitution is platen's
-//! GSUB engine (checked against HarfBuzz); positioning is, for now, what
-//! `write` draws: pair kerning between neighbors and mark-to-base /
-//! mark-to-mark attachment of the marks after a base. Not yet: the other
-//! GPOS lookup types, lookup order and flags, and script-specific shaping
-//! (Indic reordering, Arabic joining, bidi): text is shaped left to right
-//! with the font's DFLT script.
+//! GSUB engine, positioning its GPOS engine (gpos.zig) as HarfBuzz's
+//! default shaper runs it; both are checked against HarfBuzz. Not yet:
+//! fallback mark positioning for fonts without GPOS, decomposing
+//! characters the font lacks, and script-specific shaping (Indic
+//! reordering, Arabic joining, bidi): text is shaped left to right with
+//! the font's DFLT (else latn) script.
 
 const std = @import("std");
 const embedded = @import("embedded.zig");
@@ -21,6 +21,7 @@ const decode = @import("decode.zig");
 const gsub = @import("gsub.zig");
 const opentype = @import("opentype.zig");
 const unicode_props = @import("unicode_props.zig");
+const gpos = @import("gpos.zig");
 
 const Allocator = std.mem.Allocator;
 const EmbeddedFont = embedded.EmbeddedFont;
@@ -82,24 +83,49 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
     var shaper: gsub.Shaper = .{};
     defer shaper.deinit(allocator);
 
-    const run_gsub = if (emb.ot_features) |ot| d.ignorables or try hasActiveGsub(allocator, &shaper, ot, flags) else false;
-    const shaped: []const gsub.Glyph = if (run_gsub) blk: {
-        const ot = emb.ot_features.?;
-        const table: *const gsub.Table = if (ot.gsub) |*g| g else &opentype.empty_gsub;
-        break :blk try shaper.shape(allocator, table, d.glyphs.items, d.codepoints.items, flags);
-    } else &.{};
+    // GSUB always runs: GPOS needs its glyph classes and ligature
+    // components (a font without GSUB gets an empty table with its GDEF)
+    const ot = emb.ot_features;
+    var no_gsub = opentype.empty_gsub;
+    if (ot) |o| no_gsub.gdef = o.gdef;
+    const gsub_table: *const gsub.Table = if (ot) |o| (if (o.gsub) |*g| g else &no_gsub) else &no_gsub;
+    _ = try shaper.shape(allocator, gsub_table, d.glyphs.items, d.codepoints.items, flags);
+    const glyphs = shaper.buf.items;
 
-    const n = if (run_gsub) shaped.len else d.glyphs.items.len;
-    const out = try allocator.alloc(ShapedGlyph, n);
+    const pos = try allocator.alloc(gpos.Position, glyphs.len);
+    defer allocator.free(pos);
+    for (pos, glyphs) |*p, g| p.* = .{ .x_advance = emb.font.getGlyphWidth(g.id) orelse 0 };
+    if (ot) |o| try positionGlyphs(allocator, o, gsub_table, flags, glyphs, pos);
+
+    const out = try allocator.alloc(ShapedGlyph, glyphs.len);
     errdefer allocator.free(out);
-    if (run_gsub) {
-        for (out, shaped) |*o, g| o.* = .{ .id = g.id, .x_advance = 0, .cluster = g.cluster };
-    } else {
-        for (out, d.glyphs.items, 0..) |*o, gid, i| o.* = .{ .id = gid, .x_advance = 0, .cluster = @intCast(i) };
-    }
+    for (out, glyphs, pos) |*o, g, p| o.* = .{
+        .id = g.id,
+        .x_advance = p.x_advance,
+        .x_offset = p.x_offset,
+        .y_offset = p.y_offset,
+        .cluster = g.cluster,
+    };
     try formClusters(allocator, d.codepoints.items, d.offsets.items, out);
-    position(emb, flags, out);
     return out;
+}
+
+/// HarfBuzz's positioning for the default shaper (hb_ot_position): GPOS,
+/// or the 'kern' table where GPOS has no kern feature; then GDEF marks
+/// lose their advance (shifted back over the glyph before when there is no
+/// GPOS), and attached glyphs take their parents' offsets.
+fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, flags: opentype.FeatureFlags, glyphs: []gsub.Glyph, pos: []gpos.Position) !void {
+    if (ot.gpos) |*table| {
+        var lookups: std.ArrayListUnmanaged(u16) = .empty;
+        defer lookups.deinit(allocator);
+        try table.collectLookups(allocator, flags, &lookups);
+        gpos.apply(table, glyphs, pos, lookups.items);
+    }
+    if (ot.shaping_kern) |*kern| {
+        if (flags.isEnabled(.kern)) gpos.applyKernTable(gsub_table, kern, glyphs, pos);
+    }
+    gpos.zeroMarkWidths(gsub_table, glyphs, pos, ot.gpos == null);
+    gpos.propagateAttachments(pos);
 }
 
 /// Turns the glyphs' clusters from code point indices (as GSUB left them:
@@ -136,82 +162,6 @@ fn formClusters(allocator: Allocator, cps: []const u21, offsets: []const u32, gl
         prev_owner = own;
     }
     for (glyphs) |*gl| gl.cluster = offsets[start[gl.cluster]];
-}
-
-fn hasActiveGsub(allocator: Allocator, shaper: *gsub.Shaper, ot: *const opentype.OpenTypeFeatures, flags: opentype.FeatureFlags) !bool {
-    const table = if (ot.gsub) |*g| g else return false;
-    return (try shaper.activeLookups(allocator, table, flags)).len > 0;
-}
-
-/// Advances and offsets as `text_render` draws them: each glyph advances
-/// by its hmtx width plus the kerning with the next base. When the run has
-/// a mark that attaches to the glyph before it, a base's following marks
-/// attach to it (or to the mark before them) with zero advance, and the
-/// base kerns with the glyph after its marks.
-fn position(emb: *const EmbeddedFont, flags: opentype.FeatureFlags, glyphs: []ShapedGlyph) void {
-    for (glyphs) |*g| g.x_advance = emb.font.getGlyphWidth(g.id) orelse 0;
-    const ot = emb.ot_features orelse return;
-    const kern_on = flags.isEnabled(.kern) and emb.has_kern_data;
-    const marks_on = (flags.isEnabled(.mark) or flags.isEnabled(.mkmk)) and emb.has_mark_data;
-    const Ctx = struct {
-        ot: *const opentype.OpenTypeFeatures,
-        kern_on: bool,
-        marks_on: bool,
-        fn kern(c: @This(), a: u16, b: u16) i32 {
-            return if (c.kern_on) c.ot.kerningUncached(a, b) else 0;
-        }
-        fn mark(c: @This(), base: u16, m: u16) ?opentype.MarkOffset {
-            return if (c.marks_on) c.ot.getMarkOffset(base, m) else null;
-        }
-    };
-    const c: Ctx = .{ .ot = ot, .kern_on = kern_on, .marks_on = marks_on };
-
-    const has_marks = marks_on and for (0..glyphs.len -| 1) |i| {
-        if (c.mark(glyphs[i].id, glyphs[i + 1].id) != null) break true;
-    } else false;
-
-    if (!has_marks) {
-        if (!kern_on) return;
-        for (0..glyphs.len -| 1) |i| glyphs[i].x_advance += c.kern(glyphs[i].id, glyphs[i + 1].id);
-        return;
-    }
-
-    var i: usize = 0;
-    while (i < glyphs.len) {
-        const base = glyphs[i].id;
-        // The marks after this base: each attaches to the glyph before it
-        // (mark-to-mark) or to the base itself
-        var j = i + 1;
-        while (j < glyphs.len) : (j += 1) {
-            if (c.mark(glyphs[j - 1].id, glyphs[j].id) == null and c.mark(base, glyphs[j].id) == null) break;
-        }
-        const kern = if (j < glyphs.len) c.kern(base, glyphs[j].id) else 0;
-        const base_advance = glyphs[i].x_advance + kern;
-        glyphs[i].x_advance = base_advance;
-
-        // Mark positions relative to the base origin; the pen after the
-        // base is at base_advance
-        var prev = base;
-        var prev_x: i32 = 0;
-        var prev_y: i32 = 0;
-        for (glyphs[i + 1 .. j]) |*m| {
-            var ref_x: i32 = 0;
-            var ref_y: i32 = 0;
-            var off = c.mark(prev, m.id);
-            if (off != null) {
-                ref_x = prev_x;
-                ref_y = prev_y;
-            } else off = c.mark(base, m.id);
-            const o = off.?; // the scan above found one
-            m.x_advance = 0;
-            m.x_offset = ref_x + o.dx - base_advance;
-            m.y_offset = ref_y + o.dy;
-            prev = m.id;
-            prev_x = ref_x + o.dx;
-            prev_y = ref_y + o.dy;
-        }
-        i = j;
-    }
 }
 
 // ============================================================================

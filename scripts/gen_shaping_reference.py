@@ -35,7 +35,8 @@ OUT = Path("test/shaping/harfbuzz.txt")
 OUT_POSITIONS = Path("test/shaping/harfbuzz_positions.txt")
 
 # Features platen enables by default (opentype.Feature.defaultEnabled)
-PLATEN_DEFAULTS = {"ccmp", "locl", "rlig", "liga", "clig", "calt", "kern", "mark", "mkmk"}
+PLATEN_DEFAULTS = {"ccmp", "locl", "rlig", "liga", "clig", "calt", "kern", "mark", "mkmk",
+                   "curs", "dist", "abvm", "blwm"}
 # Features HarfBuzz enables by default for horizontal text; the ones platen
 # does not are switched off so both apply the same lookups
 HB_DEFAULTS = {"rvrn", "ccmp", "locl", "rlig", "abvm", "blwm", "mark", "mkmk",
@@ -123,17 +124,56 @@ CASES = [
 ]
 
 
+# Contextual kerning (Gentium: V/Y beside quotes and periods), more pairs
+KERNING = [
+    "AV To Ty Yo WA LT P. F, V. Y, \"V\" 'Y' \u201cY\u201d \u2018V\u2019 Y\u2019s",
+    "\u2c71 \u2c73 \u01b4 \u02bbY Vo Va \u0423\u0430 \u0413\u043e",
+]
+# Arabic, shaped left to right without the Arabic shaper (as HarfBuzz with
+# script Zyyy): lam-alef ligatures take marks per component (mark-to-ligature)
+ARABIC = [
+    "\u0628\u0650\u0633\u0652\u0645\u0650 \u0627\u0644\u0644\u0651\u064e\u0647\u0650",
+    "\u0644\u0627 \u0644\u064e\u0627 \u0644\u0627\u064b \u0644\u0651\u064e\u0627\u0650",
+]
+
+# Synthetic font with every GPOS lookup type and flag
+# (scripts/gen_gpos_test_font.py): one stylistic set per scenario
+GPOS_TEST = "test/fonts/gpos/GposTest.ttf"
+GPOS_SCENARIOS = {
+    "ss01": ["a b d ab bd", "aaa dbd"],
+    "ss02": ["ef efe gh ghgh hg", "eef ggh"],
+    "ss03": ["ik jl il jk ki", "iik kl"],
+    "ss04": ["mn m\u0301n m\u0301\u0323n nm"],
+    "ss05": ["or o\u0323r o\u0301r o\u0323\u0323r"],
+    "ss06": ["stu st tu sttu", "s t u ustts"],
+    "ss07": ["v\u0301 w\u0323 x\u0301\u0323 v\u0301\u0300", "\u0301 a\u0301 vv\u0328"],
+    "ss08": ["pq p\u0301q q\u0301 p\u0301q\u0301 pq\u0323", "p\u0323q\u0300 pq\u0301\u0300"],
+    "ss09": ["v\u0301\u0300 w\u0300\u0301\u0301 x\u0323\u0301\u0300", "\u0301\u0300 a\u0301\u0300"],
+    "ss10": ["ykl ykz yklz ky kly", "yklzky k"],
+    "ss11": ["zy a za azya"],
+    "ss12": ["ab a\u0301b a\u0323b a\u0323\u0301b"],
+    "ss13": ["c c\u0301 c\u0323 cc\u0301\u0323"],
+    "ss14": ["stu st tu sttu", "s t u ustts"],
+}
+GPOS_ALL_TEXTS = [t for texts in GPOS_SCENARIOS.values() for t in texts]
+
 # Fonts with GPOS (kerning, mark attachment). Fonts without one get
 # HarfBuzz's fallback mark positioning, which platen does not do yet.
 POSITION_CASES = [
-    ("test/fonts/Inter/Inter-Regular.otf", [], LATIN),
+    ("test/fonts/Inter/Inter-Regular.otf", [], LATIN + KERNING),
     ("test/fonts/Inter/Inter-Regular.otf", ["-kern"], LATIN),
     ("test/fonts/Inter/Inter-Regular.otf", ["+frac", "+dlig"], LATIN),
     ("test/fonts/Inter/Inter-Bold.ttf", [], LATIN),
     ("test/fonts/Satoshi/Satoshi-Regular.otf", [], LATIN),
-    ("test/fonts/Gentium/Gentium-Regular.ttf", [], LATIN),
+    ("test/fonts/Gentium/Gentium-Regular.ttf", [], LATIN + KERNING),
     ("test/fonts/Gentium/Gentium-Regular.ttf", ["-mark", "-mkmk"], LATIN),
-    ("test/fonts/Gentium/Gentium-Italic.ttf", [], LATIN),
+    ("test/fonts/Gentium/Gentium-Regular.ttf", ["-kern"], KERNING),
+    ("test/fonts/Gentium/Gentium-Italic.ttf", [], LATIN + KERNING),
+    ("test/fonts/Noto Sans Arabic/NotoSansArabic-Regular.ttf", [], ARABIC),
+    ("test/fonts/Noto Sans Arabic/NotoSansArabic-Regular.ttf", ["-mark"], ARABIC),
+    (GPOS_TEST, [], GPOS_ALL_TEXTS),
+    *[(GPOS_TEST, ["+" + tag], texts) for tag, texts in GPOS_SCENARIOS.items()],
+    (GPOS_TEST, ["+" + tag for tag in GPOS_SCENARIOS if tag != "ss14"], GPOS_ALL_TEXTS),
 ]
 
 

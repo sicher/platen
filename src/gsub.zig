@@ -17,29 +17,29 @@
 
 const std = @import("std");
 const opentype = @import("opentype.zig");
-const unicode_compose = @import("unicode_compose.zig");
+const unicode_props = @import("unicode_props.zig");
 
 const Feature = opentype.Feature;
 const FeatureFlags = opentype.FeatureFlags;
 const CoverageTable = opentype.CoverageTable;
 const ClassDef = opentype.ClassDef;
 
-fn readU16(data: []const u8, offset: usize) u16 {
+pub fn readU16(data: []const u8, offset: usize) u16 {
     if (offset + 2 > data.len) return 0;
     return std.mem.readInt(u16, data[offset..][0..2], .big);
 }
 
-fn readU32(data: []const u8, offset: usize) u32 {
+pub fn readU32(data: []const u8, offset: usize) u32 {
     if (offset + 4 > data.len) return 0;
     return std.mem.readInt(u32, data[offset..][0..4], .big);
 }
 
-fn coverageAt(data: []const u8, addr: usize) CoverageTable {
+pub fn coverageAt(data: []const u8, addr: usize) CoverageTable {
     if (addr + 4 > data.len) return .{ .format = 0, .data = &.{} };
     return .{ .format = readU16(data, addr), .data = data[addr..] };
 }
 
-fn classDefAt(data: []const u8, addr: usize) ClassDef {
+pub fn classDefAt(data: []const u8, addr: usize) ClassDef {
     if (addr + 4 > data.len) return .{ .format = 0, .data = &.{} };
     return .{ .format = readU16(data, addr), .data = data[addr..] };
 }
@@ -49,21 +49,21 @@ pub const GlyphClass = enum(u8) { unclassified = 0, base = 1, ligature = 2, mark
 
 /// Glyph properties: GDEF class in the low byte, mark attachment class in
 /// the high byte.
-const Props = u16;
+pub const Props = u16;
 /// Not looked up yet: GDEF classes are read when a lookup flag needs them.
-const props_unknown: Props = 0xFFFF;
+pub const props_unknown: Props = 0xFFFF;
 
 /// Lookup flag bits
-const ignore_base_glyphs: u16 = 0x0002;
-const ignore_ligatures: u16 = 0x0004;
-const ignore_marks: u16 = 0x0008;
+pub const ignore_base_glyphs: u16 = 0x0002;
+pub const ignore_ligatures: u16 = 0x0004;
+pub const ignore_marks: u16 = 0x0008;
 const use_mark_filtering_set: u16 = 0x0010;
 const mark_attachment_type_mask: u16 = 0xFF00;
 
 /// Contexts nest lookups; fonts need a few levels, hostile ones loops.
-const max_nesting = 8;
+pub const max_nesting = 8;
 /// Matched input sequence length limit (HarfBuzz: HB_MAX_CONTEXT_LENGTH).
-const max_context = 64;
+pub const max_context = 64;
 
 /// GDEF: glyph classes, mark attachment classes, mark glyph sets.
 pub const Gdef = struct {
@@ -84,9 +84,9 @@ pub const Gdef = struct {
         return g;
     }
 
-    fn props(self: Gdef, gid: u16) Props {
+    pub fn props(self: Gdef, gid: u16) Props {
         const class: u16 = if (self.glyph_class) |c| c.getClass(gid) else 0;
-        if (class != @intFromEnum(GlyphClass.mark)) return class;
+        if (class != @backingInt(GlyphClass.mark)) return class;
         const attach: u16 = if (self.mark_attach_class) |c| c.getClass(gid) else 0;
         return class | ((attach & 0xFF) << 8);
     }
@@ -105,11 +105,11 @@ pub const Gdef = struct {
 /// Bloom digest of the glyphs a lookup's subtables cover (as HarfBuzz's
 /// hb_set_digest): three 64-bit masks over different bit slices of the ID.
 /// No false negatives, so a miss safely skips the lookup for a glyph.
-const Digest = struct {
+pub const Digest = struct {
     masks: [3]u64 = .{ 0, 0, 0 },
     const shifts = [3]u4{ 0, 4, 9 };
 
-    fn addGlyph(self: *Digest, gid: u16) void {
+    pub fn addGlyph(self: *Digest, gid: u16) void {
         inline for (shifts, 0..) |s, i| self.masks[i] |= @as(u64, 1) << @truncate(gid >> s);
     }
 
@@ -144,14 +144,14 @@ const Digest = struct {
         for (&self.masks, other.masks) |*m, o| m.* |= o;
     }
 
-    fn mayIntersect(self: Digest, other: Digest) bool {
+    pub fn mayIntersect(self: Digest, other: Digest) bool {
         inline for (self.masks, other.masks) |a, b| {
             if (a & b == 0) return false;
         }
         return true;
     }
 
-    fn mayHave(self: Digest, gid: u16) bool {
+    pub fn mayHave(self: Digest, gid: u16) bool {
         inline for (shifts, 0..) |s, i| {
             if (self.masks[i] & (@as(u64, 1) << @truncate(gid >> s)) == 0) return false;
         }
@@ -159,7 +159,7 @@ const Digest = struct {
     }
 };
 
-const Lookup = struct {
+pub const Lookup = struct {
     /// Lookup type with extensions (7) resolved
     type: u16,
     flag: u16,
@@ -181,7 +181,7 @@ const Lookup = struct {
 
 /// Exact glyph -> subtables map of a lookup, from the subtables' first
 /// coverages. Sorted arrays: one binary search per glyph.
-const SubtableIndex = struct {
+pub const SubtableIndex = struct {
     glyphs: []u16, // sorted, unique
     starts: []u32, // per glyph, into subs; glyphs.len + 1 entries
     subs: []u16, // subtable indices, ascending per glyph
@@ -192,11 +192,11 @@ const SubtableIndex = struct {
     /// subtable; past this many entries the lookup goes without
     const max_entries = 1 << 20;
 
-    fn build(allocator: std.mem.Allocator, data: []const u8, lookup_type: u16, subtables: []const u32) !?SubtableIndex {
+    fn build(allocator: std.mem.Allocator, data: []const u8, kind: TableKind, lookup_type: u16, subtables: []const u32) !?SubtableIndex {
         var pairs: std.ArrayListUnmanaged(u32) = .empty; // glyph << 16 | subtable
         defer pairs.deinit(allocator);
         for (subtables, 0..) |addr, k| {
-            const cov = firstCoverage(data, lookup_type, addr);
+            const cov = firstCoverage(data, kind, lookup_type, addr);
             const d = cov.data;
             const count = readU16(d, 2);
             switch (cov.format) {
@@ -245,7 +245,7 @@ const SubtableIndex = struct {
         allocator.free(self.subs);
     }
 
-    fn subtablesFor(self: SubtableIndex, gid: u16) []const u16 {
+    pub fn subtablesFor(self: SubtableIndex, gid: u16) []const u16 {
         var lo: usize = 0;
         var hi: usize = self.glyphs.len;
         while (lo < hi) {
@@ -257,9 +257,15 @@ const SubtableIndex = struct {
     }
 };
 
-/// Parsed GSUB table. Immutable after parse; shared by per-document font
-/// clones. Slices point into the font bytes, which must outlive it.
+/// GSUB and GPOS share their layout (script, feature and lookup lists);
+/// they differ in the extension lookup type and what each type holds.
+pub const TableKind = enum { gsub, gpos };
+
+/// Parsed GSUB or GPOS table. Immutable after parse; shared by
+/// per-document font clones. Slices point into the font bytes, which must
+/// outlive it.
 pub const Table = struct {
+    kind: TableKind = .gsub,
     data: []const u8,
     gdef: Gdef,
     lookups: []Lookup,
@@ -273,8 +279,9 @@ pub const Table = struct {
     required_lookups: []const u16,
     lookup_index_storage: []u16,
 
-    pub fn parse(allocator: std.mem.Allocator, data: []const u8, gdef_data: ?[]const u8) !Table {
+    pub fn parse(allocator: std.mem.Allocator, data: []const u8, gdef_data: ?[]const u8, kind: TableKind) !Table {
         var t: Table = .{
+            .kind = kind,
             .data = data,
             .gdef = if (gdef_data) |g| Gdef.parse(g) else .{},
             .lookups = &.{},
@@ -310,6 +317,7 @@ pub const Table = struct {
         const data = self.data;
         const list: usize = readU16(data, 8);
         const count = readU16(data, list);
+        const extension: u16 = if (self.kind == .gsub) 7 else 9;
         // Two passes: count subtables, then fill one shared array
         var total: usize = 0;
         for (0..count) |i| {
@@ -330,11 +338,11 @@ pub const Table = struct {
             used += sub_count;
             for (subs, 0..) |*s, k| {
                 var addr = lt + readU16(data, lt + 6 + k * 2);
-                if (lookup_type == 7) {
+                if (lookup_type == extension) {
                     // Extension: format 1, real type, 32-bit offset
                     lookup_type = readU16(data, addr + 2);
                     addr += readU32(data, addr + 4);
-                } else if (readU16(data, lt) == 7) {
+                } else if (readU16(data, lt) == extension) {
                     // Later subtables of an extension lookup
                     addr += readU32(data, addr + 4);
                 }
@@ -350,19 +358,19 @@ pub const Table = struct {
             };
             for (subs, digests) |addr, *dg| {
                 dg.* = .{};
-                dg.addCoverage(firstCoverage(data, lookup_type, addr));
+                dg.addCoverage(firstCoverage(data, self.kind, lookup_type, addr));
                 l.digest.add(dg.*);
             }
         }
         // Second-component digests of the ligature subtables
         var lig_subtables: usize = 0;
         for (self.lookups) |l| {
-            if (l.type == 4) lig_subtables += l.subtables.len;
+            if (self.kind == .gsub and l.type == 4) lig_subtables += l.subtables.len;
         }
         self.second_digest_storage = try allocator.alloc(Digest, lig_subtables);
         var lig_used: usize = 0;
         for (self.lookups) |*l| {
-            if (l.type != 4) continue;
+            if (self.kind != .gsub or l.type != 4) continue;
             const digests = self.second_digest_storage[lig_used..][0..l.subtables.len];
             lig_used += l.subtables.len;
             for (l.subtables, digests) |addr, *dg| dg.* = secondComponents(data, addr);
@@ -371,8 +379,9 @@ pub const Table = struct {
         // Separate pass: deinit frees every lookup's index, so all must be
         // initialized before one can fail
         for (self.lookups) |*l| {
-            if (l.subtables.len >= SubtableIndex.min_subtables and l.type != 8) {
-                l.index = try SubtableIndex.build(allocator, data, l.type, l.subtables);
+            // (GSUB reverse chaining, type 8, runs backwards without one)
+            if (l.subtables.len >= SubtableIndex.min_subtables and !(self.kind == .gsub and l.type == 8)) {
+                l.index = try SubtableIndex.build(allocator, data, self.kind, l.type, l.subtables);
             }
         }
     }
@@ -417,7 +426,7 @@ pub const Table = struct {
     }
 
     /// Sorted, deduplicated lookup indices of the enabled features.
-    fn collectLookups(self: *const Table, allocator: std.mem.Allocator, flags: FeatureFlags, out: *std.ArrayListUnmanaged(u16)) !void {
+    pub fn collectLookups(self: *const Table, allocator: std.mem.Allocator, flags: FeatureFlags, out: *std.ArrayListUnmanaged(u16)) !void {
         out.clearRetainingCapacity();
         try out.appendSlice(allocator, self.required_lookups);
         for (self.feature_lookups, flags.flags) |indices, on| {
@@ -479,8 +488,19 @@ fn secondComponents(data: []const u8, addr: usize) Digest {
 }
 
 /// Coverage of the first glyph a subtable applies to (for the digest).
-fn firstCoverage(data: []const u8, lookup_type: u16, addr: usize) CoverageTable {
+/// GPOS types 1-6 have it at offset 2 (a mark lookup's: the marks'); its
+/// context types 7 and 8 are GSUB's 5 and 6.
+fn firstCoverage(data: []const u8, kind: TableKind, gsub_type: u16, addr: usize) CoverageTable {
     const format = readU16(data, addr);
+    const lookup_type: u16 = switch (kind) {
+        .gsub => gsub_type,
+        .gpos => switch (gsub_type) {
+            1...6 => 1,
+            7 => 5,
+            8 => 6,
+            else => 0,
+        },
+    };
     return switch (lookup_type) {
         1, 2, 3, 4 => coverageAt(data, addr + readU16(data, addr + 2)),
         5 => switch (format) {
@@ -523,6 +543,10 @@ pub const Glyph = struct {
     /// lookup substituted it
     ignorable: Ignorable = .none,
     substituted: bool = false,
+    /// Produced by a multiple substitution into two or more glyphs
+    /// (HarfBuzz's MULTIPLIED glyph property): GPOS attaches marks to the
+    /// first of them only
+    multiplied: bool = false,
 };
 
 /// Default_Ignorable_Code_Point, as HarfBuzz classifies it. ZWJ and ZWNJ
@@ -608,10 +632,10 @@ pub const Shaper = struct {
         for (glyphs, 0..) |gid, i| {
             var props = props_unknown;
             if (table.gdef.glyph_class == null) {
-                // No GDEF classes: combining marks are marks (as HarfBuzz
-                // synthesizes them)
-                const is_mark = if (codepoints) |cps| unicode_compose.combiningClass(cps[i]) != 0 else false;
-                props = @intFromEnum(if (is_mark) GlyphClass.mark else GlyphClass.base);
+                // No GDEF classes: nonspacing marks (Mn) are marks, default
+                // ignorables never (as HarfBuzz synthesizes them)
+                const is_mark = if (codepoints) |cps| unicode_props.isNonspacingMark(cps[i]) and Ignorable.of(cps[i]) == .none else false;
+                props = @backingInt(if (is_mark) GlyphClass.mark else GlyphClass.base);
             }
             const ignorable: Ignorable = if (codepoints) |cps| (if (cps[i] < 0xAD) .none else Ignorable.of(cps[i])) else .none;
             any_ignorable = any_ignorable or ignorable != .none;
@@ -661,13 +685,13 @@ pub const Shaper = struct {
     }
 };
 
-const Context = struct {
+pub const Context = struct {
     table: *const Table,
     buf: *std.ArrayListUnmanaged(Glyph),
     max_len: usize,
     next_lig_id: u8 = 0,
 
-    fn data(self: *const Context) []const u8 {
+    pub fn data(self: *const Context) []const u8 {
         return self.table.data;
     }
 
@@ -697,14 +721,14 @@ const Context = struct {
         return applied;
     }
 
-    fn propsOf(self: *Context, i: usize) Props {
+    pub fn propsOf(self: *Context, i: usize) Props {
         const g = &self.buf.items[i];
         if (g.props == props_unknown) g.props = self.table.gdef.props(g.id);
         return g.props;
     }
 
-    fn classOf(self: *Context, i: usize) GlyphClass {
-        return @enumFromInt(@as(u8, @truncate(self.propsOf(i))));
+    pub fn classOf(self: *Context, i: usize) GlyphClass {
+        return @fromBackingInt(@intCast(@as(u8, @truncate(self.propsOf(i)))));
     }
 
     /// Components of a ligature formed here, else 1.
@@ -714,12 +738,12 @@ const Context = struct {
     }
 
     /// True if the lookup's flags make it ignore the glyph at i.
-    fn skips(self: *Context, lookup: *const Lookup, i: usize) bool {
+    pub fn skips(self: *Context, lookup: *const Lookup, i: usize) bool {
         const flag = lookup.flag;
         if (flag & (ignore_base_glyphs | ignore_ligatures | ignore_marks | use_mark_filtering_set | mark_attachment_type_mask) == 0) return false;
         const g = self.buf.items[i];
         const props = self.propsOf(i);
-        switch (@as(GlyphClass, @enumFromInt(@as(u8, @truncate(props))))) {
+        switch (@as(GlyphClass, @fromBackingInt(@intCast(@as(u8, @truncate(props)))))) {
             .base => return flag & ignore_base_glyphs != 0,
             .ligature => return flag & ignore_ligatures != 0,
             .mark => {
@@ -879,10 +903,11 @@ const Context = struct {
             var g = src;
             g.id = readU16(d, seq + 2 + k * 2);
             g.substituted = true;
+            g.multiplied = n >= 2;
             if (self.table.gdef.glyph_class != null) {
                 g.props = props_unknown;
             } else if (src_class == .ligature) {
-                g.props = @intFromEnum(GlyphClass.base);
+                g.props = @backingInt(GlyphClass.base);
             }
             // Components of the sequence, unless attached to a ligature
             if (src.lig_id == 0) g.lig_comp = @truncate(k);
@@ -956,11 +981,12 @@ const Context = struct {
         const cluster = items[i].cluster;
         for (items[i .. last + 1]) |*g| g.cluster = cluster;
         self.replace(i, lig_glyph);
+        items[i].multiplied = false;
         if (is_ligature) {
             items[i].lig_id = lig_id;
             items[i].lig_comp = 0;
             items[i].lig_comps = @intCast(@min(total, 255));
-            if (self.table.gdef.glyph_class == null) items[i].props = @intFromEnum(GlyphClass.ligature);
+            if (self.table.gdef.glyph_class == null) items[i].props = @backingInt(GlyphClass.ligature);
         }
         for (positions[1..], 1..) |p, k| {
             if (is_ligature) {
@@ -1058,12 +1084,33 @@ const Context = struct {
         return true;
     }
 
+    /// A context rule that matched: its input positions and the nested
+    /// lookups (SequenceLookupRecords) to apply at them.
+    pub const RuleMatch = struct {
+        positions: [max_context]usize,
+        count: usize,
+        records: usize,
+        record_count: usize,
+    };
+
     // Type 5
     fn applyContext(self: *Context, lookup: *const Lookup, li: u16, addr: usize, i: usize, depth: u8) ?usize {
+        var m = self.matchContextRule(lookup, addr, i) orelse return null;
+        return self.applyRecords(li, &m.positions, m.count, m.records, m.record_count, depth);
+    }
+
+    // Type 6
+    fn applyChainContext(self: *Context, lookup: *const Lookup, li: u16, addr: usize, i: usize, depth: u8) ?usize {
+        var m = self.matchChainRule(lookup, addr, i) orelse return null;
+        return self.applyRecords(li, &m.positions, m.count, m.records, m.record_count, depth);
+    }
+
+    /// The first rule of a context subtable (GSUB 5, GPOS 7) matching at i.
+    pub fn matchContextRule(self: *Context, lookup: *const Lookup, addr: usize, i: usize) ?RuleMatch {
         const d = self.data();
         const format = readU16(d, addr);
         const gid = self.buf.items[i].id;
-        var positions: [max_context]usize = undefined;
+        var m: RuleMatch = .{ .positions = undefined, .count = 0, .records = 0, .record_count = 0 };
         switch (format) {
             1, 2 => {
                 const ci = coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(gid) orelse return null;
@@ -1078,30 +1125,35 @@ const Context = struct {
                     const rule = set + readU16(d, set + 2 + r * 2);
                     const glyph_count = readU16(d, rule);
                     const record_count = readU16(d, rule + 2);
-                    const m: Matcher = .{ .kind = if (format == 2) .class else .glyph, .values = rule + 4, .class_def = class_def };
-                    if (!self.matchInput(lookup, m, glyph_count, false, i, &positions)) continue;
-                    const records = rule + 4 + (@as(usize, glyph_count) - 1) * 2;
-                    return self.applyRecords(li, &positions, glyph_count, records, record_count, depth);
+                    const matcher: Matcher = .{ .kind = if (format == 2) .class else .glyph, .values = rule + 4, .class_def = class_def };
+                    if (!self.matchInput(lookup, matcher, glyph_count, false, i, &m.positions)) continue;
+                    m.count = glyph_count;
+                    m.records = rule + 4 + (@as(usize, glyph_count) - 1) * 2;
+                    m.record_count = record_count;
+                    return m;
                 }
                 return null;
             },
             3 => {
                 const glyph_count = readU16(d, addr + 2);
-                const record_count = readU16(d, addr + 4);
-                const m: Matcher = .{ .kind = .coverage, .values = addr + 6, .base = addr };
-                if (!self.matchInput(lookup, m, glyph_count, true, i, &positions)) return null;
-                return self.applyRecords(li, &positions, glyph_count, addr + 6 + @as(usize, glyph_count) * 2, record_count, depth);
+                const matcher: Matcher = .{ .kind = .coverage, .values = addr + 6, .base = addr };
+                if (!self.matchInput(lookup, matcher, glyph_count, true, i, &m.positions)) return null;
+                m.count = glyph_count;
+                m.records = addr + 6 + @as(usize, glyph_count) * 2;
+                m.record_count = readU16(d, addr + 4);
+                return m;
             },
             else => return null,
         }
     }
 
-    // Type 6
-    fn applyChainContext(self: *Context, lookup: *const Lookup, li: u16, addr: usize, i: usize, depth: u8) ?usize {
+    /// The first rule of a chained context subtable (GSUB 6, GPOS 8)
+    /// matching at i.
+    pub fn matchChainRule(self: *Context, lookup: *const Lookup, addr: usize, i: usize) ?RuleMatch {
         const d = self.data();
         const format = readU16(d, addr);
         const gid = self.buf.items[i].id;
-        var positions: [max_context]usize = undefined;
+        var m: RuleMatch = .{ .positions = undefined, .count = 0, .records = 0, .record_count = 0 };
         switch (format) {
             1, 2 => {
                 const ci = coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(gid) orelse return null;
@@ -1126,10 +1178,13 @@ const Context = struct {
                     const ahead_count = readU16(d, ahead_at);
                     const records_at = ahead_at + 2 + @as(usize, ahead_count) * 2;
                     const input: Matcher = .{ .kind = kind, .values = input_at + 2, .class_def = input_def };
-                    if (!self.matchInput(lookup, input, input_count, false, i, &positions)) continue;
+                    if (!self.matchInput(lookup, input, input_count, false, i, &m.positions)) continue;
                     if (!self.matchContext(lookup, .{ .kind = kind, .values = rule + 2, .class_def = back_def }, back_count, i, .back)) continue;
-                    if (!self.matchContext(lookup, .{ .kind = kind, .values = ahead_at + 2, .class_def = ahead_def }, ahead_count, positions[input_count - 1], .ahead)) continue;
-                    return self.applyRecords(li, &positions, input_count, records_at + 2, readU16(d, records_at), depth);
+                    if (!self.matchContext(lookup, .{ .kind = kind, .values = ahead_at + 2, .class_def = ahead_def }, ahead_count, m.positions[input_count - 1], .ahead)) continue;
+                    m.count = input_count;
+                    m.records = records_at + 2;
+                    m.record_count = readU16(d, records_at);
+                    return m;
                 }
                 return null;
             },
@@ -1141,10 +1196,13 @@ const Context = struct {
                 const ahead_count = readU16(d, ahead_at);
                 const records_at = ahead_at + 2 + @as(usize, ahead_count) * 2;
                 const input: Matcher = .{ .kind = .coverage, .values = input_at + 2, .base = addr };
-                if (!self.matchInput(lookup, input, input_count, true, i, &positions)) return null;
+                if (!self.matchInput(lookup, input, input_count, true, i, &m.positions)) return null;
                 if (!self.matchContext(lookup, .{ .kind = .coverage, .values = addr + 4, .base = addr }, back_count, i, .back)) return null;
-                if (!self.matchContext(lookup, .{ .kind = .coverage, .values = ahead_at + 2, .base = addr }, ahead_count, positions[input_count - 1], .ahead)) return null;
-                return self.applyRecords(li, &positions, input_count, records_at + 2, readU16(d, records_at), depth);
+                if (!self.matchContext(lookup, .{ .kind = .coverage, .values = ahead_at + 2, .base = addr }, ahead_count, m.positions[input_count - 1], .ahead)) return null;
+                m.count = input_count;
+                m.records = records_at + 2;
+                m.record_count = readU16(d, records_at);
+                return m;
             },
             else => return null,
         }
@@ -1271,7 +1329,7 @@ test "subtable index lists exactly the subtables covering each glyph" {
     put(&data, 28, 2);
     put(&data, 30, 7);
     put(&data, 32, 9);
-    const index = (try SubtableIndex.build(std.testing.allocator, &data, 1, &.{ 0, 20 })).?;
+    const index = (try SubtableIndex.build(std.testing.allocator, &data, .gsub, 1, &.{ 0, 20 })).?;
     defer index.deinit(std.testing.allocator);
     try std.testing.expectEqualSlices(u16, &.{0}, index.subtablesFor(5));
     try std.testing.expectEqualSlices(u16, &.{ 0, 1 }, index.subtablesFor(7));
