@@ -37,6 +37,15 @@ pub const Decoded = struct {
     }
 };
 
+/// How to normalize: as HarfBuzz's default shaper, or its Indic shaper
+/// (vowel constraints; decompose whatever the font has the parts of, not
+/// U+0931; never compose onto a mark).
+pub const Mode = enum { default, indic };
+
+pub fn decode(allocator: Allocator, font: *const ttf.Font, text: []const u8, out: *Decoded, track_offsets: bool) !void {
+    return decodeAs(allocator, font, text, out, track_offsets, .default);
+}
+
 /// Decode UTF-8 `text` into code points and their nominal glyphs in
 /// `font`, composing a base + combining marks into the precomposed
 /// character when the font has a glyph for it (the normalization HarfBuzz
@@ -46,7 +55,7 @@ pub const Decoded = struct {
 /// HarfBuzz's normalization does. Invalid
 /// sequences are skipped; a truncated one ends the text. With
 /// `track_offsets`, `out.offsets` gets each code point's byte offset.
-pub fn decode(allocator: Allocator, font: *const ttf.Font, text: []const u8, out: *Decoded, track_offsets: bool) !void {
+pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, out: *Decoded, track_offsets: bool, mode: Mode) !void {
     out.codepoints.clearRetainingCapacity();
     out.composed.clearRetainingCapacity();
     out.glyphs.clearRetainingCapacity();
@@ -87,15 +96,21 @@ pub fn decode(allocator: Allocator, font: *const ttf.Font, text: []const u8, out
         i += len;
     }
 
-    if (may_decompose and try decomposeMissing(allocator, font, out, track_offsets)) may_compose = true;
+    if (mode == .indic and may_decompose) try vowelConstraints(allocator, out, track_offsets);
+    if (may_decompose and try decomposeMissing(allocator, font, out, track_offsets, mode)) may_compose = true;
 
     if (may_compose) {
         const ctx = struct {
             font: *const ttf.Font,
+            indic: bool,
             pub fn hasGlyph(c: @This(), cp: u21) bool {
                 return (c.font.getGlyphId(cp) orelse 0) != 0;
             }
-        }{ .font = font };
+            /// HarfBuzz's compose_indic: split matras are not recomposed
+            pub fn allowStarter(c: @This(), cp: u21) bool {
+                return !c.indic or !unicode_props.isMark(cp);
+            }
+        }{ .font = font, .indic = mode == .indic };
         // Marks in canonical order first, as HarfBuzz's normalization
         unicode_compose.reorderMarks(out.codepoints.items, if (offsets) |o| o.items else null);
         out.composed.items.len = out.codepoints.items.len;
@@ -150,15 +165,51 @@ fn decomposeInto(font: *const ttf.Font, cp: u21, buf: []u21, n: *usize) bool {
     return true;
 }
 
-/// Decomposes the characters the font lacks; true if any was.
-fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, track_offsets: bool) !bool {
+/// HarfBuzz's decompose without short-circuit (the Indic shaper): the
+/// deepest decomposition whose parts the font has, even when it has the
+/// character itself; U+0931 is never decomposed (decompose_indic).
+fn decomposeAll(font: *const ttf.Font, cp: u21, buf: []u21, n: *usize) bool {
+    if (cp == 0x0931) return false;
+    const parts = unicode_props.decomposeOnce(cp) orelse return false;
+    const a = parts[0];
+    const b = parts[1];
+    if (b != 0 and !hasGlyph(font, b)) return false;
+    if (n.* + 2 > buf.len) return false;
+    const start = n.*;
+    if (!decomposeAll(font, a, buf, n)) {
+        n.* = start;
+        if (!hasGlyph(font, a)) return false;
+        buf[n.*] = a;
+        n.* += 1;
+    }
+    if (b != 0) {
+        if (n.* >= buf.len) {
+            n.* = start;
+            return false;
+        }
+        buf[n.*] = b;
+        n.* += 1;
+    }
+    return true;
+}
+
+fn tryDecompose(font: *const ttf.Font, cp: u21, mode: Mode, buf: []u21, n: *usize) bool {
+    if (cp < 0xC0) return false;
+    return switch (mode) {
+        .default => !hasGlyph(font, cp) and decomposeInto(font, cp, buf, n),
+        .indic => decomposeAll(font, cp, buf, n),
+    };
+}
+
+/// Decomposes the characters the font lacks (in Indic mode, all it has
+/// the parts of); true if any was.
+fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, track_offsets: bool, mode: Mode) !bool {
     const cps = out.codepoints.items;
     var first: ?usize = null;
     var buf: [8]u21 = undefined;
     for (cps, 0..) |cp, i| {
-        if (cp < 0xC0 or hasGlyph(font, cp)) continue;
         var n: usize = 0;
-        if (decomposeInto(font, cp, &buf, &n)) {
+        if (tryDecompose(font, cp, mode, &buf, &n)) {
             first = i;
             break;
         }
@@ -174,7 +225,7 @@ fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, 
     if (track_offsets) try new_offsets.appendSlice(allocator, out.offsets.items[0..from]);
     for (cps[from..], from..) |cp, i| {
         var n: usize = 0;
-        const parts: []const u21 = if (cp >= 0xC0 and !hasGlyph(font, cp) and decomposeInto(font, cp, &buf, &n)) buf[0..n] else &.{cp};
+        const parts: []const u21 = if (tryDecompose(font, cp, mode, &buf, &n)) buf[0..n] else &.{cp};
         try new_cps.appendSlice(allocator, parts);
         if (track_offsets) try new_offsets.appendNTimes(allocator, out.offsets.items[i], parts.len);
     }
@@ -188,6 +239,78 @@ fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, 
     try out.composed.ensureTotalCapacity(allocator, out.codepoints.items.len);
     try out.glyphs.ensureTotalCapacity(allocator, out.codepoints.items.len);
     return true;
+}
+
+/// HarfBuzz's Devanagari vowel constraints (hb-ot-shaper-vowel-
+/// constraints.cc): a dotted circle goes before a vowel sign that would
+/// turn an independent vowel into another one (A + AA reads as AA), so the
+/// sequence shows as written. It takes the vowel sign's offset.
+fn vowelConstraints(allocator: Allocator, out: *Decoded, track_offsets: bool) !void {
+    const cps = out.codepoints.items;
+    const n = cps.len;
+    const matches = struct {
+        fn f(c: []const u21, idx: usize) bool {
+            const next = c[idx + 1];
+            return switch (c[idx]) {
+                0x0905 => switch (next) {
+                    0x093A, 0x093B, 0x093E, 0x0945, 0x0946, 0x0949, 0x094A, 0x094B, 0x094C, 0x094F, 0x0956, 0x0957 => true,
+                    else => false,
+                },
+                0x0906 => switch (next) {
+                    0x093A, 0x0945, 0x0946, 0x0947, 0x0948 => true,
+                    else => false,
+                },
+                0x0909 => next == 0x0941,
+                0x090F => next == 0x0945 or next == 0x0946 or next == 0x0947,
+                else => false,
+            };
+        }
+    }.f;
+    var any = false;
+    for (0..n -| 1) |i| {
+        if (matches(cps, i) or (cps[i] == 0x0930 and cps[i + 1] == 0x094D and i + 2 < n and cps[i + 2] == 0x0907)) {
+            any = true;
+            break;
+        }
+    }
+    if (!any) return;
+
+    var new_cps: std.ArrayListUnmanaged(u21) = .empty;
+    errdefer new_cps.deinit(allocator);
+    var new_offsets: std.ArrayListUnmanaged(u32) = .empty;
+    errdefer new_offsets.deinit(allocator);
+    const offs = out.offsets.items;
+    const push = struct {
+        fn f(a: Allocator, c: *std.ArrayListUnmanaged(u21), o: *std.ArrayListUnmanaged(u32), track: bool, cp: u21, off: u32) !void {
+            try c.append(a, cp);
+            if (track) try o.append(a, off);
+        }
+    }.f;
+    var idx: usize = 0;
+    while (idx + 1 < n) {
+        var matched = matches(cps, idx);
+        if (cps[idx] == 0x0930 and cps[idx + 1] == 0x094D and idx + 2 < n and cps[idx + 2] == 0x0907) {
+            try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+            idx += 1;
+            matched = true;
+        }
+        try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+        idx += 1;
+        if (matched) {
+            try push(allocator, &new_cps, &new_offsets, track_offsets, 0x25CC, if (track_offsets) offs[idx] else 0);
+            try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+            idx += 1;
+        }
+    }
+    while (idx < n) : (idx += 1) try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+    out.codepoints.deinit(allocator);
+    out.codepoints = new_cps;
+    if (track_offsets) {
+        out.offsets.deinit(allocator);
+        out.offsets = new_offsets;
+    }
+    try out.composed.ensureTotalCapacity(allocator, out.codepoints.items.len);
+    try out.glyphs.ensureTotalCapacity(allocator, out.codepoints.items.len);
 }
 
 /// Glyphs for characters the font still lacks: a space takes the space

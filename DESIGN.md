@@ -1436,6 +1436,41 @@ marks are only zeroed (HarfBuzz would read the charstrings) - a gap.
 Checked with Courier Prime, Charter (marks it lacks), Noto Emoji and
 GsubTest (ligature components) in harfbuzz_positions.txt.
 
+### Indic shaper (session #35, `src/indic.zig`)
+A port of HarfBuzz 12.3.0's hb-ot-shaper-indic (source in .tools/ref, not
+committed), for Devanagari:
+- Selection (shaping.zig): the text's first character of a real script
+  (`unicode_props.runScript`, UCD Scripts.txt) picks the script; Devanagari
+  uses the Indic shaper when GSUB has dev2 or deva (deva = old spec), else
+  the default shaper with DFLT/dflt/latn. dev3 (USE in HarfBuzz) is not
+  tried. GPOS takes the same script's language system; no mark zeroing, no
+  fallback positioning (Indic: ZERO_WIDTH_MARKS_NONE).
+- Normalization (`decode.Mode.indic`): vowel constraints insert U+25CC
+  (offset of the next character); decompose whatever the font has the
+  parts of, not U+0931; never compose onto a mark.
+- Categories/positions: `src/indic_data.zig` from
+  `scripts/gen_indic_table.py` (HarfBuzz's gen-indic-table.py rules;
+  verified equal to its generated table). Syllables: the Ragel grammar as
+  set-of-positions combinators, longest match, earlier rule on ties.
+- GSUB engine: `Glyph.mask` (bit 0 global, Indic bits rphf pref blwf abvf
+  half pstf init), `syllable`, `ligated`, `inserted`; `LookupParams` per
+  lookup (mask, auto ZWJ/ZWNJ, per syllable) as HarfBuzz's map; staged
+  `beginClustered`/`applyStage`/`finish`; `Table.wouldSubstitute`;
+  `LangSysMap` per script (`default`, `devanagari`).
+- Stages: ccmp+locl (per syllable) | initial reordering | nukt akhn rphf
+  rkrf pref blwf abvf half pstf vatu cjct (one each) | final reordering |
+  init pres abvs blws psts haln + common/horizontal features (no liga) |
+  clear syllables | other enabled features.
+- Clusters: seeded per grapheme before GSUB (HarfBuzz's form_clusters;
+  an inserted vowel-constraint circle takes the next cluster), merged with
+  HarfBuzz's merge_clusters semantics (extension over equal neighbors) in
+  ligatures, deletions and reordering; output = byte offset of the cluster.
+  Mark reordering merges the offsets it moves across.
+- Checked: harfbuzz_positions.txt has Kohinoor (faces 4, 0) and Sangam MN
+  (HarfBuzz without its morx) with a corpus + 500 seeded random strings;
+  locally also old spec (Sangam with dev2 removed) - 0 differences. System
+  fonts are skipped where not installed (CI).
+
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,
 and **all** OpenType lookups eagerly (`parseGSUB` builds the whole

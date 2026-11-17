@@ -27,8 +27,15 @@
   base by glyph extents (HarfBuzz's fallback positioning, e.g. Courier
   Prime). Glyphs, clusters and positions are checked against
   HarfBuzz (test/shaping/harfbuzz_positions.txt, with a synthetic font
-  holding every lookup type and flag). No script-specific shaping yet (Indic,
-  Arabic, bidi). CLI: `shape-text <font>` (HarfBuzz's serialization),
+  holding every lookup type and flag). Devanagari is shaped by a port of
+  HarfBuzz's Indic shaper: syllables, reph, half and below forms, pre-base
+  matras, nukta forms, joiners, dotted circles for broken clusters, the
+  vowel constraints and Indic normalization, with the font's dev2 (else
+  deva, old-spec) features in their stages; checked against HarfBuzz with
+  Kohinoor Devanagari and Devanagari Sangam MN (thousands of texts). The
+  first character of a script picks the script, so mixed-script text is
+  shaped in runs. Not yet: other Indic scripts, Arabic joining, bidi, AAT
+  `morx` tables. CLI: `shape-text <font>` (HarfBuzz's serialization),
   `glyphs <out.pdf> <font>`.
 - **SVG gradients**: `<linearGradient>` and `<radialGradient>` fill and stroke
   shapes, paths and text through `url(#id)`, with an optional fallback color

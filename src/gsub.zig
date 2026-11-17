@@ -272,11 +272,10 @@ pub const Table = struct {
     subtable_storage: []u32,
     digest_storage: []Digest,
     second_digest_storage: []Digest,
-    /// Lookup indices per feature (FeatureFlags index), for the selected
-    /// script / language system
-    feature_lookups: [FeatureFlags.num_features][]const u16,
-    /// The language system's required feature, applied always
-    required_lookups: []const u16,
+    /// Features of the default script (DFLT, else dflt, else latn)
+    default: LangSysMap = .{},
+    /// Features for Devanagari text (dev2, else deva, else the default's)
+    devanagari: LangSysMap = .{},
     lookup_index_storage: []u16,
 
     pub fn parse(allocator: std.mem.Allocator, data: []const u8, gdef_data: ?[]const u8, kind: TableKind) !Table {
@@ -288,8 +287,6 @@ pub const Table = struct {
             .subtable_storage = &.{},
             .digest_storage = &.{},
             .second_digest_storage = &.{},
-            .feature_lookups = @splat(&.{}),
-            .required_lookups = &.{},
             .lookup_index_storage = &.{},
         };
         errdefer t.deinit(allocator);
@@ -389,13 +386,42 @@ pub const Table = struct {
     fn parseFeatures(self: *Table, allocator: std.mem.Allocator) !void {
         const data = self.data;
         const script_list: usize = readU16(data, 4);
+        const default_tags = [_]u32{ tag("DFLT"), tag("dflt"), tag("latn") };
+        const deva_tags = [_]u32{ tag("dev2"), tag("deva") } ++ default_tags;
+        const default_script = selectScript(data, script_list, &default_tags);
+        const deva_script = selectScript(data, script_list, &deva_tags);
+
+        const default_ls = if (default_script) |sc| langSysOf(data, sc.offset) else null;
+        const deva_ls = if (deva_script) |sc| langSysOf(data, sc.offset) else null;
+        const shared = default_ls != null and deva_ls != null and default_ls.? == deva_ls.?;
+        var total: usize = 0;
+        if (default_ls) |ls| total += self.langSysLookupCount(ls);
+        if (deva_ls) |ls| {
+            if (!shared) total += self.langSysLookupCount(ls);
+        }
+        self.lookup_index_storage = try allocator.alloc(u16, total);
+        var used: usize = 0;
+        if (default_ls) |ls| {
+            self.default.script = default_script.?.tag;
+            used += self.fillLangSys(ls, &self.default, self.lookup_index_storage[used..]);
+        }
+        if (deva_ls) |ls| {
+            if (shared) {
+                self.devanagari = self.default;
+            } else {
+                used += self.fillLangSys(ls, &self.devanagari, self.lookup_index_storage[used..]);
+            }
+            self.devanagari.script = deva_script.?.tag;
+        }
+    }
+
+    /// Lookup indices the features of the language system at `langsys` use.
+    fn langSysLookupCount(self: *const Table, langsys: usize) usize {
+        const data = self.data;
         const feature_list: usize = readU16(data, 6);
-        const langsys = selectLangSys(data, script_list) orelse return;
         const feature_count = readU16(data, feature_list);
         const index_count = readU16(data, langsys + 4);
         const required = readU16(data, langsys + 2);
-
-        // Total lookup indices of the features this language system uses
         var total: usize = 0;
         for (0..@as(usize, index_count) + 1) |k| {
             const fi = if (k == index_count) required else readU16(data, langsys + 6 + k * 2);
@@ -403,7 +429,17 @@ pub const Table = struct {
             const ft = feature_list + readU16(data, feature_list + 2 + @as(usize, fi) * 6 + 4);
             total += readU16(data, ft + 2);
         }
-        self.lookup_index_storage = try allocator.alloc(u16, total);
+        return total;
+    }
+
+    /// Fill `map` from the language system at `langsys`, its lookup
+    /// indices into `storage`; returns how many it used.
+    fn fillLangSys(self: *const Table, langsys: usize, map: *LangSysMap, storage: []u16) usize {
+        const data = self.data;
+        const feature_list: usize = readU16(data, 6);
+        const feature_count = readU16(data, feature_list);
+        const index_count = readU16(data, langsys + 4);
+        const required = readU16(data, langsys + 2);
         var used: usize = 0;
         for (0..@as(usize, index_count) + 1) |k| {
             const is_required = k == index_count;
@@ -412,24 +448,168 @@ pub const Table = struct {
             const record = feature_list + 2 + @as(usize, fi) * 6;
             const ft = feature_list + readU16(data, record + 4);
             const n = readU16(data, ft + 2);
-            const indices = self.lookup_index_storage[used..][0..n];
+            const indices = storage[used..][0..n];
             used += n;
             for (indices, 0..) |*li, j| li.* = readU16(data, ft + 4 + j * 2);
             if (is_required) {
-                self.required_lookups = indices;
+                map.required_lookups = indices;
             } else if (Feature.fromTag(readU32(data, record))) |feature| {
-                const slot = &self.feature_lookups[FeatureFlags.featureIndex(feature)];
+                const slot = &map.feature_lookups[FeatureFlags.featureIndex(feature)];
                 // A feature listed twice (rare): keep the first
                 if (slot.len == 0) slot.* = indices;
             }
         }
+        return used;
+    }
+
+    /// HarfBuzz's hb_ot_layout_lookup_would_substitute over `lookups`:
+    /// would one of them substitute exactly this glyph sequence?
+    /// `zero_context` refuses chain rules with backtrack or lookahead.
+    pub fn wouldSubstitute(self: *const Table, lookups: []const LookupParams, glyphs: []const u16, zero_context: bool) bool {
+        for (lookups) |lp| {
+            if (self.wouldApply(lp.index, glyphs, zero_context)) return true;
+        }
+        return false;
+    }
+
+    fn wouldApply(self: *const Table, li: u16, glyphs: []const u16, zero_context: bool) bool {
+        if (glyphs.len == 0 or li >= self.lookups.len) return false;
+        const lookup = &self.lookups[li];
+        if (!lookup.digest.mayHave(glyphs[0])) return false;
+        const d = self.data;
+        for (lookup.subtables) |addr| {
+            const format = readU16(d, addr);
+            const covered = coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(glyphs[0]);
+            const applies = switch (lookup.type) {
+                1, 2, 3, 8 => glyphs.len == 1 and covered != null,
+                4 => blk: {
+                    const ci = covered orelse break :blk false;
+                    if (format != 1 or ci >= readU16(d, addr + 4)) break :blk false;
+                    const set = addr + readU16(d, addr + 6 + @as(usize, ci) * 2);
+                    for (0..readU16(d, set)) |k| {
+                        const lig = set + readU16(d, set + 2 + k * 2);
+                        if (readU16(d, lig + 2) != glyphs.len) continue;
+                        for (glyphs[1..], 0..) |g, j| {
+                            if (readU16(d, lig + 4 + j * 2) != g) break;
+                        } else break :blk true;
+                    }
+                    break :blk false;
+                },
+                5 => self.contextWouldApply(addr, glyphs),
+                6 => self.chainWouldApply(addr, glyphs, zero_context),
+                else => false,
+            };
+            if (applies) return true;
+        }
+        return false;
+    }
+
+    /// Does input value k (a glyph, class or coverage offset from `base`)
+    /// accept `gid`?
+    fn inputMatches(self: *const Table, kind: enum { glyph, class, coverage }, value: u16, class_def: ClassDef, base: usize, gid: u16) bool {
+        return switch (kind) {
+            .glyph => gid == value,
+            .class => class_def.getClass(gid) == value,
+            .coverage => coverageAt(self.data, base + value).getCoverageIndex(gid) != null,
+        };
+    }
+
+    fn contextWouldApply(self: *const Table, addr: usize, glyphs: []const u16) bool {
+        const d = self.data;
+        switch (readU16(d, addr)) {
+            1, 2 => |format| {
+                const class_def = if (format == 2) classDefAt(d, addr + readU16(d, addr + 4)) else ClassDef{ .format = 0, .data = &.{} };
+                const sets_at = if (format == 2) addr + 6 else addr + 4;
+                const set_index: usize = if (format == 2)
+                    class_def.getClass(glyphs[0])
+                else
+                    coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(glyphs[0]) orelse return false;
+                if (set_index >= readU16(d, sets_at)) return false;
+                const set_off = readU16(d, sets_at + 2 + set_index * 2);
+                if (set_off == 0) return false;
+                const set = addr + set_off;
+                for (0..readU16(d, set)) |r| {
+                    const rule = set + readU16(d, set + 2 + r * 2);
+                    if (readU16(d, rule) != glyphs.len) continue;
+                    for (glyphs[1..], 0..) |g, k| {
+                        if (!self.inputMatches(if (format == 2) .class else .glyph, readU16(d, rule + 4 + k * 2), class_def, 0, g)) break;
+                    } else return true;
+                }
+                return false;
+            },
+            3 => {
+                if (readU16(d, addr + 2) != glyphs.len) return false;
+                for (glyphs[1..], 1..) |g, k| {
+                    if (!self.inputMatches(.coverage, readU16(d, addr + 6 + k * 2), .{ .format = 0, .data = &.{} }, addr, g)) return false;
+                }
+                return true;
+            },
+            else => return false,
+        }
+    }
+
+    fn chainWouldApply(self: *const Table, addr: usize, glyphs: []const u16, zero_context: bool) bool {
+        const d = self.data;
+        switch (readU16(d, addr)) {
+            1, 2 => |format| {
+                const input_def = if (format == 2) classDefAt(d, addr + readU16(d, addr + 6)) else ClassDef{ .format = 0, .data = &.{} };
+                const sets_at = if (format == 2) addr + 10 else addr + 4;
+                const set_index: usize = if (format == 2)
+                    input_def.getClass(glyphs[0])
+                else
+                    coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(glyphs[0]) orelse return false;
+                if (set_index >= readU16(d, sets_at)) return false;
+                const set_off = readU16(d, sets_at + 2 + set_index * 2);
+                if (set_off == 0) return false;
+                const set = addr + set_off;
+                for (0..readU16(d, set)) |r| {
+                    const rule = set + readU16(d, set + 2 + r * 2);
+                    const back_count = readU16(d, rule);
+                    const input_at = rule + 2 + @as(usize, back_count) * 2;
+                    const input_count = readU16(d, input_at);
+                    if (input_count != glyphs.len or input_count == 0) continue;
+                    const ahead_count = readU16(d, input_at + 2 + (@as(usize, input_count) - 1) * 2);
+                    if (zero_context and (back_count != 0 or ahead_count != 0)) continue;
+                    for (glyphs[1..], 0..) |g, k| {
+                        if (!self.inputMatches(if (format == 2) .class else .glyph, readU16(d, input_at + 2 + k * 2), input_def, 0, g)) break;
+                    } else return true;
+                }
+                return false;
+            },
+            3 => {
+                const back_count = readU16(d, addr + 2);
+                const input_at = addr + 4 + @as(usize, back_count) * 2;
+                const input_count = readU16(d, input_at);
+                const ahead_count = readU16(d, input_at + 2 + @as(usize, input_count) * 2);
+                if (zero_context and (back_count != 0 or ahead_count != 0)) return false;
+                if (input_count != glyphs.len) return false;
+                for (glyphs[1..], 1..) |g, k| {
+                    if (!self.inputMatches(.coverage, readU16(d, input_at + 2 + k * 2), .{ .format = 0, .data = &.{} }, addr, g)) return false;
+                }
+                return true;
+            },
+            else => return false,
+        }
+    }
+
+    /// The language system map for a script choice.
+    pub fn langSys(self: *const Table, script: Script) *const LangSysMap {
+        return switch (script) {
+            .default => &self.default,
+            .devanagari => &self.devanagari,
+        };
     }
 
     /// Sorted, deduplicated lookup indices of the enabled features.
     pub fn collectLookups(self: *const Table, allocator: std.mem.Allocator, flags: FeatureFlags, out: *std.ArrayListUnmanaged(u16)) !void {
+        return self.collectLookupsFor(allocator, &self.default, flags, out);
+    }
+
+    /// collectLookups for the language system of another script.
+    pub fn collectLookupsFor(self: *const Table, allocator: std.mem.Allocator, map: *const LangSysMap, flags: FeatureFlags, out: *std.ArrayListUnmanaged(u16)) !void {
         out.clearRetainingCapacity();
-        try out.appendSlice(allocator, self.required_lookups);
-        for (self.feature_lookups, flags.flags) |indices, on| {
+        try out.appendSlice(allocator, map.required_lookups);
+        for (map.feature_lookups, flags.flags) |indices, on| {
             if (on) try out.appendSlice(allocator, indices);
         }
         std.mem.sort(u16, out.items, {}, std.sort.asc(u16));
@@ -445,24 +625,42 @@ pub const Table = struct {
 
     /// True if the feature has lookups in this font.
     pub fn hasFeature(self: *const Table, feature: Feature) bool {
-        return self.feature_lookups[FeatureFlags.featureIndex(feature)].len > 0;
+        return self.default.feature_lookups[FeatureFlags.featureIndex(feature)].len > 0;
     }
 };
 
-/// LangSys table offset: the DFLT script, else latn; its default language
-/// system, else the first one.
-fn selectLangSys(data: []const u8, script_list: usize) ?usize {
+/// Which script's language system shaping uses.
+pub const Script = enum { default, devanagari };
+
+/// Lookup indices per feature for one script's language system.
+pub const LangSysMap = struct {
+    /// The script tag found (0: the table has none of those tried)
+    script: u32 = 0,
+    /// Lookup indices per feature (FeatureFlags index)
+    feature_lookups: [FeatureFlags.num_features][]const u16 = @splat(&.{}),
+    /// The language system's required feature, applied always
+    required_lookups: []const u16 = &.{},
+};
+
+pub fn tag(comptime s: *const [4]u8) u32 {
+    return std.mem.readInt(u32, s, .big);
+}
+
+/// The first of `tags` the ScriptList has (HarfBuzz's script selection).
+fn selectScript(data: []const u8, script_list: usize, tags: []const u32) ?struct { offset: usize, tag: u32 } {
     const count = readU16(data, script_list);
-    var dflt: ?usize = null;
-    var latn: ?usize = null;
-    for (0..count) |i| {
-        const rec = script_list + 2 + i * 6;
-        if (rec + 6 > data.len) break;
-        const tag = readU32(data, rec);
-        const off = script_list + readU16(data, rec + 4);
-        if (tag == 0x44464C54) dflt = off else if (tag == 0x6C61746E) latn = off;
+    for (tags) |want| {
+        for (0..count) |i| {
+            const rec = script_list + 2 + i * 6;
+            if (rec + 6 > data.len) break;
+            if (readU32(data, rec) == want) return .{ .offset = script_list + readU16(data, rec + 4), .tag = want };
+        }
     }
-    const script = dflt orelse latn orelse return null;
+    return null;
+}
+
+/// A script's default language system, else its first one.
+fn langSysOf(data: []const u8, script: usize) ?usize {
     const default_off = readU16(data, script);
     if (default_off != 0) return script + default_off;
     if (readU16(data, script + 2) == 0) return null;
@@ -547,6 +745,67 @@ pub const Glyph = struct {
     /// (HarfBuzz's MULTIPLIED glyph property): GPOS attaches marks to the
     /// first of them only
     multiplied: bool = false,
+    /// A ligature substitution produced it (HarfBuzz's LIGATED)
+    ligated: bool = false,
+    /// Feature mask: lookups apply where theirs intersects it. Bit 0 is the
+    /// global features'; the Indic shaper sets the others (indic.zig).
+    mask: u8 = mask_global,
+    /// Syllable (serial << 4 | type), for per-syllable lookups; 0 = none
+    syllable: u8 = 0,
+    /// Indic category and position (indic.zig), carried through
+    /// substitutions as HarfBuzz carries its shaper variables
+    indic_category: u8 = 0,
+    indic_position: u8 = 0,
+    /// Inserted by the shaper (a dotted circle), no character of its own
+    inserted: bool = false,
+};
+
+/// HarfBuzz's merge_clusters: the range takes its smallest cluster,
+/// extended over the neighbors that share an end's cluster value.
+pub fn mergeClusters(items: []Glyph, start_in: usize, end_in: usize) void {
+    var start = start_in;
+    var end = end_in;
+    if (end - start < 2) return;
+    var cluster = items[start].cluster;
+    for (items[start + 1 .. end]) |g| cluster = @min(cluster, g.cluster);
+    if (cluster != items[end - 1].cluster) {
+        while (end < items.len and items[end - 1].cluster == items[end].cluster) end += 1;
+    }
+    if (cluster != items[start].cluster) {
+        while (start > 0 and items[start - 1].cluster == items[start].cluster) start -= 1;
+    }
+    for (items[start..end]) |*g| g.cluster = cluster;
+}
+
+/// HarfBuzz's delete_glyph, before glyph i is removed: its cluster
+/// survives in a neighbor that shares it, else merges backward if smaller,
+/// else (at the start) into the next glyph.
+fn deleteGlyph(items: []Glyph, i: usize) void {
+    const cluster = items[i].cluster;
+    if ((i + 1 < items.len and cluster == items[i + 1].cluster) or (i > 0 and cluster == items[i - 1].cluster)) return;
+    if (i > 0) {
+        if (cluster < items[i - 1].cluster) {
+            const old = items[i - 1].cluster;
+            var k = i;
+            while (k > 0 and items[k - 1].cluster == old) : (k -= 1) items[k - 1].cluster = cluster;
+        }
+        return;
+    }
+    if (i + 1 < items.len) mergeClusters(items, i, i + 2);
+}
+
+/// Glyph.mask bit of the global (always applied) features.
+pub const mask_global: u8 = 1;
+
+/// How a lookup applies, from the feature(s) it serves (HarfBuzz's
+/// hb_ot_map_t::lookup_map_t): to glyphs whose mask intersects `mask`;
+/// ZWJ/ZWNJ skipped automatically or not; within one syllable or not.
+pub const LookupParams = struct {
+    index: u16,
+    mask: u8 = mask_global,
+    auto_zwj: bool = true,
+    auto_zwnj: bool = true,
+    per_syllable: bool = false,
 };
 
 /// Default_Ignorable_Code_Point, as HarfBuzz classifies it. ZWJ and ZWNJ
@@ -589,6 +848,10 @@ pub const Shaper = struct {
     buf: std.ArrayListUnmanaged(Glyph) = .empty,
     active: std.ArrayListUnmanaged(u16) = .empty,
     active_flags: ?FeatureFlags = null,
+    params: std.ArrayListUnmanaged(LookupParams) = .empty,
+    next_lig_id: u8 = 0,
+    input_len: usize = 0,
+    any_ignorable: bool = false,
     /// Per input code point of the last shape call: true if it was a
     /// default ignorable that shaping removed (it has no glyph and belongs
     /// in no glyph's text)
@@ -597,6 +860,7 @@ pub const Shaper = struct {
     pub fn deinit(self: *Shaper, allocator: std.mem.Allocator) void {
         self.buf.deinit(allocator);
         self.active.deinit(allocator);
+        self.params.deinit(allocator);
         self.dropped.deinit(allocator);
     }
 
@@ -624,11 +888,42 @@ pub const Shaper = struct {
         codepoints: ?[]const u21,
         flags: FeatureFlags,
     ) ![]const Glyph {
+        return self.shapeClustered(allocator, table, glyphs, codepoints, null, flags);
+    }
+
+    /// `shape` with initial clusters (see `beginClustered`).
+    pub fn shapeClustered(
+        self: *Shaper,
+        allocator: std.mem.Allocator,
+        table: *const Table,
+        glyphs: []const u16,
+        codepoints: ?[]const u21,
+        clusters: ?[]const u32,
+        flags: FeatureFlags,
+    ) ![]const Glyph {
         const lookups = try self.activeLookups(allocator, table, flags);
+        try self.beginClustered(allocator, table, glyphs, codepoints, clusters);
+        try self.params.resize(allocator, lookups.len);
+        for (self.params.items, lookups) |*pp, li| pp.* = .{ .index = li };
+        self.applyStage(table, self.params.items);
+        return self.finish(allocator);
+    }
+
+    /// Fill the buffer for staged shaping: one glyph per code point
+    /// (cluster = index), as `shape` starts.
+    pub fn begin(self: *Shaper, allocator: std.mem.Allocator, table: *const Table, glyphs: []const u16, codepoints: ?[]const u21) !void {
+        return self.beginClustered(allocator, table, glyphs, codepoints, null);
+    }
+
+    /// `begin` with initial clusters (code point indices, non-decreasing):
+    /// HarfBuzz seeds them per grapheme before shaping.
+    pub fn beginClustered(self: *Shaper, allocator: std.mem.Allocator, table: *const Table, glyphs: []const u16, codepoints: ?[]const u21, clusters: ?[]const u32) !void {
         self.buf.clearRetainingCapacity();
+        self.next_lig_id = 0;
+        self.input_len = glyphs.len;
         // Growth room for multiple substitutions; capped in applyMultiple
         try self.buf.ensureTotalCapacity(allocator, maxLen(glyphs.len));
-        var any_ignorable = false;
+        self.any_ignorable = false;
         for (glyphs, 0..) |gid, i| {
             var props = props_unknown;
             if (table.gdef.glyph_class == null) {
@@ -638,42 +933,70 @@ pub const Shaper = struct {
                 props = @backingInt(if (is_mark) GlyphClass.mark else GlyphClass.base);
             }
             const ignorable: Ignorable = if (codepoints) |cps| (if (cps[i] < 0xAD) .none else Ignorable.of(cps[i])) else .none;
-            any_ignorable = any_ignorable or ignorable != .none;
+            self.any_ignorable = self.any_ignorable or ignorable != .none;
             self.buf.appendAssumeCapacity(.{
                 .id = gid,
-                .cluster = @intCast(i),
+                .cluster = if (clusters) |c| c[i] else @intCast(i),
                 .cp = @intCast(i),
                 .props = props,
                 .ignorable = ignorable,
             });
         }
-        var ctx: Context = .{ .table = table, .buf = &self.buf, .max_len = maxLen(glyphs.len) };
+    }
+
+    /// Apply one stage's lookups (sorted by index) over the buffer.
+    pub fn applyStage(self: *Shaper, table: *const Table, lookups: []const LookupParams) void {
+        var ctx: Context = .{
+            .table = table,
+            .buf = &self.buf,
+            .max_len = @max(maxLen(self.input_len), self.buf.items.len),
+            .next_lig_id = self.next_lig_id,
+        };
         // Lookups that cover no glyph of the run are skipped whole (as
         // HarfBuzz does); the run's digest is refreshed after a lookup
         // changed the run, since substitutes may bring new glyphs in
         var run: Digest = .{};
         for (self.buf.items) |g| run.addGlyph(g.id);
-        for (lookups) |li| {
-            if (!table.lookups[li].digest.mayIntersect(run)) continue;
-            if (ctx.applyLookup(li)) {
+        for (lookups) |lp| {
+            if (lp.index >= table.lookups.len) continue;
+            if (!table.lookups[lp.index].digest.mayIntersect(run)) continue;
+            ctx.params = lp;
+            if (ctx.applyLookup(lp.index)) {
                 run = .{};
                 for (self.buf.items) |g| run.addGlyph(g.id);
             }
         }
+        self.next_lig_id = ctx.next_lig_id;
+    }
 
-        // Remove the default ignorables no lookup took up (HarfBuzz's
-        // REMOVE_DEFAULT_IGNORABLES; drawn they would be .notdef or a
-        // visible glyph for an invisible character)
-        try self.dropped.resize(allocator, glyphs.len);
+    /// End staged shaping: remove the default ignorables no lookup took up
+    /// (HarfBuzz's REMOVE_DEFAULT_IGNORABLES; drawn they would be .notdef
+    /// or a visible glyph for an invisible character).
+    pub fn finish(self: *Shaper, allocator: std.mem.Allocator) ![]const Glyph {
+        try self.dropped.resize(allocator, self.input_len);
         @memset(self.dropped.items, false);
-        if (!any_ignorable) return self.buf.items;
+        if (!self.any_ignorable) return self.buf.items;
+        // HarfBuzz's delete_glyphs_inplace: a removed glyph's cluster
+        // merges into its neighbors as delete_glyph does
+        const items = self.buf.items;
         var n: usize = 0;
-        for (self.buf.items) |g| {
-            if (g.ignorable != .none and !g.substituted) {
-                self.dropped.items[g.cp] = true;
+        for (items, 0..) |g, i| {
+            if (g.ignorable != .none and !g.substituted and !g.inserted) {
+                if (g.cp < self.dropped.items.len) self.dropped.items[g.cp] = true;
+                const cluster = g.cluster;
+                if (i + 1 < items.len and cluster == items[i + 1].cluster) continue;
+                if (n > 0) {
+                    if (cluster < items[n - 1].cluster) {
+                        const old = items[n - 1].cluster;
+                        var k = n;
+                        while (k > 0 and items[k - 1].cluster == old) : (k -= 1) items[k - 1].cluster = cluster;
+                    }
+                    continue;
+                }
+                if (i + 1 < items.len) mergeClusters(items, i, i + 2);
                 continue;
             }
-            self.buf.items[n] = g;
+            items[n] = items[i];
             n += 1;
         }
         self.buf.shrinkRetainingCapacity(n);
@@ -690,6 +1013,10 @@ pub const Context = struct {
     buf: *std.ArrayListUnmanaged(Glyph),
     max_len: usize,
     next_lig_id: u8 = 0,
+    /// The lookup being applied (nested lookups keep their parent's)
+    params: LookupParams = .{ .index = 0 },
+    /// Syllable of the glyph matching started at (per-syllable lookups)
+    start_syllable: u8 = 0,
 
     pub fn data(self: *const Context) []const u8 {
         return self.table.data;
@@ -707,7 +1034,7 @@ pub const Context = struct {
         var applied = false;
         var i: usize = 0;
         while (i < self.buf.items.len) {
-            if (lookup.digest.mayHave(self.buf.items[i].id) and !self.skips(lookup, i)) {
+            if (lookup.digest.mayHave(self.buf.items[i].id) and self.buf.items[i].mask & self.params.mask != 0 and !self.skips(lookup, i)) {
                 const len_before = self.buf.items.len;
                 if (self.applyAt(lookup, li, i, 0)) |next| {
                     applied = true;
@@ -766,9 +1093,20 @@ pub const Context = struct {
         if (g.substituted) return .no;
         return switch (g.ignorable) {
             .none, .hidden => .no,
-            .zwj, .other => .maybe,
-            .zwnj => if (context) .maybe else .no,
+            .other => .maybe,
+            .zwj => if (context or self.params.auto_zwj) .maybe else .no,
+            .zwnj => if (context and self.params.auto_zwnj) .maybe else .no,
         };
+    }
+
+    /// HarfBuzz's may_match before the glyph test: input glyphs must carry
+    /// the lookup's mask (context glyphs any), and a per-syllable lookup
+    /// stays in the syllable matching started in.
+    fn mayMatch(self: *const Context, p: usize, context: bool) bool {
+        const g = self.buf.items[p];
+        if (!context and g.mask & self.params.mask == 0) return false;
+        if (self.params.per_syllable and self.start_syllable != 0 and g.syllable != self.start_syllable) return false;
+        return true;
     }
 
     /// The next glyph from `from` in `dir` that the matcher accepts as
@@ -786,7 +1124,7 @@ pub const Context = struct {
             }
             const kind = self.skipKind(lookup, p, context);
             if (kind == .yes) continue;
-            if (m.matches(self, k, self.buf.items[p].id)) return p;
+            if (self.mayMatch(p, context) and m.matches(self, k, self.buf.items[p].id)) return p;
             if (kind == .no) return null;
         }
     }
@@ -814,6 +1152,7 @@ pub const Context = struct {
     /// wins. Returns the position to continue from.
     fn applyAt(self: *Context, lookup: *const Lookup, li: u16, i: usize, depth: u8) ?usize {
         const gid = self.buf.items[i].id;
+        self.start_syllable = self.buf.items[i].syllable;
         // Ligatures: the glyph matching would compare second components to
         const second: Follow = if (lookup.type == 4) self.following(lookup, i) else .unknown;
         if (lookup.index) |index| {
@@ -893,6 +1232,7 @@ pub const Context = struct {
         const seq = self.setFor(addr, i) orelse return null;
         const n = readU16(d, seq);
         if (n == 0) {
+            deleteGlyph(self.buf.items, i);
             _ = self.buf.orderedRemove(i);
             return i;
         }
@@ -977,11 +1317,12 @@ pub const Context = struct {
         var last_num_comps: usize = self.numComps(i);
         var so_far: usize = last_num_comps;
 
-        // Merge the clusters of the span (skipped marks included)
-        const cluster = items[i].cluster;
-        for (items[i .. last + 1]) |*g| g.cluster = cluster;
+        // Merge the clusters of the span (skipped marks included), as
+        // HarfBuzz's ligate_input
+        mergeClusters(items, i, last + 1);
         self.replace(i, lig_glyph);
         items[i].multiplied = false;
+        items[i].ligated = true;
         if (is_ligature) {
             items[i].lig_id = lig_id;
             items[i].lig_comp = 0;
@@ -1268,7 +1609,8 @@ pub const Context = struct {
         while (i > 0) {
             i -= 1;
             const g = self.buf.items[i];
-            if (!lookup.digest.mayHave(g.id) or self.skips(lookup, i)) continue;
+            if (!lookup.digest.mayHave(g.id) or g.mask & self.params.mask == 0 or self.skips(lookup, i)) continue;
+            self.start_syllable = g.syllable;
             for (lookup.subtables, lookup.subtable_digests) |addr, digest| {
                 if (!digest.mayHave(g.id) or readU16(d, addr) != 1) continue;
                 const ci = coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(g.id) orelse continue;

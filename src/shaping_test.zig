@@ -71,6 +71,7 @@ test "GSUB shaping matches HarfBuzz (test/shaping/harfbuzz.txt)" {
 
 const shaping = @import("shaping.zig");
 const FontFace = @import("embedded.zig").FontFace;
+const font_collection = @import("font_collection.zig");
 
 const positions_path = "test/shaping/harfbuzz_positions.txt";
 const gaps_path = "test/shaping/position_gaps.txt";
@@ -112,7 +113,10 @@ test "shapeText matches HarfBuzz: glyphs, clusters, advances, offsets" {
     defer allocator.free(gaps);
 
     var face: ?FontFace = null;
+    var face_data: ?[]u8 = null;
+    defer if (face_data) |fd| allocator.free(fd);
     defer if (face) |*f| f.deinit();
+    var skipped_fonts: usize = 0;
     var font_path: []const u8 = "";
     var features_line: []const u8 = "";
     var features: std.ArrayListUnmanaged(shaping.FeatureSetting) = .empty;
@@ -127,10 +131,27 @@ test "shapeText matches HarfBuzz: glyphs, clusters, advances, offsets" {
         if (std.mem.startsWith(u8, line, "font ")) {
             if (face) |*f| f.deinit();
             face = null;
+            if (face_data) |fd| allocator.free(fd);
+            face_data = null;
             font_path = line[5..];
-            face = try FontFace.fromFile(io, allocator, font_path);
+            // "path#index": a face of a collection. System fonts that are
+            // not installed (CI) skip their runs.
+            const hash = std.mem.lastIndexOfScalar(u8, font_path, '#');
+            const path = if (hash) |h| font_path[0..h] else font_path;
+            const file = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(256 << 20)) catch |err| switch (err) {
+                error.FileNotFound => {
+                    skipped_fonts += 1;
+                    continue;
+                },
+                else => return err,
+            };
+            defer allocator.free(file);
+            const index: u32 = if (hash) |h| try std.fmt.parseInt(u32, font_path[h + 1 ..], 10) else 0;
+            face_data = try font_collection.extractFace(allocator, file, index);
+            face = try FontFace.fromMemory(allocator, face_data.?);
             continue;
         }
+        if (face == null) continue; // a skipped font's runs
         if (std.mem.startsWith(u8, line, "features")) {
             features_line = std.mem.trim(u8, line[8..], " ");
             features.clearRetainingCapacity();
@@ -160,6 +181,8 @@ test "shapeText matches HarfBuzz: glyphs, clusters, advances, offsets" {
         }
     }
     if (mismatches > 0) std.debug.print("\n{d} of {d} runs differ from HarfBuzz\n", .{ mismatches, checked });
+    // System fonts this machine lacks (CI) are skipped, not failed
+    if (skipped_fonts > 0) std.debug.print("\n(skipped {d} fonts that are not installed)\n", .{skipped_fonts});
     try std.testing.expect(checked > 0);
     try std.testing.expectEqual(@as(usize, 0), mismatches);
     try std.testing.expectEqual(@as(usize, 0), fixed_gaps);

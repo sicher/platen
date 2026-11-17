@@ -215,12 +215,15 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul not decomposed).
 - [ ] **write() on the GPOS engine**: text_render still uses pair kerning +
   the mark heuristic; switching moves positions in every PDF (references).
-- [ ] **Indic (Devanagari) shaping** in shapeText: script selection
-  (dev2, then deva), syllables, reordering (pre-base matra, reph), the
-  feature stages (nukt akhn rphf blwf half pstf vatu cjct, then pres abvs
-  blws psts haln), checked against HarfBuzz with Kohinoor Devanagari and
-  Devanagari Sangam MN (courier: FD_RULES.md 3.1, 9.6). Needs Indic
-  syllabic/positional categories in unicode_props_data.zig.
+- [x] **Indic (Devanagari) shaping** in shapeText (done 2026-11-17,
+  indic.zig; HarfBuzz-checked with Kohinoor and Sangam MN).
+- [ ] **Synthetic Indic test font** so CI covers the Indic shaper (the
+  system fonts are macOS only), with a deva-only twin for old spec.
+- [ ] **Other Indic scripts** (configs and categories are ported: Bengali,
+  Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam need their
+  script detection, virama and per-script rules - Kannada, Malayalam).
+- [ ] **AAT morx**: HarfBuzz and CoreText prefer it to GSUB (Devanagari
+  Sangam MN has both); platen uses GSUB.
 
 ## Code health
 

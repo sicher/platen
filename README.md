@@ -344,8 +344,10 @@ try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face 
   its cluster's text for copy and paste: the "ffi" ligature extracts as
   "ffi".
 - Shaping is platen's GSUB and GPOS engines, run as HarfBuzz's default
-  shaper and checked against it; no script-specific shaping yet (Indic,
-  Arabic, bidi).
+  shaper, and as its Indic shaper for Devanagari; checked against HarfBuzz.
+  The text's first character of a script decides, so shape mixed-script
+  text in runs. Not yet: other Indic scripts, Arabic, bidi, AAT `morx`.
+  `write()` does not use these engines yet.
 
 ### Text Flow with Word Wrapping
 

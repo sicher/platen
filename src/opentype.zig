@@ -19,8 +19,6 @@ pub const empty_gsub: gsub_mod.Table = .{
     .subtable_storage = &.{},
     .digest_storage = &.{},
     .second_digest_storage = &.{},
-    .feature_lookups = @splat(&.{}),
-    .required_lookups = &.{},
     .lookup_index_storage = &.{},
 };
 
@@ -38,6 +36,26 @@ pub const Feature = enum(u32) {
     dist = tag("dist"), // Distances
     abvm = tag("abvm"), // Above-base Mark Positioning
     blwm = tag("blwm"), // Below-base Mark Positioning
+    rclt = tag("rclt"), // Required Contextual Alternates
+    // Indic basic and presentation features: applied by the Indic shaper
+    // (indic.zig) in its own stages, never by the default shaper
+    nukt = tag("nukt"),
+    akhn = tag("akhn"),
+    rphf = tag("rphf"),
+    rkrf = tag("rkrf"),
+    pref = tag("pref"),
+    blwf = tag("blwf"),
+    abvf = tag("abvf"),
+    half = tag("half"),
+    pstf = tag("pstf"),
+    vatu = tag("vatu"),
+    cjct = tag("cjct"),
+    init = tag("init"),
+    pres = tag("pres"),
+    abvs = tag("abvs"),
+    blws = tag("blws"),
+    psts = tag("psts"),
+    haln = tag("haln"),
     tnum = tag("tnum"), // Tabular Figures
     pnum = tag("pnum"), // Proportional Figures
     frac = tag("frac"), // Fractions
@@ -182,7 +200,7 @@ pub const Feature = enum(u32) {
         if (self.ssIndex() != null or self.cvIndex() != null) return false;
         return switch (self) {
             // HarfBuzz's defaults for horizontal text
-            .ccmp, .locl, .rlig, .liga, .clig, .kern, .calt, .mark, .mkmk, .curs, .dist, .abvm, .blwm => true,
+            .ccmp, .locl, .rlig, .liga, .clig, .kern, .calt, .mark, .mkmk, .curs, .dist, .abvm, .blwm, .rclt => true,
             else => false,
         };
     }

@@ -36,7 +36,7 @@ OUT_POSITIONS = Path("test/shaping/harfbuzz_positions.txt")
 
 # Features platen enables by default (opentype.Feature.defaultEnabled)
 PLATEN_DEFAULTS = {"ccmp", "locl", "rlig", "liga", "clig", "calt", "kern", "mark", "mkmk",
-                   "curs", "dist", "abvm", "blwm"}
+                   "curs", "dist", "abvm", "blwm", "rclt"}
 # Features HarfBuzz enables by default for horizontal text; the ones platen
 # does not are switched off so both apply the same lookups
 HB_DEFAULTS = {"rvrn", "ccmp", "locl", "rlig", "abvm", "blwm", "mark", "mkmk",
@@ -153,6 +153,29 @@ FALLBACK_MARKS = [
     "a\u035cb o\u035dx e\u0360a i\u0361j a\u0301\u0300\u0323\u0328",
 ]
 
+# Devanagari, shaped by the Indic shaper (script guessed from the text, as
+# platen's shapeText does): courier's cases, conjuncts, reph, half and below
+# forms, nukta, joiners, vowel constraints, broken clusters; then seeded
+# random strings of Devanagari letters, signs, joiners and neighbors
+DEVANAGARI = ['नमस्ते', 'कि', 'क्ष', 'हैं', 'किि', 'धर्म', 'र्क', 'स्ति', 'क्षि', 'द्ध ह्य ट्र क्र त्र श्र', 'क़ ज़ फ़ ड़', 'अ आ इ ई उ ऊ ऋ ए ऐ ओ औ', 'कँ कं कः', 'ि', '्क', 'अा', 'क्\u200dष', 'क्\u200cष', 'र्\u200dय', 'हिन्दी', 'प्रार्थना', 'कार्यक्रम', 'विश्वविद्यालय', 'स्त्र क्त्व ष्ट्र न्त्र द्व द्य ह्म ह्न ञ्ज ङ्क क्ष्म ज्ञ', 'र्कि र्की र्के र्कं धर्मों पूर्ण सूर्य वर्ष तर्क', 'प्र क्र ग्र ट्र द्र श्र प्रि क्रि ट्रि', 'स्कि स्ति न्दि न्ति ग्वि', 'क़ि ड़ि ज़्य फ़्र', 'क्\u200d द्\u200dव र्\u200d र्\u200cय क\u200d्ष ्\u200c क्\u200c', 'र्इ र्इक', 'ॐ ऽ । ॥ ०१२३ क॒ क॑ क्॑', 'हँसी कहाँ मैं हैं नहीं', 'अंतर्राष्ट्रीय प्रौद्योगिकी द्वितीय स्वास्थ्य श्रृंखला उज्ज्वल महत्त्वपूर्ण', 'ऱ्य ळ ऴ कॅ कॉ', 'ाक ् ँ क्\u200d\u200d ःक', 'Hindi हिन्दी 123 क,ख.', 'आ ई ऊ ॠ ॡ ऌ', 'क्र्य र्त्स्न्य']
+
+
+def random_devanagari(seed, count):
+    import random
+    rng = random.Random(seed)
+    pool = ([chr(c) for c in range(0x0900, 0x0980)] + [chr(c) for c in range(0x1CD0, 0x1CFA)] +
+            [chr(c) for c in range(0xA8E0, 0xA900)] + ["\u094d"] * 25 + ["\u0930"] * 10 + ["\u093c"] * 5 +
+            ["\u200d", "\u200c"] * 4 + ["\u093f"] * 8 + [" "] * 4 + ["\u25cc", "1", "a", "-", "\u00a0", "\u2010"])
+    out = []
+    while len(out) < count:
+        t = "".join(rng.choice(pool) for _ in range(rng.randint(1, 12))).strip()
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+DEVANAGARI_TEXTS = DEVANAGARI + random_devanagari(2026, 500)
+
 # Synthetic font with every GPOS lookup type and flag
 # (scripts/gen_gpos_test_font.py): one stylistic set per scenario
 GPOS_TEST = "test/fonts/gpos/GposTest.ttf"
@@ -199,7 +222,16 @@ POSITION_CASES = [
     ("test/fonts/Gentium/Gentium-Regular.ttf", [], NORMALIZE),
     *[(GPOS_TEST, ["+" + tag], texts) for tag, texts in GPOS_SCENARIOS.items()],
     (GPOS_TEST, ["+" + tag for tag in GPOS_SCENARIOS if tag != "ss14"], GPOS_ALL_TEXTS),
+    # macOS system fonts ("path#face"; skipped where not installed). Sangam
+    # MN also has an AAT 'morx' table, which HarfBuzz prefers to GSUB:
+    # platen has no AAT, so HarfBuzz shapes it with 'morx' removed.
+    ("/System/Library/Fonts/Kohinoor.ttc#4", [], DEVANAGARI_TEXTS),
+    ("/System/Library/Fonts/Kohinoor.ttc#0", [], DEVANAGARI_TEXTS),
+    ("/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc#0", [], DEVANAGARI_TEXTS),
 ]
+# Cases whose script HarfBuzz guesses from the text (the others: Zyyy)
+GUESS_SCRIPT = {"/System/Library/Fonts/Kohinoor.ttc#4", "/System/Library/Fonts/Kohinoor.ttc#0",
+                "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc#0"}
 
 
 def hb_features(toggles):
@@ -224,11 +256,14 @@ def shape(font, text, features):
     return [info.codepoint for info in buf.glyph_infos]
 
 
-def shape_positions(font, text, features):
+def shape_positions(font, text, features, guess=False):
     buf = hb.Buffer()
     buf.add_utf8(text.encode("utf-8"))
+    if guess:
+        buf.guess_segment_properties()
+    else:
+        buf.script = "Zyyy"
     buf.direction = "ltr"
-    buf.script = "Zyyy"
     buf.language = "en"
     buf.flags = hb.BufferFlags.REMOVE_DEFAULT_IGNORABLES
     hb.shape(font, buf, features)
@@ -241,24 +276,47 @@ def shape_positions(font, text, features):
     return "|".join(parts)
 
 
+def load_font(spec):
+    """hb.Font for "path" or "path#face"; None if the file is missing.
+    An AAT 'morx' table is dropped (platen shapes with GSUB)."""
+    path, _, index = spec.partition("#")
+    if not Path(path).exists():
+        return None
+    data = Path(path).read_bytes()
+    from fontTools.ttLib import TTFont
+    import io
+    tt = TTFont(io.BytesIO(data), fontNumber=int(index or 0))
+    if "morx" in tt:
+        del tt["morx"]
+        out = io.BytesIO()
+        tt.save(out)
+        return hb.Font(hb.Face(out.getvalue()))
+    return hb.Font(hb.Face(data, int(index or 0)))
+
+
 def write_cases(out, cases, shape_text):
     lines = []
     for path, toggles, texts in cases:
-        font = hb.Font(hb.Face(Path(path).read_bytes()))
+        font = load_font(path)
+        if font is None:
+            # Keep the file stable: an earlier reference's entries stay
+            print(f"skipped (not installed): {path}")
+            continue
         features = hb_features(toggles)
         lines.append(f"font {path}")
         lines.append("features " + " ".join(toggles))
         for text in texts:
             assert "\t" not in text and "\n" not in text
-            lines.append(text + "\t" + shape_text(font, text, features))
+            lines.append(text + "\t" + shape_text(font, text, features, path))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n")
     print(f"{out}: {len(cases)} cases")
 
 
 def main():
-    write_cases(OUT, CASES, lambda font, text, features: " ".join(map(str, shape(font, text, features))))
-    write_cases(OUT_POSITIONS, POSITION_CASES, shape_positions)
+    write_cases(OUT, CASES, lambda font, text, features, path: " ".join(map(str, shape(font, text, features))))
+    write_cases(OUT_POSITIONS, POSITION_CASES,
+                lambda font, text, features, path: shape_positions(font, text, features, path in GUESS_SCRIPT))
 
 
 if __name__ == "__main__":

@@ -200,6 +200,7 @@ test {
     _ = @import("gsub.zig");
     _ = @import("gpos.zig");
     _ = @import("mark_fallback.zig");
+    _ = @import("indic.zig");
     _ = @import("opentype.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");

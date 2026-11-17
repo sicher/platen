@@ -82,12 +82,21 @@ pub fn reorderMarks(cps: []u21, offsets: ?[]u32) void {
                 const off = if (offsets) |o| o[k] else 0;
                 const cc = modifiedCombiningClass(cp);
                 var j = k;
-                while (j > i and modifiedCombiningClass(cps[j - 1]) > cc) : (j -= 1) {
-                    cps[j] = cps[j - 1];
-                    if (offsets) |o| o[j] = o[j - 1];
+                while (j > i and modifiedCombiningClass(cps[j - 1]) > cc) j -= 1;
+                if (j == k) continue;
+                // HarfBuzz's sort merges the clusters of what it moves
+                // across: they all take the smallest offset
+                var merged = off;
+                if (offsets) |o| {
+                    for (o[j..k]) |x| merged = @min(merged, x);
+                }
+                var m = k;
+                while (m > j) : (m -= 1) {
+                    cps[m] = cps[m - 1];
+                    if (offsets) |o| o[m] = merged;
                 }
                 cps[j] = cp;
-                if (offsets) |o| o[j] = off;
+                if (offsets) |o| o[j] = merged;
             }
         }
         i = end;
@@ -169,7 +178,8 @@ pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, ctx: anyty
         if (ccc != 0) {
             if (starter) |s| {
                 const unblocked = out == s + 1 or last_ccc < ccc;
-                if (unblocked) {
+                const allowed = if (@hasDecl(@TypeOf(ctx), "allowStarter")) ctx.allowStarter(cps[s]) else true;
+                if (unblocked and allowed) {
                     if (compose(cps[s], cp)) |c| {
                         if (ctx.hasGlyph(c)) {
                             cps[s] = c;
@@ -267,7 +277,8 @@ test "reorderMarks sorts mark runs by modified combining class, stably" {
     var offsets = [_]u32{ 0, 1, 3, 5, 6, 8 };
     reorderMarks(&cps, &offsets);
     try std.testing.expectEqualSlices(u21, &.{ 'm', 0x0323, 0x0301, 'n', 0x0300, 0x0301 }, &cps);
-    try std.testing.expectEqualSlices(u32, &.{ 0, 3, 1, 5, 6, 8 }, &offsets);
+    // The moved range merges to its smallest offset, as HarfBuzz's sort
+    try std.testing.expectEqualSlices(u32, &.{ 0, 1, 1, 5, 6, 8 }, &offsets);
     // Arabic: fatha (30) then shadda (33) - shadda moves first
     var ar = [_]u21{ 0x0644, 0x064E, 0x0651 };
     reorderMarks(&ar, null);

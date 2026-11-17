@@ -10,10 +10,12 @@
 //! offset, then the pen moves by its advance. Substitution is platen's
 //! GSUB engine, positioning its GPOS engine (gpos.zig) as HarfBuzz's
 //! default shaper runs it, after HarfBuzz's normalization (decode.zig);
-//! fonts without GPOS get its fallback mark positioning; all checked
-//! against HarfBuzz. Not yet: script-specific shaping (Indic reordering,
-//! Arabic joining, bidi): text is shaped left to right with the font's
-//! DFLT (else latn) script.
+//! fonts without GPOS get its fallback mark positioning; Devanagari goes
+//! through HarfBuzz's Indic shaper (indic.zig); all checked against
+//! HarfBuzz. The text's first character of a script picks the script, as
+//! HarfBuzz's guess_segment_properties: split mixed-script text into runs.
+//! Not yet: other Indic scripts, Arabic joining, bidi (text is shaped left
+//! to right), and AAT 'morx' tables (GSUB is used).
 
 const std = @import("std");
 const embedded = @import("embedded.zig");
@@ -24,6 +26,7 @@ const unicode_props = @import("unicode_props.zig");
 const gpos = @import("gpos.zig");
 const ttf = @import("ttf.zig");
 const mark_fallback = @import("mark_fallback.zig");
+const indic = @import("indic.zig");
 
 const Allocator = std.mem.Allocator;
 const EmbeddedFont = embedded.EmbeddedFont;
@@ -78,27 +81,46 @@ pub fn totalAdvance(glyphs: []const ShapedGlyph) i64 {
 
 /// `shape` on a parsed font with explicit feature flags. Reads `emb` only.
 pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) ![]ShapedGlyph {
-    var d: decode.Decoded = .{};
-    defer d.deinit(allocator);
-    try decode.decode(allocator, &emb.font, text, &d, true);
-
-    var shaper: gsub.Shaper = .{};
-    defer shaper.deinit(allocator);
-
     // GSUB always runs: GPOS needs its glyph classes and ligature
     // components (a font without GSUB gets an empty table with its GDEF)
     const ot = emb.ot_features;
     var no_gsub = opentype.empty_gsub;
     if (ot) |o| no_gsub.gdef = o.gdef;
     const gsub_table: *const gsub.Table = if (ot) |o| (if (o.gsub) |*g| g else &no_gsub) else &no_gsub;
-    _ = try shaper.shape(allocator, gsub_table, d.glyphs.items, d.codepoints.items, flags);
+
+    // The script picks the language system, and Devanagari in a font with
+    // dev2/deva GSUB the Indic shaper (HarfBuzz's shaper selection)
+    const script = textScript(text);
+    var indic_plan: ?indic.Plan = null;
+    defer if (indic_plan) |p| p.deinit(allocator);
+    if (script == .devanagari and (gsub_table.devanagari.script == gsub.tag("dev2") or gsub_table.devanagari.script == gsub.tag("deva"))) {
+        indic_plan = try indic.Plan.init(allocator, gsub_table, flags, emb.font.getGlyphId(0x094D) orelse 0);
+    }
+
+    var d: decode.Decoded = .{};
+    defer d.deinit(allocator);
+    try decode.decodeAs(allocator, &emb.font, text, &d, true, if (indic_plan != null) .indic else .default);
+
+    // Clusters start per grapheme, as HarfBuzz forms them before shaping;
+    // shaping merges them further (ligatures, reordering)
+    const clusters = try graphemeClusters(allocator, d.codepoints.items, d.offsets.items);
+    defer allocator.free(clusters);
+
+    var shaper: gsub.Shaper = .{};
+    defer shaper.deinit(allocator);
+    if (indic_plan) |*plan| {
+        try shaper.beginClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters);
+        _ = try indic.substitute(allocator, &shaper, plan, &emb.font, d.codepoints.items);
+    } else {
+        _ = try shaper.shapeClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters, flags);
+    }
     const glyphs = shaper.buf.items;
 
     const pos = try allocator.alloc(gpos.Position, glyphs.len);
     defer allocator.free(pos);
     for (pos, glyphs) |*p, g| p.* = .{ .x_advance = emb.font.getGlyphWidth(g.id) orelse 0 };
     if (d.space_fallbacks.items.len > 0) spaceWidths(&emb.font, d.space_fallbacks.items, glyphs, pos);
-    if (ot) |o| try positionGlyphs(allocator, o, gsub_table, &emb.font, d.codepoints.items, flags, glyphs, pos);
+    if (ot) |o| try positionGlyphs(allocator, o, gsub_table, &emb.font, d.codepoints.items, flags, script, indic_plan != null, glyphs, pos);
 
     const out = try allocator.alloc(ShapedGlyph, glyphs.len);
     errdefer allocator.free(out);
@@ -107,10 +129,25 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
         .x_advance = p.x_advance,
         .x_offset = p.x_offset,
         .y_offset = p.y_offset,
-        .cluster = g.cluster,
+        .cluster = d.offsets.items[g.cluster],
     };
-    try formClusters(allocator, d.codepoints.items, d.offsets.items, out);
     return out;
+}
+
+/// The text's script, as HarfBuzz's guess_segment_properties finds it: the
+/// first character of a script (not common or inherited) decides.
+/// Devanagari picks its own language system; anything else the default.
+fn textScript(text: []const u8) gsub.Script {
+    var view = std.unicode.Utf8View.init(text) catch return .default;
+    var it = view.iterator();
+    while (it.nextCodepoint()) |cp| {
+        switch (unicode_props.runScript(cp)) {
+            .none => {},
+            .devanagari => return .devanagari,
+            .other => return .default,
+        }
+    }
+    return .default;
 }
 
 /// HarfBuzz's _hb_ot_shape_fallback_spaces: a space the font lacks, drawn
@@ -147,55 +184,58 @@ fn spaceWidths(font: *const ttf.Font, kinds: []const unicode_props.SpaceFallback
 /// lose their advance (shifted back over the glyph before when there is no
 /// GPOS), and attached glyphs take their parents' offsets. Without GPOS,
 /// marks are then placed by glyph extents (mark_fallback.zig).
-fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, glyphs: []gsub.Glyph, pos: []gpos.Position) !void {
+fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, script: gsub.Script, indic_shaper: bool, glyphs: []gsub.Glyph, pos: []gpos.Position) !void {
     if (ot.gpos) |*table| {
         var lookups: std.ArrayListUnmanaged(u16) = .empty;
         defer lookups.deinit(allocator);
-        try table.collectLookups(allocator, flags, &lookups);
+        try table.collectLookupsFor(allocator, table.langSys(script), flags, &lookups);
         gpos.apply(table, glyphs, pos, lookups.items);
     }
     if (ot.shaping_kern) |*kern| {
         if (flags.isEnabled(.kern)) gpos.applyKernTable(gsub_table, kern, glyphs, pos);
     }
-    gpos.zeroMarkWidths(gsub_table, glyphs, pos, ot.gpos == null);
+    // The Indic shaper zeroes no marks and has no fallback positioning
+    if (!indic_shaper) gpos.zeroMarkWidths(gsub_table, glyphs, pos, ot.gpos == null);
     gpos.propagateAttachments(pos);
-    if (ot.gpos == null) mark_fallback.position(gsub_table, font, cps, glyphs, pos, true);
+    if (ot.gpos == null and !indic_shaper) mark_fallback.position(gsub_table, font, cps, glyphs, pos, true);
 }
 
-/// Turns the glyphs' clusters from code point indices (as GSUB left them:
-/// non-decreasing, a ligature's merged to its first component) into byte
-/// offsets of merged clusters, as HarfBuzz's default cluster level
-/// (monotone graphemes) gives them. A glyph's cluster owns the code points
-/// up to the next glyph's (one GSUB deleted, or a removed ignorable, joins
-/// the cluster before it; at the start, the one after). A grapheme
-/// (unicode_props.markContinuations) never spans two clusters: those it
-/// touches merge, and a merged cluster takes the offset of its first code
-/// point.
-fn formClusters(allocator: Allocator, cps: []const u21, offsets: []const u32, glyphs: []ShapedGlyph) !void {
-    if (glyphs.len == 0) return;
+/// Each code point's initial cluster: the index of the first code point
+/// of its grapheme (unicode_props.markContinuations, as HarfBuzz's
+/// hb_form_clusters at its default cluster level). A dotted circle the
+/// Indic vowel constraints inserted (it shares the next character's
+/// offset) is not there for this: HarfBuzz forms clusters first and then
+/// inserts it with the cluster of the character after it.
+fn graphemeClusters(allocator: Allocator, cps: []const u21, offsets: []const u32) ![]u32 {
     const n = cps.len;
-    const buf = try allocator.alloc(u32, n);
-    defer allocator.free(buf);
-    const cont = try allocator.alloc(bool, n);
+    const out = try allocator.alloc(u32, n);
+    errdefer allocator.free(out);
+    const inserted = try allocator.alloc(bool, n);
+    defer allocator.free(inserted);
+    for (inserted, 0..) |*f, i| f.* = cps[i] == 0x25CC and i + 1 < n and offsets[i] == offsets[i + 1];
+    // Graphemes over the text as typed
+    const typed = try allocator.alloc(u21, n);
+    defer allocator.free(typed);
+    const index = try allocator.alloc(u32, n);
+    defer allocator.free(index);
+    var m: usize = 0;
+    for (cps, inserted, 0..) |cp, f, i| {
+        if (f) continue;
+        typed[m] = cp;
+        index[m] = @intCast(i);
+        m += 1;
+    }
+    const cont = try allocator.alloc(bool, m);
     defer allocator.free(cont);
-    unicode_props.markContinuations(cps, cont);
-
-    // owner[i]: the glyph cluster whose span holds code point i
-    const owner = buf;
-    var g: usize = 0;
-    for (owner, 0..) |*o, i| {
-        while (g + 1 < glyphs.len and glyphs[g + 1].cluster <= i) g += 1;
-        o.* = glyphs[g].cluster;
+    unicode_props.markContinuations(typed[0..m], cont);
+    for (0..m) |k| out[index[k]] = if (k > 0 and cont[k]) out[index[k - 1]] else index[k];
+    // An inserted dotted circle takes the next character's cluster
+    var i = n;
+    while (i > 0) {
+        i -= 1;
+        if (inserted[i]) out[i] = out[i + 1];
     }
-    // In place: start[i], the first code point of i's merged cluster
-    const start = buf;
-    var prev_owner: u32 = undefined;
-    for (0..n) |i| {
-        const own = owner[i];
-        start[i] = if (i > 0 and (cont[i] or own == prev_owner)) start[i - 1] else @intCast(i);
-        prev_owner = own;
-    }
-    for (glyphs) |*gl| gl.cluster = offsets[start[gl.cluster]];
+    return out;
 }
 
 // ============================================================================
@@ -272,4 +312,41 @@ test "shape: empty text and ignorables only" {
     try testing.expectEqual(@as(usize, 1), soft.len);
     // HarfBuzz merges a removed leading ignorable forward: cluster 0
     try testing.expectEqual(@as(u32, 0), soft[0].cluster);
+}
+
+test "shape: Devanagari as Final Draft 13 prints it (Kohinoor Devanagari Light)" {
+    // courier's reference glyphs (FD_RULES 3.1): macOS only
+    const a = testing.allocator;
+    const ttc = std.Io.Dir.cwd().readFileAlloc(testing.io, "/System/Library/Fonts/Kohinoor.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    const data = try @import("font_collection.zig").extractFace(a, ttc, 4);
+    defer a.free(data);
+    var face = try FontFace.fromMemory(a, data);
+    defer face.deinit();
+    try testing.expectEqual(@as(u16, 1000), unitsPerEm(&face));
+
+    // namaste: na, ma, the sa-ta conjunct (11.484 pt at 12 pt), then the e
+    // matra with no advance, drawn at the conjunct's pen position
+    const namaste = try shape(a, &face, "नमस्ते", .{});
+    defer a.free(namaste);
+    try testing.expectEqual(@as(usize, 4), namaste.len);
+    try testing.expectEqual(@as(i32, 957), namaste[2].x_advance);
+    try testing.expectEqual(@as(u32, 6), namaste[2].cluster);
+    try testing.expectEqual(@as(i32, 0), namaste[3].x_advance);
+    try testing.expectEqual(@as(u32, 6), namaste[3].cluster);
+    // ki: the i matra before ka, one cluster
+    const ki = try shape(a, &face, "कि", .{});
+    defer a.free(ki);
+    try testing.expectEqual(@as(usize, 2), ki.len);
+    try testing.expectEqual(face.prototype.font.getGlyphId(0x0915).?, ki[1].id);
+    // ksha: one glyph
+    const ksha = try shape(a, &face, "क्ष", .{});
+    defer a.free(ksha);
+    try testing.expectEqual(@as(usize, 1), ksha.len);
+    // hain: ha, then ai + anusvara as one mark glyph
+    const hain = try shape(a, &face, "हैं", .{});
+    defer a.free(hain);
+    try testing.expectEqual(@as(usize, 2), hain.len);
+    try testing.expectEqual(face.prototype.font.getGlyphId(0x0939).?, hain[0].id);
+    try testing.expectEqual(@as(i32, 0), hain[1].x_advance);
 }
