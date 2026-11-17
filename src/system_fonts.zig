@@ -36,9 +36,12 @@ pub const Options = struct {
     home: ?[]const u8 = null,
     /// Folders to search instead of the platform defaults.
     dirs: ?[]const []const u8 = null,
-    /// Only open files whose name looks like the family (see `nameMayMatch`).
-    /// macOS ships gigabytes of fonts; turn this off only for fonts whose
-    /// file name has nothing to do with their family name.
+    /// Only read files whose name looks like the family (see `nameMayMatch`);
+    /// a file name with non-ASCII characters ("ヒラギノ角ゴシック W3.ttc"
+    /// holds Hiragino Sans) cannot be judged that way, so only its name
+    /// tables are read (`holdsFamily`). macOS ships gigabytes of fonts; turn
+    /// this off only for fonts whose ASCII file name has nothing to do with
+    /// their family name.
     prefilter: bool = true,
     /// Larger font files are skipped.
     max_file_size: usize = default_max_file_size,
@@ -298,6 +301,71 @@ fn squashInto(buf: []u8, s: []const u8) []const u8 {
     return buf[0..n];
 }
 
+fn isAsciiName(basename: []const u8) bool {
+    for (basename) |c| if (c >= 0x80) return false;
+    return true;
+}
+
+/// Longest name table `holdsFamily` reads.
+const max_name_table = 1 << 20;
+
+/// Whether the font file `basename` in `dir` has a face of `family` (ASCII
+/// case ignored), reading only the collection header, each face's table
+/// directory and its name table, not the whole file.
+fn holdsFamily(io: std.Io, fa: Allocator, dir: std.Io.Dir, basename: []const u8, family: []const u8) !bool {
+    const file = dir.openFile(io, basename, .{}) catch return false;
+    defer file.close(io);
+    const head = readAt(io, fa, file, 0, 12) catch |err| return skipUnlessOom(err);
+    const offsets: []const u8 = if (font_collection.isCollection(head)) blk: {
+        const n = std.mem.readInt(u32, head[8..12], .big);
+        if (n == 0 or n > 1 << 12) return false;
+        break :blk readAt(io, fa, file, 12, 4 * n) catch |err| return skipUnlessOom(err);
+    } else &.{ 0, 0, 0, 0 };
+    var i: usize = 0;
+    while (i < offsets.len) : (i += 4) {
+        const off = std.mem.readInt(u32, offsets[i..][0..4], .big);
+        if (faceHasFamily(io, fa, file, off, family) catch |err| return skipUnlessOom(err)) return true;
+    }
+    return false;
+}
+
+fn skipUnlessOom(err: anyerror) error{OutOfMemory}!bool {
+    return if (err == error.OutOfMemory) error.OutOfMemory else false;
+}
+
+/// Whether the face at `off` is of `family`: its name table, read alone,
+/// goes into a one-table sfnt for `font_collection.describeFace`.
+fn faceHasFamily(io: std.Io, fa: Allocator, file: std.Io.File, off: u32, family: []const u8) !bool {
+    const sfnt = try readAt(io, fa, file, off, 12);
+    const num = std.mem.readInt(u16, sfnt[4..6], .big);
+    const dir = try readAt(io, fa, file, @as(u64, off) + 12, 16 * @as(usize, num));
+    const rec = for (0..num) |t| {
+        if (std.mem.eql(u8, dir[16 * t ..][0..4], "name")) break dir[16 * t ..][0..16];
+    } else return false;
+    const len = std.mem.readInt(u32, rec[12..16], .big);
+    if (len > max_name_table) return false;
+    const table = try readAt(io, fa, file, std.mem.readInt(u32, rec[8..12], .big), len);
+
+    const one = try fa.alloc(u8, 28 + len);
+    @memcpy(one[0..12], sfnt);
+    std.mem.writeInt(u16, one[4..6], 1, .big);
+    @memcpy(one[12..28], rec);
+    std.mem.writeInt(u32, one[20..24], 28, .big);
+    @memcpy(one[28..], table);
+    const info = font_collection.describeFace(fa, one, 0) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return false,
+    };
+    return std.ascii.eqlIgnoreCase(info.family, family);
+}
+
+/// `len` bytes at `offset`; error.EndOfStream if the file is shorter.
+fn readAt(io: std.Io, fa: Allocator, file: std.Io.File, offset: u64, len: usize) ![]u8 {
+    const buf = try fa.alloc(u8, len);
+    if (try file.readPositionalAll(io, buf, offset) != len) return error.EndOfStream;
+    return buf;
+}
+
 fn isFontFile(basename: []const u8) bool {
     const ext = std.fs.path.extension(basename);
     for ([_][]const u8{ ".ttf", ".otf", ".ttc", ".otc" }) |e| {
@@ -388,10 +456,12 @@ fn walk(io: std.Io, allocator: Allocator, family: []const u8, opts: Options, ctx
             }
             if (e.kind != .file and e.kind != .sym_link) continue;
             if (!isFontFile(e.basename)) continue;
-            if (opts.prefilter and !nameMayMatch(e.basename, key)) continue;
-
             _ = file_arena.reset(.retain_capacity);
             const fa = file_arena.allocator();
+            if (opts.prefilter and !nameMayMatch(e.basename, key)) {
+                if (isAsciiName(e.basename)) continue;
+                if (!try holdsFamily(io, fa, e.dir, e.basename, family)) continue;
+            }
             const data = e.dir.readFileAlloc(io, e.basename, fa, .limited(opts.max_file_size)) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => continue,
@@ -599,4 +669,35 @@ test "FamilyFace.load extracts the face; a changed file is refused" {
     try testing.expectError(error.FaceChanged, moved.load(testing.io, testing.allocator));
     moved.info.index = 99;
     try testing.expectError(error.FaceChanged, moved.load(testing.io, testing.allocator));
+}
+
+test "prefilter: a non-ASCII file name is judged by its name table" {
+    // As macOS ships Hiragino Sans in "ヒラギノ角ゴシック W0.ttc" etc., with
+    // the names in NFD ("ギ" = "キ" + U+3099). ASCII names still go by
+    // `nameMayMatch`: "Zz.otf" holds Charter but is not opened.
+    const io = testing.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const copies = [_][2][]const u8{
+        .{ "test/fonts/Inter/Inter.ttc", "\u{30A4}\u{30F3}\u{30BF}\u{30FC}.ttc" },
+        .{ "test/fonts/Charter/Charter Regular.otf", "\u{30C1}\u{30E3}\u{30FC}\u{30BF}\u{30FC} \u{30AD}\u{3099}.otf" },
+        .{ "test/fonts/Charter/Charter Bold.otf", "Zz.otf" },
+    };
+    for (copies) |c| try std.Io.Dir.cwd().copyFile(c[0], tmp.dir, c[1], io, .{});
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", testing.allocator);
+    defer testing.allocator.free(dir);
+    const opts: Options = .{ .dirs = &.{dir} };
+
+    const inter = try listFamily(io, testing.allocator, "Inter", opts);
+    defer freeFamilyFaces(testing.allocator, inter);
+    try testing.expectEqual(@as(usize, 18), inter.len);
+    for (inter) |f| try testing.expect(std.mem.endsWith(u8, f.path, copies[0][1]));
+
+    var charter = (try findFamily(io, testing.allocator, "charter", opts)).?;
+    defer charter.deinit(testing.allocator);
+    try testing.expect(std.mem.endsWith(u8, charter.regular.?.path, copies[1][1]));
+    try testing.expectEqualStrings("Charter", charter.regular.?.family);
+    try testing.expect(charter.bold == null);
+
+    try testing.expect(try findFamily(io, testing.allocator, "Inter Displays", opts) == null);
 }

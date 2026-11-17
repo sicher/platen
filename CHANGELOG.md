@@ -118,6 +118,14 @@
 
 ### Fixed
 
+- **System font lookup missed families in files with non-ASCII names**:
+  `findSystemFontFamily`/`listSystemFontFaces` did not find Hiragino Sans,
+  Hiragino Mincho ProN or Hiragino Maru Gothic ProN on macOS, whose files are
+  "ヒラギノ角ゴシック W0.ttc" ... "W9.ttc", "ヒラギノ明朝 ProN.ttc" and
+  "ヒラギノ丸ゴ ProN W4.ttc": the file-name prefilter rejected them. A file
+  name with non-ASCII characters now has its name tables read (header, table
+  directories and `name` only, not the whole file) to decide; ASCII names
+  are filtered as before. CLI: `find-font "Hiragino Sans" --all`.
 - **CJK text in CID-keyed OpenType/CFF fonts printed as garbage** (Apple SD
   Gothic Neo, Hiragino...: Hangul and kana showed as unrelated low glyphs,
   in PDFKit and poppler alike). The subset kept the font's charset, which

@@ -237,9 +237,15 @@ returns **standalone sfnt bytes**, not a loaded Font.
   Final Draft takes a family's lightest upright face) pick from the list.
 - **Prefilter** (`nameMayMatch`): the squashed file stem starts with the
   squashed family, or an 8.3-style stem (<= 8 chars, Windows "timesbd",
-  "cour") shares the family's first 4 chars. `prefilter = false` scans
-  everything (needed for fonts whose file name is unrelated, e.g.
-  Hiragino's Japanese file names). Real-macOS lookups take 10-60 ms.
+  "cour") shares the family's first 4 chars. A stem with non-ASCII
+  characters cannot be judged from an ASCII family (macOS: Hiragino in
+  "ヒラギノ角ゴシック W3.ttc", stored in NFD), so `holdsFamily` reads only
+  its collection header, table directories and `name` tables (positional
+  reads; the name table goes into a one-table sfnt for `describeFace`) and
+  the whole file is read only on a match. macOS has 12 such files (84 MB);
+  the probe adds ~0.3 ms to a warm lookup. No alias table to maintain.
+  `prefilter = false` scans everything (for ASCII file names unrelated to
+  the family). Real-macOS lookups take 10-60 ms.
 - **Folders**: macOS /System/Library/Fonts(+/Supplemental), /Library/Fonts,
   ~/Library/Fonts; Linux /usr/share/fonts, /usr/local/share/fonts,
   ~/.local/share/fonts, ~/.fonts; Windows C:\Windows\Fonts and
