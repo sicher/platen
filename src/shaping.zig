@@ -110,6 +110,11 @@ pub const Cache = struct {
     gpos_lookups: [2]std.ArrayListUnmanaged(u16) = .{ .empty, .empty },
     gpos_valid: [2]bool = .{ false, false },
     indic_plan: ?indic.Plan = null,
+    /// GPOS pair adjustments found so far (independent of flags)
+    pairs: std.AutoHashMapUnmanaged(u64, gpos.PairRecord) = .empty,
+    /// Advance and glyph count of short texts measured (advanceCached) with
+    /// `flags`: wrapping measures the same words over and over. Keys owned.
+    widths: std.StringHashMapUnmanaged(Advance) = .empty,
     /// The flags the cached lookups and plan are for
     flags: ?opentype.FeatureFlags = null,
 
@@ -120,7 +125,21 @@ pub const Cache = struct {
         self.arena.promote(allocator).deinit();
         for (&self.gpos_lookups) |*l| l.deinit(allocator);
         if (self.indic_plan) |p| p.deinit(allocator);
+        self.pairs.deinit(allocator);
+        self.clearWidths(allocator);
+        self.widths.deinit(allocator);
         self.* = .{};
+    }
+
+    /// Texts longer than this are not remembered (lines rarely repeat)
+    const max_width_text = 64;
+    /// Widths remembered before the cache starts over
+    const max_widths = 4096;
+
+    fn clearWidths(self: *Cache, allocator: Allocator) void {
+        var it = self.widths.keyIterator();
+        while (it.next()) |k| allocator.free(k.*);
+        self.widths.clearRetainingCapacity();
     }
 
     fn useFlags(self: *Cache, allocator: Allocator, flags: opentype.FeatureFlags) void {
@@ -130,6 +149,7 @@ pub const Cache = struct {
         self.gpos_valid = .{ false, false };
         if (self.indic_plan) |p| p.deinit(allocator);
         self.indic_plan = null;
+        self.clearWidths(allocator);
         self.flags = flags;
     }
 };
@@ -169,12 +189,28 @@ pub fn shapeCached(cache_alloc: Allocator, cache: *Cache, out_alloc: Allocator, 
 
 /// Total advance (font units) and glyph count of `text` as shapeCached
 /// shapes it, without building its glyph list.
-pub fn advanceCached(cache_alloc: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) !struct { advance: i64, count: usize } {
+pub fn advanceCached(cache_alloc: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: opentype.FeatureFlags, text: []const u8) !Advance {
+    cache.useFlags(cache_alloc, flags);
+    const remember = text.len <= Cache.max_width_text;
+    if (remember) {
+        if (cache.widths.get(text)) |a| return a;
+    }
     const r = try run(cache_alloc, cache, emb, flags, text);
     var sum: i64 = 0;
     for (r.pos) |p| sum += p.x_advance;
-    return .{ .advance = sum, .count = r.glyphs.len };
+    const result: Advance = .{ .advance = sum, .count = r.glyphs.len };
+    if (remember) {
+        if (cache.widths.count() >= Cache.max_widths) cache.clearWidths(cache_alloc);
+        // A cache: out of memory only skips remembering
+        if (cache_alloc.dupe(u8, text)) |key| {
+            cache.widths.put(cache_alloc, key, result) catch cache_alloc.free(key);
+        } else |_| {}
+    }
+    return result;
 }
+
+/// Total advance (font units) and glyph count of a shaped text.
+pub const Advance = struct { advance: i64, count: usize };
 
 /// One shaping pass; its glyphs and positions live in `cache` until the
 /// next call.
@@ -231,7 +267,9 @@ fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: ope
             }
             lookups = cache.gpos_lookups[k].items;
         }
-        positionGlyphs(o, gsub_table, &emb.font, d.codepoints.items, flags, indic_plan != null, glyphs, pos, lookups);
+        var pairs: gpos.PairCache = .{ .map = cache.pairs, .allocator = allocator };
+        defer cache.pairs = pairs.map;
+        positionGlyphs(o, gsub_table, &emb.font, d.codepoints.items, flags, indic_plan != null, glyphs, pos, lookups, &pairs);
     }
     return .{ .glyphs = glyphs, .pos = pos };
 }
@@ -287,8 +325,8 @@ fn spaceWidths(font: *const ttf.Font, kinds: []const unicode_props.SpaceFallback
 /// GPOS), and attached glyphs take their parents' offsets. Without GPOS,
 /// marks are then placed by glyph extents (mark_fallback.zig).
 /// `gpos_lookups`: the GPOS lookups for the text's script and flags.
-fn positionGlyphs(ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, indic_shaper: bool, glyphs: []gsub.Glyph, pos: []gpos.Position, gpos_lookups: []const u16) void {
-    if (ot.gpos) |*table| gpos.apply(table, glyphs, pos, gpos_lookups);
+fn positionGlyphs(ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, indic_shaper: bool, glyphs: []gsub.Glyph, pos: []gpos.Position, gpos_lookups: []const u16, pairs: *gpos.PairCache) void {
+    if (ot.gpos) |*table| gpos.applyCached(table, glyphs, pos, gpos_lookups, pairs);
     if (ot.shaping_kern) |*kern| {
         if (flags.isEnabled(.kern)) gpos.applyKernTable(gsub_table, kern, glyphs, pos);
     }

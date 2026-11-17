@@ -1487,10 +1487,20 @@ GsubTest (ligature components) in harfbuzz_positions.txt.
   cache; clones get their own.
 - Spans never overlap: a composite (decode) or ligature (gsub) that covers
   an intervening mark's text takes it, the mark's span becomes empty.
-- Performance (2000 pages, old -> new ms): simple text 66 -> 105,
-  OpenType heavy 378 -> 505, Unicode/marks 219 -> 344, text flow 42 -> 139.
-  GSUB costs the same; the rest is GPOS (class-pair kerning: ClassDef
-  lookups, no pair cache as the old path had) and per-call overhead.
+- Performance: GSUB costs what it did; the rest was per-call overhead,
+  GPOS class-pair kerning and the ToUnicode maps. Remedies, all in
+  per-document state: `shaping.Cache.pairs` (gpos.PairCache: the PairPos
+  record per (lookup, first, second), found once - the old kern cache's
+  role); `Cache.widths` (advance + glyph count of texts <= 64 bytes, owned
+  keys, cleared at 4096 and on a flags change: wrapping re-measures the
+  same words); `EmbeddedFont.glyphs_done`/`cps_done` bitsets (width and
+  text recorded, BMP character's first glyph known: a glyph drawn for one
+  such character skips the maps). perf_test, 2000 pages x 3 (b0d4e28 ->
+  now, ms): simple text 50 -> 47, OpenType heavy 415 -> 456,
+  Unicode/marks 247 -> 313, text flow 51 -> 67, PDF output 726 -> 647,
+  total 1813 -> 1887 (+4%); the remaining cost includes GPOS mark
+  positioning the old path did not do. Profile with
+  `sample <pid>` on a long run (`platen-perf --pages=20000`).
 - The old path (markUnicodeCharsUsed, renderCIDTextWithKerning, pair kern
   cache, getMarkOffset) remains for `platen shape` and tests until removed.
 

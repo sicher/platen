@@ -215,9 +215,9 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul not decomposed).
 - [x] **write() on the GPOS engine** (done 2026-11-17: shapeRun +
   renderShapedRun; references regenerated).
-- [ ] **Shaping performance**: write()/measure is 1.3-3x slower on text
-  (GPOS class kerning, per-call overhead); GPOS digests or a class cache, a
-  measurement width cache.
+- [ ] **Shaping performance**: after the pair/width caches and done-sets
+  the total is +4% over the old path (Unicode/marks +27%, text flow +31%);
+  left: decode/cluster setup per call, GPOS mark lookups.
 - [ ] **Remove the old glyph path** (markUnicodeCharsUsed,
   renderCIDTextWithKerning, getKerning/getMarkOffset caches); `platen shape`
   onto shapeRun.

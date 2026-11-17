@@ -47,10 +47,49 @@ pub const AttachType = enum(u2) { none, mark, cursive };
 /// `glyphs` (GSUB's output) and `pos` (their advances, offsets zero).
 /// Allocation-free.
 pub fn apply(table: *const Table, glyphs: []Glyph, pos: []Position, lookups: []const u16) void {
+    applyCached(table, glyphs, pos, lookups, null);
+}
+
+/// The pair adjustment a PairPos lookup gives a glyph pair: which record
+/// of which subtable (or none). Fixed for (lookup, first, second), so a
+/// font's shaping cache remembers it (repeated pairs skip the coverage and
+/// class searches).
+pub const PairRecord = struct {
+    found: bool,
+    vf1: u16 = 0,
+    vf2: u16 = 0,
+    rec1: u32 = 0,
+    rec2: u32 = 0,
+};
+
+pub const PairCache = struct {
+    map: std.AutoHashMapUnmanaged(u64, PairRecord) = .empty,
+    allocator: std.mem.Allocator,
+
+    /// Entries kept before the cache starts over
+    const max_entries = 1 << 16;
+
+    pub fn deinit(self: *PairCache) void {
+        self.map.deinit(self.allocator);
+    }
+
+    fn key(li: u16, first: u16, second: u16) u64 {
+        return @as(u64, li) << 32 | @as(u64, first) << 16 | second;
+    }
+
+    fn put(self: *PairCache, k: u64, r: PairRecord) void {
+        if (self.map.count() >= max_entries) self.map.clearRetainingCapacity();
+        self.map.put(self.allocator, k, r) catch {}; // a cache: OOM only skips it
+    }
+};
+
+/// `apply`, with PairPos results remembered in `cache` (one table's).
+pub fn applyCached(table: *const Table, glyphs: []Glyph, pos: []Position, lookups: []const u16, cache: ?*PairCache) void {
     var list: std.ArrayListUnmanaged(Glyph) = .fromOwnedSlice(glyphs);
     var ctx: Ctx = .{
         .m = .{ .table = table, .buf = &list, .max_len = glyphs.len },
         .pos = pos,
+        .pair_cache = cache,
     };
     var run: gsub.Digest = .{};
     for (glyphs) |g| run.addGlyph(g.id);
@@ -169,6 +208,7 @@ const Ctx = struct {
     /// GSUB's matcher over the same buffer: classes, flags, contexts
     m: gsub.Context,
     pos: []Position,
+    pair_cache: ?*PairCache = null,
 
     fn data(self: *const Ctx) []const u8 {
         return self.m.table.data;
@@ -182,6 +222,9 @@ const Ctx = struct {
     /// Returns where to continue.
     fn applyAt(self: *Ctx, lookup: *const Lookup, li: u16, i: usize, depth: u8) ?usize {
         const gid = self.glyphs()[i].id;
+        if (lookup.type == 2) {
+            if (self.pair_cache) |cache| return self.applyPairCached(cache, lookup, li, i);
+        }
         if (lookup.index) |index| {
             for (index.subtablesFor(gid)) |k| {
                 if (self.applySubtable(lookup, li, lookup.subtables[k], i, depth)) |n| return n;
@@ -249,23 +292,61 @@ const Ctx = struct {
     // Type 2. The second glyph is the next one the flags don't skip; the
     // run continues from it (after it, if it got a value record).
     fn applyPair(self: *Ctx, lookup: *const Lookup, addr: usize, i: usize) ?usize {
-        const d = self.data();
         const items = self.glyphs();
-        const ci = coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(items[i].id) orelse return null;
         const j = nextIndex(&self.m, lookup, i) orelse return null;
+        const r = findPair(self.data(), addr, items[i].id, items[j].id);
+        if (!r.found) return null;
+        return self.applyPairRecord(r, i, j);
+    }
+
+    /// A PairPos lookup at i through the cache: the record found for
+    /// (lookup, glyph, next glyph) in any subtable, searched once.
+    fn applyPairCached(self: *Ctx, cache: *PairCache, lookup: *const Lookup, li: u16, i: usize) ?usize {
+        const items = self.glyphs();
+        const j = nextIndex(&self.m, lookup, i) orelse return null;
+        const k = PairCache.key(li, items[i].id, items[j].id);
+        const r = cache.map.get(k) orelse blk: {
+            var found: PairRecord = .{ .found = false };
+            const gid = items[i].id;
+            if (lookup.index) |index| {
+                for (index.subtablesFor(gid)) |sub| {
+                    found = findPair(self.data(), lookup.subtables[sub], gid, items[j].id);
+                    if (found.found) break;
+                }
+            } else for (lookup.subtables, lookup.subtable_digests) |addr, digest| {
+                if (!digest.mayHave(gid)) continue;
+                found = findPair(self.data(), addr, gid, items[j].id);
+                if (found.found) break;
+            }
+            cache.put(k, found);
+            break :blk found;
+        };
+        if (!r.found) return null;
+        return self.applyPairRecord(r, i, j);
+    }
+
+    fn applyPairRecord(self: *Ctx, r: PairRecord, i: usize, j: usize) usize {
+        self.applyValue(r.vf1, r.rec1, &self.pos[i]);
+        self.applyValue(r.vf2, r.rec2, &self.pos[j]);
+        return if (valueSize(r.vf2) != 0) j + 1 else j;
+    }
+
+    /// The record of PairPos subtable `addr` for (first, second), if any.
+    fn findPair(d: []const u8, addr: usize, first: u16, second: u16) PairRecord {
+        const none: PairRecord = .{ .found = false };
+        const ci = coverageAt(d, addr + readU16(d, addr + 2)).getCoverageIndex(first) orelse return none;
         const vf1 = readU16(d, addr + 4);
         const vf2 = readU16(d, addr + 6);
         const len1 = valueSize(vf1);
         const len2 = valueSize(vf2);
         switch (readU16(d, addr)) {
             1 => {
-                if (ci >= readU16(d, addr + 8)) return null;
+                if (ci >= readU16(d, addr + 8)) return none;
                 const set = addr + readU16(d, addr + 10 + @as(usize, ci) * 2);
                 const record_size = 2 + len1 + len2;
                 // Records are sorted by second glyph
                 var lo: usize = 0;
                 var hi: usize = readU16(d, set);
-                const second = items[j].id;
                 while (lo < hi) {
                     const mid = (lo + hi) / 2;
                     const rec = set + 2 + mid * record_size;
@@ -275,25 +356,21 @@ const Ctx = struct {
                     } else if (g > second) {
                         hi = mid;
                     } else {
-                        self.applyValue(vf1, rec + 2, &self.pos[i]);
-                        self.applyValue(vf2, rec + 2 + len1, &self.pos[j]);
-                        return if (len2 != 0) j + 1 else j;
+                        return .{ .found = true, .vf1 = vf1, .vf2 = vf2, .rec1 = @intCast(rec + 2), .rec2 = @intCast(rec + 2 + len1) };
                     }
                 }
-                return null;
+                return none;
             },
             2 => {
-                const class1 = classDefAt(d, addr + readU16(d, addr + 8)).getClass(items[i].id);
-                const class2 = classDefAt(d, addr + readU16(d, addr + 10)).getClass(items[j].id);
+                const class1 = classDefAt(d, addr + readU16(d, addr + 8)).getClass(first);
+                const class2 = classDefAt(d, addr + readU16(d, addr + 10)).getClass(second);
                 const class1_count = readU16(d, addr + 12);
                 const class2_count = readU16(d, addr + 14);
-                if (class1 >= class1_count or class2 >= class2_count) return null;
+                if (class1 >= class1_count or class2 >= class2_count) return none;
                 const rec = addr + 16 + (@as(usize, class1) * class2_count + class2) * (len1 + len2);
-                self.applyValue(vf1, rec, &self.pos[i]);
-                self.applyValue(vf2, rec + len1, &self.pos[j]);
-                return if (len2 != 0) j + 1 else j;
+                return .{ .found = true, .vf1 = vf1, .vf2 = vf2, .rec1 = @intCast(rec), .rec2 = @intCast(rec + len1) };
             },
-            else => return null,
+            else => return none,
         }
     }
 

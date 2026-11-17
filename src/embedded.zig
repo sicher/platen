@@ -209,6 +209,11 @@ pub const EmbeddedFont = struct {
     /// Shaping state reused between shapeRun/shapedWidth calls (not on a
     /// shared prototype).
     shape_cache: shaping.Cache = .{},
+    /// Glyphs whose width and ToUnicode text are recorded (first use wins:
+    /// nothing more to do for them), and BMP characters whose first glyph
+    /// is in cid_used_glyphs: written text skips the maps for these.
+    glyphs_done: std.DynamicBitSetUnmanaged = .{},
+    cps_done: std.DynamicBitSetUnmanaged = .{},
 
     // Metrics scaled to 1000 units (PDF standard)
     ascent: i16,
@@ -451,6 +456,8 @@ pub const EmbeddedFont = struct {
 
     pub fn deinit(self: *EmbeddedFont) void {
         self.shape_cache.deinit(self.allocator);
+        self.glyphs_done.deinit(self.allocator);
+        self.cps_done.deinit(self.allocator);
         self.allocator.free(self.name);
         if (self.subset_data) |subset| {
             self.allocator.free(subset);
@@ -506,6 +513,8 @@ pub const EmbeddedFont = struct {
         // A clone is one document's: it keeps its own shaping cache
         emb.shared = false;
         emb.shape_cache = .{};
+        emb.glyphs_done = .{};
+        emb.cps_done = .{};
         if (proto.ot_features) |proto_ot| {
             const ot = try allocator.create(opentype.OpenTypeFeatures);
             errdefer allocator.destroy(ot);
@@ -903,11 +912,28 @@ pub const EmbeddedFont = struct {
         const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
         var cps: std.ArrayListUnmanaged(u21) = .empty;
         defer cps.deinit(self.allocator);
-        for (ids) |gid| try self.trackGlyphWidth(gid, scale);
+        if (self.glyphs_done.bit_length == 0) {
+            // Every glyph ID, every BMP character (8 KB each)
+            self.glyphs_done = try .initEmpty(self.allocator, 1 << 16);
+            self.cps_done = try .initEmpty(self.allocator, 1 << 16);
+        }
+        for (ids) |gid| {
+            if (!self.isGlyphDone(gid)) try self.trackGlyphWidth(gid, scale);
+        }
         var i: usize = 0;
         while (i < ids.len) : (i += 1) {
             const src = sources[i];
             if (src[0] >= src[1] or src[1] > text.len) continue;
+            // One BMP character drawn by a glyph already done: its text and
+            // its character's glyph are recorded
+            const len = src[1] - src[0];
+            if (len <= 3 and (std.unicode.utf8ByteSequenceLength(text[src[0]]) catch 0) == len and self.isGlyphDone(ids[i]) and
+                (i + 1 == ids.len or sources[i + 1][0] != sources[i + 1][1]))
+            {
+                if (std.unicode.utf8Decode(text[src[0]..src[1]])) |cp| {
+                    if (self.cps_done.isSet(cp)) continue;
+                } else |_| {}
+            }
             // Glyphs a multiple substitution split it into follow with no
             // text of their own, at its cluster (at or before its start; an
             // inserted dotted circle sits after it): they map together, as
@@ -934,7 +960,9 @@ pub const EmbeddedFont = struct {
             if (group.len == 1 and cps.items.len == 1) {
                 const cp = cps.items[0];
                 if (!self.cid_used_glyphs.contains(cp)) try self.cid_used_glyphs.put(self.allocator, cp, group[0]);
+                if (cp < 0x10000) self.cps_done.set(cp);
                 try self.trackGlyphText(group[0], cp, false);
+                self.markGlyphDone(group[0]);
                 continue;
             }
             var flags_buf: [32]bool = @splat(false);
@@ -945,7 +973,20 @@ pub const EmbeddedFont = struct {
             };
             defer if (cps.items.len > flags_buf.len) self.allocator.free(composed);
             try self.trackClusterText(group, cps.items, composed);
+            for (group) |gid| self.markGlyphDone(gid);
         }
+    }
+
+    fn isGlyphDone(self: *const EmbeddedFont, gid: u16) bool {
+        return gid < self.glyphs_done.bit_length and self.glyphs_done.isSet(gid);
+    }
+
+    /// Records that `gid`'s width and text need no more work, once both are
+    /// in the maps.
+    fn markGlyphDone(self: *EmbeddedFont, gid: u16) void {
+        if (gid >= self.glyphs_done.bit_length) return;
+        if (!self.cid_glyph_widths.contains(gid) and self.font.getGlyphWidth(gid) != null) return;
+        if (self.glyph_to_codepoint.contains(gid) or self.ligature_codepoints.contains(gid)) self.glyphs_done.set(gid);
     }
 
     /// Get glyph sequence for text with ligature substitution applied
