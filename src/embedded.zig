@@ -817,6 +817,34 @@ pub const EmbeddedFont = struct {
         }
     }
 
+    /// markPlacedGlyphsUsed with each glyph's own source text: `sources`
+    /// are byte ranges of `text` (empty: the glyph stands for none). The
+    /// same default ignorables are left out as there.
+    pub fn markSourcedGlyphsUsed(self: *EmbeddedFont, text: []const u8, ids: []const u16, sources: []const [2]u32) !void {
+        const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
+        var cps: std.ArrayListUnmanaged(u21) = .empty;
+        defer cps.deinit(self.allocator);
+        for (ids, sources) |gid, src| {
+            try self.trackGlyphWidth(gid, scale);
+            if (src[0] >= src[1] or src[1] > text.len) continue;
+            cps.clearRetainingCapacity();
+            var view = std.unicode.Utf8View.init(text[src[0]..src[1]]) catch continue;
+            var it = view.iterator();
+            while (it.nextCodepoint()) |cp| {
+                switch (gsub.Ignorable.of(cp)) {
+                    .none, .zwj, .zwnj => {},
+                    else => if (!(cp >= 0xFE00 and cp <= 0xFE0F) and !(cp >= 0xE0100 and cp <= 0xE01EF)) continue,
+                }
+                try cps.append(self.allocator, cp);
+            }
+            if (cps.items.len == 0) continue;
+            const composed = try self.allocator.alloc(bool, cps.items.len);
+            defer self.allocator.free(composed);
+            @memset(composed, false);
+            try self.trackClusterText(&.{gid}, cps.items, composed);
+        }
+    }
+
     /// Get glyph sequence for text with ligature substitution applied
     /// Returns allocated slice that caller must free
     pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {

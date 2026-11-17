@@ -1091,7 +1091,22 @@ pub const Document = struct {
             x.* = g.x;
             y.* = height - g.y;
         }
-        try emb.markPlacedGlyphsUsed(text, ids, clusters);
+        // Glyphs with their own source text map exactly to it; the others
+        // by their clusters
+        var sourced = false;
+        for (glyphs) |g| {
+            if (g.source != null) sourced = true;
+        }
+        if (sourced) {
+            for (glyphs) |g| {
+                if (g.source) |src| {
+                    if (src.end > text.len or src.start > src.end) return error.InvalidGlyphSource;
+                }
+            }
+            const sources = try page_alloc.alloc([2]u32, glyphs.len);
+            for (glyphs, sources) |g, *sp| sp.* = if (g.source) |src| .{ src.start, src.end } else .{ g.cluster, g.cluster };
+            try emb.markSourcedGlyphsUsed(text, ids, sources);
+        } else try emb.markPlacedGlyphsUsed(text, ids, clusters);
         try page.commands.append(self.allocator, .{ .glyphs = .{
             .font = emb,
             .font_size = style.size,

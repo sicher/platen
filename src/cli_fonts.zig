@@ -120,6 +120,7 @@ pub fn drawGlyphs(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: [
                 .x = pen + @as(f64, @floatFromInt(g.x_offset)) * scale,
                 .y = y - @as(f64, @floatFromInt(g.y_offset)) * scale,
                 .cluster = g.cluster,
+                .source = .{ .start = g.text_start, .end = g.text_end },
             };
             pen += @as(f64, @floatFromInt(g.x_advance)) * scale;
         }

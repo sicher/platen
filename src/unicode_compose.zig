@@ -63,8 +63,9 @@ pub fn modifiedCombiningClass(cp: u21) u8 {
 /// HarfBuzz's mark reordering (normalization round 2): each run of code
 /// points with a nonzero modified combining class, up to 32 long, is
 /// sorted stably by that class. `offsets` (optional, same length) moves
-/// along.
-pub fn reorderMarks(cps: []u21, offsets: ?[]u32) void {
+/// along, merged as HarfBuzz merges clusters; `spans` (optional: each code
+/// point's own source bytes) moves along unmerged.
+pub fn reorderMarks(cps: []u21, offsets: ?[]u32, spans: ?[][2]u32) void {
     const max_run = 32;
     var i: usize = 0;
     while (i < cps.len) {
@@ -80,6 +81,7 @@ pub fn reorderMarks(cps: []u21, offsets: ?[]u32) void {
             while (k < end) : (k += 1) {
                 const cp = cps[k];
                 const off = if (offsets) |o| o[k] else 0;
+                const span = if (spans) |sp| sp[k] else .{ 0, 0 };
                 const cc = modifiedCombiningClass(cp);
                 var j = k;
                 while (j > i and modifiedCombiningClass(cps[j - 1]) > cc) j -= 1;
@@ -94,9 +96,11 @@ pub fn reorderMarks(cps: []u21, offsets: ?[]u32) void {
                 while (m > j) : (m -= 1) {
                     cps[m] = cps[m - 1];
                     if (offsets) |o| o[m] = merged;
+                    if (spans) |sp| sp[m] = sp[m - 1];
                 }
                 cps[j] = cp;
                 if (offsets) |o| o[j] = merged;
+                if (spans) |sp| sp[j] = span;
             }
         }
         i = end;
@@ -169,7 +173,9 @@ pub fn decompose(c: u21, buf: []u21) []u21 {
 /// (same length as `cps`) gets, per output position, whether that code
 /// point was composed from a decomposed sequence. `offsets` (same length,
 /// optional) moves with the code points: a composite keeps its base's.
-pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, ctx: anytype) usize {
+/// `spans` (optional, each code point's source bytes): a composite covers
+/// its parts'.
+pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, spans: ?[][2]u32, ctx: anytype) usize {
     var out: usize = 0;
     var starter: ?usize = null;
     var last_ccc: u8 = 0; // class of the last uncomposed mark after the starter
@@ -184,6 +190,7 @@ pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, ctx: anyty
                         if (ctx.hasGlyph(c)) {
                             cps[s] = c;
                             if (composed) |flags| flags[s] = true;
+                            if (spans) |sp| sp[s] = .{ @min(sp[s][0], sp[in][0]), @max(sp[s][1], sp[in][1]) };
                             continue;
                         }
                     }
@@ -197,6 +204,7 @@ pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, ctx: anyty
         cps[out] = cp;
         if (composed) |flags| flags[out] = false;
         if (offsets) |o| o[out] = o[in];
+        if (spans) |sp| sp[out] = sp[in];
         out += 1;
     }
     return out;
@@ -211,7 +219,7 @@ const AllGlyphs = struct {
 fn expectComposed(input: []const u21, expected: []const u21, ctx: anytype) !void {
     var buf: [16]u21 = undefined;
     @memcpy(buf[0..input.len], input);
-    const n = composeInPlace(buf[0..input.len], null, null, ctx);
+    const n = composeInPlace(buf[0..input.len], null, null, null, ctx);
     try std.testing.expectEqualSlices(u21, expected, buf[0..n]);
 }
 
@@ -248,7 +256,7 @@ test "composeInPlace reports composed positions and moves offsets" {
     var flags: [4]bool = undefined;
     // UTF-8 byte offsets of "\u{E9}e\u{301}x"
     var offsets = [_]u32{ 0, 2, 3, 5 };
-    const n = composeInPlace(&cps, &flags, &offsets, AllGlyphs{});
+    const n = composeInPlace(&cps, &flags, &offsets, null, AllGlyphs{});
     try std.testing.expectEqualSlices(u21, &.{ 0x00E9, 0x00E9, 'x' }, cps[0..n]);
     try std.testing.expectEqualSlices(bool, &.{ false, true, false }, flags[0..n]);
     // The composite keeps its base's offset; the acute's is gone
@@ -275,12 +283,12 @@ test "reorderMarks sorts mark runs by modified combining class, stably" {
     // m, acute (230), dot below (220), n: the dot below goes first
     var cps = [_]u21{ 'm', 0x0301, 0x0323, 'n', 0x0300, 0x0301 };
     var offsets = [_]u32{ 0, 1, 3, 5, 6, 8 };
-    reorderMarks(&cps, &offsets);
+    reorderMarks(&cps, &offsets, null);
     try std.testing.expectEqualSlices(u21, &.{ 'm', 0x0323, 0x0301, 'n', 0x0300, 0x0301 }, &cps);
     // The moved range merges to its smallest offset, as HarfBuzz's sort
     try std.testing.expectEqualSlices(u32, &.{ 0, 1, 1, 5, 6, 8 }, &offsets);
     // Arabic: fatha (30) then shadda (33) - shadda moves first
     var ar = [_]u21{ 0x0644, 0x064E, 0x0651 };
-    reorderMarks(&ar, null);
+    reorderMarks(&ar, null, null);
     try std.testing.expectEqualSlices(u21, &.{ 0x0644, 0x0651, 0x064E }, &ar);
 }

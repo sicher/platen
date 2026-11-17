@@ -21,6 +21,11 @@ pub const Decoded = struct {
     /// Byte offset in the text of each code point (of the base, for a
     /// composed one). Filled only when `decode` is asked for it.
     offsets: std.ArrayListUnmanaged(u32) = .empty,
+    /// Byte range of the text each code point stands for (filled with
+    /// `offsets`): a composite covers its parts, a decomposition's first
+    /// part has the character and the others nothing, an inserted dotted
+    /// circle nothing. Never merged, unlike `offsets`.
+    spans: std.ArrayListUnmanaged([2]u32) = .empty,
     /// The text has a default ignorable (U+FE0F, ZWJ, soft hyphen...): it
     /// must go through the shaper, which removes them.
     ignorables: bool = false,
@@ -33,6 +38,7 @@ pub const Decoded = struct {
         self.composed.deinit(allocator);
         self.glyphs.deinit(allocator);
         self.offsets.deinit(allocator);
+        self.spans.deinit(allocator);
         self.space_fallbacks.deinit(allocator);
     }
 };
@@ -60,12 +66,14 @@ pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, o
     out.composed.clearRetainingCapacity();
     out.glyphs.clearRetainingCapacity();
     out.offsets.clearRetainingCapacity();
+    out.spans.clearRetainingCapacity();
     out.space_fallbacks.clearRetainingCapacity();
     // Worst case: all ASCII = text.len code points
     try out.codepoints.ensureTotalCapacity(allocator, text.len);
     try out.composed.ensureTotalCapacity(allocator, text.len);
     try out.glyphs.ensureTotalCapacity(allocator, text.len);
     if (track_offsets) try out.offsets.ensureTotalCapacity(allocator, text.len);
+    if (track_offsets) try out.spans.ensureTotalCapacity(allocator, text.len);
     const offsets: ?*std.ArrayListUnmanaged(u32) = if (track_offsets) &out.offsets else null;
 
     var may_compose = false;
@@ -78,6 +86,7 @@ pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, o
         if (byte < 128) {
             out.codepoints.appendAssumeCapacity(byte);
             if (offsets) |o| o.appendAssumeCapacity(@intCast(i));
+            if (track_offsets) out.spans.appendAssumeCapacity(.{ @intCast(i), @intCast(i + 1) });
             i += 1;
             continue;
         }
@@ -93,6 +102,7 @@ pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, o
         if (gsub.Ignorable.of(codepoint) != .none) out.ignorables = true;
         out.codepoints.appendAssumeCapacity(codepoint);
         if (offsets) |o| o.appendAssumeCapacity(@intCast(i));
+        if (track_offsets) out.spans.appendAssumeCapacity(.{ @intCast(i), @intCast(i + len) });
         i += len;
     }
 
@@ -112,12 +122,14 @@ pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, o
             }
         }{ .font = font, .indic = mode == .indic };
         // Marks in canonical order first, as HarfBuzz's normalization
-        unicode_compose.reorderMarks(out.codepoints.items, if (offsets) |o| o.items else null);
+        const spans: ?[][2]u32 = if (track_offsets) out.spans.items else null;
+        unicode_compose.reorderMarks(out.codepoints.items, if (offsets) |o| o.items else null, spans);
         out.composed.items.len = out.codepoints.items.len;
-        const n = unicode_compose.composeInPlace(out.codepoints.items, out.composed.items, if (offsets) |o| o.items else null, ctx);
+        const n = unicode_compose.composeInPlace(out.codepoints.items, out.composed.items, if (offsets) |o| o.items else null, spans, ctx);
         out.codepoints.items.len = n;
         out.composed.items.len = n;
         if (offsets) |o| o.items.len = n;
+        if (track_offsets) out.spans.items.len = n;
     } else {
         out.composed.appendNTimesAssumeCapacity(false, out.codepoints.items.len);
     }
@@ -220,21 +232,34 @@ fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, 
     errdefer new_cps.deinit(allocator);
     var new_offsets: std.ArrayListUnmanaged(u32) = .empty;
     errdefer new_offsets.deinit(allocator);
+    var new_spans: std.ArrayListUnmanaged([2]u32) = .empty;
+    errdefer new_spans.deinit(allocator);
     try new_cps.ensureTotalCapacity(allocator, cps.len + 8);
     new_cps.appendSliceAssumeCapacity(cps[0..from]);
-    if (track_offsets) try new_offsets.appendSlice(allocator, out.offsets.items[0..from]);
+    if (track_offsets) {
+        try new_offsets.appendSlice(allocator, out.offsets.items[0..from]);
+        try new_spans.appendSlice(allocator, out.spans.items[0..from]);
+    }
     for (cps[from..], from..) |cp, i| {
         var n: usize = 0;
         const parts: []const u21 = if (tryDecompose(font, cp, mode, &buf, &n)) buf[0..n] else &.{cp};
         try new_cps.appendSlice(allocator, parts);
-        if (track_offsets) try new_offsets.appendNTimes(allocator, out.offsets.items[i], parts.len);
+        if (track_offsets) {
+            try new_offsets.appendNTimes(allocator, out.offsets.items[i], parts.len);
+            // The first part stands for the character, the others for none
+            const span = out.spans.items[i];
+            try new_spans.append(allocator, span);
+            try new_spans.appendNTimes(allocator, .{ span[1], span[1] }, parts.len - 1);
+        }
     }
     out.codepoints.deinit(allocator);
     out.codepoints = new_cps;
     if (track_offsets) {
         out.offsets.deinit(allocator);
         out.offsets = new_offsets;
-    }
+        out.spans.deinit(allocator);
+        out.spans = new_spans;
+    } else new_spans.deinit(allocator);
     // The other per-code-point lists are filled after this, at this length
     try out.composed.ensureTotalCapacity(allocator, out.codepoints.items.len);
     try out.glyphs.ensureTotalCapacity(allocator, out.codepoints.items.len);
@@ -279,35 +304,62 @@ fn vowelConstraints(allocator: Allocator, out: *Decoded, track_offsets: bool) !v
     errdefer new_cps.deinit(allocator);
     var new_offsets: std.ArrayListUnmanaged(u32) = .empty;
     errdefer new_offsets.deinit(allocator);
+    var new_spans: std.ArrayListUnmanaged([2]u32) = .empty;
+    errdefer new_spans.deinit(allocator);
     const offs = out.offsets.items;
-    const push = struct {
-        fn f(a: Allocator, c: *std.ArrayListUnmanaged(u21), o: *std.ArrayListUnmanaged(u32), track: bool, cp: u21, off: u32) !void {
-            try c.append(a, cp);
-            if (track) try o.append(a, off);
+    const spans = out.spans.items;
+    const Lists = struct {
+        a: Allocator,
+        c: *std.ArrayListUnmanaged(u21),
+        o: *std.ArrayListUnmanaged(u32),
+        s: *std.ArrayListUnmanaged([2]u32),
+        track: bool,
+        fn push(l: @This(), cp: u21, off: u32, span: [2]u32) !void {
+            try l.c.append(l.a, cp);
+            if (l.track) {
+                try l.o.append(l.a, off);
+                try l.s.append(l.a, span);
+            }
         }
-    }.f;
+    };
+    const l: Lists = .{ .a = allocator, .c = &new_cps, .o = &new_offsets, .s = &new_spans, .track = track_offsets };
+    const at = struct {
+        fn off(t: bool, o: []const u32, k: usize) u32 {
+            return if (t) o[k] else 0;
+        }
+        fn span(t: bool, sp: []const [2]u32, k: usize) [2]u32 {
+            return if (t) sp[k] else .{ 0, 0 };
+        }
+    };
     var idx: usize = 0;
     while (idx + 1 < n) {
         var matched = matches(cps, idx);
         if (cps[idx] == 0x0930 and cps[idx + 1] == 0x094D and idx + 2 < n and cps[idx + 2] == 0x0907) {
-            try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+            try l.push(cps[idx], at.off(track_offsets, offs, idx), at.span(track_offsets, spans, idx));
             idx += 1;
             matched = true;
         }
-        try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+        try l.push(cps[idx], at.off(track_offsets, offs, idx), at.span(track_offsets, spans, idx));
         idx += 1;
         if (matched) {
-            try push(allocator, &new_cps, &new_offsets, track_offsets, 0x25CC, if (track_offsets) offs[idx] else 0);
-            try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+            // The inserted circle stands for no text
+            const next = at.off(track_offsets, offs, idx);
+            try l.push(0x25CC, next, .{ next, next });
+            try l.push(cps[idx], next, at.span(track_offsets, spans, idx));
             idx += 1;
         }
     }
-    while (idx < n) : (idx += 1) try push(allocator, &new_cps, &new_offsets, track_offsets, cps[idx], if (track_offsets) offs[idx] else 0);
+    while (idx < n) : (idx += 1) try l.push(cps[idx], at.off(track_offsets, offs, idx), at.span(track_offsets, spans, idx));
     out.codepoints.deinit(allocator);
     out.codepoints = new_cps;
     if (track_offsets) {
         out.offsets.deinit(allocator);
         out.offsets = new_offsets;
+        out.spans.deinit(allocator);
+        out.spans = new_spans;
+    } else {
+        new_offsets.deinit(allocator);
+        new_spans.deinit(allocator);
     }
     try out.composed.ensureTotalCapacity(allocator, out.codepoints.items.len);
     try out.glyphs.ensureTotalCapacity(allocator, out.codepoints.items.len);
@@ -349,10 +401,15 @@ fn applyVariationSequences(font: *const ttf.Font, d: *Decoded, track_offsets: bo
         cps[out] = cps[i];
         composed[out] = composed[i];
         glyphs[out] = glyphs[i];
-        if (track_offsets) d.offsets.items[out] = d.offsets.items[i];
+        if (track_offsets) {
+            d.offsets.items[out] = d.offsets.items[i];
+            d.spans.items[out] = d.spans.items[i];
+        }
         if (i + 1 < cps.len and isVariationSelector(cps[i + 1])) {
             if (font.getVariationGlyph(cps[i], cps[i + 1])) |gid| {
                 glyphs[out] = gid;
+                // The selector is part of the character's text
+                if (track_offsets) d.spans.items[out][1] = d.spans.items[i + 1][1];
                 i += 1;
                 consumed = true;
             }
@@ -363,7 +420,10 @@ fn applyVariationSequences(font: *const ttf.Font, d: *Decoded, track_offsets: bo
     d.codepoints.items.len = out;
     d.composed.items.len = out;
     d.glyphs.items.len = out;
-    if (track_offsets) d.offsets.items.len = out;
+    if (track_offsets) {
+        d.offsets.items.len = out;
+        d.spans.items.len = out;
+    }
     d.ignorables = for (d.codepoints.items) |cp| {
         if (gsub.Ignorable.of(cp) != .none) break true;
     } else false;

@@ -199,8 +199,16 @@ pub const PlacedGlyph = struct {
     x: f64,
     y: f64,
     /// Byte offset in the drawn text of this glyph's cluster
-    /// (ShapedGlyph.cluster): it gives the glyph its ToUnicode text.
+    /// (ShapedGlyph.cluster): it gives the glyph its ToUnicode text,
+    /// unless `source` does.
     cluster: u32,
+    /// The bytes of the drawn text this glyph stands for
+    /// (ShapedGlyph.text_start/text_end; empty: none). When given, the
+    /// glyph's ToUnicode text is exactly these characters - each glyph of
+    /// a cluster its own, as copy and paste should read them.
+    source: ?Source = null,
+
+    pub const Source = struct { start: u32, end: u32 };
 };
 
 /// Options for writeAt (point-positioned text).

@@ -330,6 +330,8 @@ for (shaped, placed[0..shaped.len]) |g, *p| {
         .x = pen + @as(f64, @floatFromInt(g.x_offset)) * scale,
         .y = 100 - @as(f64, @floatFromInt(g.y_offset)) * scale, // baseline at 100
         .cluster = g.cluster,
+        // Copy text: each glyph its own characters
+        .source = .{ .start = g.text_start, .end = g.text_end },
     };
     pen += @as(f64, @floatFromInt(g.x_advance)) * scale;
 }
@@ -341,8 +343,9 @@ try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face 
   are HarfBuzz's (default level): a ligature or a base with its marks shares
   one; they never decrease.
 - `drawGlyphs` writes each glyph at its position (to 0.001 pt) and gives it
-  its cluster's text for copy and paste: the "ffi" ligature extracts as
-  "ffi".
+  its `source` text for copy and paste (`text_start`/`text_end`: the "ffi"
+  ligature "ffi", a conjunct its characters, a reordered matra its own),
+  else its cluster's text.
 - Shaping is platen's GSUB and GPOS engines, run as HarfBuzz's default
   shaper, and as its Indic shaper for Devanagari; checked against HarfBuzz.
   The text's first character of a script decides, so shape mixed-script

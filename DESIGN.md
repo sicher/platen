@@ -1375,6 +1375,15 @@ Final Draft does). `shapeText(allocator, *const FontFace, text, opts)`:
   `EmbeddedFont.markPlacedGlyphsUsed`: widths, and ToUnicode per cluster
   through `trackClusterText` - a cluster's text runs to the next larger
   cluster value, default ignorables dropped except ZWJ/ZWNJ/VS.
+- Per-glyph source text: `decode.Decoded.spans` (each code point's own
+  bytes, never merged: compose unions, decomposition gives the first part
+  the character, inserted circles none, mark sorting moves them) and
+  `gsub.Glyph.src_lo/src_hi` (code point range: ligature = union of its
+  components, not skipped marks; multiple substitution's first glyph keeps
+  it) give `ShapedGlyph.text_start/text_end`. `PlacedGlyph.source` makes
+  `markSourcedGlyphsUsed` map each glyph to exactly its text (first use of
+  a glyph ID wins, as Quartz). Copy order is drawing order (a reordered
+  matra or reph reads where it is drawn), as Quartz's.
 - Subsetting now counts a font as used when any glyph has a width entry,
   not only when a single code point maps to a glyph.
 

@@ -758,6 +758,12 @@ pub const Glyph = struct {
     indic_position: u8 = 0,
     /// Inserted by the shaper (a dotted circle), no character of its own
     inserted: bool = false,
+    /// The code points (indices, [src_lo, src_hi)) this glyph was formed
+    /// from: its own at first; a ligature's components' together; the
+    /// first glyph of a multiple substitution keeps them, the others have
+    /// none. Unlike `cluster`, never merged with neighbors.
+    src_lo: u32 = 0,
+    src_hi: u32 = 0,
 };
 
 /// HarfBuzz's merge_clusters: the range takes its smallest cluster,
@@ -938,6 +944,8 @@ pub const Shaper = struct {
                 .id = gid,
                 .cluster = if (clusters) |c| c[i] else @intCast(i),
                 .cp = @intCast(i),
+                .src_lo = @intCast(i),
+                .src_hi = @intCast(i + 1),
                 .props = props,
                 .ignorable = ignorable,
             });
@@ -1251,6 +1259,8 @@ pub const Context = struct {
             }
             // Components of the sequence, unless attached to a ligature
             if (src.lig_id == 0) g.lig_comp = @truncate(k);
+            // The source text goes with the first glyph
+            if (k > 0) g.src_lo = g.src_hi;
             if (k == 0) self.buf.items[i] = g else self.buf.insertAssumeCapacity(i + k, g);
         }
         return i + n;
@@ -1317,6 +1327,23 @@ pub const Context = struct {
         var last_num_comps: usize = self.numComps(i);
         var so_far: usize = last_num_comps;
 
+        // The ligature stands for its components' text (not the marks it
+        // skipped, which keep theirs)
+        var src_lo = items[i].src_lo;
+        var src_hi = items[i].src_hi;
+        for (positions[1..]) |p| {
+            const c = items[p];
+            if (c.src_lo == c.src_hi) continue;
+            if (src_lo == src_hi) {
+                src_lo = c.src_lo;
+                src_hi = c.src_hi;
+            } else {
+                src_lo = @min(src_lo, c.src_lo);
+                src_hi = @max(src_hi, c.src_hi);
+            }
+        }
+        items[i].src_lo = src_lo;
+        items[i].src_hi = src_hi;
         // Merge the clusters of the span (skipped marks included), as
         // HarfBuzz's ligate_input
         mergeClusters(items, i, last + 1);

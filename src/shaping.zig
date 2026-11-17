@@ -45,6 +45,15 @@ pub const ShapedGlyph = struct {
     /// cluster. Glyphs of one cluster (a ligature's, a base and its
     /// marks after composition) share it; clusters never decrease.
     cluster: u32,
+    /// The bytes of the text this glyph itself was formed from
+    /// [text_start, text_end): a ligature or conjunct its characters', a
+    /// mark its own, a reordered matra its own; empty (start == end) for a
+    /// glyph that stands for no text (the second glyph of a decomposition,
+    /// an inserted dotted circle). Each character belongs to one glyph at
+    /// most: copy text built from these neither repeats nor drops any
+    /// (but a ligature formed across a mark also spans the mark's bytes).
+    text_start: u32 = 0,
+    text_end: u32 = 0,
 };
 
 pub const FeatureSetting = struct {
@@ -124,13 +133,29 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
 
     const out = try allocator.alloc(ShapedGlyph, glyphs.len);
     errdefer allocator.free(out);
-    for (out, glyphs, pos) |*o, g, p| o.* = .{
-        .id = g.id,
-        .x_advance = p.x_advance,
-        .x_offset = p.x_offset,
-        .y_offset = p.y_offset,
-        .cluster = d.offsets.items[g.cluster],
-    };
+    for (out, glyphs, pos) |*o, g, p| {
+        const cluster = d.offsets.items[g.cluster];
+        var start: u32 = std.math.maxInt(u32);
+        var end: u32 = 0;
+        for (d.spans.items[g.src_lo..g.src_hi]) |span| {
+            if (span[0] == span[1]) continue;
+            start = @min(start, span[0]);
+            end = @max(end, span[1]);
+        }
+        if (start >= end) {
+            start = cluster;
+            end = cluster;
+        }
+        o.* = .{
+            .id = g.id,
+            .x_advance = p.x_advance,
+            .x_offset = p.x_offset,
+            .y_offset = p.y_offset,
+            .cluster = cluster,
+            .text_start = start,
+            .text_end = end,
+        };
+    }
     return out;
 }
 
@@ -349,4 +374,44 @@ test "shape: Devanagari as Final Draft 13 prints it (Kohinoor Devanagari Light)"
     try testing.expectEqual(@as(usize, 2), hain.len);
     try testing.expectEqual(face.prototype.font.getGlyphId(0x0939).?, hain[0].id);
     try testing.expectEqual(@as(i32, 0), hain[1].x_advance);
+}
+
+test "shape: each glyph's source text, ligatures and reordering included" {
+    var face = try testFace("test/fonts/Gentium/Gentium-Regular.ttf");
+    defer face.deinit();
+    // o | ffi ligature | c | e ; then q + tilde (attached mark, own text)
+    const text = "office q\u{303}";
+    const glyphs = try shape(testing.allocator, &face, text, .{});
+    defer testing.allocator.free(glyphs);
+    const expected = [_][2]u32{ .{ 0, 1 }, .{ 1, 4 }, .{ 4, 5 }, .{ 5, 6 }, .{ 6, 7 }, .{ 7, 8 }, .{ 8, 10 } };
+    try testing.expectEqual(expected.len, glyphs.len);
+    for (glyphs, expected) |g, e| {
+        try testing.expectEqual(e[0], g.text_start);
+        try testing.expectEqual(e[1], g.text_end);
+    }
+    // The mark shares its base's cluster but has its own text
+    try testing.expectEqual(glyphs[5].cluster, glyphs[6].cluster);
+}
+
+test "shape: Devanagari glyphs carry their own characters (Kohinoor)" {
+    const a = testing.allocator;
+    const ttc = std.Io.Dir.cwd().readFileAlloc(testing.io, "/System/Library/Fonts/Kohinoor.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    const data = try @import("font_collection.zig").extractFace(a, ttc, 4);
+    defer a.free(data);
+    var face = try FontFace.fromMemory(a, data);
+    defer face.deinit();
+    // ki: the i matra (bytes 3..6) drawn first, then ka (0..3)
+    const ki = try shape(a, &face, "कि", .{});
+    defer a.free(ki);
+    try testing.expectEqual(@as(u32, 3), ki[0].text_start);
+    try testing.expectEqual(@as(u32, 6), ki[0].text_end);
+    try testing.expectEqual(@as(u32, 0), ki[1].text_start);
+    try testing.expectEqual(@as(u32, 3), ki[1].text_end);
+    // ste: the sa-virama-ta conjunct (0..9), then the e matra (9..12)
+    const ste = try shape(a, &face, "स्ते", .{});
+    defer a.free(ste);
+    try testing.expectEqual(@as(usize, 2), ste.len);
+    try testing.expectEqual([2]u32{ 0, 9 }, [2]u32{ ste[0].text_start, ste[0].text_end });
+    try testing.expectEqual([2]u32{ 9, 12 }, [2]u32{ ste[1].text_start, ste[1].text_end });
 }

@@ -15,9 +15,12 @@
   `platen.shapeText(allocator, &face, text, .{ .features = ... })` turns
   text into glyph IDs with advances, offsets (font units) and clusters (byte
   offsets into the text), reading the `FontFace` only (no Document, no I/O,
-  any thread). `doc.drawGlyphs(text, glyphs, style)` draws glyphs by ID, each
-  at its own position, and maps each to its cluster's text in ToUnicode, so a
-  ligature or conjunct copies out as its characters. For layout engines that
+  any thread), and each glyph's own source text (`text_start`/`text_end`,
+  tracked through ligatures, decompositions and reordering).
+  `doc.drawGlyphs(text, glyphs, style)` draws glyphs by ID, each at its own
+  position; ToUnicode gives each glyph its `source` text (a conjunct its
+  characters, a reordered matra its own: copying neither repeats nor drops
+  characters), or without one its cluster's text. For layout engines that
   place every glyph themselves. Positioning is a GPOS engine run the way
   HarfBuzz's default shaper does: every lookup type (single, pair, cursive,
   mark-to-base, -ligature and -mark, contexts, extensions) in lookup order

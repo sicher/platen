@@ -124,3 +124,37 @@ test "drawGlyphs rejects what it cannot draw" {
     const pdf = try doc.output();
     a.free(pdf);
 }
+
+test "drawGlyphs: with sources, each glyph maps to its own characters" {
+    const a = testing.allocator;
+    var doc = Document.init(a, testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const font = try doc.loadFont("test/fonts/Gentium/Gentium-Regular.ttf", .identity);
+    var face = try FontFace.fromFile(testing.io, a, "test/fonts/Gentium/Gentium-Regular.ttf");
+    defer face.deinit();
+    const text = "office q\u{303}";
+    const shaped = try platen.shapeText(a, &face, text, .{});
+    defer a.free(shaped);
+    const placed = try a.alloc(PlacedGlyph, shaped.len);
+    defer a.free(placed);
+    for (shaped, placed, 0..) |g, *p, i| p.* = .{
+        .id = g.id,
+        .x = 72 + 20 * @as(f64, @floatFromInt(i)),
+        .y = 100,
+        .cluster = g.cluster,
+        .source = .{ .start = g.text_start, .end = g.text_end },
+    };
+    try doc.drawGlyphs(text, placed, .{ .font = font, .size = 12 });
+    const emb = font.embedded;
+    // The ffi ligature maps to f, f, i; the tilde mark to itself, not to
+    // "q" + tilde on the base
+    try testing.expectEqualSlices(u21, &.{ 'f', 'f', 'i' }, emb.ligature_codepoints.get(shaped[1].id).?);
+    try testing.expectEqual(@as(u21, 'q'), emb.glyph_to_codepoint.get(shaped[5].id).?);
+    try testing.expectEqual(@as(u21, 0x0303), emb.glyph_to_codepoint.get(shaped[6].id).?);
+
+    // A source past the text is refused
+    var bad = placed[0];
+    bad.source = .{ .start = 3, .end = 99 };
+    try testing.expectError(error.InvalidGlyphSource, doc.drawGlyphs(text, &.{bad}, .{ .font = font, .size = 12 }));
+}
