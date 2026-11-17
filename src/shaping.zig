@@ -10,8 +10,8 @@
 //! offset, then the pen moves by its advance. Substitution is platen's
 //! GSUB engine, positioning its GPOS engine (gpos.zig) as HarfBuzz's
 //! default shaper runs it, after HarfBuzz's normalization (decode.zig);
-//! all checked against HarfBuzz. Not yet: fallback mark positioning for
-//! fonts without GPOS, and script-specific shaping (Indic reordering,
+//! fonts without GPOS get its fallback mark positioning; all checked
+//! against HarfBuzz. Not yet: script-specific shaping (Indic reordering,
 //! Arabic joining, bidi): text is shaped left to right with the font's
 //! DFLT (else latn) script.
 
@@ -23,6 +23,7 @@ const opentype = @import("opentype.zig");
 const unicode_props = @import("unicode_props.zig");
 const gpos = @import("gpos.zig");
 const ttf = @import("ttf.zig");
+const mark_fallback = @import("mark_fallback.zig");
 
 const Allocator = std.mem.Allocator;
 const EmbeddedFont = embedded.EmbeddedFont;
@@ -97,7 +98,7 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
     defer allocator.free(pos);
     for (pos, glyphs) |*p, g| p.* = .{ .x_advance = emb.font.getGlyphWidth(g.id) orelse 0 };
     if (d.space_fallbacks.items.len > 0) spaceWidths(&emb.font, d.space_fallbacks.items, glyphs, pos);
-    if (ot) |o| try positionGlyphs(allocator, o, gsub_table, flags, glyphs, pos);
+    if (ot) |o| try positionGlyphs(allocator, o, gsub_table, &emb.font, d.codepoints.items, flags, glyphs, pos);
 
     const out = try allocator.alloc(ShapedGlyph, glyphs.len);
     errdefer allocator.free(out);
@@ -144,8 +145,9 @@ fn spaceWidths(font: *const ttf.Font, kinds: []const unicode_props.SpaceFallback
 /// HarfBuzz's positioning for the default shaper (hb_ot_position): GPOS,
 /// or the 'kern' table where GPOS has no kern feature; then GDEF marks
 /// lose their advance (shifted back over the glyph before when there is no
-/// GPOS), and attached glyphs take their parents' offsets.
-fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, flags: opentype.FeatureFlags, glyphs: []gsub.Glyph, pos: []gpos.Position) !void {
+/// GPOS), and attached glyphs take their parents' offsets. Without GPOS,
+/// marks are then placed by glyph extents (mark_fallback.zig).
+fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, glyphs: []gsub.Glyph, pos: []gpos.Position) !void {
     if (ot.gpos) |*table| {
         var lookups: std.ArrayListUnmanaged(u16) = .empty;
         defer lookups.deinit(allocator);
@@ -157,6 +159,7 @@ fn positionGlyphs(allocator: Allocator, ot: *const opentype.OpenTypeFeatures, gs
     }
     gpos.zeroMarkWidths(gsub_table, glyphs, pos, ot.gpos == null);
     gpos.propagateAttachments(pos);
+    if (ot.gpos == null) mark_fallback.position(gsub_table, font, cps, glyphs, pos, true);
 }
 
 /// Turns the glyphs' clusters from code point indices (as GSUB left them:

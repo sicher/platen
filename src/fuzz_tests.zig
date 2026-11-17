@@ -122,6 +122,8 @@ fn fuzzTtfParse(_: void, smith: *Smith) !void {
     }
     _ = font.getCharWidth(codepoint);
     _ = font.getGlyphWidth(smith.value(u16));
+    _ = font.glyphExtents(smith.value(u16));
+    _ = font.leftSideBearing(smith.value(u16));
 }
 
 test "fuzz ttf.Font.parse" {

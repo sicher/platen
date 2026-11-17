@@ -340,6 +340,49 @@ pub const Font = struct {
         }
     }
 
+    /// Ink extents of a glyph in font units, as HarfBuzz reports them:
+    /// x_bearing is the hmtx left side bearing (else xMin), y_bearing the
+    /// top (yMax), width xMax - xMin, height yMin - yMax (negative). An
+    /// empty glyph has all zero. TrueType outlines only: null for CFF
+    /// fonts, glyph IDs past the font, or a broken glyf/loca.
+    pub fn glyphExtents(self: *const Font, glyph_id: u16) ?GlyphExtents {
+        const head = self.head orelse return null;
+        const maxp = self.maxp orelse return null;
+        if (glyph_id >= maxp.num_glyphs) return null;
+        const loca = self.getTable("loca".*) orelse return null;
+        const glyf = self.getTable("glyf".*) orelse return null;
+        const g: usize = glyph_id;
+        const short = head.index_to_loc_format == 0;
+        if (if (short) g * 2 + 4 > loca.len else g * 4 + 8 > loca.len) return null;
+        const start: usize, const end: usize = if (short) .{
+            @as(usize, readU16(loca, g * 2)) * 2,
+            @as(usize, readU16(loca, g * 2 + 2)) * 2,
+        } else .{ readU32(loca, g * 4), readU32(loca, g * 4 + 4) };
+        if (start == end) return .{};
+        if (end < start or start + 10 > glyf.len) return null;
+        const x_min: i32 = readI16(glyf, start + 2);
+        const y_min: i32 = readI16(glyf, start + 4);
+        const x_max: i32 = readI16(glyf, start + 6);
+        const y_max: i32 = readI16(glyf, start + 8);
+        return .{
+            .x_bearing = self.leftSideBearing(glyph_id) orelse @min(x_min, x_max),
+            .y_bearing = @max(y_min, y_max),
+            .width = @max(x_min, x_max) - @min(x_min, x_max),
+            .height = @min(y_min, y_max) - @max(y_min, y_max),
+        };
+    }
+
+    /// The hmtx left side bearing of a glyph, null past the table.
+    pub fn leftSideBearing(self: *const Font, glyph_id: u16) ?i32 {
+        const hhea = self.hhea orelse return null;
+        const hmtx = self.hmtx_data orelse return null;
+        const long: usize = hhea.num_of_long_hor_metrics;
+        const g: usize = glyph_id;
+        const off = if (g < long) g * 4 + 2 else long * 4 + (g - long) * 2;
+        if (off + 2 > hmtx.len) return null;
+        return readI16(hmtx, off);
+    }
+
     /// Get glyph width with ASCII fast path (in font units)
     /// Largest advance width getGlyphWidth can return (the longHorMetric
     /// entries; trailing glyphs reuse the last one).
@@ -550,6 +593,14 @@ pub const HheaTable = struct {
 /// 'maxp' table - maximum profile
 pub const MaxpTable = struct {
     num_glyphs: u16,
+};
+
+/// A glyph's ink box in font units (HarfBuzz's hb_glyph_extents_t).
+pub const GlyphExtents = struct {
+    x_bearing: i32 = 0,
+    y_bearing: i32 = 0,
+    width: i32 = 0,
+    height: i32 = 0,
 };
 
 /// 'post' table - PostScript hints (underline metrics)
@@ -915,4 +966,21 @@ test "name record whose string offset + length overflows u16 is ignored" {
 
     const font = try Font.parse(&data);
     try std.testing.expectEqual(@as(?[]const u8, null), font.getNameEntry(6));
+}
+
+test "glyphExtents: TrueType boxes with the hmtx side bearing; CFF has none" {
+    const loaded = try Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    defer std.testing.allocator.free(loaded.data);
+    const f = loaded.font;
+    const h = f.getGlyphId('H').?;
+    const e = f.glyphExtents(h).?;
+    try std.testing.expect(e.width > 0 and e.height < 0 and e.y_bearing > 0);
+    try std.testing.expectEqual(f.leftSideBearing(h).?, e.x_bearing);
+    // Space has no outline: all zero
+    try std.testing.expectEqual(GlyphExtents{}, f.glyphExtents(f.getGlyphId(' ').?).?);
+    try std.testing.expect(f.glyphExtents(f.maxp.?.num_glyphs) == null);
+
+    const cff = try Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.otf");
+    defer std.testing.allocator.free(cff.data);
+    try std.testing.expect(cff.font.glyphExtents(cff.font.getGlyphId('H').?) == null);
 }

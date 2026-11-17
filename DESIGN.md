@@ -1423,6 +1423,19 @@ buffer through a non-growing ArrayList view.
   in harfbuzz_positions.txt. Hostile tables: fuzz_tests "mutated fixture
   bytes: GSUB/GPOS/GDEF" (found the coverage u16 overflow).
 
+### Fallback mark positioning (session #35, `src/mark_fallback.zig`)
+HarfBuzz's hb-ot-shape-fallback for fonts without GPOS (LTR): after GDEF
+zeroing (with offsets shifted back), each base + following marks (GC M*)
+is a cluster; marks with a nonzero class (modified ccc, Mn recategorized:
+Hebrew/Arabic/Thai/Lao/Tibetan classes to positions) are placed against
+the base's extents (x from 0 to its advance, y from its glyf box), per
+ligature component, stacking per class with a 1/16 em gap; marks of class
+0 move the pen offset like bases. Extents: `ttf.Font.glyphExtents` (glyf
+box, x_bearing = hmtx lsb, as HarfBuzz); CFF fonts have none, so their
+marks are only zeroed (HarfBuzz would read the charstrings) - a gap.
+Checked with Courier Prime, Charter (marks it lacks), Noto Emoji and
+GsubTest (ligature components) in harfbuzz_positions.txt.
+
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,
 and **all** OpenType lookups eagerly (`parseGSUB` builds the whole

@@ -144,6 +144,15 @@ NORMALIZE = [
     "a\u2002b\u2003c\u2009d\u200ae\u202ff\u2007g\u2008h\u205fi\u3000j\u00a0k\u2011l\u2004m\u2005n\u2006o",
 ]
 
+# Marks of other scripts, for fallback positioning (recategorized classes:
+# Hebrew points, Arabic harakat, Thai and Lao vowels, double diacritics)
+FALLBACK_MARKS = [
+    "\u05e9\u05c1\u05b8 \u05dc\u05d5\u05b9 \u05d1\u05bc\u05b0 \u05d3\u05b7\u05bf \u05e9\u05c2\u05b6",
+    "\u0628\u0650 \u0633\u0652 \u0644\u0651\u064e \u0647\u064d \u0627\u064b",
+    "\u0e01\u0e31\u0e49 \u0e19\u0e38\u0e48 \u0e1b\u0e3a \u0e81\u0eb4\u0ec8 \u0e94\u0ebc",
+    "a\u035cb o\u035dx e\u0360a i\u0361j a\u0301\u0300\u0323\u0328",
+]
+
 # Synthetic font with every GPOS lookup type and flag
 # (scripts/gen_gpos_test_font.py): one stylistic set per scenario
 GPOS_TEST = "test/fonts/gpos/GposTest.ttf"
@@ -165,9 +174,14 @@ GPOS_SCENARIOS = {
 }
 GPOS_ALL_TEXTS = [t for texts in GPOS_SCENARIOS.values() for t in texts]
 
-# Fonts with GPOS (kerning, mark attachment). Fonts without one get
-# HarfBuzz's fallback mark positioning, which platen does not do yet.
+# Fonts with GPOS (kerning, mark attachment), and without (marks placed by
+# HarfBuzz's fallback positioning, from glyph extents)
 POSITION_CASES = [
+    ("test/fonts/Courier Prime/Courier Prime.ttf", [], LATIN + NORMALIZE + FALLBACK_MARKS),
+    ("test/fonts/Charter/Charter Regular.ttf", [], LATIN + NORMALIZE + FALLBACK_MARKS),
+    ("test/fonts/Noto Emoji/NotoEmoji-Regular.ttf", [], EMOJI + FALLBACK_MARKS),
+    (GSUB_TEST, [], ALL_SCENARIO_TEXTS + NORMALIZE + FALLBACK_MARKS),
+    (GSUB_TEST, ["+ss03", "+ss04", "+ss05", "+ss06"], ALL_SCENARIO_TEXTS),
     ("test/fonts/Inter/Inter-Regular.otf", [], LATIN + KERNING),
     ("test/fonts/Inter/Inter-Regular.otf", ["-kern"], LATIN),
     ("test/fonts/Inter/Inter-Regular.otf", ["+frac", "+dlig"], LATIN),

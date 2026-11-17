@@ -23,7 +23,9 @@
   mark-to-base, -ligature and -mark, contexts, extensions) in lookup order
   with lookup flags, `curs`, `dist`, `abvm` and `blwm` on by default, the
   `kern` table where GPOS has no kerning, marks zeroed by GDEF class and
-  attachments propagated. Glyphs, clusters and positions are checked against
+  attachments propagated; in a font without GPOS, marks are stacked on their
+  base by glyph extents (HarfBuzz's fallback positioning, e.g. Courier
+  Prime). Glyphs, clusters and positions are checked against
   HarfBuzz (test/shaping/harfbuzz_positions.txt, with a synthetic font
   holding every lookup type and flag). No script-specific shaping yet (Indic,
   Arabic, bidi). CLI: `shape-text <font>` (HarfBuzz's serialization),

@@ -732,7 +732,7 @@ pub const Context = struct {
     }
 
     /// Components of a ligature formed here, else 1.
-    fn numComps(self: *Context, i: usize) u8 {
+    pub fn numComps(self: *Context, i: usize) u8 {
         const g = self.buf.items[i];
         return if (g.lig_comps > 0 and self.classOf(i) == .ligature) g.lig_comps else 1;
     }
