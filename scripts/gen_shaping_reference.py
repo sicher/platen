@@ -136,6 +136,14 @@ ARABIC = [
     "\u0644\u0627 \u0644\u064e\u0627 \u0644\u0627\u064b \u0644\u0651\u064e\u0627\u0650",
 ]
 
+# Normalization: characters a font lacks decompose into ones it has; a
+# missing space takes the space glyph at its own width; U+2011 takes U+2010
+NORMALIZE = [
+    "r\u00e9sum\u00e9 caf\u00e9 \u00e0 \u1ea1 \u0105 \u1e17 \u212b \u01d8",
+    "v\u00e9 w\u00e0 x\u1ea1\u0301 \u0119\u0301",
+    "a\u2002b\u2003c\u2009d\u200ae\u202ff\u2007g\u2008h\u205fi\u3000j\u00a0k\u2011l\u2004m\u2005n\u2006o",
+]
+
 # Synthetic font with every GPOS lookup type and flag
 # (scripts/gen_gpos_test_font.py): one stylistic set per scenario
 GPOS_TEST = "test/fonts/gpos/GposTest.ttf"
@@ -171,7 +179,10 @@ POSITION_CASES = [
     ("test/fonts/Gentium/Gentium-Italic.ttf", [], LATIN + KERNING),
     ("test/fonts/Noto Sans Arabic/NotoSansArabic-Regular.ttf", [], ARABIC),
     ("test/fonts/Noto Sans Arabic/NotoSansArabic-Regular.ttf", ["-mark"], ARABIC),
-    (GPOS_TEST, [], GPOS_ALL_TEXTS),
+    (GPOS_TEST, [], GPOS_ALL_TEXTS + NORMALIZE),
+    (GPOS_TEST, ["+ss07", "+ss09"], NORMALIZE),
+    ("test/fonts/Inter/Inter-Regular.otf", [], NORMALIZE),
+    ("test/fonts/Gentium/Gentium-Regular.ttf", [], NORMALIZE),
     *[(GPOS_TEST, ["+" + tag], texts) for tag, texts in GPOS_SCENARIOS.items()],
     (GPOS_TEST, ["+" + tag for tag in GPOS_SCENARIOS if tag != "ss14"], GPOS_ALL_TEXTS),
 ]

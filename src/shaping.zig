@@ -9,11 +9,11 @@
 //! HarfBuzz reports them: a glyph is drawn at the pen position plus its
 //! offset, then the pen moves by its advance. Substitution is platen's
 //! GSUB engine, positioning its GPOS engine (gpos.zig) as HarfBuzz's
-//! default shaper runs it; both are checked against HarfBuzz. Not yet:
-//! fallback mark positioning for fonts without GPOS, decomposing
-//! characters the font lacks, and script-specific shaping (Indic
-//! reordering, Arabic joining, bidi): text is shaped left to right with
-//! the font's DFLT (else latn) script.
+//! default shaper runs it, after HarfBuzz's normalization (decode.zig);
+//! all checked against HarfBuzz. Not yet: fallback mark positioning for
+//! fonts without GPOS, and script-specific shaping (Indic reordering,
+//! Arabic joining, bidi): text is shaped left to right with the font's
+//! DFLT (else latn) script.
 
 const std = @import("std");
 const embedded = @import("embedded.zig");
@@ -22,6 +22,7 @@ const gsub = @import("gsub.zig");
 const opentype = @import("opentype.zig");
 const unicode_props = @import("unicode_props.zig");
 const gpos = @import("gpos.zig");
+const ttf = @import("ttf.zig");
 
 const Allocator = std.mem.Allocator;
 const EmbeddedFont = embedded.EmbeddedFont;
@@ -95,6 +96,7 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
     const pos = try allocator.alloc(gpos.Position, glyphs.len);
     defer allocator.free(pos);
     for (pos, glyphs) |*p, g| p.* = .{ .x_advance = emb.font.getGlyphWidth(g.id) orelse 0 };
+    if (d.space_fallbacks.items.len > 0) spaceWidths(&emb.font, d.space_fallbacks.items, glyphs, pos);
     if (ot) |o| try positionGlyphs(allocator, o, gsub_table, flags, glyphs, pos);
 
     const out = try allocator.alloc(ShapedGlyph, glyphs.len);
@@ -108,6 +110,35 @@ pub fn shapeFont(allocator: Allocator, emb: *const EmbeddedFont, flags: opentype
     };
     try formClusters(allocator, d.codepoints.items, d.offsets.items, out);
     return out;
+}
+
+/// HarfBuzz's _hb_ot_shape_fallback_spaces: a space the font lacks, drawn
+/// with the space glyph, gets the width its kind calls for.
+fn spaceWidths(font: *const ttf.Font, kinds: []const unicode_props.SpaceFallback, glyphs: []const gsub.Glyph, pos: []gpos.Position) void {
+    const upem: i32 = font.head.?.units_per_em;
+    for (glyphs, pos) |g, *p| {
+        const kind = kinds[g.cp];
+        switch (kind) {
+            .none, .space => {},
+            .em, .em_2, .em_3, .em_4, .em_5, .em_6, .em_16 => {
+                const n: i32 = @backingInt(kind);
+                p.x_advance = @divTrunc(upem + @divTrunc(n, 2), n);
+            },
+            .four_em_18 => p.x_advance = @divTrunc(upem * 4, 18),
+            .figure => for ("0123456789") |c| {
+                const gid = font.getGlyphId(c) orelse 0;
+                if (gid != 0) {
+                    p.x_advance = font.getGlyphWidth(gid) orelse 0;
+                    break;
+                }
+            },
+            .punctuation => {
+                const gid = font.getGlyphId('.') orelse font.getGlyphId(',') orelse 0;
+                if (gid != 0) p.x_advance = font.getGlyphWidth(gid) orelse 0;
+            },
+            .narrow => p.x_advance = @divTrunc(p.x_advance, 2),
+        }
+    }
 }
 
 /// HarfBuzz's positioning for the default shaper (hb_ot_position): GPOS,

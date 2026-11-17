@@ -37,6 +37,61 @@ fn isRegionalIndicator(cp: u21) bool {
     return cp >= 0x1F1E6 and cp <= 0x1F1FF;
 }
 
+/// The canonical single-step decomposition of `cp`: (first, second), the
+/// second 0 for a singleton (U+212B -> U+00C5). Null if it has none.
+pub fn decomposeOnce(cp: u21) ?[2]u21 {
+    if (cp < 0xC0) return null;
+    const table = &data.decompositions;
+    var lo: usize = 0;
+    var hi: usize = table.len;
+    while (lo < hi) {
+        const mid = (lo + hi) / 2;
+        if (cp < table[mid][0]) {
+            hi = mid;
+        } else if (cp > table[mid][0]) {
+            lo = mid + 1;
+        } else return .{ table[mid][1], table[mid][2] };
+    }
+    return null;
+}
+
+/// HarfBuzz's space fallback (hb_unicode_funcs_t::space_t): a space
+/// character the font lacks is drawn as its space glyph, this wide. The
+/// em fractions are the enum value (an em divided by it).
+pub const SpaceFallback = enum(u8) {
+    none = 0,
+    em = 1,
+    em_2 = 2,
+    em_3 = 3,
+    em_4 = 4,
+    em_5 = 5,
+    em_6 = 6,
+    em_16 = 16,
+    four_em_18,
+    space,
+    figure,
+    punctuation,
+    narrow,
+
+    pub fn of(cp: u21) SpaceFallback {
+        return switch (cp) {
+            0x0020, 0x00A0 => .space,
+            0x2000, 0x2002 => .em_2,
+            0x2001, 0x2003, 0x3000 => .em,
+            0x2004 => .em_3,
+            0x2005 => .em_4,
+            0x2006 => .em_6,
+            0x2007 => .figure,
+            0x2008 => .punctuation,
+            0x2009 => .em_5,
+            0x200A => .em_16,
+            0x202F => .narrow,
+            0x205F => .four_em_18,
+            else => .none,
+        };
+    }
+};
+
 /// Sets `cont[i]` when code point i continues the grapheme of the one
 /// before it, by HarfBuzz's rules (hb_set_unicode_props): marks, emoji
 /// modifiers, the second of a regional indicator pair, ZWJ and an
@@ -83,4 +138,13 @@ test "markContinuations follows HarfBuzz's grapheme rules" {
     markContinuations(&cps, &cont);
     // e acute | SE flag pair, then a lone U | man ZWJ woman | thumbs + tone | ka + i
     try testing.expectEqualSlices(bool, &.{ false, true, false, true, false, false, true, true, false, true, false, true }, &cont);
+}
+
+test "decomposeOnce: pairs, singletons, exclusions" {
+    try testing.expectEqual([2]u21{ 'e', 0x0301 }, decomposeOnce(0x00E9).?);
+    try testing.expectEqual([2]u21{ 0x00C5, 0 }, decomposeOnce(0x212B).?); // Angstrom sign
+    try testing.expectEqual([2]u21{ 0x0915, 0x093C }, decomposeOnce(0x0958).?); // qa (excluded from composition)
+    try testing.expectEqual([2]u21{ 0x0113, 0x0301 }, decomposeOnce(0x1E17).?); // e macron acute
+    try testing.expect(decomposeOnce('a') == null);
+    try testing.expect(decomposeOnce(0xAC00) == null); // Hangul is algorithmic
 }

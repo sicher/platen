@@ -1408,8 +1408,15 @@ buffer through a non-growing ArrayList view.
 - Anchors: x, y only (contour points and device tables need hinting).
   ValueRecords: XPlacement, YPlacement, XAdvance; YAdvance ignored
   horizontally.
-- Normalization before shaping now also reorders mark runs by HarfBuzz's
-  modified combining class (`unicode_compose.reorderMarks`). Fonts without
+- Normalization before shaping (decode.zig) is HarfBuzz's: characters the
+  font lacks are decomposed (`unicode_props.decomposeOnce`, all canonical
+  single-step decompositions from UCD, Hangul excluded; the second part
+  must have a glyph, the first may decompose further), mark runs are
+  reordered by the modified combining class (`unicode_compose.reorderMarks`),
+  then composed where the font has the composite. Missing spaces take the
+  space glyph with a `SpaceFallback` kind (shapeText sets the width before
+  GPOS: em / n rounded, 4/18 em, a digit's or '.'s advance, half a space);
+  U+2011 takes U+2010's glyph. Fonts without
   GDEF classes: marks are Mn and not default-ignorable (was ccc != 0).
 - `test/fonts/gpos/GposTest.ttf` (`scripts/gen_gpos_test_font.py`): one
   stylistic set per lookup type, format and flag; checked against HarfBuzz

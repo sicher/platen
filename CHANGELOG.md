@@ -78,6 +78,13 @@
 
 ### Fixed
 
+- **Characters a font lacks precomposed now draw from their parts**, as
+  HarfBuzz does: "é" in a font with "e" and U+0301 but no "é" is decomposed
+  (canonically, step by step, singletons and Indic nukta forms too) instead
+  of drawn as .notdef. A missing space character (en, em, thin, hair,
+  narrow no-break, figure, punctuation, ideographic...) takes the space
+  glyph, and U+2011 the hyphen U+2010; shapeText gives such spaces
+  HarfBuzz's widths (an en space half an em, a thin space a fifth).
 - **Marks typed out of canonical order** (an acute before a dot below) are
   put in order before shaping, as HarfBuzz does, so they compose and attach
   the same either way.

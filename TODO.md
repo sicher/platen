@@ -210,9 +210,8 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   HarfBuzz-checked with GposTest.ttf).
 - [ ] **Fallback mark positioning** for fonts without GPOS (HarfBuzz's
   hb-ot-shape-fallback: marks stacked by glyph extents; Courier Prime).
-- [ ] **Normalization: decompose** characters the font lacks into ones it
-  has (GsubTest "é" -> e + U+0301), space fallbacks (U+2002.. as the space
-  glyph with HarfBuzz's widths), U+2011 as U+2010.
+- [x] **Normalization: decompose** characters the font lacks, space
+  fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul not decomposed).
 - [ ] **write() on the GPOS engine**: text_render still uses pair kerning +
   the mark heuristic; switching moves positions in every PDF (references).
 - [ ] **Indic (Devanagari) shaping** in shapeText: script selection
