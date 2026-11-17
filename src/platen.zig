@@ -55,6 +55,9 @@ pub const findSystemFontFamily = system_fonts.findFamily;
 pub const FamilyFace = system_fonts.FamilyFace;
 pub const listSystemFontFaces = system_fonts.listFamily;
 pub const shaping = @import("shaping.zig");
+/// Unicode properties: extended grapheme clusters (UAX #29,
+/// graphemeEndBytes) and monospaced cell counts (cells).
+pub const unicode_props = @import("unicode_props.zig");
 pub const ShapedGlyph = shaping.ShapedGlyph;
 pub const shapeText = shaping.shape;
 

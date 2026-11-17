@@ -114,6 +114,110 @@ pub const SpaceFallback = enum(u8) {
     }
 };
 
+/// East_Asian_Width W or F.
+pub fn isWide(cp: u21) bool {
+    return cp >= 0x1100 and inRanges(&data.wide_ranges, cp);
+}
+
+/// Cells a cluster takes on a monospaced grid: its widest code point - 2
+/// for East Asian Wide or Fullwidth, 0 for a mark, 1 for anything else -
+/// at least 1; a variation selector 16 (emoji presentation) makes it 2.
+pub fn cells(cluster: []const u21) u8 {
+    var n: u8 = 1;
+    for (cluster) |cp| {
+        if (cp == 0xFE0F or isWide(cp)) n = 2;
+    }
+    return n;
+}
+
+/// UAX #29 Grapheme_Cluster_Break.
+pub const Gcb = enum(u4) { other, cr, lf, control, extend, zwj, regional_indicator, prepend, spacing_mark, l, v, t, lv, lvt };
+/// Indic_Conjunct_Break (GB9c).
+pub const InCB = enum(u2) { none, linker, consonant, extend };
+
+fn graphemeProps(cp: u21) struct { gcb: Gcb, incb: InCB } {
+    const t = &data.grapheme_ranges;
+    var lo: usize = 0;
+    var hi: usize = t.len;
+    while (lo < hi) {
+        const mid = (lo + hi) / 2;
+        if (cp < t[mid][0]) {
+            hi = mid;
+        } else if (cp > t[mid][1]) {
+            lo = mid + 1;
+        } else {
+            const v: u8 = @intCast(t[mid][2]);
+            return .{ .gcb = @fromBackingInt(@intCast(@as(u4, @truncate(v)))), .incb = @fromBackingInt(@intCast(@as(u2, @truncate(v >> 4)))) };
+        }
+    }
+    return .{ .gcb = .other, .incb = .none };
+}
+
+/// The end (exclusive) of the extended grapheme cluster that starts at
+/// `start` (UAX #29, Unicode 16: GB3-GB13 with GB9c's Indic conjuncts).
+pub fn graphemeEnd(cps: []const u21, start: usize) usize {
+    if (start >= cps.len) return start;
+    var prev = graphemeProps(cps[start]);
+    var ri_run: usize = @intFromBool(prev.gcb == .regional_indicator);
+    var pict: enum { none, pict, zwj } = if (isExtendedPictographic(cps[start])) .pict else .none;
+    var conjunct: enum { none, consonant, linked } = if (prev.incb == .consonant) .consonant else .none;
+    var i = start + 1;
+    while (i < cps.len) : (i += 1) {
+        const cur = graphemeProps(cps[i]);
+        const cur_pict = isExtendedPictographic(cps[i]);
+        const join = blk: {
+            if (prev.gcb == .cr and cur.gcb == .lf) break :blk true; // GB3
+            if (prev.gcb == .cr or prev.gcb == .lf or prev.gcb == .control) break :blk false; // GB4
+            if (cur.gcb == .cr or cur.gcb == .lf or cur.gcb == .control) break :blk false; // GB5
+            if (prev.gcb == .l and (cur.gcb == .l or cur.gcb == .v or cur.gcb == .lv or cur.gcb == .lvt)) break :blk true; // GB6
+            if ((prev.gcb == .lv or prev.gcb == .v) and (cur.gcb == .v or cur.gcb == .t)) break :blk true; // GB7
+            if ((prev.gcb == .lvt or prev.gcb == .t) and cur.gcb == .t) break :blk true; // GB8
+            if (cur.gcb == .extend or cur.gcb == .zwj) break :blk true; // GB9
+            if (cur.gcb == .spacing_mark) break :blk true; // GB9a
+            if (prev.gcb == .prepend) break :blk true; // GB9b
+            if (conjunct == .linked and cur.incb == .consonant) break :blk true; // GB9c
+            if (pict == .zwj and cur_pict) break :blk true; // GB11
+            if (prev.gcb == .regional_indicator and cur.gcb == .regional_indicator and ri_run % 2 == 1) break :blk true; // GB12, GB13
+            break :blk false; // GB999
+        };
+        if (!join) break;
+        ri_run = if (cur.gcb == .regional_indicator) ri_run + 1 else 0;
+        pict = if (cur_pict) .pict else if (pict == .pict and cur.gcb == .extend) .pict else if (pict == .pict and cur.gcb == .zwj) .zwj else .none;
+        conjunct = switch (cur.incb) {
+            .consonant => .consonant,
+            .linker => if (conjunct != .none) .linked else .none,
+            .extend => conjunct,
+            .none => .none,
+        };
+        prev = cur;
+    }
+    return i;
+}
+
+/// The byte end of the extended grapheme cluster starting at byte `start`
+/// of UTF-8 `text` (invalid bytes are clusters of one byte; a cluster is
+/// cut after 32 code points).
+pub fn graphemeEndBytes(text: []const u8, start: usize) usize {
+    if (start >= text.len) return start;
+    var cps: [32]u21 = undefined;
+    var ends: [32]usize = undefined;
+    var n: usize = 0;
+    var i = start;
+    while (i < text.len and n < cps.len) {
+        const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
+        const cp = if (i + len <= text.len) std.unicode.utf8Decode(text[i .. i + len]) catch null else null;
+        if (cp == null) {
+            if (n == 0) return i + 1;
+            break; // the invalid byte starts a cluster of its own
+        }
+        cps[n] = cp.?;
+        i += len;
+        ends[n] = i;
+        n += 1;
+    }
+    return ends[graphemeEnd(cps[0..n], 0) - 1];
+}
+
 /// Sets `cont[i]` when code point i continues the grapheme of the one
 /// before it, by HarfBuzz's rules (hb_set_unicode_props): marks, emoji
 /// modifiers, the second of a regional indicator pair, ZWJ and an
@@ -185,4 +289,72 @@ test "runScript: Devanagari, other scripts, and characters of none" {
     try testing.expectEqual(RunScript.none, runScript(0x0964)); // danda: Common
     try testing.expectEqual(RunScript.none, runScript('5'));
     try testing.expectEqual(RunScript.other, runScript('a'));
+}
+
+test "graphemeEnd passes UCD's GraphemeBreakTest.txt" {
+    const a = testing.allocator;
+    const text = try std.Io.Dir.cwd().readFileAlloc(testing.io, "test/unicode/GraphemeBreakTest.txt", a, .limited(1 << 20));
+    defer a.free(text);
+    var cps: std.ArrayListUnmanaged(u21) = .empty;
+    defer cps.deinit(a);
+    var breaks: std.ArrayListUnmanaged(usize) = .empty;
+    defer breaks.deinit(a);
+    var checked: usize = 0;
+    var failed: usize = 0;
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw[0 .. std.mem.indexOfScalar(u8, raw, '#') orelse raw.len], " \t\r");
+        if (line.len == 0) continue;
+        cps.clearRetainingCapacity();
+        breaks.clearRetainingCapacity();
+        var tokens = std.mem.tokenizeScalar(u8, line, ' ');
+        while (tokens.next()) |tok| {
+            if (std.mem.eql(u8, tok, "\u{F7}")) {
+                // a boundary before code point cps.len (skip the leading one)
+                if (cps.items.len > 0) try breaks.append(a, cps.items.len);
+            } else if (std.mem.eql(u8, tok, "\u{D7}")) {} else {
+                try cps.append(a, try std.fmt.parseInt(u21, tok, 16));
+            }
+        }
+        checked += 1;
+        var got: std.ArrayListUnmanaged(usize) = .empty;
+        defer got.deinit(a);
+        var i: usize = 0;
+        while (i < cps.items.len) {
+            i = graphemeEnd(cps.items, i);
+            try got.append(a, i);
+        }
+        if (!std.mem.eql(usize, breaks.items, got.items)) {
+            failed += 1;
+            if (failed <= 5) std.debug.print("\n{s}\n  expected {any}\n  got      {any}\n", .{ line, breaks.items, got.items });
+        }
+    }
+    try testing.expect(checked > 500);
+    try testing.expectEqual(@as(usize, 0), failed);
+}
+
+test "cells: wide, narrow, marks, emoji presentation" {
+    try testing.expectEqual(@as(u8, 2), cells(&.{0xD55C})); // Hangul syllable
+    try testing.expectEqual(@as(u8, 2), cells(&.{0x30A2})); // katakana
+    try testing.expectEqual(@as(u8, 2), cells(&.{0x6771})); // CJK
+    try testing.expectEqual(@as(u8, 1), cells(&.{ 0x0430, 0x0301 })); // a + acute
+    try testing.expectEqual(@as(u8, 1), cells(&.{ 0x0915, 0x094D, 0x0937 })); // ksha
+    try testing.expectEqual(@as(u8, 1), cells(&.{0x263A})); // smiley, text style
+    try testing.expectEqual(@as(u8, 2), cells(&.{ 0x263A, 0xFE0F })); // ... with VS16
+    try testing.expectEqual(@as(u8, 2), cells(&.{0x1F600})); // emoji (W)
+    try testing.expectEqual(@as(u8, 1), cells(&.{0x0301})); // a lone mark: at least 1
+}
+
+test "graphemeEndBytes steps over whole clusters" {
+    const text = "e\u{301}xस्ते\u{1F1F8}\u{1F1EA}!";
+    var ends: [8]usize = undefined;
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) : (n += 1) {
+        i = graphemeEndBytes(text, i);
+        ends[n] = i;
+    }
+    try testing.expectEqualSlices(usize, &.{ 3, 4, 16, 24, 25 }, ends[0..n]);
+    try testing.expectEqual(@as(usize, 1), graphemeEndBytes("\xffa", 0));
+    try testing.expectEqual(@as(usize, 1), graphemeEndBytes("a\xff", 0));
 }

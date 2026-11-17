@@ -301,12 +301,16 @@ _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "INT. КУХНЯ — ДЕНЬ", style
 - Fallbacks are fonts loaded into the document (single faces or families,
   Unicode encoding); a standard font in the chain is
   `error.InvalidFallbackFont`.
-- Combining marks stay in their base character's font.
+- Each extended grapheme cluster (UAX #29: a base and its marks, a
+  conjunct, an emoji sequence) stays in one font.
 - `bold`/`italic` pick a fallback family's own variant; what a fallback lacks
   is synthesized (stroked outline, slanted text) as FreeType does on screen.
 - `.natural` (default) advances by the fallback glyph's own width;
-  `.monospace` by the width of a space in `font`, glyph centered (or shrunk
-  to fit when wider), so every character keeps one column.
+  `.monospace` by cells the width of a space in `font`: each cluster is
+  shaped, centered (or shrunk to fit when wider) in two cells if East Asian
+  Wide/Fullwidth (or with VS16), else in one, so the text keeps its
+  columns. `fallback_cells = myWidth` counts a cluster's cells instead (a
+  `fn ([]const u8) u8`, given the cluster's UTF-8), to match your own grid.
 - Measurement, wrapping, anchoring and underlines follow the runs.
 
 ### Shaping and Placing Glyphs Yourself

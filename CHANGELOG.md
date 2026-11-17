@@ -58,11 +58,20 @@
   it, combining marks staying with their base. Bold and italic use each
   fallback's own variant, and are synthesized where it has none (stroked
   outline, slanted text matrix, at FreeType's strengths). With
-  `fallback_advance = .monospace` a fallback character takes the width of a
-  space in `font`, centered (shrunk to fit when wider, as a CJK ideograph
-  is): monospaced text, e.g. a screenplay in Courier with Cyrillic from
-  another font, stays on its columns. Measurement,
-  wrapping, anchoring and decorations follow the runs.
+  `fallback_advance = .monospace` each fallback cluster (an extended
+  grapheme cluster, UAX #29: a base with its marks, a conjunct, an emoji
+  sequence) is shaped in its font (GSUB, GPOS or fallback mark positioning,
+  Indic reordering) and centered in its cells, each the width of a space in
+  `font`: two for East Asian Wide/Fullwidth characters (or with VS16), else
+  one, or what `TextStyle.fallback_cells` says (to count as the caller's
+  own grid does); shrunk to fit when wider. Monospaced text, e.g. a
+  screenplay in Courier with Cyrillic, Hangul or Devanagari from other
+  fonts, stays on its columns. Measurement, wrapping, anchoring and
+  decorations follow the runs.
+- **Extended grapheme clusters**: `platen.unicode_props.graphemeEndBytes`
+  (UAX #29 with Unicode 16's GB9c, passing UCD's GraphemeBreakTest.txt) and
+  `cells` (East Asian Width). A word broken between characters as a last
+  resort now breaks between clusters, never inside one.
 - **A font's own style and embedding permission**: `ttf.Font.style` (OS/2
   fsSelection, else head.macStyle) and `ttf.Font.fs_type` with `mayEmbed()`
   (false for Restricted License and Bitmap Embedding Only), so a caller
@@ -70,6 +79,8 @@
   prints both.
 - **`platen fallback <out> <font> [--fallback FONT]... [--monospace]`**: writes
   stdin lines with fallback fonts and prints their widths.
+- **`platen graphemes`**: splits stdin lines into grapheme clusters, with
+  their code points and cells.
 - **`platen svg <in.svg> [out.pdf]`**: renders an SVG on a page of its own size
   (1 px = 1 pt).
 

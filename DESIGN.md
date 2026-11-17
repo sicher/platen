@@ -1209,9 +1209,10 @@ draws. Three rules keep it true:
 
 ### Fallback fonts (`src/fallback.zig`)
 `TextStyle.fallback` cuts text into runs, one font each (slot 0 =
-`font`, i+1 = `fallback[i]`), chosen per cluster: a character with the
-combining marks (ccc != 0) and default ignorables after it goes to the
-first slot that draws all of it, as its codepoints or composed into a
+`font`, i+1 = `fallback[i]`), chosen per cluster: an extended grapheme
+cluster (`unicode_props.graphemeEnd`, UAX #29 incl. GB9c conjuncts;
+tested against UCD's GraphemeBreakTest.txt, copied to test/unicode by
+gen_unicode_props.py) goes to the first slot that draws all of it, as its codepoints or composed into a
 precomposed letter (`drawsCluster`: "e" + U+0301 stays in a font with
 "é" though it lacks a lone U+0301); else the first slot with the base;
 else slot 0 (.notdef shows the gap). `writeTextStyled` routes a fallback style to
@@ -1223,7 +1224,20 @@ across runs) and, for `.monospace`, `glyph_dx` (centering) and
 (drawn at size * cell / width, decorations at the style's size) instead
 of centering - CJK beside Courier, as dvui fits it on screen.
 `.monospace` makes each fallback cluster its own run; cell = the
-primary's space advance.
+primary's space advance; a cluster takes `fallback.clusterCells` cells
+(`TextStyle.fallback_cells`, else `unicode_props.cells`: 2 for EAW W/F
+or VS16, else 1). In an Identity-H fallback a cluster goes to
+`writeMonospaceCluster` instead: shaped with `shaping.shapeFont`
+(initOpenTypeFeatures first: GSUB/GPOS are parsed lazily), each glyph
+placed by `TextCommand.placed` (one Tm per glyph, `renderPlacedOffsets`)
+and mapped to its own source text in ToUnicode, centered in the cells or
+scaled to fit. Copy order is drawing order there (a reordered i matra
+reads first). Forced word breaks (`findCharacterBreakStyled`) step by
+grapheme cluster (`graphemeEndBytes`).
+- `-Dtest-filter` drops the unnamed `test {}` blocks, so tests in files
+  reached only through them (document.zig's own) don't run in a filtered
+  build: it reports a pass without running them. Check with the full
+  suite.
 - A face with no outlines platen can subset (glyf+loca, CFF/CFF2) and no
   bitmaps is refused at load (`error.UnsupportedOutlines`): Apple's
   `hvgl` faces (PingFang UI) otherwise load and fail at output.

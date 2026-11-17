@@ -291,3 +291,17 @@ pub fn renderPlacedGlyphs(cw: *ContentWriter, g: pagemod.GlyphsCommand, font_ind
     }
     try cw.append("ET\n");
 }
+
+/// A TextCommand's `placed` glyphs: one text matrix each (slanted by
+/// `shear` for synthesized italic), at (x, y) plus the glyph's offset.
+pub fn renderPlacedOffsets(cw: *ContentWriter, emb: *EmbeddedFont, placed: []const pagemod.PlacedOffset, x: f64, y: f64, shear: f64) !void {
+    const has_remap = emb.gid_remap.count() > 0;
+    var hex_buf: [4]u8 = undefined;
+    for (placed) |p| {
+        if (shear != 0) try cw.writeTmShear(x + p.dx, y + p.dy, shear) else try cw.writeTm3(x + p.dx, y + p.dy);
+        writeHex4(&hex_buf, if (has_remap) emb.gid_remap.get(p.id) orelse 0 else p.id);
+        try cw.append("<");
+        try cw.append(&hex_buf);
+        try cw.append("> Tj\n");
+    }
+}

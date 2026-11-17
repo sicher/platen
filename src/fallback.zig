@@ -3,10 +3,10 @@
 //! Text is cut into runs, each drawn in one font: a character goes to the
 //! first of `font`, `fallback[0]`, `fallback[1]`, ... that has a glyph for
 //! it, and to `font` when none does (its .notdef marks the gap). The unit
-//! is a cluster: a character with the combining marks and default
-//! ignorables after it, drawn in the first font that has all of them or
-//! the precomposed letter they make ("e" + U+0301 in a font with "é"), so
-//! a base and its accents are always shaped in one font.
+//! is an extended grapheme cluster (UAX #29: a base with its marks, a
+//! conjunct, an emoji sequence), drawn in the first font that has all of
+//! it or the precomposed letter it makes ("e" + U+0301 in a font with
+//! "é"), so a cluster is always shaped in one font.
 //!
 //! Slot 0 is the primary font, slot i+1 is `fallback[i]`. A primary run is
 //! written with the style as given (minus the fallback list); a fallback
@@ -16,14 +16,15 @@
 //! (FT_GlyphSlot_Embolden grows it by em/48 a side), italic slants the text
 //! matrix (FT_GlyphSlot_Oblique's shear).
 //!
-//! With `.monospace` advance every fallback character (with its marks) is a
-//! run of its own, centered in a cell the width of the primary's space.
+//! With `.monospace` advance every fallback cluster is a run of its own,
+//! shaped and centered in its cells: as many as `clusterCells` says (2 for
+//! East Asian wide characters), each the width of the primary's space.
 
 const std = @import("std");
 const layout = @import("layout.zig");
 const embedded = @import("embedded.zig");
 const unicode_compose = @import("unicode_compose.zig");
-const gsub = @import("gsub.zig");
+const unicode_props = @import("unicode_props.zig");
 
 const Font = layout.Font;
 const TextStyle = layout.TextStyle;
@@ -208,7 +209,7 @@ pub const Plan = struct {
         while (i < text.len) {
             const run = self.nextRun(text, i);
             total += if (run.slot != 0 and self.monospace)
-                self.cell(style.size) + style.char_spacing
+                @as(f64, @floatFromInt(clusterCells(style, text[i..run.end]))) * self.cell(style.size) + style.char_spacing
             else
                 ctx.width(text[i..run.end], self.runStyle(style, run.slot));
             i = run.end;
@@ -224,31 +225,27 @@ pub const Run = struct {
     slot: usize,
 };
 
-/// Codepoints of a cluster weighed when picking its font; marks beyond
-/// these still belong to the cluster.
-const max_cluster = 16;
+/// Longest cluster (as unicode_props.graphemeEndBytes cuts it).
+const max_cluster = 32;
 
-/// The cluster at `i.*` (a codepoint and the sticky ones after it),
-/// advancing past it; its first `max_cluster` codepoints.
+/// The extended grapheme cluster at `i.*`, advancing past it; its code
+/// points.
 fn nextCluster(text: []const u8, i: *usize, buf: *[max_cluster]u21) []const u21 {
-    buf[0] = decode(text, i);
-    var n: usize = 1;
-    while (i.* < text.len) {
-        var j = i.*;
-        const cp = decode(text, &j);
-        if (!sticky(cp)) break;
-        if (n < buf.len) {
-            buf[n] = cp;
-            n += 1;
-        }
-        i.* = j;
-    }
+    const end = unicode_props.graphemeEndBytes(text, i.*);
+    var n: usize = 0;
+    while (i.* < end and n < buf.len) : (n += 1) buf[n] = decode(text, i);
+    i.* = end;
     return buf[0..n];
 }
 
-/// Belongs to the cluster before it rather than starting one.
-fn sticky(cp: u21) bool {
-    return unicode_compose.combiningClass(cp) != 0 or gsub.Ignorable.of(cp) != .none;
+/// Cells of the cluster `text` (one extended grapheme cluster) with
+/// `.monospace`: the style's `fallback_cells` override, else
+/// unicode_props.cells.
+pub fn clusterCells(style: TextStyle, text: []const u8) u8 {
+    if (style.fallback_cells) |f| return @max(1, f(text));
+    var buf: [max_cluster]u21 = undefined;
+    var i: usize = 0;
+    return unicode_props.cells(nextCluster(text, &i, &buf));
 }
 
 /// Next codepoint at `i.*`, advancing past it. A byte that is not valid

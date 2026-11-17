@@ -138,6 +138,11 @@ pub const TextStyle = struct {
     fallback: []const Font = &.{},
     /// How far a character drawn from a fallback font advances.
     fallback_advance: FallbackAdvance = .natural,
+    /// With `.monospace`: the cells a fallback cluster (one extended
+    /// grapheme cluster, UTF-8) takes, to count exactly as the caller's
+    /// own layout does. Null: 2 for East Asian Wide/Fullwidth (or with
+    /// VS16), else 1 (unicode_props.cells). At least 1.
+    fallback_cells: ?*const fn (cluster: []const u8) u8 = null,
 
     /// Get the resolved StandardFont if this is a standard font.
     pub fn standardFont(self: TextStyle) ?StandardFont {

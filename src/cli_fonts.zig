@@ -279,3 +279,31 @@ pub fn fallback(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []c
     defer allocator.free(pdf);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = args[0], .data = pdf });
 }
+
+/// graphemes: each stdin line's extended grapheme clusters (UAX #29), one
+/// per line with its code points and the cells it takes with `.monospace`
+/// fallback (unicode_props.cells).
+pub fn graphemes(io: std.Io, out: *std.Io.Writer) !void {
+    const props = platen.unicode_props;
+    var in_buffer: [64 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &in_buffer);
+    while (try stdin.interface.takeDelimiter('\n')) |line| {
+        var i: usize = 0;
+        while (i < line.len) {
+            const end = props.graphemeEndBytes(line, i);
+            var cps: [32]u21 = undefined;
+            var n: usize = 0;
+            const view = std.unicode.Utf8View.init(line[i..end]) catch {
+                try out.print("{d}..{d}\tinvalid UTF-8\n", .{ i, end });
+                i = end;
+                continue;
+            };
+            var it = view.iterator();
+            while (it.nextCodepoint()) |cp| : (n += 1) cps[n] = cp;
+            try out.print("{d}..{d}\t{d} cell(s)\t", .{ i, end, props.cells(cps[0..n]) });
+            for (cps[0..n], 0..) |cp, k| try out.print("{s}U+{X:0>4}", .{ if (k == 0) "" else " ", cp });
+            try out.print("\t{s}\n", .{line[i..end]});
+            i = end;
+        }
+    }
+}

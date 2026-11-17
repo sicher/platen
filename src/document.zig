@@ -35,6 +35,8 @@ pub const Encryption = encrypt.Encryption;
 pub const Permissions = encrypt.Permissions;
 const color_fonts = @import("color_fonts.zig");
 const fallback = @import("fallback.zig");
+const shaping = @import("shaping.zig");
+const unicode_props = @import("unicode_props.zig");
 pub const colr = @import("colr.zig");
 
 const ObjectId = objects.ObjectId;
@@ -1232,6 +1234,11 @@ pub const Document = struct {
         while (i < text.len) {
             const run = plan.nextRun(text, i);
             const run_style = plan.runStyle(style, run.slot);
+            if (plan.monospace and run.slot != 0 and monospaceShapes(plan.faces[run.slot - 1].font)) {
+                x += try self.writeMonospaceCluster(.{ .x = x, .y = pos.y }, text[i..run.end], style, run_style, &plan, run.slot, cell);
+                i = run.end;
+                continue;
+            }
             const natural = try self.writeOneFont(.{ .x = x, .y = pos.y }, text[i..run.end], run_style, word_spacing);
             i = run.end;
             if (run.slot == 0) {
@@ -1250,18 +1257,102 @@ pub const Document = struct {
                     .embedded => |emb| if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
                     .standard => natural,
                 };
-                // Too wide for its cell (a CJK ideograph beside Courier):
-                // shrink it to fit, as the screen does; else center it
-                if (own > cell) {
-                    t.glyph_scale = cell / own;
+                // Too wide for its cells: shrink it to fit, as the screen
+                // does; else center it
+                const room = @as(f64, @floatFromInt(fallback.clusterCells(style, t.text_data))) * cell;
+                if (own > room) {
+                    t.glyph_scale = room / own;
                 } else {
-                    t.glyph_dx = (cell - own) / 2;
+                    t.glyph_dx = (room - own) / 2;
                 }
-                t.text_width = cell + style.char_spacing;
+                t.text_width = room + style.char_spacing;
             }
             x += t.text_width;
         }
         return x - pos.x;
+    }
+
+    /// A `.monospace` fallback face whose clusters are shaped and placed
+    /// glyph by glyph (an Identity-H embedded font).
+    fn monospaceShapes(font: Font) bool {
+        return switch (font) {
+            .embedded => |e| e.encoding == .identity,
+            else => false,
+        };
+    }
+
+    /// One `.monospace` fallback cluster: shaped in its fallback face (GPOS
+    /// or fallback mark positioning, conjuncts, Indic reordering), its
+    /// glyphs placed at their shaped offsets, the whole centered in the
+    /// cluster's cells (fallback.clusterCells x `cell`) or shrunk to fit
+    /// when wider. Each glyph's ToUnicode is its own source text. Returns
+    /// the advance: cells x cell plus the character spacing.
+    fn writeMonospaceCluster(self: *Document, pos: Point, cluster: []const u8, style: TextStyle, run_style: TextStyle, plan: *const fallback.Plan, slot: usize, cell: f64) !f64 {
+        var page = &self.pages.items[self.current_page];
+        const page_alloc = page.pageAllocator();
+        const norm = try self.normalizeStyle(run_style);
+        const emb = switch (norm.font) {
+            .embedded => |e| e,
+            else => return error.InvalidFallbackFont,
+        };
+        if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
+        try page.markEmbeddedUsed(self.allocator, emb);
+        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
+
+        // GSUB/GPOS are parsed on first use
+        try emb.initOpenTypeFeatures();
+        const text_copy = try page_alloc.dupe(u8, cluster);
+        const shaped = try shaping.shapeFont(page_alloc, emb, emb.feature_flags, text_copy);
+        const cells: f64 = @floatFromInt(fallback.clusterCells(style, cluster));
+        const room = cells * cell;
+        const units: f64 = @floatFromInt(emb.font.head.?.units_per_em);
+        const to_pt = style.size / units;
+        const own = @as(f64, @floatFromInt(shaping.totalAdvance(shaped))) * to_pt;
+        // Too wide for its cells: shrink to fit, as the screen does; else
+        // center the shaped ink
+        const glyph_scale: f64 = if (own > room and own > 0) room / own else 1;
+        const glyph_dx: f64 = if (glyph_scale < 1) 0 else (room - own) / 2;
+
+        const ids = try page_alloc.alloc(u16, shaped.len);
+        const sources = try page_alloc.alloc([2]u32, shaped.len);
+        const placed = try page_alloc.alloc(pagemod.PlacedOffset, shaped.len);
+        var pen: f64 = 0;
+        for (shaped, ids, sources, placed) |g, *id, *src, *p| {
+            id.* = g.id;
+            src.* = .{ g.text_start, g.text_end };
+            p.* = .{
+                .id = g.id,
+                .dx = (pen + @as(f64, @floatFromInt(g.x_offset))) * to_pt * glyph_scale,
+                .dy = @as(f64, @floatFromInt(g.y_offset)) * to_pt * glyph_scale,
+            };
+            pen += @floatFromInt(g.x_advance);
+        }
+        try emb.markSourcedGlyphsUsed(text_copy, ids, sources);
+
+        const f = plan.faces[slot - 1];
+        const advance = room + style.char_spacing;
+        try page.commands.append(self.allocator, .{ .text = .{
+            .x = pos.x,
+            .y = self.currentPageSize().height - pos.y,
+            .font_size = style.size,
+            .char_spacing = 0,
+            .word_spacing = 0,
+            .text_data = text_copy,
+            .font = .{ .embedded = emb },
+            .text_color = style.color,
+            .opacity = style.opacity,
+            .cached_glyphs = ids,
+            .text_width = advance,
+            .underline = style.decoration.underline,
+            .strikethrough = style.decoration.strikethrough,
+            .glyph_dx = glyph_dx,
+            .glyph_scale = glyph_scale,
+            .synth_bold = f.synth_bold,
+            .synth_italic = f.synth_italic,
+            .decoration_font = plan.primary,
+            .placed = placed,
+        } });
+        return advance;
     }
 
     /// Text width in an already-normalized style, fallback runs included.
@@ -1749,15 +1840,15 @@ pub const Document = struct {
 
     /// Find a character break point in a word that fits within max_width.
     /// This is a last resort when no hyphen or soft-hyphen breaks are available.
-    /// Returns the byte position where to break (respecting UTF-8 boundaries).
+    /// Returns the byte position where to break: between extended grapheme
+    /// clusters, so a base keeps its marks and a conjunct stays whole.
     fn findCharacterBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         var current_width: f64 = 0;
         var i: usize = 0;
 
         while (i < word.len) {
-            const char_len = std.unicode.utf8ByteSequenceLength(word[i]) catch 1;
-            const char_end = @min(i + char_len, word.len);
+            const char_end = unicode_props.graphemeEndBytes(word, i);
             const prefix_width = self.getTextWidthStyled(word[0..char_end], style);
 
             if (prefix_width <= max_width) {
@@ -2173,7 +2264,7 @@ pub const Document = struct {
                             if (self.findHyphenBreakStyled(rest, line_width, render_style)) |c| break :blk c;
                         }
                         break :blk self.findCharacterBreakStyled(rest, line_width, render_style) orelse
-                            @min(std.unicode.utf8ByteSequenceLength(rest[0]) catch 1, rest.len);
+                            unicode_props.graphemeEndBytes(rest, 0);
                     };
                     piece = rest[0..cut];
                     next = pos + cut;
@@ -3146,7 +3237,11 @@ pub const Document = struct {
                                     // Pass absolute position for Tm-based mark positioning
                                     // Use cached glyphs if available (avoids duplicate OpenType shaping)
                                     const shear: f64 = if (t.synth_italic) fallback.oblique_shear else 0;
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
+                                    if (t.placed) |placed| {
+                                        try text_render.renderPlacedOffsets(&cw, emb, placed, t.x + t.glyph_dx, t.y, shear);
+                                    } else {
+                                        _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
+                                    }
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode
@@ -4700,4 +4795,21 @@ test "soft hyphens excluded from text width" {
     const with_soft = doc.getTextWidthStyled("ex\xc2\xadplic\xc2\xadit", style);
     const without_soft = doc.getTextWidthStyled("explicit", style);
     try std.testing.expectEqual(without_soft, with_soft);
+}
+
+test "findCharacterBreakStyled never splits a grapheme cluster" {
+    const a = std.testing.allocator;
+    const ttc = std.Io.Dir.cwd().readFileAlloc(std.testing.io, "/System/Library/Fonts/Kohinoor.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    var doc = Document.init(a, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const style: TextStyle = .{ .font = try doc.loadFontFromCollection(ttc, 4, .identity), .size = 12 };
+    // Room for "ka" but not the cluster "ka-i" (the i matra has an advance
+    // of its own): no break inside it (code point stepping cut after the
+    // ka, byte 3)
+    const w = doc.getTextWidthStyled("क", style);
+    try std.testing.expect(doc.getTextWidthStyled("कि", style) > w + 0.01);
+    try std.testing.expectEqual(@as(?usize, null), doc.findCharacterBreakStyled("किन", w + 0.01, style));
+    try std.testing.expectEqual(@as(?usize, 6), doc.findCharacterBreakStyled("किन", doc.getTextWidthStyled("कि", style) + 0.01, style));
 }

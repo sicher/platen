@@ -69,6 +69,8 @@ pub fn main(init: std.process.Init) !void {
         try cli_fonts.drawGlyphs(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "shape-text")) {
         try cli_fonts.shapeText(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "graphemes")) {
+        try cli_fonts.graphemes(init.io, stdout);
     } else if (std.mem.eql(u8, cmd, "fallback")) {
         try cli_fonts.fallback(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "extract-face")) {
@@ -174,6 +176,7 @@ fn printUsage() !void {
         \\                                 print gid=cluster@xoff,yoff+advance (font units)
         \\  glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...  Draw stdin lines glyph by
         \\                                 glyph (shapeText + drawGlyphs)
+        \\  graphemes            Split stdin lines into grapheme clusters (UAX #29) with their cells
         \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--bold] [--italic] [--size PT]
         \\                       Write stdin lines with per-character fallback fonts
         \\  find-font <family> [--bold] [--italic] [--all] [--dir DIR]... [--out FILE]

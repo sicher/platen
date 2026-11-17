@@ -381,3 +381,108 @@ test "fallback text extracts as written, in every style" {
     }
     try testing.expectEqual(@as(usize, 8), found);
 }
+
+const emoji_path = "test/fonts/Noto Emoji/NotoEmoji-Regular.ttf";
+
+test "monospace: a wide cluster takes two cells" {
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const emoji = try doc.loadFont(emoji_path, .identity);
+    const style: platen.TextStyle = .{ .font = cp, .size = 12, .fallback = &.{emoji}, .fallback_advance = .monospace };
+    const cell = try width(&doc, " ", .{ .font = cp, .size = 12 });
+    // U+1F600 is East Asian Wide; U+263A is narrow until VS16 asks for
+    // emoji presentation
+    try testing.expectApproxEqAbs(4 * cell, try width(&doc, "A\u{1F600}B", style), 1e-9);
+    try testing.expectApproxEqAbs(3 * cell, try width(&doc, "A\u{263A}B", style), 1e-9);
+    try testing.expectApproxEqAbs(4 * cell, try width(&doc, "A\u{263A}\u{FE0F}B", style), 1e-9);
+
+    const rect = try doc.writeAt(.{ .x = 72, .y = 100 }, "A\u{1F600}B", style, .{});
+    try testing.expectApproxEqAbs(4 * cell, rect.width, 1e-9);
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    var xs_buf: [8]f64 = undefined;
+    const xs = textX(pdf, &xs_buf);
+    try testing.expectEqual(@as(usize, 3), xs.len);
+    // B starts after the emoji's two cells; the emoji is centered in them
+    try testing.expectApproxEqAbs(72 + 3 * cell, xs[2], 0.006);
+    const w_emoji = try width(&doc, "\u{1F600}", .{ .font = emoji, .size = 12 });
+    const room = 2 * cell;
+    const expected = if (w_emoji > room) 72 + cell else 72 + cell + (room - w_emoji) / 2;
+    try testing.expectApproxEqAbs(expected, xs[1], 0.006);
+}
+
+fn threeCells(_: []const u8) u8 {
+    return 3;
+}
+
+test "monospace: fallback_cells overrides the cell count" {
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const style: platen.TextStyle = .{
+        .font = cp,
+        .size = 12,
+        .fallback = &.{try gentium(&doc)},
+        .fallback_advance = .monospace,
+        .fallback_cells = threeCells,
+    };
+    const cell = try width(&doc, " ", .{ .font = cp, .size = 12 });
+    // A and B one cell each, Ж and ж three
+    try testing.expectApproxEqAbs(8 * cell, try width(&doc, "AЖBж", style), 1e-9);
+    const rect = try doc.writeAt(.{ .x = 72, .y = 100 }, "AЖBж", style, .{});
+    try testing.expectApproxEqAbs(8 * cell, rect.width, 1e-9);
+}
+
+test "monospace: a cluster is shaped, its mark placed on its base" {
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const gen = try gentiumRegular(&doc);
+    const style: platen.TextStyle = .{ .font = cp, .size = 12, .fallback = &.{gen}, .fallback_advance = .monospace };
+    const cell = try width(&doc, " ", .{ .font = cp, .size = 12 });
+    // zhe + acute: no precomposed letter, so two glyphs in one cell
+    const text = "Aж\u{0301}B";
+    try testing.expectApproxEqAbs(3 * cell, try width(&doc, text, style), 1e-9);
+    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, text, style, .{});
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    var xs_buf: [8]f64 = undefined;
+    const xs = textX(pdf, &xs_buf);
+    // A; zhe and the acute, each placed; B
+    try testing.expectEqual(@as(usize, 4), xs.len);
+    // The acute sits over the zhe (GPOS mark attachment), not after it
+    const w_zhe = try width(&doc, "ж", .{ .font = gen, .size = 12 });
+    try testing.expect(xs[2] >= xs[1] and xs[2] < xs[1] + w_zhe);
+    try testing.expectApproxEqAbs(72 + 2 * cell, xs[3], 0.006);
+
+    const path = "test/output/fallback_shaped_cluster.pdf";
+    std.Io.Dir.cwd().createDir(testing.io, "test/output", .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    try std.Io.Dir.cwd().writeFile(testing.io, .{ .sub_path = path, .data = pdf });
+    const result = std.process.run(a, testing.io, .{ .argv = &.{ "pdftotext", "-raw", path, "-" } }) catch return error.SkipZigTest;
+    defer a.free(result.stdout);
+    defer a.free(result.stderr);
+    try testing.expectEqualStrings(text, std.mem.trim(u8, result.stdout, " \n\x0c"));
+}
+
+test "monospace: a Devanagari conjunct is one cluster, shaped (Kohinoor)" {
+    const ttc = std.Io.Dir.cwd().readFileAlloc(testing.io, "/System/Library/Fonts/Kohinoor.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const deva = try doc.loadFontFromCollection(ttc, 4, .identity);
+    const style: platen.TextStyle = .{ .font = cp, .size = 12, .fallback = &.{deva}, .fallback_advance = .monospace };
+    const cell = try width(&doc, " ", .{ .font = cp, .size = 12 });
+    // sa-virama-ta-e is one extended grapheme cluster (GB9c): one cell
+    try testing.expectApproxEqAbs(3 * cell, try width(&doc, "Aस्तेB", style), 1e-9);
+    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, "Aस्तेB", style, .{});
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    var xs_buf: [8]f64 = undefined;
+    // A; the sa-ta conjunct and the e matra (two glyphs, not four); B
+    try testing.expectEqual(@as(usize, 4), textX(pdf, &xs_buf).len);
+}

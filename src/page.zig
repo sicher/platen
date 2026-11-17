@@ -64,7 +64,14 @@ pub const TextCommand = struct {
     /// Decoration metrics come from this font rather than `font`, so a
     /// fallback run is underlined like the text around it.
     decoration_font: ?*EmbeddedFont = null,
+    /// Shaped glyphs placed one by one (a `.monospace` fallback cluster):
+    /// each glyph's offset in points from (x + glyph_dx, y), y up. The
+    /// renderer then draws these instead of shaping `text_data`.
+    placed: ?[]const PlacedOffset = null,
 };
+
+/// A glyph of a TextCommand's `placed` run.
+pub const PlacedOffset = struct { id: u16, dx: f64, dy: f64 };
 
 /// Glyphs drawn by ID at absolute positions (Document.drawGlyphs).
 pub const GlyphsCommand = struct {
