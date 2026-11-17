@@ -64,7 +64,9 @@
   Indic reordering) and centered in its cells, each the width of a space in
   `font`: two for East Asian Wide/Fullwidth characters (or with VS16), else
   one, or what `TextStyle.fallback_cells` says (to count as the caller's
-  own grid does); shrunk to fit when wider. Monospaced text, e.g. a
+  own grid does); shrunk to fit when wider, and at most
+  `TextStyle.fallback_max_em` x size when set (0.88 keeps CJK within
+  Courier's ink, so lines don't touch). Monospaced text, e.g. a
   screenplay in Courier with Cyrillic, Hangul or Devanagari from other
   fonts, stays on its columns. Measurement, wrapping, anchoring and
   decorations follow the runs.
@@ -77,8 +79,9 @@
   (false for Restricted License and Bitmap Embedding Only), so a caller
   picking system fonts can skip what may not be embedded. `platen font-info`
   prints both.
-- **`platen fallback <out> <font> [--fallback FONT]... [--monospace]`**: writes
-  stdin lines with fallback fonts and prints their widths.
+- **`platen fallback <out> <font> [--fallback FONT]... [--monospace]
+  [--max-em F]`**: writes stdin lines with fallback fonts and prints their
+  widths.
 - **`platen graphemes`**: splits stdin lines into grapheme clusters, with
   their code points and cells.
 - **`platen svg <in.svg> [out.pdf]`**: renders an SVG on a page of its own size

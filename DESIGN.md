@@ -1230,8 +1230,11 @@ or VS16, else 1). In an Identity-H fallback a cluster goes to
 `writeMonospaceCluster` instead: shaped with `shaping.shapeFont`
 (initOpenTypeFeatures first: GSUB/GPOS are parsed lazily), each glyph
 placed by `TextCommand.placed` (one Tm per glyph, `renderPlacedOffsets`)
-and mapped to its own source text in ToUnicode, centered in the cells or
-scaled to fit. Copy order is drawing order there (a reordered i matra
+and mapped to its own source text in ToUnicode. Both paths size and
+center by `fallback.fitCluster`: scale = min(cells/own if wider,
+`fallback_max_em`), dx = (room - own x scale) / 2 (reveal passes 0.88,
+as dvui's `Font.fallback_max_em`; dvui floors its pixel size, the PDF
+keeps size x cap exactly). Copy order is drawing order there (a reordered i matra
 reads first). Forced word breaks (`findCharacterBreakStyled`) step by
 grapheme cluster (`graphemeEndBytes`).
 - `-Dtest-filter` drops the unnamed `test {}` blocks, so tests in files

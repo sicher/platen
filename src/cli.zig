@@ -177,7 +177,7 @@ fn printUsage() !void {
         \\  glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...  Draw stdin lines glyph by
         \\                                 glyph (shapeText + drawGlyphs)
         \\  graphemes            Split stdin lines into grapheme clusters (UAX #29) with their cells
-        \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--bold] [--italic] [--size PT]
+        \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--max-em F] [--bold] [--italic] [--size PT]
         \\                       Write stdin lines with per-character fallback fonts
         \\  find-font <family> [--bold] [--italic] [--all] [--dir DIR]... [--out FILE]
         \\                       Find an installed font (whole family without flags)

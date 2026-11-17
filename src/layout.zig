@@ -143,6 +143,12 @@ pub const TextStyle = struct {
     /// own layout does. Null: 2 for East Asian Wide/Fullwidth (or with
     /// VS16), else 1 (unicode_props.cells). At least 1.
     fallback_cells: ?*const fn (cluster: []const u8) u8 = null,
+    /// With `.monospace`: the largest size of a fallback cluster, as a
+    /// fraction of `size` (CJK ink spans nearly its em, Courier's far
+    /// less: 0.88 makes ideographs fill Courier's ink band). A cluster is
+    /// set at the smaller of this and the size that fits its cells,
+    /// centered. Null: only fitted. Must be > 0.
+    fallback_max_em: ?f32 = null,
 
     /// Get the resolved StandardFont if this is a standard font.
     pub fn standardFont(self: TextStyle) ?StandardFont {

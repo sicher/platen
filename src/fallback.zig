@@ -238,6 +238,17 @@ fn nextCluster(text: []const u8, i: *usize, buf: *[max_cluster]u21) []const u21 
     return buf[0..n];
 }
 
+/// How a `.monospace` fallback cluster `own` points wide (at the style's
+/// size) sits in `room` points of cells: scaled to fit when wider, capped
+/// by `fallback_max_em`, and centered.
+pub const Fit = struct { scale: f64, dx: f64 };
+
+pub fn fitCluster(style: TextStyle, own: f64, room: f64) Fit {
+    var scale: f64 = if (own > room and own > 0) room / own else 1;
+    if (style.fallback_max_em) |cap| scale = @min(scale, @as(f64, cap));
+    return .{ .scale = scale, .dx = (room - own * scale) / 2 };
+}
+
 /// Cells of the cluster `text` (one extended grapheme cluster) with
 /// `.monospace`: the style's `fallback_cells` override, else
 /// unicode_props.cells.

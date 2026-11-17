@@ -486,3 +486,36 @@ test "monospace: a Devanagari conjunct is one cluster, shaped (Kohinoor)" {
     // A; the sa-ta conjunct and the e matra (two glyphs, not four); B
     try testing.expectEqual(@as(usize, 4), textX(pdf, &xs_buf).len);
 }
+
+test "monospace: fallback_max_em caps a cluster's size, centered in its cells" {
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const emoji = try doc.loadFont(emoji_path, .identity);
+    var style: platen.TextStyle = .{ .font = cp, .size = 12, .fallback = &.{emoji}, .fallback_advance = .monospace, .fallback_max_em = 0.5 };
+    const cell = try width(&doc, " ", .{ .font = cp, .size = 12 });
+    // The cap changes the glyph, not the grid
+    try testing.expectApproxEqAbs(4 * cell, try width(&doc, "A\u{1F600}B", style), 1e-9);
+    const rect = try doc.writeAt(.{ .x = 72, .y = 100 }, "A\u{1F600}B", style, .{});
+    try testing.expectApproxEqAbs(4 * cell, rect.width, 1e-9);
+
+    // A cap of 0 or less (or NaN) is refused
+    style.fallback_max_em = 0;
+    try testing.expectError(error.InvalidNumber, doc.writeAt(.{ .x = 72, .y = 120 }, "A\u{1F600}", style, .{}));
+    style.fallback_max_em = std.math.nan(f32);
+    try testing.expectError(error.InvalidNumber, doc.writeAt(.{ .x = 72, .y = 120 }, "A\u{1F600}", style, .{}));
+
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    var sizes_buf: [8]f64 = undefined;
+    const sizes = fontSizes(pdf, &sizes_buf);
+    try testing.expectEqual(@as(usize, 3), sizes.len);
+    // Half size: smaller than the fit (the emoji is about two cells wide)
+    try testing.expectApproxEqAbs(6.0, sizes[1], 1e-9);
+    var xs_buf: [8]f64 = undefined;
+    const xs = textX(pdf, &xs_buf);
+    const w_emoji = try width(&doc, "\u{1F600}", .{ .font = emoji, .size = 12 });
+    try testing.expect(w_emoji * 0.5 < 2 * cell and w_emoji > 2 * cell * 0.5);
+    try testing.expectApproxEqAbs(72 + cell + (2 * cell - w_emoji * 0.5) / 2, xs[1], 0.006);
+    try testing.expectApproxEqAbs(72 + 3 * cell, xs[2], 0.006);
+}

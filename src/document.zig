@@ -1226,6 +1226,9 @@ pub const Document = struct {
     /// own font, laid end to end. Returns the total width.
     fn writeFallbackRuns(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !f64 {
         const plan = try fallback.Plan.init(style);
+        if (style.fallback_max_em) |cap| {
+            if (!(cap > 0)) return error.InvalidNumber;
+        }
         const page_alloc = self.pages.items[self.current_page].pageAllocator();
         const text = try stripSoftHyphens(page_alloc, str);
         const cell = plan.cell(style.size);
@@ -1257,14 +1260,12 @@ pub const Document = struct {
                     .embedded => |emb| if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
                     .standard => natural,
                 };
-                // Too wide for its cells: shrink it to fit, as the screen
-                // does; else center it
+                // Shrunk to fit its cells (as the screen does) or to the
+                // cap, and centered
                 const room = @as(f64, @floatFromInt(fallback.clusterCells(style, t.text_data))) * cell;
-                if (own > room) {
-                    t.glyph_scale = room / own;
-                } else {
-                    t.glyph_dx = (room - own) / 2;
-                }
+                const fit = fallback.fitCluster(style, own, room);
+                t.glyph_scale = fit.scale;
+                t.glyph_dx = fit.dx;
                 t.text_width = room + style.char_spacing;
             }
             x += t.text_width;
@@ -1308,10 +1309,11 @@ pub const Document = struct {
         const units: f64 = @floatFromInt(emb.font.head.?.units_per_em);
         const to_pt = style.size / units;
         const own = @as(f64, @floatFromInt(shaping.totalAdvance(shaped))) * to_pt;
-        // Too wide for its cells: shrink to fit, as the screen does; else
-        // center the shaped ink
-        const glyph_scale: f64 = if (own > room and own > 0) room / own else 1;
-        const glyph_dx: f64 = if (glyph_scale < 1) 0 else (room - own) / 2;
+        // Shrunk to fit its cells (as the screen does) or to the cap, and
+        // centered
+        const fit = fallback.fitCluster(style, own, room);
+        const glyph_scale = fit.scale;
+        const glyph_dx = fit.dx;
 
         const ids = try page_alloc.alloc(u16, shaped.len);
         const sources = try page_alloc.alloc([2]u32, shaped.len);

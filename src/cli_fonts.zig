@@ -227,8 +227,8 @@ fn printFound(out: *std.Io.Writer, label: []const u8, f: platen.FoundFont) !void
     });
 }
 
-/// fallback <out.pdf> <font> [--fallback FONT]... [--monospace] [--bold]
-///          [--italic] [--size PT]: write each stdin line in <font>, with
+/// fallback <out.pdf> <font> [--fallback FONT]... [--monospace]
+///          [--max-em F] [--bold] [--italic] [--size PT]: write each stdin line in <font>, with
 ///          the characters it lacks drawn from the fallback fonts in order
 ///          (TextStyle.fallback); prints each line's width. --bold/--italic
 ///          apply to the fallbacks (synthesized, as these are single faces),
@@ -236,7 +236,7 @@ fn printFound(out: *std.Io.Writer, label: []const u8, f: platen.FoundFont) !void
 pub fn fallback(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
     if (args.len < 2) return out.writeAll(
         \\Usage: platen fallback <out.pdf> <font> [--fallback FONT]... [--monospace]
-        \\                       [--bold] [--italic] [--size PT] < lines
+        \\                       [--max-em F] [--bold] [--italic] [--size PT] < lines
         \\
     );
     var doc = platen.Document.init(allocator, io);
@@ -253,6 +253,9 @@ pub fn fallback(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []c
             try fallbacks.append(allocator, try doc.loadFont(args[i], .identity));
         } else if (std.mem.eql(u8, a, "--monospace")) {
             style.fallback_advance = .monospace;
+        } else if (std.mem.eql(u8, a, "--max-em") and i + 1 < args.len) {
+            i += 1;
+            style.fallback_max_em = try std.fmt.parseFloat(f32, args[i]);
         } else if (std.mem.eql(u8, a, "--bold")) {
             style.bold = true;
         } else if (std.mem.eql(u8, a, "--italic")) {

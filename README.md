@@ -311,6 +311,8 @@ _ = try doc.writeAt(.{ .x = 72, .y = 72 }, "INT. КУХНЯ — ДЕНЬ", style
   Wide/Fullwidth (or with VS16), else in one, so the text keeps its
   columns. `fallback_cells = myWidth` counts a cluster's cells instead (a
   `fn ([]const u8) u8`, given the cluster's UTF-8), to match your own grid.
+  `fallback_max_em = 0.88` caps a cluster's size at 0.88 x `size` (CJK ink
+  spans nearly its em; Courier's about 0.78), centered as before.
 - Measurement, wrapping, anchoring and underlines follow the runs.
 
 ### Shaping and Placing Glyphs Yourself
