@@ -1547,6 +1547,27 @@ committed), for Devanagari:
   locally also old spec (Sangam with dev2 removed) - 0 differences. System
   fonts are skipped where not installed (CI).
 
+### GPOS pair kerning (2026-11-18, `src/gpos_kerning.zig`)
+For courier's unshaped runs (one glyph per character, kerned as CoreText
+does with GPOS when a font has no `kern` table):
+- `GposKerning.init(face, script)` keeps the 'kern' feature's type-2
+  lookups of the script's `LangSysMap`, sorted; `pair(l, r)` runs
+  `gpos.applyPairs` (the engine's `applyAt` at glyph 0 of a two-glyph
+  buffer, with a `PairCache`) and returns both glyphs' value changes and
+  whether a second value record consumed the right glyph. Props from GDEF
+  (else both bases), so lookup flags skip a mark as in shaping - then no
+  kerning, where shaping would kern across the mark. Chained/contextual
+  positioning in 'kern' is not applied.
+- The face is only read; the struct is per thread. ~84 ns a cached pair,
+  ~300 ns uncached (ReleaseFast, Inter).
+- Checked against HarfBuzz (kern only, Zyyy) on 100x100 character pairs:
+  Apple SD Gothic Neo Thin, Arial, Inter, Gentium, Charter, Satoshi - all
+  equal once HarfBuzz's GDEF mark zeroing is accounted for (not kerning).
+  Times New Roman's GPOS has no kern feature (its `kern` table kerns).
+- Found: `gsub.Script.default` tries DFLT before latn; HarfBuzz tries latn
+  first for text it guesses as Latin (Zyyy -> DFLT). Same lookups in every
+  font checked; TODO.md.
+
 ### Hangul shaper (2026-11-18, `src/hangul.zig`)
 HarfBuzz 12.3.0's hb-ot-shaper-hangul, for text whose first strong
 character is Hangul (`unicode_props.runScript`, Scripts.txt), always (no

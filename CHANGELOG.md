@@ -4,6 +4,17 @@
 
 ### Added
 
+- **GPOS pair kerning without shaping:** `platen.GposKerning` gives the
+  kerning of two glyph IDs (`advance`, or `pair` for the full
+  `KernAdjustment`) from the GPOS 'kern' feature's PairPos lookups of a
+  script's language system, run through the GPOS engine exactly as
+  `shapeText` applies them (formats 1 and 2, extensions, lookup flags);
+  `platen.hasGposKerning(face, script)` says whether there is any. Pure,
+  for callers placing one glyph per character (courier, as CoreText kerns
+  GPOS-only fonts such as Apple SD Gothic Neo: "ra" -21, "Ja" -5). Checked
+  against HarfBuzz on every pair of 100 characters in six fonts. CLI:
+  `gpos-kern <font> [--script ...]`.
+
 - **Hangul shaping:** `shapeText` (and `write()`) shape Hangul text as
   HarfBuzz's Hangul shaper does. Conjoining jamo (U+1100-11FF, A960-A97F,
   D7B0-D7FF) become the precomposed syllable when the font has it, so

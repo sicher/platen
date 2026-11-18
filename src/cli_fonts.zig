@@ -78,6 +78,48 @@ pub fn shapeText(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []
     }
 }
 
+/// gpos-kern <font> [--script default|devanagari|hangul]: for each stdin
+/// line, each adjacent character pair as GposKerning kerns it (glyphs from
+/// the cmap, no shaping): "left,right=x_advance", plus
+/// "@x_offset,y_offset" when the first glyph moves and
+/// ";second=x_advance@x_offset,y_offset" / ";consumes" when the pair has a
+/// second value record; pairs joined by "|". Font units.
+pub fn gposKern(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
+    if (args.len < 1) return out.writeAll("Usage: platen gpos-kern <font> [--script default|devanagari|hangul] < lines\n");
+    var face = try platen.FontFace.fromFile(io, allocator, args[0]);
+    defer face.deinit();
+    var script: platen.KernScript = .default;
+    if (args.len >= 3 and std.mem.eql(u8, args[1], "--script")) {
+        script = std.meta.stringToEnum(platen.KernScript, args[2]) orelse return out.print("Unknown script: {s}\n", .{args[2]});
+    } else if (args.len > 1) return out.print("Unknown option: {s}\n", .{args[1]});
+    var kerning = try platen.GposKerning.init(allocator, &face, script);
+    defer kerning.deinit();
+    try out.print("# GPOS kerning: {s}\n", .{if (platen.hasGposKerning(&face, script)) "yes" else "no"});
+
+    var in_buffer: [64 * 1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &in_buffer);
+    while (try stdin.interface.takeDelimiter('\n')) |line| {
+        var gids: std.ArrayList(u16) = .empty;
+        defer gids.deinit(allocator);
+        var view = std.unicode.Utf8View.init(line) catch return out.writeAll("Invalid UTF-8\n");
+        var it = view.iterator();
+        while (it.nextCodepoint()) |cp| try gids.append(allocator, face.prototype.font.getGlyphId(cp) orelse 0);
+        if (gids.items.len < 2) {
+            try out.writeAll("\n");
+            continue;
+        }
+        for (gids.items[0 .. gids.items.len - 1], gids.items[1..], 0..) |l, r, i| {
+            const k = kerning.pair(l, r);
+            try out.print("{s}{d},{d}={d}", .{ if (i == 0) "" else "|", l, r, k.x_advance });
+            if (k.x_offset != 0 or k.y_offset != 0) try out.print("@{d},{d}", .{ k.x_offset, k.y_offset });
+            if (k.second_x_advance != 0 or k.second_x_offset != 0 or k.second_y_offset != 0)
+                try out.print(";second={d}@{d},{d}", .{ k.second_x_advance, k.second_x_offset, k.second_y_offset });
+            if (k.consumes_second) try out.writeAll(";consumes");
+        }
+        try out.writeAll("\n");
+    }
+}
+
 /// glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...: shape each stdin
 /// line with shapeText and draw it glyph by glyph with drawGlyphs, one line
 /// per baseline; prints each line's glyph count and width.

@@ -109,6 +109,26 @@ pub fn applyCached(table: *const Table, glyphs: []Glyph, pos: []Position, lookup
     }
 }
 
+/// The PairPos `lookups` (sorted indices, all type 2) at the first of two
+/// `glyphs`, as `applyCached` applies them there: the pair adjustments
+/// shaping gives the two. True if a record had a second value (shaping
+/// then continues after the second glyph).
+pub fn applyPairs(table: *const Table, glyphs: *[2]Glyph, pos: *[2]Position, lookups: []const u16, cache: *PairCache) bool {
+    var list: std.ArrayListUnmanaged(Glyph) = .fromOwnedSlice(glyphs);
+    var ctx: Ctx = .{
+        .m = .{ .table = table, .buf = &list, .max_len = glyphs.len },
+        .pos = pos,
+        .pair_cache = cache,
+    };
+    var consumed = false;
+    for (lookups) |li| {
+        const lookup = &table.lookups[li];
+        if (lookup.type != 2 or !lookup.digest.mayHave(glyphs[0].id) or ctx.m.skips(lookup, 0)) continue;
+        if (ctx.applyAt(lookup, li, 0, 0)) |next| consumed = consumed or next > 1;
+    }
+    return consumed;
+}
+
 /// HarfBuzz's legacy 'kern' table pass (hb_kern_machine_t), for fonts
 /// whose GPOS has no kern feature: each glyph kerns with the next non-mark
 /// glyph, half the value on each side.

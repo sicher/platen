@@ -60,6 +60,12 @@ pub const shaping = @import("shaping.zig");
 pub const unicode_props = @import("unicode_props.zig");
 pub const ShapedGlyph = shaping.ShapedGlyph;
 pub const shapeText = shaping.shape;
+/// GPOS pair kerning of two glyphs without shaping (gpos_kerning.zig).
+pub const GposKerning = gpos_kerning.GposKerning;
+pub const hasGposKerning = gpos_kerning.hasGposKerning;
+pub const KernScript = gpos_kerning.Script;
+pub const KernAdjustment = gpos_kerning.Adjustment;
+const gpos_kerning = @import("gpos_kerning.zig");
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
@@ -206,6 +212,7 @@ test {
     _ = @import("mark_fallback.zig");
     _ = @import("indic.zig");
     _ = @import("hangul.zig");
+    _ = @import("gpos_kerning.zig");
     _ = @import("opentype.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");

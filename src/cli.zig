@@ -69,6 +69,8 @@ pub fn main(init: std.process.Init) !void {
         try cli_fonts.drawGlyphs(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "shape-text")) {
         try cli_fonts.shapeText(init.io, allocator, stdout, args[2..]);
+    } else if (std.mem.eql(u8, cmd, "gpos-kern")) {
+        try cli_fonts.gposKern(init.io, allocator, stdout, args[2..]);
     } else if (std.mem.eql(u8, cmd, "graphemes")) {
         try cli_fonts.graphemes(init.io, stdout);
     } else if (std.mem.eql(u8, cmd, "fallback")) {
@@ -176,6 +178,8 @@ fn printUsage() !void {
         \\                                 print gid=cluster@xoff,yoff+advance (font units)
         \\  glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...  Draw stdin lines glyph by
         \\                                 glyph (shapeText + drawGlyphs)
+        \\  gpos-kern <font> [--script default|devanagari|hangul]  GPOS pair kerning
+        \\                                 (GposKerning) of each adjacent character pair of stdin lines
         \\  graphemes            Split stdin lines into grapheme clusters (UAX #29) with their cells
         \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--max-em F] [--bold] [--italic] [--size PT]
         \\                       Write stdin lines with per-character fallback fonts

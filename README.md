@@ -359,6 +359,15 @@ try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face 
   decides, so shape mixed-script text in runs. Not yet: other Indic
   scripts, Arabic, bidi, AAT `morx`. `write()` and measurement shape the
   same way.
+- GPOS kerning without shaping, for text placed one glyph per character:
+  `var k = try platen.GposKerning.init(allocator, &face, .default)`, then
+  `k.advance(left_gid, right_gid)` is the first glyph's advance change
+  (font units) from the GPOS 'kern' feature's pair lookups, as `shapeText`
+  applies them; `k.pair` gives the whole `KernAdjustment` (offsets, the
+  second glyph's values, `consumes_second`). `platen.hasGposKerning(&face,
+  script)` says whether GPOS kerns at all (a font may kern with a `kern`
+  table only). Pure; one `GposKerning` per thread (it caches pairs, about
+  80 ns a cached pair). CLI: `gpos-kern <font>`.
 
 ### Text Flow with Word Wrapping
 
