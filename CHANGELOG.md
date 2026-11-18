@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Showcase: scripts and SVG gradients**: a fourth showcase page
+  (`examples/showcase_scripts.pdf`, in the README gallery) shows fallback
+  fonts, synthesized bold and italic, a screenplay in Courier Prime with
+  Greek, Cyrillic, Hangul and emoji in monospace cells, Korean (jamo
+  composing into a syllable) and Devanagari; the graphics page gains SVG
+  gradients (`test/images/gradients.svg`). New test fonts: Noto Sans
+  Devanagari, and a Noto Sans KR subset (`scripts/subset_noto_kr.py`).
+
 - **GPOS pair kerning without shaping:** `platen.GposKerning` gives the
   kerning of two glyph IDs (`advance`, or `pair` for the full
   `KernAdjustment`) from the GPOS 'kern' feature's PairPos lookups of a

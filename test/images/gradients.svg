@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="140" viewBox="0 0 200 140">
+  <!-- SVG gradients as platen draws them (src/showcase.zig, graphics page):
+       linear and radial, a focal point, gradientTransform, stops inherited
+       through href, user-space units, a hard edge, and gradient-filled
+       text and strokes -->
+  <defs>
+    <linearGradient id="dusk" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#24346e"/>
+      <stop offset="0.6" stop-color="#783c8c"/>
+      <stop offset="1" stop-color="#f07828"/>
+    </linearGradient>
+    <!-- The same stops, turned: inherited through href -->
+    <linearGradient id="dusk-down" href="#dusk" gradientTransform="rotate(90 0.5 0.5)"/>
+    <!-- A horizontal line has no height: its gradient spans user space -->
+    <linearGradient id="dusk-wide" href="#dusk" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="200" y2="0"/>
+    <radialGradient id="pearl" cx="0.5" cy="0.5" r="0.5" fx="0.3" fy="0.28">
+      <stop offset="0" stop-color="white"/>
+      <stop offset="0.35" stop-color="oklch(0.85 0.08 230)"/>
+      <stop offset="1" stop-color="#24346e"/>
+    </radialGradient>
+    <radialGradient id="ember" xlink:href="#pearl" fx="0.5" fy="0.5">
+      <stop offset="0" stop-color="#fff3c4"/>
+      <stop offset="0.5" stop-color="#f07828"/>
+      <stop offset="1" stop-color="#8c2814"/>
+    </radialGradient>
+    <!-- Two stops at one offset: a hard edge -->
+    <linearGradient id="flag" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.5" stop-color="#0057b7"/>
+      <stop offset="0.5" stop-color="#ffd700"/>
+    </linearGradient>
+  </defs>
+
+  <text x="100" y="38" text-anchor="middle" font-size="40" font-weight="bold" fill="url(#dusk)">gradients</text>
+  <line x1="6" y1="54" x2="194" y2="54" stroke="url(#dusk-wide)" stroke-width="4" stroke-linecap="round"/>
+
+  <circle cx="26" cy="96" r="22" fill="url(#pearl)"/>
+  <circle cx="78" cy="96" r="22" fill="url(#ember)"/>
+  <rect x="112" y="74" width="30" height="44" rx="4" fill="url(#flag)"/>
+  <rect x="152" y="74" width="44" height="44" rx="8" fill="none" stroke="url(#dusk-down)" stroke-width="7"/>
+</svg>

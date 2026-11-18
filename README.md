@@ -10,25 +10,31 @@ Every page below is a PDF rendered by platen; click an image to open the PDF its
 
 <table>
   <tr>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
 
 [![Typography page: justified two-column text with Knuth-Plass line breaking, Greek, Cyrillic and Vietnamese diacritics, and font weight specimens](docs/images/typography.png)](examples/showcase_typography.pdf)
 
 <sub><b>Typography</b><br>Knuth-Plass justification, OpenType shaping, Unicode marks</sub>
 </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
 
-[![Vector graphics page: the SVG tiger, translucent circles, a radial-gradient sphere, rotated squares, dashed rounded rectangle, Bezier wave and star](docs/images/graphics.png)](examples/showcase_graphics.pdf)
+[![Vector graphics page: the SVG tiger, translucent circles, a radial-gradient sphere, rotated squares, dashed rounded rectangle, Bezier wave, SVG gradients on text and shapes, and star](docs/images/graphics.png)](examples/showcase_graphics.pdf)
 
 <sub><b>Vector graphics</b><br>SVG, gradients, clipping, transforms, opacity</sub>
 </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
 
 [![Color fonts page: COLRv1 gradient lettering, a grid of color emoji, a PNG with alpha over a checkerboard, and COLRv0 and OpenType-SVG lettering](docs/images/color.png)](examples/showcase_color.pdf)
 
 <sub><b>Color fonts &amp; images</b><br>COLRv0/v1, OT-SVG, emoji, PNG alpha</sub>
 </td>
-    <td align="center" width="25%">
+    <td align="center" width="20%">
+
+[![Scripts page: Charter with Gentium and emoji fallbacks, synthesized bold and italic, a screenplay in Courier Prime with Greek, Cyrillic, Hangul and emoji in monospace cells, Korean and Devanagari text](docs/images/scripts.png)](examples/showcase_scripts.pdf)
+
+<sub><b>Scripts &amp; fallback</b><br>Fallback fonts, monospace cells, Hangul, Devanagari</sub>
+</td>
+    <td align="center" width="20%">
 
 [![A one-page invoice with the platen logo, line items table and totals](docs/images/invoice.png)](examples/benchmark_invoice.pdf)
 
@@ -37,7 +43,7 @@ Every page below is a PDF rendered by platen; click an image to open the PDF its
   </tr>
 </table>
 
-The first three are made by [`src/showcase.zig`](src/showcase.zig) (`zig build showcase` writes `examples/showcase_*.pdf`); the invoice is the [invoice benchmark](src/invoice_bench.zig)'s sample. `scripts/render-readme-images` regenerates all four images.
+The four showcase pages are made by [`src/showcase.zig`](src/showcase.zig) (`zig build showcase` writes `examples/showcase_*.pdf`); the invoice is the [invoice benchmark](src/invoice_bench.zig)'s sample. `scripts/render-readme-images` regenerates all five images.
 
 ## Features
 
