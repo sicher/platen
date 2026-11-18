@@ -14,7 +14,7 @@ zig build showcase
 zig build bench-invoice -- --count=1 --output=examples/benchmark_invoice.pdf >/dev/null 2>&1
 
 # 900 px wide: sharp on HiDPI when the README shows them at ~300 px
-for name in typography graphics color; do
+for name in typography graphics color scripts; do
     pdftoppm -png -singlefile -scale-to-x 900 -scale-to-y -1 \
         "examples/showcase_$name.pdf" "docs/images/$name"
 done

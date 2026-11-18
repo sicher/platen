@@ -1,8 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 — 2026-11-18
 
 ### Added
+
+- **Showcase: scripts and SVG gradients**: a fourth showcase page
+  (`examples/showcase_scripts.pdf`, in the README gallery) shows fallback
+  fonts, synthesized bold and italic, a screenplay in Courier Prime with
+  Greek, Cyrillic, Hangul and emoji in monospace cells, Korean (jamo
+  composing into a syllable) and Devanagari; the graphics page gains SVG
+  gradients (`test/images/gradients.svg`). New test fonts: Noto Sans
+  Devanagari, and a Noto Sans KR subset (`scripts/subset_noto_kr.py`).
 
 - **GPOS pair kerning without shaping:** `platen.GposKerning` gives the
   kerning of two glyph IDs (`advance`, or `pair` for the full
@@ -158,6 +166,30 @@
   and returns null for a translucent one: a `Color` has no alpha to keep.
 
 ### Fixed
+
+- **`output()` panicked for a font with 1000 or more glyphs used**
+  (`NoSpaceLeft` writing the ToUnicode CMap: CJK text, or Inter's full
+  repertoire). ToUnicode CMaps are now written in bfchar blocks of at most
+  100 entries, as readers expect (one block held them all before), and a
+  glyph mapping to a long text no longer overflows its entry buffer.
+
+- **CFF glyphs with a hintmask in a subroutine could print wrong** (Noto
+  Sans KR's 안, 글, 연, and any CFF font whose subroutines hold hint masks):
+  subsetting expanded each subroutine on its own, so a hintmask there saw
+  none of the glyph's stems and read its mask bytes as operators,
+  dropping or garbling the outline. Subroutines are now inlined with the
+  glyph's operand stack and stem count, `return` and `endchar` end what
+  they should, and the curve operators 30/31 clear the stack. Checked
+  against fontTools for every glyph written of Inter, Satoshi, Noto Sans
+  KR, Apple SD Gothic Neo and Hiragino.
+
+- **Text copied from monospace fallback cells could split words**: a
+  narrow fallback glyph centered in its cells (Gentium Italic's Cyrillic in
+  Courier Prime) leaves gaps that poppler 25's `pdftotext` read as word
+  breaks ("Ив ан: «Г д е кофе?»"). Two or more fallback clusters in a row
+  are now one marked-content span whose `/ActualText` is their text, so
+  they extract whole; each glyph still maps to its own text for viewers
+  that ignore ActualText.
 
 - **A project depending on platen failed to build**: platen's build.zig
   panicked with "cannot open test/ to declare test inputs: FileNotFound",

@@ -121,6 +121,42 @@ pub fn wordSpacing1000(word_spacing: f64, font_size: f64) i32 {
     return @intFromFloat(@round(word_spacing * 1000.0 / font_size));
 }
 
+/// Begin a marked-content span whose glyphs extract as `text` (UTF-8):
+/// `/Span <</ActualText <FEFF...>>> BDC`, the text as UTF-16BE with a
+/// byte order mark (a PDF text string); a byte that starts no valid UTF-8
+/// sequence is U+FFFD. End it with `EMC`.
+pub fn beginActualText(cw: *ContentWriter, text: []const u8) !void {
+    try cw.append("/Span <</ActualText <FEFF");
+    var buf: [8]u8 = undefined;
+    var i: usize = 0;
+    while (i < text.len) {
+        var cp: u21 = 0xFFFD;
+        var step: usize = 1;
+        const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 0;
+        if (len != 0 and i + len <= text.len) {
+            if (std.unicode.utf8Decode(text[i..][0..len])) |c| {
+                cp = c;
+                step = len;
+            } else |_| {}
+        }
+        i += step;
+        var units: [2]u16 = undefined;
+        const n: usize = if (cp >= 0x10000) blk: {
+            const v = cp - 0x10000;
+            units = .{ @intCast(0xD800 + (v >> 10)), @intCast(0xDC00 + (v & 0x3FF)) };
+            break :blk 2;
+        } else blk: {
+            units[0] = @intCast(cp);
+            break :blk 1;
+        };
+        for (units[0..n]) |u| {
+            _ = std.fmt.bufPrint(&buf, "{X:0>4}", .{u}) catch unreachable;
+            try cw.append(buf[0..4]);
+        }
+    }
+    try cw.append(">>> BDC\n");
+}
+
 /// Glyphs by ID, each placed with its own text matrix (Document.drawGlyphs).
 /// `font_index` names the font resource (/E<index+1>).
 pub fn renderPlacedGlyphs(cw: *ContentWriter, g: pagemod.GlyphsCommand, font_index: usize) !void {

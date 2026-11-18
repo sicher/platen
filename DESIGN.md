@@ -191,6 +191,9 @@ endstream
 - Enables text extraction and copy/paste in PDF viewers
 - Only includes mappings for used characters
 - Format: single-byte codespace, bfchar entries
+- Every ToUnicode CMap (WinAnsi, CID, color-font subfonts) writes its
+  bfchar entries in blocks of at most 100 (`format.bfcharBlockLines`,
+  Adobe TN #5099); entries of any length are appended directly
 
 **Implemented features:**
 1. FlateDecode compression for all streams (via std.compress.flate)
@@ -1258,6 +1261,19 @@ as dvui's `Font.fallback_max_em`; dvui floors its pixel size, the PDF
 keeps size x cap exactly). Copy order is drawing order there (a reordered i matra
 reads first). Forced word breaks (`findCharacterBreakStyled`) step by
 grapheme cluster (`graphemeEndBytes`).
+Two or more clusters in a row (`writeFallbackRuns`, `spanClusters`) are
+one `/Span <</ActualText <FEFF...>>> BDC ... EMC` around their text
+objects (`TextCommand.actual_text` / `actual_text_end`,
+`text_render.beginActualText`): each glyph is centered in its cells,
+and extractors take the gaps between glyph boxes for word breaks
+(poppler 25 starts a word at 0.1 em, spaces at 0.15 em: "Ив ан" from
+Gentium Italic in Courier cells; 26 is more lenient). Closing the gaps
+in the PDF does not work: poppler subtracts Tc from a glyph's box
+(TextOutputDev addChar), a box starts at the glyph's origin (the
+centering gap before it stays), and alias CIDs with cell widths would
+need a CIDToGIDMap, which CFF fonts (most CJK fallbacks) lack. poppler
+emits a span as one unit over its glyphs' extent; viewers that ignore
+ActualText still have the per-glyph ToUnicode.
 - `-Dtest-filter` drops the unnamed `test {}` blocks, so tests in files
   reached only through them (document.zig's own) don't run in a filtered
   build: it reports a pass without running them. Check with the full
@@ -1656,6 +1672,17 @@ subrs, offsets as fixed 5-byte ints, Top DICT rebuilt until its size
 settles. Test: test/fonts/cff (scripts/gen_cff_test_fonts.py) has the same
 outlines name-keyed and CID-keyed (CIDs != GIDs, two FDs with different
 local subrs); both must render identically (pdftoppm, grayscale bytes).
+Desubroutinizing (`cff_subset.desubroutinize`, every CFF subset) runs
+one `Desubr` state per glyph, as a Type 2 interpreter: subroutines share
+the caller's operand stack and stem count and write into the glyph's
+output; `return` ends a subroutine, `endchar` the glyph, every operator
+(0-31 but 28/29, the curves 30/31 too) clears the stack. A hintmask's
+mask is (stems + 7) / 8 bytes, stems counted across the whole glyph:
+expanding each subroutine on its own (before 2026-11-18) counted none
+for a hintmask in a subroutine and parsed its mask as operators (Noto
+Sans KR 안 글 연: test/fonts/Noto Sans KR, scripts/subset_noto_kr.py).
+Checked against fontTools' outlines for every glyph written (Inter,
+Satoshi, Noto Sans KR, Apple SD Gothic Neo, Hiragino: 0 differ).
 
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,

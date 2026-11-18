@@ -1141,23 +1141,23 @@ pub const EmbeddedFont = struct {
             }
         }
 
-        // Write bfchar entries
-        var count_buf: [16]u8 = undefined;
-        const count_str = std.fmt.bufPrint(&count_buf, "{d} beginbfchar\n", .{count}) catch unreachable;
-        try cmap.appendSlice(self.allocator, count_str);
-
+        // Write bfchar entries, at most 100 per block
+        var block_buf: [48]u8 = undefined;
+        var written: usize = 0;
         for (0..256) |i| {
             if (self.used_chars[i] and win_ansi_to_unicode[i] != 0xFFFD) {
+                try cmap.appendSlice(self.allocator, format.bfcharBlockLines(&block_buf, written, count));
+                written += 1;
                 const unicode = win_ansi_to_unicode[i];
                 var entry_buf: [32]u8 = undefined;
                 const entry = std.fmt.bufPrint(&entry_buf, "<{X:0>2}> <{X:0>4}>\n", .{ i, unicode }) catch unreachable;
                 try cmap.appendSlice(self.allocator, entry);
             }
         }
+        if (count > 0) try cmap.appendSlice(self.allocator, "endbfchar\n");
 
         // CMap footer
         try cmap.appendSlice(self.allocator,
-            \\endbfchar
             \\endcmap
             \\CMapName currentdict /CMap defineresource pop
             \\end
@@ -1198,10 +1198,10 @@ pub const EmbeddedFont = struct {
         const total_count = regular_count + ligature_count;
 
         if (total_count > 0) {
-            // Write bfchar entries (glyph ID → Unicode codepoint(s))
-            var count_buf: [16]u8 = undefined;
-            const count_str = std.fmt.bufPrint(&count_buf, "{d} beginbfchar\n", .{total_count}) catch unreachable;
-            try cmap.appendSlice(self.allocator, count_str);
+            // Write bfchar entries (glyph ID → Unicode codepoint(s)), at
+            // most 100 per block
+            var block_buf: [48]u8 = undefined;
+            var written: usize = 0;
 
             const has_remap = self.gid_remap.count() > 0;
 
@@ -1211,6 +1211,8 @@ pub const EmbeddedFont = struct {
                 const orig_gid = entry.key_ptr.*;
                 const codepoint = entry.value_ptr.*;
                 const gid = if (has_remap) self.gid_remap.get(orig_gid) orelse 0 else orig_gid;
+                try cmap.appendSlice(self.allocator, format.bfcharBlockLines(&block_buf, written, total_count));
+                written += 1;
                 var entry_buf: [48]u8 = undefined;
 
                 if (codepoint > 0xFFFF) {
@@ -1231,36 +1233,28 @@ pub const EmbeddedFont = struct {
                 const orig_lig_gid = entry.key_ptr.*;
                 const lig_codepoints = entry.value_ptr.*;
                 const lig_gid = if (has_remap) self.gid_remap.get(orig_lig_gid) orelse 0 else orig_lig_gid;
+                try cmap.appendSlice(self.allocator, format.bfcharBlockLines(&block_buf, written, total_count));
+                written += 1;
 
-                // Format: <GID> <UTF16_CODEPOINT_SEQUENCE>
-                var entry_buf: [128]u8 = undefined;
-                var len: usize = 0;
-
-                entry_buf[len] = '<';
-                len += 1;
-                format.writeHex4(entry_buf[len..][0..4], lig_gid);
-                len += 4;
-                @memcpy(entry_buf[len..][0..3], "> <");
-                len += 3;
-
+                // Format: <GID> <UTF16_CODEPOINT_SEQUENCE>, any length
+                var hex: [4]u8 = undefined;
+                try cmap.append(self.allocator, '<');
+                format.writeHex4(&hex, lig_gid);
+                try cmap.appendSlice(self.allocator, &hex);
+                try cmap.appendSlice(self.allocator, "> <");
                 for (lig_codepoints) |cp| {
                     if (cp > 0xFFFF) {
                         const adjusted = cp - 0x10000;
-                        const high: u16 = @intCast(0xD800 + (adjusted >> 10));
-                        const low: u16 = @intCast(0xDC00 + (adjusted & 0x3FF));
-                        format.writeHex4(entry_buf[len..][0..4], high);
-                        len += 4;
-                        format.writeHex4(entry_buf[len..][0..4], low);
-                        len += 4;
+                        format.writeHex4(&hex, @intCast(0xD800 + (adjusted >> 10)));
+                        try cmap.appendSlice(self.allocator, &hex);
+                        format.writeHex4(&hex, @intCast(0xDC00 + (adjusted & 0x3FF)));
+                        try cmap.appendSlice(self.allocator, &hex);
                     } else {
-                        format.writeHex4(entry_buf[len..][0..4], @intCast(cp));
-                        len += 4;
+                        format.writeHex4(&hex, @intCast(cp));
+                        try cmap.appendSlice(self.allocator, &hex);
                     }
                 }
-                @memcpy(entry_buf[len..][0..2], ">\n");
-                len += 2;
-
-                try cmap.appendSlice(self.allocator, entry_buf[0..len]);
+                try cmap.appendSlice(self.allocator, ">\n");
             }
 
             try cmap.appendSlice(self.allocator, "endbfchar\n");
@@ -2336,6 +2330,29 @@ test "ToUnicode CMap generation" {
     try std.testing.expect(std.mem.indexOf(u8, cmap, "<48> <0048>") != null);
     try std.testing.expect(std.mem.indexOf(u8, cmap, "<69> <0069>") != null);
     try std.testing.expect(std.mem.indexOf(u8, cmap, "<21> <0021>") != null);
+}
+
+test "ToUnicode CMap: a thousand glyphs and more, in blocks of at most 100" {
+    // 1000+ glyphs overflowed the "N beginbfchar" buffer (a panic in
+    // output()), and one block held them all; a long ligature overflowed
+    // its entry buffer
+    const allocator = std.testing.allocator;
+    const emb = try EmbeddedFont.fromFile(std.testing.io, allocator, "test/fonts/Gentium/Gentium-Regular.ttf");
+    defer emb.deinit();
+    for (0..1500) |i| try emb.glyph_to_codepoint.put(allocator, @intCast(i + 1), @intCast(0x4E00 + i));
+    const long = try allocator.alloc(u21, 40);
+    for (long, 0..) |*cp, i| cp.* = @intCast(0x1F600 + i);
+    try emb.ligature_codepoints.put(allocator, 2000, long);
+
+    const cmap = try emb.generateCIDToUnicodeCMap();
+    defer allocator.free(cmap);
+    // 1501 entries: 15 blocks of 100 and one of 1
+    try std.testing.expectEqual(@as(usize, 15), std.mem.count(u8, cmap, "100 beginbfchar\n"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, cmap, "\n1 beginbfchar\n"));
+    try std.testing.expectEqual(@as(usize, 16), std.mem.count(u8, cmap, "endbfchar\n"));
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "<0001> <4E00>\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "<07D0> <D83DDE00D83DDE01") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cmap, "D83DDE27>\nendbfchar\n") != null);
 }
 
 // =============================================================================

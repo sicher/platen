@@ -71,6 +71,13 @@ pub const TextCommand = struct {
     /// each glyph's offset in points from (x + glyph_dx, y), y up. The
     /// renderer then draws these instead of shaping `text_data`.
     placed: ?[]const PlacedOffset = null,
+    /// Begins a marked-content span with this /ActualText before the
+    /// command (consecutive `.monospace` fallback clusters: text
+    /// extraction takes their text whole, where the gaps around glyphs
+    /// centered in their cells read as word breaks)
+    actual_text: ?[]const u8 = null,
+    /// Ends the span an earlier command's `actual_text` began, after this one
+    actual_text_end: bool = false,
 };
 
 /// A glyph of a TextCommand's `placed` run.

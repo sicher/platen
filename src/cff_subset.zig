@@ -773,8 +773,7 @@ pub fn desubroutinizeCharString(
     local_subrs: ?CFFIndex,
     depth: u8,
 ) ![]const u8 {
-    var budget: DesubrBudget = .{};
-    return desubroutinize(allocator, charstring, global_subrs, local_subrs, depth, &budget);
+    return desubroutinize(allocator, charstring, global_subrs, local_subrs, depth);
 }
 
 /// Type 2 charstring implementation limits (Adobe TN #5177, Appendix B):
@@ -787,189 +786,175 @@ const max_charstring_len = 65535;
 /// (largest fully expanded glyph in Inter/Satoshi: 466 bytes).
 const max_desubr_work: usize = 1 << 20;
 
-const DesubrBudget = struct {
-    scanned: usize = 0,
-};
-
 /// Inline all subroutine calls; error.InvalidCFF when the font exceeds the
 /// Type 2 limits (nesting > 10, expanded glyph > 65535 bytes) or the work
 /// bound. Exceeding the depth used to return the charstring unexpanded -
 /// still calling subroutines the subset no longer contains.
+///
+/// One state for the whole glyph, as a Type 2 interpreter has it: a
+/// subroutine works on its caller's operand stack and stem hints, so a
+/// hintmask in a subroutine after stems declared in the glyph reads as
+/// many mask bytes as there are stems (expanded on its own, it read none
+/// and took the mask for operators: Noto Sans KR's 안 lost a mask and an
+/// operand). Subroutines write into the glyph's output; `return` ends a
+/// subroutine and `endchar` the glyph.
 fn desubroutinize(
     allocator: std.mem.Allocator,
     charstring: []const u8,
     global_subrs: ?CFFIndex,
     local_subrs: ?CFFIndex,
     depth: u8,
-    budget: *DesubrBudget,
 ) ![]const u8 {
-    if (depth > max_subr_depth) return error.InvalidCFF;
-    budget.scanned += charstring.len;
-    if (budget.scanned > max_desubr_work) return error.InvalidCFF;
+    var d: Desubr = .{
+        .allocator = allocator,
+        .global_subrs = global_subrs,
+        .local_subrs = local_subrs,
+        .gsubr_bias = if (global_subrs) |gs| getSubrBias(gs.count) else 0,
+        .lsubr_bias = if (local_subrs) |ls| getSubrBias(ls.count) else 0,
+    };
+    errdefer d.result.deinit(allocator);
+    try d.run(charstring, depth);
+    // Ensure we end with endchar (only for main charstring, not subroutines)
+    if (!d.seen_endchar and d.result.items.len > 0 and depth == 0) {
+        try d.result.append(allocator, 14);
+    }
+    // Also covers a single oversized charstring with no calls.
+    if (d.result.items.len > max_charstring_len) return error.InvalidCFF;
+    return d.result.toOwnedSlice(allocator);
+}
 
-    var result = std.ArrayListUnmanaged(u8).empty;
-    errdefer result.deinit(allocator);
+const Desubr = struct {
+    /// Explicit: run and call recurse into each other
+    const Error = error{ InvalidCFF, OutOfMemory };
 
-    const gsubr_bias: i32 = if (global_subrs) |gs| getSubrBias(gs.count) else 0;
-    const lsubr_bias: i32 = if (local_subrs) |ls| getSubrBias(ls.count) else 0;
+    allocator: std.mem.Allocator,
+    global_subrs: ?CFFIndex,
+    local_subrs: ?CFFIndex,
+    gsubr_bias: i32,
+    lsubr_bias: i32,
+    result: std.ArrayListUnmanaged(u8) = .empty,
+    /// Bytes scanned across all inlined calls (max_desubr_work)
+    scanned: usize = 0,
+    /// The operand stack: values (for subroutine numbers) and where each
+    /// operand starts in `result` (to drop a call's subroutine number)
+    stack: [48]i32 = undefined,
+    operand_positions: [48]usize = undefined,
+    stack_top: usize = 0,
+    /// Stem hints so far: a hintmask/cntrmask has (stems + 7) / 8 bytes
+    stem_count: usize = 0,
+    seen_endchar: bool = false,
 
-    // Track operand stack for subr index calculation
-    var stack: [48]i32 = undefined;
-    var stack_top: usize = 0;
+    fn push(self: *Desubr, value: i32, bytes: []const u8) !void {
+        if (self.stack_top < self.stack.len) {
+            self.operand_positions[self.stack_top] = self.result.items.len;
+            self.stack[self.stack_top] = value;
+            self.stack_top += 1;
+        }
+        try self.result.appendSlice(self.allocator, bytes);
+    }
 
-    // Track operand byte positions in result (for removing callsubr operand)
-    var operand_positions: [48]usize = undefined;
+    /// Inline the subroutine whose (unbiased) number is on top of the stack
+    fn call(self: *Desubr, subrs: ?CFFIndex, bias: i32, depth: u8) Error!void {
+        if (self.stack_top == 0 or subrs == null) return;
+        // The subroutine number is not part of the inlined glyph
+        self.result.shrinkRetainingCapacity(self.operand_positions[self.stack_top - 1]);
+        self.stack_top -= 1;
+        const subr_idx = self.stack[self.stack_top] + bias;
+        if (subr_idx < 0) return;
+        const subr_data = subrs.?.getEntry(@intCast(subr_idx)) orelse return;
+        try self.run(subr_data, depth + 1);
+        if (self.result.items.len > max_charstring_len) return error.InvalidCFF;
+    }
 
-    // Track hint count for hintmask/cntrmask
-    var stem_count: usize = 0;
-    var seen_endchar = false;
+    fn run(self: *Desubr, charstring: []const u8, depth: u8) Error!void {
+        if (depth > max_subr_depth) return error.InvalidCFF;
+        self.scanned += charstring.len;
+        if (self.scanned > max_desubr_work) return error.InvalidCFF;
+        const allocator = self.allocator;
 
-    var i: usize = 0;
-    while (i < charstring.len) {
-        const b0 = charstring[i];
+        var i: usize = 0;
+        while (i < charstring.len and !self.seen_endchar) {
+            const b0 = charstring[i];
 
-        if (b0 == 1 or b0 == 3 or b0 == 18 or b0 == 23) {
-            // hstem, vstem, hstemhm, vstemhm
-            stem_count += stack_top / 2;
-            stack_top = 0;
-            try result.append(allocator, b0);
-            i += 1;
-        } else if (b0 == 19 or b0 == 20) {
-            // hintmask/cntrmask
-            stem_count += stack_top / 2;
-            stack_top = 0;
-            try result.append(allocator, b0);
-            i += 1;
-            const mask_bytes = (stem_count + 7) / 8;
-            if (i + mask_bytes <= charstring.len) {
-                try result.appendSlice(allocator, charstring[i..][0..mask_bytes]);
+            if (b0 == 1 or b0 == 3 or b0 == 18 or b0 == 23) {
+                // hstem, vstem, hstemhm, vstemhm
+                self.stem_count += self.stack_top / 2;
+                self.stack_top = 0;
+                try self.result.append(allocator, b0);
+                i += 1;
+            } else if (b0 == 19 or b0 == 20) {
+                // hintmask/cntrmask: operands before it are vstems
+                self.stem_count += self.stack_top / 2;
+                self.stack_top = 0;
+                try self.result.append(allocator, b0);
+                i += 1;
+                const mask_bytes = (self.stem_count + 7) / 8;
+                if (i + mask_bytes > charstring.len) return error.InvalidCFF;
+                try self.result.appendSlice(allocator, charstring[i..][0..mask_bytes]);
                 i += mask_bytes;
-            }
-        } else if (b0 == 10) {
-            // callsubr - inline local subroutine
-            if (stack_top > 0 and local_subrs != null) {
-                const operand_start = operand_positions[stack_top - 1];
-                result.shrinkRetainingCapacity(operand_start);
-
-                stack_top -= 1;
-                const subr_idx = stack[stack_top] + lsubr_bias;
-                if (subr_idx >= 0) {
-                    if (local_subrs.?.getEntry(@intCast(subr_idx))) |subr_data| {
-                        const expanded = try desubroutinize(allocator, subr_data, global_subrs, local_subrs, depth + 1, budget);
-                        defer allocator.free(expanded);
-                        const inline_len = if (expanded.len > 0 and expanded[expanded.len - 1] == 11)
-                            expanded.len - 1
-                        else
-                            expanded.len;
-                        try result.appendSlice(allocator, expanded[0..inline_len]);
-                        if (result.items.len > max_charstring_len) return error.InvalidCFF;
-                    }
+            } else if (b0 == 10) {
+                // callsubr - inline local subroutine
+                i += 1;
+                try self.call(self.local_subrs, self.lsubr_bias, depth);
+            } else if (b0 == 29) {
+                // callgsubr - inline global subroutine
+                i += 1;
+                try self.call(self.global_subrs, self.gsubr_bias, depth);
+            } else if (b0 == 11) {
+                // return: the rest of a subroutine is never run
+                return;
+            } else if (b0 == 14) {
+                // endchar: the glyph ends, in a subroutine too
+                try self.result.append(allocator, b0);
+                self.seen_endchar = true;
+            } else if (b0 == 12) {
+                // Two-byte operator
+                if (i + 1 < charstring.len) {
+                    try self.result.appendSlice(allocator, charstring[i..][0..2]);
+                    self.stack_top = 0;
                 }
-            }
-            i += 1;
-        } else if (b0 == 29) {
-            // callgsubr - inline global subroutine
-            if (stack_top > 0 and global_subrs != null) {
-                const operand_start = operand_positions[stack_top - 1];
-                result.shrinkRetainingCapacity(operand_start);
-
-                stack_top -= 1;
-                const subr_idx = stack[stack_top] + gsubr_bias;
-                if (subr_idx >= 0) {
-                    if (global_subrs.?.getEntry(@intCast(subr_idx))) |subr_data| {
-                        const expanded = try desubroutinize(allocator, subr_data, global_subrs, local_subrs, depth + 1, budget);
-                        defer allocator.free(expanded);
-                        const inline_len = if (expanded.len > 0 and expanded[expanded.len - 1] == 11)
-                            expanded.len - 1
-                        else
-                            expanded.len;
-                        try result.appendSlice(allocator, expanded[0..inline_len]);
-                        if (result.items.len > max_charstring_len) return error.InvalidCFF;
-                    }
+                i += 2;
+            } else if (b0 == 28) {
+                // shortint
+                if (i + 2 < charstring.len) {
+                    try self.push(@as(i16, @bitCast(readU16(charstring, i + 1))), charstring[i..][0..3]);
                 }
+                i += 3;
+            } else if (b0 >= 32 and b0 <= 246) {
+                // Single-byte integer
+                try self.push(@as(i32, b0) - 139, charstring[i..][0..1]);
+                i += 1;
+            } else if (b0 >= 247 and b0 <= 250) {
+                // Two-byte positive integer
+                if (i + 1 < charstring.len) {
+                    try self.push((@as(i32, b0) - 247) * 256 + charstring[i + 1] + 108, charstring[i..][0..2]);
+                }
+                i += 2;
+            } else if (b0 >= 251 and b0 <= 254) {
+                // Two-byte negative integer
+                if (i + 1 < charstring.len) {
+                    try self.push(-(@as(i32, b0) - 251) * 256 - charstring[i + 1] - 108, charstring[i..][0..2]);
+                }
+                i += 2;
+            } else if (b0 == 255) {
+                // 16.16 fixed: an operand too (a stem's), never a
+                // subroutine number
+                if (i + 4 < charstring.len) {
+                    try self.push(std.math.minInt(i32), charstring[i..][0..5]);
+                }
+                i += 5;
+            } else {
+                // Other single-byte operators (0-31 but 28, 29), the
+                // curves vhcurveto (30) and hvcurveto (31) among them:
+                // all clear the stack, or a later hintmask would count
+                // their operands as stems
+                try self.result.append(allocator, b0);
+                self.stack_top = 0;
+                i += 1;
             }
-            i += 1;
-        } else if (b0 == 11) {
-            // return - skip
-            i += 1;
-        } else if (b0 == 14) {
-            // endchar
-            try result.append(allocator, b0);
-            seen_endchar = true;
-            i += 1;
-        } else if (b0 == 12) {
-            // Two-byte operator
-            if (i + 1 < charstring.len) {
-                try result.appendSlice(allocator, charstring[i..][0..2]);
-                stack_top = 0;
-            }
-            i += 2;
-        } else if (b0 == 28) {
-            // shortint
-            if (i + 2 < charstring.len and stack_top < 48) {
-                operand_positions[stack_top] = result.items.len;
-                const val = @as(i32, @as(i16, @bitCast(readU16(charstring, i + 1))));
-                stack[stack_top] = val;
-                stack_top += 1;
-                try result.appendSlice(allocator, charstring[i..][0..3]);
-            }
-            i += 3;
-        } else if (b0 >= 32 and b0 <= 246) {
-            // Single-byte integer
-            if (stack_top < 48) {
-                operand_positions[stack_top] = result.items.len;
-                stack[stack_top] = @as(i32, b0) - 139;
-                stack_top += 1;
-            }
-            try result.append(allocator, b0);
-            i += 1;
-        } else if (b0 >= 247 and b0 <= 250) {
-            // Two-byte positive integer
-            if (i + 1 < charstring.len and stack_top < 48) {
-                operand_positions[stack_top] = result.items.len;
-                const val = (@as(i32, b0) - 247) * 256 + charstring[i + 1] + 108;
-                stack[stack_top] = val;
-                stack_top += 1;
-                try result.appendSlice(allocator, charstring[i..][0..2]);
-            }
-            i += 2;
-        } else if (b0 >= 251 and b0 <= 254) {
-            // Two-byte negative integer
-            if (i + 1 < charstring.len and stack_top < 48) {
-                operand_positions[stack_top] = result.items.len;
-                const val = -(@as(i32, b0) - 251) * 256 - charstring[i + 1] - 108;
-                stack[stack_top] = val;
-                stack_top += 1;
-                try result.appendSlice(allocator, charstring[i..][0..2]);
-            }
-            i += 2;
-        } else if (b0 == 255) {
-            // 4-byte fixed point
-            if (i + 4 < charstring.len) {
-                try result.appendSlice(allocator, charstring[i..][0..5]);
-            }
-            i += 5;
-        } else if (b0 <= 27) {
-            // Other single-byte operators
-            try result.append(allocator, b0);
-            stack_top = 0;
-            i += 1;
-        } else {
-            // Unknown/reserved
-            try result.append(allocator, b0);
-            i += 1;
         }
     }
-
-    // Ensure we end with endchar (only for main charstring, not subroutines)
-    if (!seen_endchar and result.items.len > 0 and depth == 0) {
-        try result.append(allocator, 14);
-    }
-
-    // Also covers a single oversized charstring with no calls.
-    if (result.items.len > max_charstring_len) return error.InvalidCFF;
-    return result.toOwnedSlice(allocator);
-}
+};
 
 // =============================================================================
 // Tests
@@ -1310,6 +1295,37 @@ test "desubroutinizing inlines a legitimate chain" {
     // 2^3 = 8 copies of "0 0 rlineto", then endchar.
     try std.testing.expectEqual(@as(usize, 8 * 3 + 1), out.len);
     try std.testing.expectEqual(@as(u8, 14), out[out.len - 1]);
+}
+
+test "desubroutinizing: a hintmask in a subroutine counts the glyph's stems" {
+    // Nine stems in the glyph (18 operands, hstemhm): a mask is 2 bytes,
+    // here 0x0A 0x0B, which read as operators would be callsubr, return
+    const a = std.testing.allocator;
+    const subrs = try testIndex(a, &.{&.{ 19, 0x0A, 0x0B, 139, 139, 5, 11 }}); // hintmask, 0 0 rlineto, return
+    defer a.free(subrs);
+    const stems: [18]u8 = @splat(139);
+    const glyph = stems ++ [_]u8{ 18, 32, 10, 14 }; // hstemhm, callsubr 0, endchar
+    const out = try desubroutinizeCharString(a, &glyph, null, parseCFFIndex(subrs, 0).?, 0);
+    defer a.free(out);
+    try std.testing.expectEqualSlices(u8, &(stems ++ [_]u8{ 18, 19, 0x0A, 0x0B, 139, 139, 5, 14 }), out);
+}
+
+test "desubroutinizing: endchar in a subroutine ends the glyph, return the subroutine" {
+    const a = std.testing.allocator;
+    const subrs = try testIndex(a, &.{
+        &.{ 139, 139, 5, 14 }, // 0 0 rlineto endchar
+        &.{ 140, 140, 5, 11, 141, 141, 5 }, // 1 1 rlineto return (never: 2 2 rlineto)
+    });
+    defer a.free(subrs);
+    const local = parseCFFIndex(subrs, 0).?;
+    const ends = [_]u8{ 32, 10, 142, 142, 5, 14 }; // callsubr 0, (never: 3 3 rlineto)
+    const out1 = try desubroutinizeCharString(a, &ends, null, local, 0);
+    defer a.free(out1);
+    try std.testing.expectEqualSlices(u8, &.{ 139, 139, 5, 14 }, out1);
+    const returns = [_]u8{ 33, 10, 14 }; // callsubr 1, endchar
+    const out2 = try desubroutinizeCharString(a, &returns, null, local, 0);
+    defer a.free(out2);
+    try std.testing.expectEqualSlices(u8, &.{ 140, 140, 5, 14 }, out2);
 }
 
 test "buildPrivateDictWithoutSubrs: a DICT ending in an escape byte" {

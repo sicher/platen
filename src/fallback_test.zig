@@ -384,6 +384,48 @@ test "fallback text extracts as written, in every style" {
 
 const emoji_path = "test/fonts/Noto Emoji/NotoEmoji-Regular.ttf";
 
+fn occurrences(haystack: []const u8, needle: []const u8) usize {
+    return std.mem.count(u8, haystack, needle);
+}
+
+test "monospace: clusters in a row extract whole, through one ActualText span" {
+    // Centered in their cells, Gentium Italic's narrow Cyrillic leaves gaps
+    // poppler 25 reads as word breaks ("Ив ан"); a span of two or more
+    // clusters carries their text, a lone cluster needs none
+    var doc = try newDoc();
+    defer doc.deinit();
+    const cp = try courier(&doc);
+    const emoji = try doc.loadFont(emoji_path, .identity);
+    const style: platen.TextStyle = .{ .font = cp, .size = 12, .italic = true, .fallback = &.{ try gentium(&doc), emoji }, .fallback_advance = .monospace };
+    _ = try doc.writeAt(.{ .x = 72, .y = 100 }, "Иван: «Где» Ж \u{1F600}\u{1F600}", style, .{});
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    try testing.expectEqual(@as(usize, 3), occurrences(pdf, " BDC\n"));
+    try testing.expectEqual(@as(usize, 3), occurrences(pdf, "EMC\n"));
+    // UTF-16BE: Иван, Где, and U+1F600 twice as surrogate pairs
+    try testing.expect(std.mem.indexOf(u8, pdf, "/Span <</ActualText <FEFF041804320430043D>>> BDC\n") != null);
+    try testing.expect(std.mem.indexOf(u8, pdf, "/Span <</ActualText <FEFF041304340435>>> BDC\n") != null);
+    try testing.expect(std.mem.indexOf(u8, pdf, "/Span <</ActualText <FEFFD83DDE00D83DDE00>>> BDC\n") != null);
+    // Each span closes before the next opens, around whole text objects
+    var depth: usize = 0;
+    var lines = std.mem.splitScalar(u8, pdf, '\n');
+    var in_text = false;
+    while (lines.next()) |l| {
+        if (std.mem.endsWith(u8, l, " BDC")) {
+            try testing.expect(depth == 0 and !in_text);
+            depth += 1;
+        } else if (std.mem.eql(u8, l, "EMC")) {
+            try testing.expect(depth == 1 and !in_text);
+            depth -= 1;
+        } else if (std.mem.eql(u8, l, "BT")) {
+            in_text = true;
+        } else if (std.mem.eql(u8, l, "ET")) {
+            in_text = false;
+        }
+    }
+    try testing.expectEqual(@as(usize, 0), depth);
+}
+
 test "monospace: a wide cluster takes two cells" {
     var doc = try newDoc();
     defer doc.deinit();

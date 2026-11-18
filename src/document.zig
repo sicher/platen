@@ -1240,14 +1240,20 @@ pub const Document = struct {
         const cell = plan.cell(style.size);
         var x = pos.x;
         var i: usize = 0;
+        // Consecutive clusters share one ActualText span: their first
+        // command and where their text starts
+        var span: ?struct { command: usize, start: usize } = null;
         while (i < text.len) {
             const run = plan.nextRun(text, i);
             const run_style = plan.runStyle(style, run.slot);
             if (plan.monospace and run.slot != 0 and monospaceShapes(plan.faces[run.slot - 1].font)) {
                 x += try self.writeMonospaceCluster(.{ .x = x, .y = pos.y }, text[i..run.end], style, run_style, &plan, run.slot, cell);
+                if (span == null) span = .{ .command = self.pages.items[self.current_page].commands.items.len - 1, .start = i };
                 i = run.end;
                 continue;
             }
+            if (span) |sp| try self.spanClusters(sp.command, text[sp.start..i]);
+            span = null;
             const natural = try self.writeOneFont(.{ .x = x, .y = pos.y }, text[i..run.end], run_style, word_spacing);
             i = run.end;
             if (run.slot == 0) {
@@ -1276,7 +1282,22 @@ pub const Document = struct {
             }
             x += t.text_width;
         }
+        if (span) |sp| try self.spanClusters(sp.command, text[sp.start..]);
         return x - pos.x;
+    }
+
+    /// Two or more `.monospace` clusters in a row, from command `first` to
+    /// the last one written: one ActualText span with their text, so text
+    /// extraction keeps a word whole. Each glyph is centered in its cells,
+    /// and extractors take a gap between glyph boxes for a word break
+    /// (poppler 25 at 0.1 em: "Ив ан" from Gentium Italic in Courier
+    /// cells). Glyph by glyph, ToUnicode still maps each to its text.
+    fn spanClusters(self: *Document, first: usize, text: []const u8) !void {
+        const page = &self.pages.items[self.current_page];
+        const items = page.commands.items;
+        if (items.len - 1 == first) return;
+        items[first].text.actual_text = try page.pageAllocator().dupe(u8, text);
+        items[items.len - 1].text.actual_text_end = true;
     }
 
     /// A `.monospace` fallback face whose clusters are shaped and placed
@@ -3173,6 +3194,7 @@ pub const Document = struct {
         for (page.commands.items) |cmd| {
             switch (cmd) {
                 .text => |t| {
+                    if (t.actual_text) |actual| try text_render.beginActualText(&cw, actual);
                     // Apply fill (non-stroking) opacity via ExtGState if not fully opaque.
                     // Wrap the whole text object (and its decorations) in q/Q so the
                     // alpha does not leak into subsequent content.
@@ -3291,6 +3313,7 @@ pub const Document = struct {
                     if (opacity_gs != null) {
                         try cw.append("Q\n");
                     }
+                    if (t.actual_text_end) try cw.append("EMC\n");
                 },
                 .glyphs => |g| {
                     const idx = self.getEmbeddedFontIndex(g.font) orelse continue;

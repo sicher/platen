@@ -1,10 +1,10 @@
 //! Feature showcase: one single-page PDF per topic - typography, vector
-//! graphics, and color fonts/images. The README gallery shows them
+//! graphics, color fonts/images, and scripts with fallback fonts. The README gallery shows them
 //! rasterized (scripts/render-readme-images) and links each image to its
 //! PDF.
 //!
 //! Run with: zig build showcase -- [--output-dir=DIR]
-//! Default output: examples/showcase_{typography,graphics,color}.pdf
+//! Default output: examples/showcase_{typography,graphics,color,scripts}.pdf
 
 const std = @import("std");
 const platen = @import("platen");
@@ -34,6 +34,7 @@ const pages = [_]struct {
     .{ .name = "typography", .title = "platen showcase: typography", .render = typographyPage },
     .{ .name = "graphics", .title = "platen showcase: vector graphics", .render = graphicsPage },
     .{ .name = "color", .title = "platen showcase: color fonts and images", .render = colorPage },
+    .{ .name = "scripts", .title = "platen showcase: scripts and fallback fonts", .render = scriptsPage },
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -282,12 +283,18 @@ fn graphicsPage(doc: *platen.Document, fonts: Fonts) !void {
     try wave.moveTo(.{ .x = margin, .y = 680 });
     var x: f64 = margin;
     var up = true;
-    while (x < 400) : (x += 60) {
+    while (x < 220) : (x += 60) {
         const dy: f64 = if (up) -60 else 60;
         try wave.curveTo(.{ .x = x + 20, .y = 680 + dy }, .{ .x = x + 40, .y = 680 + dy }, .{ .x = x + 60, .y = 680 });
         up = !up;
     }
     try doc.drawPath(&wave, .{ .stroke = .{ .color = deep, .width = 3, .cap = .round, .join = .round } });
+
+    // SVG gradients: linear, radial with a focal point, href inheritance,
+    // gradientTransform, user-space units, a hard edge; on text and strokes
+    const gradients = try doc.loadSvg("test/images/gradients.svg");
+    try doc.drawSvg(gradients, .{ .x = 256, .y = 628, .width = 160, .height = 112 });
+    _ = try doc.writeAt(.{ .x = 336, .y = 758 }, "SVG gradients", .{ .font = fonts.inter, .size = 8, .color = muted }, .{ .anchor = .center });
 
     // Polygon star
     var star: [10]platen.Point = undefined;
@@ -375,4 +382,101 @@ fn colorPage(doc: *platen.Document, fonts: Fonts) !void {
     _ = try doc.writeBlock(&card, "Each run uses its own font: Inter for the words, Noto Color Emoji for the pictures. Text is measured with the same shaping as rendering, so runs can be placed precisely next to each other.", .{ .font = fonts.inter, .size = 10.5, .color = muted }, .{ .line_height = 1.45 });
 
     try footer(doc, fonts, "COLRv0, COLRv1 and SVG color fonts, emoji, and PNG transparency");
+}
+
+/// Cells for a monospaced screenplay line: Courier Prime at 12 pt
+const cell_size: f64 = 12;
+
+fn scriptsPage(doc: *platen.Document, fonts: Fonts) !void {
+    try doc.addPage(.{});
+    try header(doc, fonts, "SCRIPTS & FALLBACK", "Every character, a font");
+    const full_w = page_w - 2 * margin;
+    var y: f64 = margin + 86;
+
+    // One style, three fonts: what Charter lacks comes from the fallbacks
+    try sectionLabel(doc, fonts, y, "FALLBACK FONTS");
+    y += 10;
+    const fallbacks = [_]platen.Font{ fonts.gentium, fonts.emoji };
+    const mixed = platen.TextStyle{ .font = fonts.charter, .size = 14, .color = ink, .fallback = &fallbacks };
+    var block = platen.Region{ .x = margin, .y = y, .width = full_w, .height = 120 };
+    _ = try doc.writeBlock(&block, "One style, three fonts. Charter sets the Latin; Gentium takes what Charter lacks, Greek (ἐν ἀρχῇ ἦν ὁ λόγος) " ++
+        "and Cyrillic (съешь же ещё этих мягких французских булок); Noto Color Emoji draws the pictures \u{1F3DB}\u{FE0F} \u{1F4DC} \u{1F3A8} \u{1F984}.", mixed, .{ .line_height = 1.45 });
+    y += block.cursor_y + 22;
+
+    // Bold and italic: Charter's own faces; Gentium is loaded in Regular
+    // only, so its bold and italic are synthesized
+    try sectionLabel(doc, fonts, y, "SYNTHESIZED BOLD & ITALIC");
+    y += 26;
+    const styled = [_]struct { bold: bool, italic: bool }{ .{ .bold = true, .italic = false }, .{ .bold = false, .italic = true }, .{ .bold = true, .italic = true } };
+    for (styled) |st| {
+        var style = mixed;
+        style.bold = st.bold;
+        style.italic = st.italic;
+        _ = try doc.writeAt(.{ .x = margin, .y = y }, "Charter \u{00B7} Ελληνικά \u{00B7} Русский", style, .{});
+        y += 22;
+    }
+    _ = try doc.writeAt(.{ .x = margin, .y = y - 4 }, "Charter's own bold and italic; Gentium loaded in Regular only, its bold stroked and its italic slanted", .{ .font = fonts.inter, .size = 8, .color = muted }, .{});
+    y += 24;
+
+    // A screenplay in Courier Prime: every fallback cluster centered in
+    // its cells (two for an emoji), so the columns hold
+    try sectionLabel(doc, fonts, y, "MONOSPACE CELLS");
+    y += 16;
+    const courier = try doc.loadFont("test/fonts/Courier Prime/Courier Prime.ttf", .identity);
+    const korean = try doc.loadFont("test/fonts/Noto Sans KR/NotoSansKR-Regular-subset.otf", .identity);
+    const devanagari = try doc.loadFont("test/fonts/Noto Sans Devanagari/NotoSansDevanagari-Regular.ttf", .identity);
+    const screen_fallbacks = [_]platen.Font{ fonts.gentium, korean, fonts.emoji };
+    const mono = platen.TextStyle{ .font = courier, .size = cell_size, .color = ink, .fallback = &screen_fallbacks, .fallback_advance = .monospace, .fallback_max_em = 0.88 };
+    const cell_w = cell_size * 0.6;
+    const columns = 66;
+    const lines = [_]struct { indent: u8, text: []const u8 }{
+        .{ .indent = 0, .text = "INT. ΚΑΦΕΝΕΙΟ, ATHENS \u{2014} NIGHT" },
+        .{ .indent = 0, .text = "" },
+        .{ .indent = 0, .text = "Rain on the glass. MARIA (40s) slides a postcard \u{2709}\u{FE0F}" },
+        .{ .indent = 0, .text = "across the table: \"Привет из Москвы!\"" },
+        .{ .indent = 0, .text = "" },
+        .{ .indent = 22, .text = "MARIA" },
+        .{ .indent = 10, .text = "Γεια σου. You kept it? \u{1F642}" },
+        .{ .indent = 0, .text = "" },
+        .{ .indent = 22, .text = "NIKOLAI" },
+        .{ .indent = 16, .text = "(in Russian)" },
+        .{ .indent = 10, .text = "Конечно. Every word. \u{2615}\u{2615}" },
+        .{ .indent = 0, .text = "" },
+        .{ .indent = 22, .text = "SEO-YEON" },
+        .{ .indent = 10, .text = "안녕하세요! 대본 있어요?" },
+    };
+    const line_h = cell_size * 1.25;
+    const grid_top = y;
+    const grid_h = @as(f64, @floatFromInt(lines.len)) * line_h + 6;
+    var c: usize = 0;
+    while (c <= columns) : (c += 1) {
+        const gx = margin + @as(f64, @floatFromInt(c)) * cell_w;
+        try doc.drawLine(.{ .x = gx, .y = grid_top }, .{ .x = gx, .y = grid_top + grid_h }, .{ .color = platen.Color.rgb(226, 229, 238), .width = 0.4 });
+    }
+    y += line_h;
+    for (lines) |line| {
+        if (line.text.len > 0) {
+            _ = try doc.writeAt(.{ .x = margin + @as(f64, @floatFromInt(line.indent)) * cell_w, .y = y }, line.text, mono, .{});
+        }
+        y += line_h;
+    }
+    _ = try doc.writeAt(.{ .x = margin, .y = grid_top + grid_h + 14 }, "Courier Prime, falling back to Gentium, Noto Sans KR and emoji: centered in their cells, shrunk when wider (М)", .{ .font = fonts.inter, .size = 8, .color = muted }, .{});
+
+    y = grid_top + grid_h + 46;
+
+    // Complex scripts, shaped as HarfBuzz shapes them
+    try sectionLabel(doc, fonts, y, "HANGUL & DEVANAGARI");
+    y += 34;
+    const ko = platen.TextStyle{ .font = korean, .size = 20, .color = ink };
+    _ = try doc.writeAt(.{ .x = margin, .y = y }, "다람쥐 헌 쳇바퀴에 타고파", ko, .{});
+    // Conjoining jamo apart, then together: one precomposed syllable
+    const jamo = try doc.writeAt(.{ .x = margin + 300, .y = y }, "\u{1112} \u{1161} \u{11AB}  \u{2192}  ", ko, .{});
+    _ = try doc.writeAt(.{ .x = jamo.x + jamo.width, .y = y }, "\u{1112}\u{1161}\u{11AB}", ko, .{});
+    _ = try doc.writeAt(.{ .x = margin, .y = y + 18 }, "Noto Sans KR (CID-keyed CFF, subset). Right: three conjoining jamo apart, then composed into one syllable", .{ .font = fonts.inter, .size = 8, .color = muted }, .{});
+    y += 56;
+    const hi = platen.TextStyle{ .font = devanagari, .size = 20, .color = ink };
+    _ = try doc.writeAt(.{ .x = margin, .y = y }, "नमस्ते दुनिया \u{2014} हिन्दी, क्षत्रिय, ज्ञान, श्री", hi, .{});
+    _ = try doc.writeAt(.{ .x = margin, .y = y + 18 }, "Noto Sans Devanagari: conjuncts, and the i-matra drawn before its consonant cluster", .{ .font = fonts.inter, .size = 8, .color = muted }, .{});
+
+    try footer(doc, fonts, "Fallback fonts, synthesized styles, monospace cells, Hangul and Devanagari, embedded and subset by platen");
 }
