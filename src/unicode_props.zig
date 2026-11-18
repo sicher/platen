@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const data = @import("unicode_props_data.zig");
+const hangul = @import("hangul.zig");
 
 fn inRanges(ranges: []const [2]u21, cp: u21) bool {
     var lo: usize = 0;
@@ -44,11 +45,13 @@ pub fn isWordChar(cp: u21) bool {
 /// The script a character gives a run, as HarfBuzz's
 /// guess_segment_properties reads it: none for Common, Inherited and
 /// unassigned characters.
-pub const RunScript = enum { none, devanagari, other };
+pub const RunScript = enum { none, devanagari, hangul, other };
 
 pub fn runScript(cp: u21) RunScript {
     if (!inRanges(&data.strong_script_ranges, cp)) return .none;
-    return if (inRanges(&data.devanagari_script_ranges, cp)) .devanagari else .other;
+    if (inRanges(&data.devanagari_script_ranges, cp)) return .devanagari;
+    if (inRanges(&data.hangul_script_ranges, cp)) return .hangul;
+    return .other;
 }
 
 pub fn isExtendedPictographic(cp: u21) bool {
@@ -60,9 +63,11 @@ fn isRegionalIndicator(cp: u21) bool {
 }
 
 /// The canonical single-step decomposition of `cp`: (first, second), the
-/// second 0 for a singleton (U+212B -> U+00C5). Null if it has none.
+/// second 0 for a singleton (U+212B -> U+00C5), Hangul syllables
+/// algorithmically (LV -> L V, LVT -> LV T). Null if it has none.
 pub fn decomposeOnce(cp: u21) ?[2]u21 {
     if (cp < 0xC0) return null;
+    if (hangul.decompose(cp)) |parts| return parts;
     const table = &data.decompositions;
     var lo: usize = 0;
     var hi: usize = table.len;
@@ -272,7 +277,8 @@ test "decomposeOnce: pairs, singletons, exclusions" {
     try testing.expectEqual([2]u21{ 0x0915, 0x093C }, decomposeOnce(0x0958).?); // qa (excluded from composition)
     try testing.expectEqual([2]u21{ 0x0113, 0x0301 }, decomposeOnce(0x1E17).?); // e macron acute
     try testing.expect(decomposeOnce('a') == null);
-    try testing.expect(decomposeOnce(0xAC00) == null); // Hangul is algorithmic
+    try testing.expectEqual([2]u21{ 0x1100, 0x1161 }, decomposeOnce(0xAC00).?); // Hangul: algorithmic
+    try testing.expectEqual([2]u21{ 0xAC00, 0x11A8 }, decomposeOnce(0xAC01).?);
 }
 
 test "isLetter, isWordChar" {

@@ -4,6 +4,21 @@
 
 ### Added
 
+- **Hangul shaping:** `shapeText` (and `write()`) shape Hangul text as
+  HarfBuzz's Hangul shaper does. Conjoining jamo (U+1100-11FF, A960-A97F,
+  D7B0-D7FF) become the precomposed syllable when the font has it, so
+  ᄒ ᅡ ᆫ ᄀ ᅳ ᆯ in Apple SD Gothic Neo is the same two glyphs as 한글;
+  otherwise they take the font's ljmo/vjmo/tjmo features (Old Hangul), and
+  a syllable the font lacks is decomposed into its jamo. A tone mark moves
+  before its syllable (or gets a dotted circle), 'calt' is off, marks keep
+  their advances, and the Hangul script's language system ('hang') is used
+  for GSUB and GPOS. Each syllable is one cluster, and each glyph's
+  `text_start`/`text_end` covers the jamo it came from. Checked against
+  HarfBuzz with a synthetic font holding jamo features
+  (test/fonts/hangul/HangulTest.ttf, scripts/gen_hangul_test_font.py) and
+  Apple SD Gothic Neo: a corpus plus 500 seeded random strings, no
+  differences.
+
 - **Every face of an installed family:** `platen.listSystemFontFaces(io,
   allocator, family, opts)` returns each face whose typographic family
   matches, whatever its weight or width (Light, Condensed, Black...), with its

@@ -176,6 +176,42 @@ def random_devanagari(seed, count):
 
 DEVANAGARI_TEXTS = DEVANAGARI + random_devanagari(2026, 500)
 
+# Hangul, shaped by the Hangul shaper (script guessed from the text):
+# conjoining jamo composed into syllables or given ljmo/vjmo/tjmo, syllables
+# decomposed, LV + T, Old Hangul, tone marks (moved before their syllable,
+# or with a dotted circle), marks, joiners; then seeded random strings of
+# jamo, syllables (in the test font and not), tone marks and neighbors
+HANGUL = ["가 각 하 한 나 다", "낙 닥 글", "\u1100\u1161", "\u1100\u1161\u11a8", "\u1102\u1161\u11a8",
+          "\u1112\u1161\u11ab\u1100\u1173\u11af", "한글", "가\u11a8", "나\u11a8", "다\u11a8", "가\u11c3",
+          "\u1113\u1161\u11ab", "\u1113\ud7b0", "\u1113\ud7b0\ud7cb", "\ua960\u1176\u11c3", "\u1100\u1176\u11c3",
+          "\u1100\u1161\u302e", "\u1100\u1161\u302f", "한\u302e", "한\u302f", "\u302e", "\u302f가", " \u302e",
+          "a\u302f", "\u1102\u1161\u11a8\u302e", "가\u0301", "\u1100\u1161\u0301", "가\u0301\u302e",
+          "\u1100\u1161\u11a8\u302e\u0301", "가 a aa 가가", "aa 가가", "\u1103\u1161", "\u1100\u1177",
+          "\u3131\u314f", "\u1100\u200d\u1161", "\u1100\u1161\u200d\u11a8", "\u1100\u1100\u1161", "글\u302e",
+          "닥\u302e", "\u1100\u1161\u11a8\u11a8", "\u1160\u11a8", "\u115f\u1161", "Wr Ja 한글 abc"]
+
+
+def random_hangul(seed, count):
+    import random
+    rng = random.Random(seed)
+    jamo_l = [chr(c) for c in list(range(0x1100, 0x1114)) + [0xA960, 0xA961, 0x115F]]
+    jamo_v = [chr(c) for c in list(range(0x1160, 0x1178)) + [0xD7B0, 0xD7B1]]
+    jamo_t = [chr(c) for c in list(range(0x11A8, 0x11C5)) + [0xD7CB, 0xD7CC]]
+    syllables = [chr(c) for c in [0xAC00, 0xAC01, 0xD558, 0xD55C, 0xB098, 0xB099, 0xB2E4, 0xB2E5, 0xAE00, 0xAE01]]
+    pool = (jamo_l * 3 + jamo_v * 3 + jamo_t * 2 + syllables * 2 + ["\u302e", "\u302f"] * 6 + ["\u0301"] * 3 +
+            [" ", "a", "\u25cc", "\u200d", "\u200c", "\u3131"])
+    out = []
+    while len(out) < count:
+        t = "".join(rng.choice(pool) for _ in range(rng.randint(1, 10))).strip()
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+HANGUL_TEXTS = HANGUL + random_hangul(2026, 500)
+# Synthetic font with jamo features (scripts/gen_hangul_test_font.py)
+HANGUL_TEST = "test/fonts/hangul/HangulTest.ttf"
+
 # Synthetic font with every GPOS lookup type and flag
 # (scripts/gen_gpos_test_font.py): one stylistic set per scenario
 GPOS_TEST = "test/fonts/gpos/GposTest.ttf"
@@ -228,10 +264,17 @@ POSITION_CASES = [
     ("/System/Library/Fonts/Kohinoor.ttc#4", [], DEVANAGARI_TEXTS),
     ("/System/Library/Fonts/Kohinoor.ttc#0", [], DEVANAGARI_TEXTS),
     ("/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc#0", [], DEVANAGARI_TEXTS),
+    (HANGUL_TEST, [], HANGUL_TEXTS),
+    (HANGUL_TEST, ["-kern"], HANGUL),
+    # Apple SD Gothic Neo Regular and Thin: precomposed syllables, no jamo
+    # features; GPOS kerning under 'hang'
+    ("/System/Library/Fonts/AppleSDGothicNeo.ttc#0", [], HANGUL_TEXTS),
+    ("/System/Library/Fonts/AppleSDGothicNeo.ttc#10", [], HANGUL),
 ]
 # Cases whose script HarfBuzz guesses from the text (the others: Zyyy)
 GUESS_SCRIPT = {"/System/Library/Fonts/Kohinoor.ttc#4", "/System/Library/Fonts/Kohinoor.ttc#0",
-                "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc#0"}
+                "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc#0", HANGUL_TEST,
+                "/System/Library/Fonts/AppleSDGothicNeo.ttc#0", "/System/Library/Fonts/AppleSDGothicNeo.ttc#10"}
 
 
 def hb_features(toggles):

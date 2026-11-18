@@ -6101,6 +6101,24 @@ pub const devanagari_script_ranges = [_][2]u21{
     .{ 0x11B00, 0x11B09 },
 };
 
+/// Script=Hangul (sorted, inclusive).
+pub const hangul_script_ranges = [_][2]u21{
+    .{ 0x1100, 0x11FF },
+    .{ 0x302E, 0x302F },
+    .{ 0x3131, 0x318E },
+    .{ 0x3200, 0x321E },
+    .{ 0x3260, 0x327E },
+    .{ 0xA960, 0xA97C },
+    .{ 0xAC00, 0xD7A3 },
+    .{ 0xD7B0, 0xD7C6 },
+    .{ 0xD7CB, 0xD7FB },
+    .{ 0xFFA0, 0xFFBE },
+    .{ 0xFFC2, 0xFFC7 },
+    .{ 0xFFCA, 0xFFCF },
+    .{ 0xFFD2, 0xFFD7 },
+    .{ 0xFFDA, 0xFFDC },
+};
+
 /// Extended_Pictographic (sorted, inclusive).
 pub const ext_pict_ranges = [_][2]u21{
     .{ 0x00A9, 0x00A9 },

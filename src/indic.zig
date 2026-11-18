@@ -407,7 +407,7 @@ pub const Plan = struct {
         plan.virama = virama;
         plan.storage = storage;
         var stages: [basic_features.len + 3][]LookupParams = undefined;
-        for (&stages, 0..) |*st, k| st.* = mergeStage(storage[bounds[k]..bounds[k + 1]]);
+        for (&stages, 0..) |*st, k| st.* = gsub.mergeLookups(storage[bounds[k]..bounds[k + 1]]);
         plan.first = stages[0];
         for (&plan.basic, 0..) |*b, k| b.* = stages[1 + k];
         plan.tail = stages[1 + basic_features.len];
@@ -430,29 +430,6 @@ pub const Plan = struct {
                 .per_syllable = spec.per_syllable,
             });
         }
-    }
-
-    /// Sort a stage's lookups by index and merge duplicates as HarfBuzz's
-    /// map builder: masks or'ed, automatic joiners only if all say so.
-    fn mergeStage(stage: []LookupParams) []LookupParams {
-        if (stage.len < 2) return stage;
-        std.sort.insertion(LookupParams, stage, {}, struct {
-            fn lt(_: void, a: LookupParams, b: LookupParams) bool {
-                return a.index < b.index;
-            }
-        }.lt);
-        var j: usize = 0;
-        for (stage[1..]) |lp| {
-            if (lp.index != stage[j].index) {
-                j += 1;
-                stage[j] = lp;
-            } else {
-                stage[j].mask |= lp.mask;
-                stage[j].auto_zwnj = stage[j].auto_zwnj and lp.auto_zwnj;
-                stage[j].auto_zwj = stage[j].auto_zwj and lp.auto_zwj;
-            }
-        }
-        return stage[0 .. j + 1];
     }
 
     fn wouldSubstitute(self: *const Plan, stage: usize, glyphs: []const u16) bool {

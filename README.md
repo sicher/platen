@@ -353,10 +353,12 @@ try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face 
   ligature "ffi", a conjunct its characters, a reordered matra its own),
   else its cluster's text.
 - Shaping is platen's GSUB and GPOS engines, run as HarfBuzz's default
-  shaper, and as its Indic shaper for Devanagari; checked against HarfBuzz.
-  The text's first character of a script decides, so shape mixed-script
-  text in runs. Not yet: other Indic scripts, Arabic, bidi, AAT `morx`.
-  `write()` does not use these engines yet.
+  shaper, as its Indic shaper for Devanagari and as its Hangul shaper for
+  Hangul (conjoining jamo composed into syllables, else ljmo/vjmo/tjmo);
+  checked against HarfBuzz. The text's first character of a script
+  decides, so shape mixed-script text in runs. Not yet: other Indic
+  scripts, Arabic, bidi, AAT `morx`. `write()` and measurement shape the
+  same way.
 
 ### Text Flow with Word Wrapping
 

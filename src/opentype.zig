@@ -56,6 +56,11 @@ pub const Feature = enum(u32) {
     blws = tag("blws"),
     psts = tag("psts"),
     haln = tag("haln"),
+    // Hangul jamo features: the Hangul shaper (hangul.zig) applies them to
+    // the jamo of the syllables it does not compose
+    ljmo = tag("ljmo"),
+    vjmo = tag("vjmo"),
+    tjmo = tag("tjmo"),
     tnum = tag("tnum"), // Tabular Figures
     pnum = tag("pnum"), // Proportional Figures
     frac = tag("frac"), // Fractions

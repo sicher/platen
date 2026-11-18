@@ -7,6 +7,7 @@ const ttf = @import("ttf.zig");
 const unicode_compose = @import("unicode_compose.zig");
 const gsub = @import("gsub.zig");
 const unicode_props = @import("unicode_props.zig");
+const hangul = @import("hangul.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -32,6 +33,9 @@ pub const Decoded = struct {
     /// Per code point, when a space the font lacks took its space glyph:
     /// how wide it is (HarfBuzz's space fallback). Empty if none did.
     space_fallbacks: std.ArrayListUnmanaged(unicode_props.SpaceFallback) = .empty,
+    /// Per code point in Hangul mode: its hangul.Jamo feature. Empty in
+    /// the other modes.
+    jamo: std.ArrayListUnmanaged(u8) = .empty,
 
     pub fn deinit(self: *Decoded, allocator: Allocator) void {
         self.codepoints.deinit(allocator);
@@ -40,13 +44,16 @@ pub const Decoded = struct {
         self.offsets.deinit(allocator);
         self.spans.deinit(allocator);
         self.space_fallbacks.deinit(allocator);
+        self.jamo.deinit(allocator);
     }
 };
 
-/// How to normalize: as HarfBuzz's default shaper, or its Indic shaper
+/// How to normalize: as HarfBuzz's default shaper, its Indic shaper
 /// (vowel constraints; decompose whatever the font has the parts of, not
-/// U+0931; never compose onto a mark).
-pub const Mode = enum { default, indic };
+/// U+0931; never compose onto a mark) or its Hangul shaper (hangul.zig's
+/// preprocessing first, with clusters in the offsets; then decompose what
+/// the font lacks, compose nothing; needs `track_offsets`).
+pub const Mode = enum { default, indic, hangul };
 
 pub fn decode(allocator: Allocator, font: *const ttf.Font, text: []const u8, out: *Decoded, track_offsets: bool) !void {
     return decodeAs(allocator, font, text, out, track_offsets, .default);
@@ -68,6 +75,7 @@ pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, o
     out.offsets.clearRetainingCapacity();
     out.spans.clearRetainingCapacity();
     out.space_fallbacks.clearRetainingCapacity();
+    out.jamo.clearRetainingCapacity();
     // Worst case: all ASCII = text.len code points
     try out.codepoints.ensureTotalCapacity(allocator, text.len);
     try out.composed.ensureTotalCapacity(allocator, text.len);
@@ -106,10 +114,19 @@ pub fn decodeAs(allocator: Allocator, font: *const ttf.Font, text: []const u8, o
         i += len;
     }
 
+    if (mode == .hangul) {
+        std.debug.assert(track_offsets);
+        try hangul.preprocess(allocator, font, out);
+    }
     if (mode == .indic and may_decompose) try vowelConstraints(allocator, out, track_offsets);
     if (may_decompose and try decomposeMissing(allocator, font, out, track_offsets, mode)) may_compose = true;
 
-    if (may_compose) {
+    if (may_compose and mode == .hangul) {
+        // Marks in canonical order; nothing recomposed (HarfBuzz's
+        // normalization mode NONE)
+        unicode_compose.reorderMarksTagged(out.codepoints.items, out.offsets.items, out.spans.items, out.jamo.items);
+        out.composed.appendNTimesAssumeCapacity(false, out.codepoints.items.len);
+    } else if (may_compose) {
         const ctx = struct {
             font: *const ttf.Font,
             indic: bool,
@@ -208,7 +225,7 @@ fn decomposeAll(font: *const ttf.Font, cp: u21, buf: []u21, n: *usize) bool {
 fn tryDecompose(font: *const ttf.Font, cp: u21, mode: Mode, buf: []u21, n: *usize) bool {
     if (cp < 0xC0) return false;
     return switch (mode) {
-        .default => !hasGlyph(font, cp) and decomposeInto(font, cp, buf, n),
+        .default, .hangul => !hasGlyph(font, cp) and decomposeInto(font, cp, buf, n),
         .indic => decomposeAll(font, cp, buf, n),
     };
 }
@@ -234,6 +251,10 @@ fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, 
     errdefer new_offsets.deinit(allocator);
     var new_spans: std.ArrayListUnmanaged([2]u32) = .empty;
     errdefer new_spans.deinit(allocator);
+    var new_jamo: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer new_jamo.deinit(allocator);
+    const jamo = out.jamo.items.len > 0;
+    if (jamo) try new_jamo.appendSlice(allocator, out.jamo.items[0..from]);
     try new_cps.ensureTotalCapacity(allocator, cps.len + 8);
     new_cps.appendSliceAssumeCapacity(cps[0..from]);
     if (track_offsets) {
@@ -244,6 +265,7 @@ fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, 
         var n: usize = 0;
         const parts: []const u21 = if (tryDecompose(font, cp, mode, &buf, &n)) buf[0..n] else &.{cp};
         try new_cps.appendSlice(allocator, parts);
+        if (jamo) try new_jamo.appendNTimes(allocator, out.jamo.items[i], parts.len);
         if (track_offsets) {
             try new_offsets.appendNTimes(allocator, out.offsets.items[i], parts.len);
             // The first part stands for the character, the others for none
@@ -260,6 +282,8 @@ fn decomposeMissing(allocator: Allocator, font: *const ttf.Font, out: *Decoded, 
         out.spans.deinit(allocator);
         out.spans = new_spans;
     } else new_spans.deinit(allocator);
+    out.jamo.deinit(allocator);
+    out.jamo = new_jamo;
     // The other per-code-point lists are filled after this, at this length
     try out.composed.ensureTotalCapacity(allocator, out.codepoints.items.len);
     try out.glyphs.ensureTotalCapacity(allocator, out.codepoints.items.len);
@@ -401,6 +425,7 @@ fn applyVariationSequences(font: *const ttf.Font, d: *Decoded, track_offsets: bo
         cps[out] = cps[i];
         composed[out] = composed[i];
         glyphs[out] = glyphs[i];
+        if (d.jamo.items.len > 0) d.jamo.items[out] = d.jamo.items[i];
         if (track_offsets) {
             d.offsets.items[out] = d.offsets.items[i];
             d.spans.items[out] = d.spans.items[i];
@@ -420,6 +445,7 @@ fn applyVariationSequences(font: *const ttf.Font, d: *Decoded, track_offsets: bo
     d.codepoints.items.len = out;
     d.composed.items.len = out;
     d.glyphs.items.len = out;
+    if (d.jamo.items.len > 0) d.jamo.items.len = out;
     if (track_offsets) {
         d.offsets.items.len = out;
         d.spans.items.len = out;

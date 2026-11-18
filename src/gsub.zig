@@ -276,6 +276,8 @@ pub const Table = struct {
     default: LangSysMap = .{},
     /// Features for Devanagari text (dev2, else deva, else the default's)
     devanagari: LangSysMap = .{},
+    /// Features for Hangul text (hang, else the default's)
+    hangul: LangSysMap = .{},
     lookup_index_storage: []u16,
 
     pub fn parse(allocator: std.mem.Allocator, data: []const u8, gdef_data: ?[]const u8, kind: TableKind) !Table {
@@ -387,32 +389,45 @@ pub const Table = struct {
         const data = self.data;
         const script_list: usize = readU16(data, 4);
         const default_tags = [_]u32{ tag("DFLT"), tag("dflt"), tag("latn") };
-        const deva_tags = [_]u32{ tag("dev2"), tag("deva") } ++ default_tags;
-        const default_script = selectScript(data, script_list, &default_tags);
-        const deva_script = selectScript(data, script_list, &deva_tags);
-
-        const default_ls = if (default_script) |sc| langSysOf(data, sc.offset) else null;
-        const deva_ls = if (deva_script) |sc| langSysOf(data, sc.offset) else null;
-        const shared = default_ls != null and deva_ls != null and default_ls.? == deva_ls.?;
+        // Per Script: the tags tried, in order (HarfBuzz's script tags for
+        // it, then its default ones)
+        const tried = [_][]const u32{
+            &default_tags,
+            &([_]u32{ tag("dev2"), tag("deva") } ++ default_tags),
+            &([_]u32{tag("hang")} ++ default_tags),
+        };
+        var found: [tried.len]?usize = undefined;
         var total: usize = 0;
-        if (default_ls) |ls| total += self.langSysLookupCount(ls);
-        if (deva_ls) |ls| {
-            if (!shared) total += self.langSysLookupCount(ls);
+        for (tried, &found, 0..) |tags, *ls, k| {
+            const sc = selectScript(data, script_list, tags);
+            ls.* = if (sc) |c| langSysOf(data, c.offset) else null;
+            self.langSysMut(@fromBackingInt(@intCast(k))).script = if (ls.* != null) sc.?.tag else 0;
+            if (ls.*) |l| if (std.mem.indexOfScalar(?usize, found[0..k], l) == null) {
+                total += self.langSysLookupCount(l);
+            };
         }
         self.lookup_index_storage = try allocator.alloc(u16, total);
         var used: usize = 0;
-        if (default_ls) |ls| {
-            self.default.script = default_script.?.tag;
-            used += self.fillLangSys(ls, &self.default, self.lookup_index_storage[used..]);
-        }
-        if (deva_ls) |ls| {
-            if (shared) {
-                self.devanagari = self.default;
+        for (found, 0..) |ls, k| {
+            const l = ls orelse continue;
+            const map = self.langSysMut(@fromBackingInt(@intCast(k)));
+            const script = map.script;
+            if (std.mem.indexOfScalar(?usize, found[0..k], l)) |same| {
+                // A language system another script uses too: shared
+                map.* = self.langSysMut(@fromBackingInt(@intCast(same))).*;
             } else {
-                used += self.fillLangSys(ls, &self.devanagari, self.lookup_index_storage[used..]);
+                used += self.fillLangSys(l, map, self.lookup_index_storage[used..]);
             }
-            self.devanagari.script = deva_script.?.tag;
+            map.script = script;
         }
+    }
+
+    fn langSysMut(self: *Table, script: Script) *LangSysMap {
+        return switch (script) {
+            .default => &self.default,
+            .devanagari => &self.devanagari,
+            .hangul => &self.hangul,
+        };
     }
 
     /// Lookup indices the features of the language system at `langsys` use.
@@ -597,6 +612,7 @@ pub const Table = struct {
         return switch (script) {
             .default => &self.default,
             .devanagari => &self.devanagari,
+            .hangul => &self.hangul,
         };
     }
 
@@ -630,7 +646,7 @@ pub const Table = struct {
 };
 
 /// Which script's language system shaping uses.
-pub const Script = enum { default, devanagari };
+pub const Script = enum { default, devanagari, hangul };
 
 /// Lookup indices per feature for one script's language system.
 pub const LangSysMap = struct {
@@ -813,6 +829,29 @@ pub const LookupParams = struct {
     auto_zwnj: bool = true,
     per_syllable: bool = false,
 };
+
+/// Sort a stage's lookups by index and merge duplicates as HarfBuzz's map
+/// builder: masks or'ed, automatic joiners only if all say so.
+pub fn mergeLookups(stage: []LookupParams) []LookupParams {
+    if (stage.len < 2) return stage;
+    std.sort.insertion(LookupParams, stage, {}, struct {
+        fn lt(_: void, a: LookupParams, b: LookupParams) bool {
+            return a.index < b.index;
+        }
+    }.lt);
+    var j: usize = 0;
+    for (stage[1..]) |lp| {
+        if (lp.index != stage[j].index) {
+            j += 1;
+            stage[j] = lp;
+        } else {
+            stage[j].mask |= lp.mask;
+            stage[j].auto_zwnj = stage[j].auto_zwnj and lp.auto_zwnj;
+            stage[j].auto_zwj = stage[j].auto_zwj and lp.auto_zwj;
+        }
+    }
+    return stage[0 .. j + 1];
+}
 
 /// Default_Ignorable_Code_Point, as HarfBuzz classifies it. ZWJ and ZWNJ
 /// are skipped under different rules; "hidden" ones (CGJ, Mongolian free

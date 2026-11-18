@@ -66,41 +66,72 @@ pub fn modifiedCombiningClass(cp: u21) u8 {
 /// along, merged as HarfBuzz merges clusters; `spans` (optional: each code
 /// point's own source bytes) moves along unmerged.
 pub fn reorderMarks(cps: []u21, offsets: ?[]u32, spans: ?[][2]u32) void {
+    reorderMarksTagged(cps, offsets, spans, null);
+}
+
+/// A `reorderMarksTagged` tag: the code point sorts with combining class
+/// 224, as a dotted circle HarfBuzz's Hangul shaper inserts for a tone
+/// mark does (it copies the tone mark's properties).
+pub const tag_tone_class: u8 = 0xFF;
+
+fn classAt(cps: []const u21, tags: ?[]const u8, i: usize) u8 {
+    if (tags) |t| if (t[i] == tag_tone_class) return 224;
+    return modifiedCombiningClass(cps[i]);
+}
+
+/// HarfBuzz's merge_clusters over offsets that carry clusters: [start,
+/// end) takes its smallest, extended over the neighbors that share an
+/// end's offset when that end changes.
+fn mergeOffsets(o: []u32, start_in: usize, end_in: usize) void {
+    var start = start_in;
+    var end = end_in;
+    var merged = o[start];
+    for (o[start + 1 .. end]) |x| merged = @min(merged, x);
+    if (merged != o[end - 1]) {
+        while (end < o.len and o[end - 1] == o[end]) end += 1;
+    }
+    if (merged != o[start]) {
+        while (start > 0 and o[start - 1] == o[start]) start -= 1;
+    }
+    for (o[start..end]) |*x| x.* = merged;
+}
+
+/// `reorderMarks` with `tags` (optional, same length): moved along, and
+/// `tag_tone_class` gives its code point class 224.
+pub fn reorderMarksTagged(cps: []u21, offsets: ?[]u32, spans: ?[][2]u32, tags: ?[]u8) void {
     const max_run = 32;
     var i: usize = 0;
     while (i < cps.len) {
-        if (modifiedCombiningClass(cps[i]) == 0) {
+        if (classAt(cps, tags, i) == 0) {
             i += 1;
             continue;
         }
         var end = i + 1;
-        while (end < cps.len and modifiedCombiningClass(cps[end]) != 0) end += 1;
+        while (end < cps.len and classAt(cps, tags, end) != 0) end += 1;
         if (end - i <= max_run) {
             // Insertion sort: stable, and runs are short
             var k = i + 1;
             while (k < end) : (k += 1) {
                 const cp = cps[k];
-                const off = if (offsets) |o| o[k] else 0;
                 const span = if (spans) |sp| sp[k] else .{ 0, 0 };
-                const cc = modifiedCombiningClass(cp);
+                const tag = if (tags) |t| t[k] else 0;
+                const cc = classAt(cps, tags, k);
                 var j = k;
-                while (j > i and modifiedCombiningClass(cps[j - 1]) > cc) j -= 1;
+                while (j > i and classAt(cps, tags, j - 1) > cc) j -= 1;
                 if (j == k) continue;
                 // HarfBuzz's sort merges the clusters of what it moves
-                // across: they all take the smallest offset
-                var merged = off;
-                if (offsets) |o| {
-                    for (o[j..k]) |x| merged = @min(merged, x);
-                }
+                // across (merge_clusters): they all take the smallest
+                // offset, and so do the neighbors that share an end's
+                if (offsets) |o| mergeOffsets(o, j, k + 1);
                 var m = k;
                 while (m > j) : (m -= 1) {
                     cps[m] = cps[m - 1];
-                    if (offsets) |o| o[m] = merged;
                     if (spans) |sp| sp[m] = sp[m - 1];
+                    if (tags) |t| t[m] = t[m - 1];
                 }
                 cps[j] = cp;
-                if (offsets) |o| o[j] = merged;
                 if (spans) |sp| sp[j] = span;
+                if (tags) |t| t[j] = tag;
             }
         }
         i = end;

@@ -1273,7 +1273,8 @@ otherwise the sequence stays decomposed for GPOS mark positioning.
   combining marks (blocking rule; no reordering, input assumed in
   canonical order). Data `src/unicode_compose_data.zig` is generated from
   Python's unicodedata by `scripts/gen_unicode_compose.py` (902 pairs,
-  393 combining-class ranges). Hangul is not composed.
+  393 combining-class ranges). Hangul is not composed here (the Hangul
+  shaper composes syllables, hangul.zig).
 - Fast path: text with no code point >= U+0300 skips it (`mayCompose`
   checks for UTF-8 lead bytes >= 0xCC in measurement).
 - ToUnicode of a composed glyph is its canonical decomposition - the text
@@ -1442,7 +1443,8 @@ buffer through a non-growing ArrayList view.
   horizontally.
 - Normalization before shaping (decode.zig) is HarfBuzz's: characters the
   font lacks are decomposed (`unicode_props.decomposeOnce`, all canonical
-  single-step decompositions from UCD, Hangul excluded; the second part
+  single-step decompositions from UCD, Hangul syllables algorithmically
+  (LV -> L V, LVT -> LV T, `hangul.decompose`); the second part
   must have a glyph, the first may decompose further), mark runs are
   reordered by the modified combining class (`unicode_compose.reorderMarks`),
   then composed where the font has the composite. Missing spaces take the
@@ -1544,6 +1546,44 @@ committed), for Devanagari:
   (HarfBuzz without its morx) with a corpus + 500 seeded random strings;
   locally also old spec (Sangam with dev2 removed) - 0 differences. System
   fonts are skipped where not installed (CI).
+
+### Hangul shaper (2026-11-18, `src/hangul.zig`)
+HarfBuzz 12.3.0's hb-ot-shaper-hangul, for text whose first strong
+character is Hangul (`unicode_props.runScript`, Scripts.txt), always (no
+font condition, as HarfBuzz):
+- Preprocessing (`hangul.preprocess`, in `decode.Mode.hangul`, before
+  normalization as preprocess_text): L V (T) -> the precomposed syllable
+  when the font has it, LV + combining T -> LVT; else the jamo get
+  `Decoded.jamo` = ljmo/vjmo/tjmo; a syllable the font lacks (or an LV
+  before a non-combining T) is decomposed into jamo with features when the
+  font has them all. Tone marks U+302E/F: after a syllable moved before
+  it unless zero-width (has a glyph with no advance); otherwise a dotted
+  circle, after it (before if zero-width).
+- Clusters live in `Decoded.offsets` in this mode (HarfBuzz's byte
+  clusters): form_clusters first (a continuation takes its predecessor's
+  offset), then merges take the smallest with merge_clusters /
+  merge_out_clusters extension; `shaping.offsetClusters` turns runs of
+  equal offsets into clusters. `unicode_compose.reorderMarks` now extends
+  its merges the same way (it matters only where offsets already carry
+  merged clusters).
+- The inserted circle copies the tone mark's properties in HarfBuzz
+  (replace_glyphs), so it sorts with class 224 in mark reordering:
+  `Jamo.tone_circle` = `unicode_compose.tag_tone_class`, and
+  `reorderMarksTagged` moves `Decoded.jamo` along.
+- Normalization mode NONE: decompose what the font lacks, reorder marks,
+  compose nothing.
+- Plan: one stage, the 'hang' language system (else DFLT/dflt/latn; a
+  third `LangSysMap`, `gsub.Script.hangul`): required feature + enabled
+  features minus calt (override_features), global; ljmo (manual ZWJ),
+  vjmo, tjmo with mask bits 2/4/8 (`gsub.mergeLookups`, shared with
+  indic.zig). The jamo features cannot be turned off (HarfBuzz: -ljmo).
+- Positioning: GPOS with 'hang'; no mark zeroing, no fallback marks
+  (ZERO_WIDTH_MARKS_NONE).
+- Checked: harfbuzz_positions.txt has HangulTest.ttf (with and without
+  kern) and Apple SD Gothic Neo Regular/Thin (skipped where not
+  installed), a corpus + 500 seeded random strings, 0 differences.
+- `zig build test` caches its run on the test binary: a regenerated
+  reference file alone does not re-run it. Check with `--cache-dir` fresh.
 
 ### CID-keyed CFF subsetting (session #35, `src/cff_cid.zig`)
 A Top DICT with ROS (12 30) is CID-keyed: charset maps GID -> CID, and

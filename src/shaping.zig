@@ -11,8 +11,8 @@
 //! GSUB engine, positioning its GPOS engine (gpos.zig) as HarfBuzz's
 //! default shaper runs it, after HarfBuzz's normalization (decode.zig);
 //! fonts without GPOS get its fallback mark positioning; Devanagari goes
-//! through HarfBuzz's Indic shaper (indic.zig); all checked against
-//! HarfBuzz. The text's first character of a script picks the script, as
+//! through HarfBuzz's Indic shaper (indic.zig), Hangul through its Hangul
+//! shaper (hangul.zig); all checked against HarfBuzz. The text's first character of a script picks the script, as
 //! HarfBuzz's guess_segment_properties: split mixed-script text into runs.
 //! Not yet: other Indic scripts, Arabic joining, bidi (text is shaped left
 //! to right), and AAT 'morx' tables (GSUB is used).
@@ -27,6 +27,7 @@ const gpos = @import("gpos.zig");
 const ttf = @import("ttf.zig");
 const mark_fallback = @import("mark_fallback.zig");
 const indic = @import("indic.zig");
+const hangul = @import("hangul.zig");
 
 const Allocator = std.mem.Allocator;
 const EmbeddedFont = embedded.EmbeddedFont;
@@ -106,10 +107,11 @@ pub const Cache = struct {
     pos: std.ArrayListUnmanaged(gpos.Position) = .empty,
     /// Per-call temporaries, reset at each call
     arena: std.heap.ArenaAllocator.State = .{},
-    /// GPOS lookups for `flags`, per script (default, devanagari)
-    gpos_lookups: [2]std.ArrayListUnmanaged(u16) = .{ .empty, .empty },
-    gpos_valid: [2]bool = .{ false, false },
+    /// GPOS lookups for `flags`, per gsub.Script
+    gpos_lookups: [script_count]std.ArrayListUnmanaged(u16) = @splat(.empty),
+    gpos_valid: [script_count]bool = @splat(false),
     indic_plan: ?indic.Plan = null,
+    hangul_plan: ?hangul.Plan = null,
     /// GPOS pair adjustments found so far (independent of flags)
     pairs: std.AutoHashMapUnmanaged(u64, gpos.PairRecord) = .empty,
     /// Advance and glyph count of short texts measured (advanceCached) with
@@ -125,6 +127,7 @@ pub const Cache = struct {
         self.arena.promote(allocator).deinit();
         for (&self.gpos_lookups) |*l| l.deinit(allocator);
         if (self.indic_plan) |p| p.deinit(allocator);
+        if (self.hangul_plan) |p| p.deinit(allocator);
         self.pairs.deinit(allocator);
         self.clearWidths(allocator);
         self.widths.deinit(allocator);
@@ -146,9 +149,11 @@ pub const Cache = struct {
         if (self.flags) |f| {
             if (std.mem.eql(bool, &f.flags, &flags.flags)) return;
         }
-        self.gpos_valid = .{ false, false };
+        self.gpos_valid = @splat(false);
         if (self.indic_plan) |p| p.deinit(allocator);
         self.indic_plan = null;
+        if (self.hangul_plan) |p| p.deinit(allocator);
+        self.hangul_plan = null;
         self.clearWidths(allocator);
         self.flags = flags;
     }
@@ -228,26 +233,39 @@ fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: ope
     if (ot) |o| no_gsub.gdef = o.gdef;
     const gsub_table: *const gsub.Table = if (ot) |o| (if (o.gsub) |*g| g else &no_gsub) else &no_gsub;
 
-    // The script picks the language system, and Devanagari in a font with
-    // dev2/deva GSUB the Indic shaper (HarfBuzz's shaper selection)
+    // The script picks the language system, and the shaper (HarfBuzz's
+    // shaper selection): Devanagari in a font with dev2/deva GSUB the
+    // Indic one, Hangul always the Hangul one
     const script = textScript(text);
     var indic_plan: ?*const indic.Plan = null;
+    var hangul_plan: ?*const hangul.Plan = null;
     if (script == .devanagari and (gsub_table.devanagari.script == gsub.tag("dev2") or gsub_table.devanagari.script == gsub.tag("deva"))) {
         if (cache.indic_plan == null) cache.indic_plan = try indic.Plan.init(allocator, gsub_table, flags, emb.font.getGlyphId(0x094D) orelse 0);
         indic_plan = &cache.indic_plan.?;
+    } else if (script == .hangul) {
+        if (cache.hangul_plan == null) cache.hangul_plan = try hangul.Plan.init(allocator, gsub_table, flags);
+        hangul_plan = &cache.hangul_plan.?;
     }
 
     const d = &cache.decoded;
-    try decode.decodeAs(allocator, &emb.font, text, d, true, if (indic_plan != null) .indic else .default);
+    const mode: decode.Mode = if (indic_plan != null) .indic else if (hangul_plan != null) .hangul else .default;
+    try decode.decodeAs(allocator, &emb.font, text, d, true, mode);
 
     // Clusters start per grapheme, as HarfBuzz forms them before shaping;
-    // shaping merges them further (ligatures, reordering)
-    const clusters = try graphemeClusters(tmp, d.codepoints.items, d.offsets.items);
+    // shaping merges them further (ligatures, reordering). The Hangul
+    // preprocessing formed and merged them already, in the offsets.
+    const clusters = if (hangul_plan != null)
+        try offsetClusters(tmp, d.offsets.items)
+    else
+        try graphemeClusters(tmp, d.codepoints.items, d.offsets.items);
 
     const shaper = &cache.shaper;
     if (indic_plan) |plan| {
         try shaper.beginClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters);
         _ = try indic.substitute(allocator, shaper, plan, &emb.font, d.codepoints.items);
+    } else if (hangul_plan) |plan| {
+        try shaper.beginClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters);
+        _ = try hangul.substitute(allocator, shaper, plan, d.jamo.items);
     } else {
         _ = try shaper.shapeClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters, flags);
     }
@@ -260,7 +278,7 @@ fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: ope
     if (ot) |o| {
         var lookups: []const u16 = &.{};
         if (o.gpos) |*table| {
-            const k: usize = @intFromBool(script == .devanagari);
+            const k = @backingInt(script);
             if (!cache.gpos_valid[k]) {
                 try table.collectLookupsFor(allocator, table.langSys(script), flags, &cache.gpos_lookups[k]);
                 cache.gpos_valid[k] = true;
@@ -269,14 +287,15 @@ fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: ope
         }
         var pairs: gpos.PairCache = .{ .map = cache.pairs, .allocator = allocator };
         defer cache.pairs = pairs.map;
-        positionGlyphs(o, gsub_table, &emb.font, d.codepoints.items, flags, indic_plan != null, glyphs, pos, lookups, &pairs);
+        positionGlyphs(o, gsub_table, &emb.font, d.codepoints.items, flags, indic_plan != null or hangul_plan != null, glyphs, pos, lookups, &pairs);
     }
     return .{ .glyphs = glyphs, .pos = pos };
 }
 
 /// The text's script, as HarfBuzz's guess_segment_properties finds it: the
 /// first character of a script (not common or inherited) decides.
-/// Devanagari picks its own language system; anything else the default.
+/// Devanagari and Hangul pick their own language systems; anything else
+/// the default.
 fn textScript(text: []const u8) gsub.Script {
     var view = std.unicode.Utf8View.init(text) catch return .default;
     var it = view.iterator();
@@ -284,6 +303,7 @@ fn textScript(text: []const u8) gsub.Script {
         switch (unicode_props.runScript(cp)) {
             .none => {},
             .devanagari => return .devanagari,
+            .hangul => return .hangul,
             .other => return .default,
         }
     }
@@ -325,15 +345,16 @@ fn spaceWidths(font: *const ttf.Font, kinds: []const unicode_props.SpaceFallback
 /// GPOS), and attached glyphs take their parents' offsets. Without GPOS,
 /// marks are then placed by glyph extents (mark_fallback.zig).
 /// `gpos_lookups`: the GPOS lookups for the text's script and flags.
-fn positionGlyphs(ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, indic_shaper: bool, glyphs: []gsub.Glyph, pos: []gpos.Position, gpos_lookups: []const u16, pairs: *gpos.PairCache) void {
+/// `shaper_marks`: the Indic and Hangul shapers zero no marks and have no
+/// fallback positioning.
+fn positionGlyphs(ot: *const opentype.OpenTypeFeatures, gsub_table: *const gsub.Table, font: *const ttf.Font, cps: []const u21, flags: opentype.FeatureFlags, shaper_marks: bool, glyphs: []gsub.Glyph, pos: []gpos.Position, gpos_lookups: []const u16, pairs: *gpos.PairCache) void {
     if (ot.gpos) |*table| gpos.applyCached(table, glyphs, pos, gpos_lookups, pairs);
     if (ot.shaping_kern) |*kern| {
         if (flags.isEnabled(.kern)) gpos.applyKernTable(gsub_table, kern, glyphs, pos);
     }
-    // The Indic shaper zeroes no marks and has no fallback positioning
-    if (!indic_shaper) gpos.zeroMarkWidths(gsub_table, glyphs, pos, ot.gpos == null);
+    if (!shaper_marks) gpos.zeroMarkWidths(gsub_table, glyphs, pos, ot.gpos == null);
     gpos.propagateAttachments(pos);
-    if (ot.gpos == null and !indic_shaper) mark_fallback.position(gsub_table, font, cps, glyphs, pos, true);
+    if (ot.gpos == null and !shaper_marks) mark_fallback.position(gsub_table, font, cps, glyphs, pos, true);
 }
 
 /// Each code point's initial cluster: the index of the first code point
@@ -373,6 +394,16 @@ fn graphemeClusters(allocator: Allocator, cps: []const u21, offsets: []const u32
     }
     return out;
 }
+
+/// Each code point's cluster from offsets that carry them (hangul.zig):
+/// a run of equal offsets is one cluster, at its first code point.
+fn offsetClusters(allocator: Allocator, offsets: []const u32) ![]u32 {
+    const out = try allocator.alloc(u32, offsets.len);
+    for (out, 0..) |*c, i| c.* = if (i > 0 and offsets[i] == offsets[i - 1]) out[i - 1] else @intCast(i);
+    return out;
+}
+
+const script_count = std.enums.values(gsub.Script).len;
 
 // ============================================================================
 // Tests (HarfBuzz differential: shaping_test.zig)
@@ -525,4 +556,69 @@ test "shape: Devanagari glyphs carry their own characters (Kohinoor)" {
     try testing.expectEqual(@as(usize, 2), ste.len);
     try testing.expectEqual([2]u32{ 0, 9 }, [2]u32{ ste[0].text_start, ste[0].text_end });
     try testing.expectEqual([2]u32{ 9, 12 }, [2]u32{ ste[1].text_start, ste[1].text_end });
+}
+
+test "shape: Hangul jamo as Final Draft 13 prints them (Apple SD Gothic Neo Thin)" {
+    // courier's reference: macOS only
+    const a = testing.allocator;
+    const ttc = std.Io.Dir.cwd().readFileAlloc(testing.io, "/System/Library/Fonts/AppleSDGothicNeo.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    const data = try @import("font_collection.zig").extractFace(a, ttc, 10);
+    defer a.free(data);
+    var face = try FontFace.fromMemory(a, data);
+    defer face.deinit();
+    // The conjoining jamo of 한글 compose into its two syllables, each one
+    // cluster with the text of its three jamo
+    const jamo = try shape(a, &face, "\u{1112}\u{1161}\u{11AB}\u{1100}\u{1173}\u{11AF}", .{});
+    defer a.free(jamo);
+    const syllables = try shape(a, &face, "한글", .{});
+    defer a.free(syllables);
+    try testing.expectEqual(@as(usize, 2), jamo.len);
+    try testing.expectEqual(syllables.len, jamo.len);
+    for (jamo, syllables, [_]u32{ 0, 9 }) |j, s, start| {
+        try testing.expectEqual(s.id, j.id);
+        try testing.expectEqual(s.x_advance, j.x_advance);
+        try testing.expectEqual(start, j.cluster);
+        try testing.expectEqual([2]u32{ start, start + 9 }, [2]u32{ j.text_start, j.text_end });
+    }
+}
+
+test "shape: Hangul syllables are clusters; jamo, ligatures and tone marks keep their text" {
+    var face = try testFace("test/fonts/hangul/HangulTest.ttf");
+    defer face.deinit();
+    const a = testing.allocator;
+    const font = &face.prototype.font;
+    const Case = struct { text: []const u8, spans: []const [2]u32 };
+    const cases = [_]Case{
+        // 낙 is not in the font: its jamo take ljmo/vjmo/tjmo, one cluster
+        .{ .text = "\u{1102}\u{1161}\u{11A8}", .spans = &.{ .{ 0, 3 }, .{ 3, 6 }, .{ 6, 9 } } },
+        // 각 is: one glyph for the three jamo
+        .{ .text = "\u{1100}\u{1161}\u{11A8}", .spans = &.{.{ 0, 9 }} },
+        // Old Hangul V + T: a ccmp ligature after the L
+        .{ .text = "\u{1100}\u{1176}\u{11C3}", .spans = &.{ .{ 0, 3 }, .{ 3, 9 } } },
+        // A tone mark after a syllable goes before it
+        .{ .text = "가\u{302E}", .spans = &.{ .{ 3, 6 }, .{ 0, 3 } } },
+        // Alone, it gets a dotted circle (no text of its own)
+        .{ .text = "\u{302E}", .spans = &.{ .{ 0, 3 }, .{ 0, 0 } } },
+    };
+    for (cases) |c| {
+        const glyphs = try shape(a, &face, c.text, .{});
+        defer a.free(glyphs);
+        try testing.expectEqual(c.spans.len, glyphs.len);
+        for (glyphs, c.spans) |g, sp| {
+            try testing.expectEqual(@as(u32, 0), g.cluster);
+            try testing.expectEqual(sp, [2]u32{ g.text_start, g.text_end });
+        }
+    }
+    // The jamo were substituted (their nominal glyphs not drawn); 각 and
+    // the tone mark's syllable are the font's precomposed glyphs
+    const nak = try shape(a, &face, "\u{1102}\u{1161}\u{11A8}", .{});
+    defer a.free(nak);
+    for (nak, [_]u21{ 0x1102, 0x1161, 0x11A8 }) |g, cp| try testing.expect(g.id != font.getGlyphId(cp).?);
+    const gak = try shape(a, &face, "\u{1100}\u{1161}\u{11A8}", .{});
+    defer a.free(gak);
+    try testing.expectEqual(font.getGlyphId(0xAC01).?, gak[0].id);
+    const tone = try shape(a, &face, "\u{302E}", .{});
+    defer a.free(tone);
+    try testing.expectEqual(font.getGlyphId(0x25CC).?, tone[1].id);
 }

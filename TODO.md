@@ -212,7 +212,7 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   2026-11-17, mark_fallback.zig). Gap: CFF fonts without GPOS (no glyph
   extents from charstrings).
 - [x] **Normalization: decompose** characters the font lacks, space
-  fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul not decomposed).
+  fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul too, 2026-11-18).
 - [x] **write() on the GPOS engine** (done 2026-11-17: shapeRun +
   renderShapedRun; references regenerated).
 - [ ] **Shaping performance**: after the pair/width caches and done-sets
@@ -223,6 +223,12 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   onto shapeRun.
 - [x] **Indic (Devanagari) shaping** in shapeText (done 2026-11-17,
   indic.zig; HarfBuzz-checked with Kohinoor and Sangam MN).
+- [x] **Hangul shaping** in shapeText (done 2026-11-18, hangul.zig;
+  HarfBuzz-checked with a synthetic jamo-feature font and Apple SD Gothic
+  Neo).
+- [ ] **Fallback picks for jamo**: `fallback.Plan.drawsCluster` composes
+  with `unicode_compose.compose`, which has no Hangul: a font with the
+  syllable but not the jamo is judged unable to draw L V T.
 - [ ] **Synthetic Indic test font** so CI covers the Indic shaper (the
   system fonts are macOS only), with a deva-only twin for old spec.
 - [ ] **Other Indic scripts** (configs and categories are ported: Bengali,
