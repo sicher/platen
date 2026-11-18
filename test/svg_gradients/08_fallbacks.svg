@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="50">
+  <!-- what SVG paints when a gradient cannot: the fallback for a missing
+       reference, nothing without one; one stop is its color, no stops
+       nothing; no extent (equal end points, zero radius) the last stop -->
+  <!-- probes: 25,25 75,25 125,25 175,25 225,25 275,25 -->
+  <defs>
+    <linearGradient id="one"><stop offset="0.5" stop-color="purple"/></linearGradient>
+    <linearGradient id="none"/>
+    <linearGradient id="flat" x1="0.5" x2="0.5"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="#0a0"/></linearGradient>
+    <radialGradient id="dot" r="0"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="#00a"/></radialGradient>
+  </defs>
+  <rect x="0" y="0" width="50" height="50" fill="url(#missing) orange"/>
+  <rect x="50" y="0" width="50" height="50" fill="url(#missing)"/>
+  <rect x="100" y="0" width="50" height="50" fill="url(#one)"/>
+  <rect x="150" y="0" width="50" height="50" fill="url(#none)"/>
+  <rect x="200" y="0" width="50" height="50" fill="url(#flat)"/>
+  <rect x="250" y="0" width="50" height="50" fill="url(#dot)"/>
+</svg>

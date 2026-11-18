@@ -96,6 +96,18 @@ pub const Font = union(enum) {
     }
 };
 
+/// Advance of characters drawn from a `TextStyle.fallback` font.
+pub const FallbackAdvance = enum {
+    /// The fallback glyph's own width.
+    natural,
+    /// The width of a space in `font`, with the glyph centered in it:
+    /// monospaced text keeps every character on its column whatever font
+    /// draws it. Each character with its combining marks takes one cell; a
+    /// glyph wider than the cell (a CJK ideograph beside Courier) is drawn
+    /// smaller to fit it.
+    monospace,
+};
+
 /// Complete text style (font, size, weight, color, decoration).
 pub const TextStyle = struct {
     font: Font,
@@ -115,6 +127,28 @@ pub const TextStyle = struct {
     /// 1.0 = fully opaque. Values < 1.0 require transparency support
     /// (rejected by PDF/A-1b). Applies to glyphs and text decorations.
     opacity: f64 = 1.0,
+    /// Fonts for the characters `font` has no glyph for, tried in order:
+    /// each character is drawn in the first font that has it (`font`
+    /// itself when none does). Combining marks and default ignorables stay
+    /// in their base character's font. Every font involved must be
+    /// embedded with Unicode (identity) encoding: error.InvalidFallbackFont
+    /// otherwise. Bold/italic pick each fallback's own variant where it
+    /// has one, and are synthesized where it does not (stroked outline,
+    /// slanted text matrix).
+    fallback: []const Font = &.{},
+    /// How far a character drawn from a fallback font advances.
+    fallback_advance: FallbackAdvance = .natural,
+    /// With `.monospace`: the cells a fallback cluster (one extended
+    /// grapheme cluster, UTF-8) takes, to count exactly as the caller's
+    /// own layout does. Null: 2 for East Asian Wide/Fullwidth (or with
+    /// VS16), else 1 (unicode_props.cells). At least 1.
+    fallback_cells: ?*const fn (cluster: []const u8) u8 = null,
+    /// With `.monospace`: the largest size of a fallback cluster, as a
+    /// fraction of `size` (CJK ink spans nearly its em, Courier's far
+    /// less: 0.88 makes ideographs fill Courier's ink band). A cluster is
+    /// set at the smaller of this and the size that fits its cells,
+    /// centered. Null: only fitted. Must be > 0.
+    fallback_max_em: ?f32 = null,
 
     /// Get the resolved StandardFont if this is a standard font.
     pub fn standardFont(self: TextStyle) ?StandardFont {
@@ -164,6 +198,28 @@ pub const Anchor = enum {
     center,
     /// pos.x is the right edge of the text.
     right,
+};
+
+/// A glyph drawn by ID (Document.drawGlyphs), e.g. one of shapeText's.
+pub const PlacedGlyph = struct {
+    /// Glyph ID in the font (not a subset's).
+    id: u16,
+    /// Where the glyph's origin goes, in points from the page's top-left
+    /// corner; y is the baseline. For shapeText output: the pen position
+    /// plus (x_offset, -y_offset), scaled by size / unitsPerEm.
+    x: f64,
+    y: f64,
+    /// Byte offset in the drawn text of this glyph's cluster
+    /// (ShapedGlyph.cluster): it gives the glyph its ToUnicode text,
+    /// unless `source` does.
+    cluster: u32,
+    /// The bytes of the drawn text this glyph stands for
+    /// (ShapedGlyph.text_start/text_end; empty: none). When given, the
+    /// glyph's ToUnicode text is exactly these characters - each glyph of
+    /// a cluster its own, as copy and paste should read them.
+    source: ?Source = null,
+
+    pub const Source = struct { start: u32, end: u32 };
 };
 
 /// Options for writeAt (point-positioned text).

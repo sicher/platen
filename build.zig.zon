@@ -2,6 +2,17 @@
     .name = .platen,
     .version = "0.13.0",
     .dependencies = .{},
-    .paths = .{""},
+    // What a dependent's package contains: the library and what building it
+    // needs (src/ embeds src/data/sRGB2014.icc). Tests, fixtures (~100 MB),
+    // examples and dev scripts stay out; .gitattributes keeps them out of
+    // the forge's release tarballs too. Clones still get everything.
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        "README.md",
+        "CHANGELOG.md",
+    },
     .fingerprint = 0x84c0b5791b44e68e,
 }

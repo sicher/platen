@@ -12,6 +12,132 @@ const data = @import("unicode_compose_data.zig");
 pub const first_mark: u21 = 0x0300;
 
 /// Canonical combining class (0 for starters and unlisted code points).
+/// HarfBuzz's modified combining class (_hb_modified_combining_class), by
+/// which marks are put in order before shaping: Hebrew points in SBL
+/// order, Arabic shadda first, Telugu length marks and Thai sara u/uu
+/// before the virama, Tibetan sign u before sign i; and three special
+/// cases (Tai Tham sakot, Tibetan tsa-phru).
+pub fn modifiedCombiningClass(cp: u21) u8 {
+    switch (cp) {
+        0x1A60, 0x0FC6 => return 254,
+        0x0F39 => return 127,
+        else => {},
+    }
+    const ccc = combiningClass(cp);
+    return switch (ccc) {
+        // Hebrew
+        10 => 22,
+        11 => 15,
+        12 => 16,
+        13 => 17,
+        14 => 23,
+        15 => 18,
+        16 => 19,
+        17 => 20,
+        18 => 21,
+        19 => 14,
+        20 => 24,
+        21 => 12,
+        22 => 25,
+        23 => 13,
+        24 => 10,
+        25 => 11,
+        // Arabic: shadda (33) before the others
+        27 => 28,
+        28 => 29,
+        29 => 30,
+        30 => 31,
+        31 => 32,
+        32 => 33,
+        33 => 27,
+        // Telugu length marks, Thai sara u/uu, Tibetan sign i/u
+        84 => 4,
+        91 => 5,
+        103 => 3,
+        130 => 132,
+        132 => 131,
+        else => ccc,
+    };
+}
+
+/// HarfBuzz's mark reordering (normalization round 2): each run of code
+/// points with a nonzero modified combining class, up to 32 long, is
+/// sorted stably by that class. `offsets` (optional, same length) moves
+/// along, merged as HarfBuzz merges clusters; `spans` (optional: each code
+/// point's own source bytes) moves along unmerged.
+pub fn reorderMarks(cps: []u21, offsets: ?[]u32, spans: ?[][2]u32) void {
+    reorderMarksTagged(cps, offsets, spans, null);
+}
+
+/// A `reorderMarksTagged` tag: the code point sorts with combining class
+/// 224, as a dotted circle HarfBuzz's Hangul shaper inserts for a tone
+/// mark does (it copies the tone mark's properties).
+pub const tag_tone_class: u8 = 0xFF;
+
+fn classAt(cps: []const u21, tags: ?[]const u8, i: usize) u8 {
+    if (tags) |t| if (t[i] == tag_tone_class) return 224;
+    return modifiedCombiningClass(cps[i]);
+}
+
+/// HarfBuzz's merge_clusters over offsets that carry clusters: [start,
+/// end) takes its smallest, extended over the neighbors that share an
+/// end's offset when that end changes.
+fn mergeOffsets(o: []u32, start_in: usize, end_in: usize) void {
+    var start = start_in;
+    var end = end_in;
+    var merged = o[start];
+    for (o[start + 1 .. end]) |x| merged = @min(merged, x);
+    if (merged != o[end - 1]) {
+        while (end < o.len and o[end - 1] == o[end]) end += 1;
+    }
+    if (merged != o[start]) {
+        while (start > 0 and o[start - 1] == o[start]) start -= 1;
+    }
+    for (o[start..end]) |*x| x.* = merged;
+}
+
+/// `reorderMarks` with `tags` (optional, same length): moved along, and
+/// `tag_tone_class` gives its code point class 224.
+pub fn reorderMarksTagged(cps: []u21, offsets: ?[]u32, spans: ?[][2]u32, tags: ?[]u8) void {
+    const max_run = 32;
+    var i: usize = 0;
+    while (i < cps.len) {
+        if (classAt(cps, tags, i) == 0) {
+            i += 1;
+            continue;
+        }
+        var end = i + 1;
+        while (end < cps.len and classAt(cps, tags, end) != 0) end += 1;
+        if (end - i <= max_run) {
+            // Insertion sort: stable, and runs are short
+            var k = i + 1;
+            while (k < end) : (k += 1) {
+                const cp = cps[k];
+                const span = if (spans) |sp| sp[k] else .{ 0, 0 };
+                const tag = if (tags) |t| t[k] else 0;
+                const cc = classAt(cps, tags, k);
+                var j = k;
+                while (j > i and classAt(cps, tags, j - 1) > cc) j -= 1;
+                if (j == k) continue;
+                // HarfBuzz's sort merges the clusters of what it moves
+                // across (merge_clusters): they all take the smallest
+                // offset, and so do the neighbors that share an end's
+                if (offsets) |o| mergeOffsets(o, j, k + 1);
+                var m = k;
+                while (m > j) : (m -= 1) {
+                    cps[m] = cps[m - 1];
+                    if (spans) |sp| sp[m] = sp[m - 1];
+                    if (tags) |t| t[m] = t[m - 1];
+                }
+                cps[j] = cp;
+                if (spans) |sp| sp[j] = span;
+                if (tags) |t| t[j] = tag;
+            }
+        }
+        i = end;
+    }
+}
+
 pub fn combiningClass(cp: u21) u8 {
     if (cp < first_mark) return 0;
     const ranges = &data.ccc_ranges;
@@ -76,21 +202,33 @@ pub fn decompose(c: u21, buf: []u21) []u21 {
 /// only when `ctx.hasGlyph(composite)`. Input is expected in canonical
 /// order (as typed text is); nothing is reordered. If given, `composed`
 /// (same length as `cps`) gets, per output position, whether that code
-/// point was composed from a decomposed sequence.
-pub fn composeInPlace(cps: []u21, composed: ?[]bool, ctx: anytype) usize {
+/// point was composed from a decomposed sequence. `offsets` (same length,
+/// optional) moves with the code points: a composite keeps its base's.
+/// `spans` (optional, each code point's source bytes): a composite covers
+/// its parts'.
+pub fn composeInPlace(cps: []u21, composed: ?[]bool, offsets: ?[]u32, spans: ?[][2]u32, ctx: anytype) usize {
     var out: usize = 0;
     var starter: ?usize = null;
     var last_ccc: u8 = 0; // class of the last uncomposed mark after the starter
-    for (cps) |cp| {
+    for (cps, 0..) |cp, in| {
         const ccc = combiningClass(cp);
         if (ccc != 0) {
             if (starter) |s| {
                 const unblocked = out == s + 1 or last_ccc < ccc;
-                if (unblocked) {
+                const allowed = if (@hasDecl(@TypeOf(ctx), "allowStarter")) ctx.allowStarter(cps[s]) else true;
+                if (unblocked and allowed) {
                     if (compose(cps[s], cp)) |c| {
                         if (ctx.hasGlyph(c)) {
                             cps[s] = c;
                             if (composed) |flags| flags[s] = true;
+                            if (spans) |sp| {
+                                sp[s] = .{ @min(sp[s][0], sp[in][0]), @max(sp[s][1], sp[in][1]) };
+                                // Marks composed across, inside that range
+                                // now, give their text up to the composite
+                                for (sp[s + 1 .. out]) |*m| {
+                                    if (m[0] < m[1] and m[0] >= sp[s][0] and m[1] <= sp[s][1]) m[0] = m[1];
+                                }
+                            }
                             continue;
                         }
                     }
@@ -103,6 +241,8 @@ pub fn composeInPlace(cps: []u21, composed: ?[]bool, ctx: anytype) usize {
         }
         cps[out] = cp;
         if (composed) |flags| flags[out] = false;
+        if (offsets) |o| o[out] = o[in];
+        if (spans) |sp| sp[out] = sp[in];
         out += 1;
     }
     return out;
@@ -117,7 +257,7 @@ const AllGlyphs = struct {
 fn expectComposed(input: []const u21, expected: []const u21, ctx: anytype) !void {
     var buf: [16]u21 = undefined;
     @memcpy(buf[0..input.len], input);
-    const n = composeInPlace(buf[0..input.len], null, ctx);
+    const n = composeInPlace(buf[0..input.len], null, null, null, ctx);
     try std.testing.expectEqualSlices(u21, expected, buf[0..n]);
 }
 
@@ -149,12 +289,16 @@ test "composeInPlace composes, chains, and respects blocking" {
     try expectComposed(&.{ 'q', 0x0301, 0x0300, 'a', 0x0300 }, &.{ 'q', 0x0301, 0x0300, 0x00E0 }, all);
 }
 
-test "composeInPlace reports composed positions" {
+test "composeInPlace reports composed positions and moves offsets" {
     var cps = [_]u21{ 0x00E9, 'e', 0x0301, 'x' }; // é typed precomposed, then e + acute
     var flags: [4]bool = undefined;
-    const n = composeInPlace(&cps, &flags, AllGlyphs{});
+    // UTF-8 byte offsets of "\u{E9}e\u{301}x"
+    var offsets = [_]u32{ 0, 2, 3, 5 };
+    const n = composeInPlace(&cps, &flags, &offsets, null, AllGlyphs{});
     try std.testing.expectEqualSlices(u21, &.{ 0x00E9, 0x00E9, 'x' }, cps[0..n]);
     try std.testing.expectEqualSlices(bool, &.{ false, true, false }, flags[0..n]);
+    // The composite keeps its base's offset; the acute's is gone
+    try std.testing.expectEqualSlices(u32, &.{ 0, 2, 5 }, offsets[0..n]);
 }
 
 test "decompose inverts chained compositions" {
@@ -171,4 +315,39 @@ test "composeInPlace keeps sequences the font cannot show precomposed" {
         }
     };
     try expectComposed(&.{ 'i', 0x0308, 'e', 0x0301 }, &.{ 'i', 0x0308, 0x00E9 }, NoIdieresis{});
+}
+
+test "reorderMarks sorts mark runs by modified combining class, stably" {
+    // m, acute (230), dot below (220), n: the dot below goes first
+    var cps = [_]u21{ 'm', 0x0301, 0x0323, 'n', 0x0300, 0x0301 };
+    var offsets = [_]u32{ 0, 1, 3, 5, 6, 8 };
+    reorderMarks(&cps, &offsets, null);
+    try std.testing.expectEqualSlices(u21, &.{ 'm', 0x0323, 0x0301, 'n', 0x0300, 0x0301 }, &cps);
+    // The moved range merges to its smallest offset, as HarfBuzz's sort
+    try std.testing.expectEqualSlices(u32, &.{ 0, 1, 1, 5, 6, 8 }, &offsets);
+    // Arabic: fatha (30) then shadda (33) - shadda moves first
+    var ar = [_]u21{ 0x0644, 0x064E, 0x0651 };
+    reorderMarks(&ar, null, null);
+    try std.testing.expectEqualSlices(u21, &.{ 0x0644, 0x0651, 0x064E }, &ar);
+}
+
+test "composeInPlace spans: a composite takes the marks it composed across" {
+    // O + cedilla + tilde (bytes 0, 1-2, 3-4): O + tilde compose across
+    // the cedilla (blocked by nothing: 202 < 230), whose bytes the
+    // composite now covers
+    var cps = [_]u21{ 'O', 0x0327, 0x0303 };
+    var spans = [_][2]u32{ .{ 0, 1 }, .{ 1, 3 }, .{ 3, 5 } };
+    const n = composeInPlace(&cps, null, null, &spans, AllGlyphs{});
+    try std.testing.expectEqualSlices(u21, &.{ 0x00D5, 0x0327 }, cps[0..n]);
+    try std.testing.expectEqual([2]u32{ 0, 5 }, spans[0]);
+    try std.testing.expectEqual(spans[1][0], spans[1][1]);
+
+    // Typed O + tilde + cedilla, sorted to O + cedilla + tilde: the
+    // composite covers bytes 0-2, the cedilla (3-4) keeps its own
+    var cps2 = [_]u21{ 'O', 0x0327, 0x0303 };
+    var spans2 = [_][2]u32{ .{ 0, 1 }, .{ 3, 5 }, .{ 1, 3 } };
+    const n2 = composeInPlace(&cps2, null, null, &spans2, AllGlyphs{});
+    try std.testing.expectEqual(@as(usize, 2), n2);
+    try std.testing.expectEqual([2]u32{ 0, 3 }, spans2[0]);
+    try std.testing.expectEqual([2]u32{ 3, 5 }, spans2[1]);
 }

@@ -1,0 +1,2 @@
+# Known differences between shapeText and HarfBuzz (src/shaping_test.zig).
+# font<TAB>features<TAB>text<TAB>reason

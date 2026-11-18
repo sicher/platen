@@ -34,6 +34,9 @@ const validate = @import("validate.zig");
 pub const Encryption = encrypt.Encryption;
 pub const Permissions = encrypt.Permissions;
 const color_fonts = @import("color_fonts.zig");
+const fallback = @import("fallback.zig");
+const shaping = @import("shaping.zig");
+const unicode_props = @import("unicode_props.zig");
 pub const colr = @import("colr.zig");
 
 const ObjectId = objects.ObjectId;
@@ -70,6 +73,7 @@ pub const Align = layout.Align;
 pub const VAlign = layout.VAlign;
 pub const LineBreaking = layout.LineBreaking;
 pub const TextDecoration = layout.TextDecoration;
+pub const FallbackAdvance = layout.FallbackAdvance;
 pub const TextStyleOptions = layout.TextStyleOptions;
 pub const Margins = layout.Margins;
 pub const Padding = layout.Padding;
@@ -84,6 +88,7 @@ pub const PageLabel = layout.PageLabel;
 pub const WriteResult = layout.WriteResult;
 pub const WriteOptions = layout.WriteOptions;
 pub const WriteAtOptions = layout.WriteAtOptions;
+pub const PlacedGlyph = layout.PlacedGlyph;
 pub const Anchor = layout.Anchor;
 pub const BlockOptions = layout.BlockOptions;
 pub const ParagraphOptions = layout.ParagraphOptions;
@@ -608,6 +613,9 @@ pub const Document = struct {
                 return s;
             },
             .family => |fam| {
+                // Fallback fonts still need the requested bold/italic: the
+                // runs resolve the family themselves (writeFallbackRuns)
+                if (style.fallback.len > 0) return style;
                 const f = try fam.resolve(style.bold, style.italic);
                 var s = style;
                 s.font = .{ .embedded = try self.faceInstance(f) };
@@ -919,7 +927,7 @@ pub const Document = struct {
         // overrides are reflected in measurement
         const s = try self.normalizeStyle(style);
         return .{
-            .width = metrics.measureTextStyled(text_str, s),
+            .width = self.measureNormalized(text_str, s),
             .height = s.size * 1.2,
             .char_count = text_str.len,
         };
@@ -1007,6 +1015,7 @@ pub const Document = struct {
     pub fn writeAt(self: *Document, pos: Point, str: []const u8, style: TextStyle, opts: WriteAtOptions) !Rect {
         try validate.check(.{ pos, style });
         try self.checkFontConformance(style);
+        const first_command = if (self.pages.items.len > 0) self.pages.items[self.current_page].commands.items.len else 0;
         const width = try self.writeTextStyled(pos, str, style, 0);
 
         // Anchoring: writeTextStyled shapes the text (which is where the
@@ -1018,8 +1027,11 @@ pub const Document = struct {
             .right => pos.x - width,
         };
         if (opts.anchor != .left) {
-            var page = &self.pages.items[self.current_page];
-            page.commands.items[page.commands.items.len - 1].text.x = x_left;
+            const page = &self.pages.items[self.current_page];
+            for (page.commands.items[first_command..]) |*cmd| switch (cmd.*) {
+                .text => |*t| t.x += x_left - pos.x,
+                .raw, .glyphs => {},
+            };
         }
 
         const m = self.getFontMetricsStyled(style);
@@ -1031,12 +1043,95 @@ pub const Document = struct {
         };
     }
 
+    /// Draws glyphs by ID, each at its own position: for a layout engine
+    /// that shapes text itself (shapeText) and places every glyph. `text`
+    /// is what the glyphs show, and each glyph's `cluster` is a byte offset
+    /// into it: copying the text out of the PDF (ToUnicode) gives `text`,
+    /// a ligature or conjunct mapping to all of its characters.
+    ///
+    /// `style` supplies the font, size, color and opacity, and bold/italic
+    /// to pick a family's variant. The font must be embedded with Unicode
+    /// (identity) encoding: error.GlyphsNeedIdentityFont otherwise. Glyph
+    /// IDs are the font's own (error.InvalidGlyphId past its glyph count).
+    /// Fallback fonts, decorations and character spacing do not apply to
+    /// placed glyphs: error.UnsupportedStyle when set. Color glyphs
+    /// (COLR, bitmaps, SVG) draw as their plain outlines.
+    pub fn drawGlyphs(self: *Document, text: []const u8, glyphs: []const PlacedGlyph, style_in: TextStyle) !void {
+        try validate.check(style_in);
+        try validate.checkEach(glyphs);
+        if (self.pages.items.len == 0) return error.NoPage;
+        if (style_in.fallback.len > 0 or style_in.char_spacing != 0 or
+            style_in.decoration.underline or style_in.decoration.strikethrough) return error.UnsupportedStyle;
+        try self.checkFontConformance(style_in);
+        const style = try self.normalizeStyle(style_in);
+        const emb: *EmbeddedFont = switch (style.font) {
+            .embedded => |e| blk: {
+                if (style.bold or style.italic) return error.FontVariantNotLoaded;
+                break :blk e;
+            },
+            .embedded_family => |fam| try fam.resolve(style.bold, style.italic),
+            .face, .family => unreachable, // normalized
+            .standard, .symbol, .zapf_dingbats => return error.GlyphsNeedIdentityFont,
+        };
+        if (emb.encoding != .identity) return error.GlyphsNeedIdentityFont;
+        if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
+        const glyph_count = emb.font.maxp.?.num_glyphs;
+        for (glyphs) |g| if (g.id >= glyph_count) return error.InvalidGlyphId;
+        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
+
+        var page = &self.pages.items[self.current_page];
+        const page_alloc = page.pageAllocator();
+        try page.markEmbeddedUsed(self.allocator, emb);
+        const ids = try page_alloc.alloc(u16, glyphs.len);
+        const clusters = try page_alloc.alloc(u32, glyphs.len);
+        const xs = try page_alloc.alloc(f64, glyphs.len);
+        const ys = try page_alloc.alloc(f64, glyphs.len);
+        const height = self.currentPageSize().height;
+        for (glyphs, ids, clusters, xs, ys) |g, *id, *c, *x, *y| {
+            id.* = g.id;
+            c.* = g.cluster;
+            x.* = g.x;
+            y.* = height - g.y;
+        }
+        // Glyphs with their own source text map exactly to it; the others
+        // by their clusters
+        var sourced = false;
+        for (glyphs) |g| {
+            if (g.source != null) sourced = true;
+        }
+        if (sourced) {
+            for (glyphs) |g| {
+                if (g.source) |src| {
+                    if (src.end > text.len or src.start > src.end) return error.InvalidGlyphSource;
+                }
+            }
+            const sources = try page_alloc.alloc([2]u32, glyphs.len);
+            for (glyphs, sources) |g, *sp| sp.* = if (g.source) |src| .{ src.start, src.end } else .{ g.cluster, g.cluster };
+            try emb.markSourcedGlyphsUsed(text, ids, sources);
+        } else try emb.markPlacedGlyphsUsed(text, ids, clusters);
+        try page.commands.append(self.allocator, .{ .glyphs = .{
+            .font = emb,
+            .font_size = style.size,
+            .ids = ids,
+            .xs = xs,
+            .ys = ys,
+            .text_color = style.color,
+            .opacity = style.opacity,
+        } });
+    }
+
     /// Internal: Write text at position with explicit style and word spacing.
     /// pos is in user coordinates (top-left origin), converted to PDF coordinates internally.
     /// Returns the rendered width: computed from the shaped glyph run for
     /// embedded fonts (no second shaping pass), measured otherwise.
     fn writeTextStyled(self: *Document, pos: Point, str: []const u8, style_in: TextStyle, word_spacing: f64) !f64 {
         if (self.pages.items.len == 0) return error.NoPage;
+        if (style_in.fallback.len > 0) return self.writeFallbackRuns(pos, str, style_in, word_spacing);
+        return self.writeOneFont(pos, str, style_in, word_spacing);
+    }
+
+    /// writeTextStyled for a style without fallback fonts: one command.
+    fn writeOneFont(self: *Document, pos: Point, str: []const u8, style_in: TextStyle, word_spacing: f64) !f64 {
         const style = try self.normalizeStyle(style_in);
 
         var page = &self.pages.items[self.current_page];
@@ -1047,6 +1142,7 @@ pub const Document = struct {
 
         // Determine font reference from style
         var cached_glyphs: ?[]const u16 = null;
+        var cached_positions: ?[]const EmbeddedFont.GlyphPos = null;
         const font_ref: FontRef = switch (style.font) {
             .embedded => |emb| blk: {
                 // A single embedded font has no variants: bold/italic would
@@ -1061,7 +1157,9 @@ pub const Document = struct {
                 if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
-                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                    const run = try emb.shapeRun(text_copy, page_alloc);
+                    cached_glyphs = run.glyphs;
+                    cached_positions = run.pos;
                 } else {
                     emb.markCharsUsed(text_copy);
                 }
@@ -1072,7 +1170,9 @@ pub const Document = struct {
                 if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
                 try page.markEmbeddedUsed(self.allocator, emb);
                 if (emb.encoding == .identity) {
-                    cached_glyphs = try emb.markUnicodeCharsUsed(text_copy, page_alloc);
+                    const run = try emb.shapeRun(text_copy, page_alloc);
+                    cached_glyphs = run.glyphs;
+                    cached_positions = run.pos;
                 } else {
                     emb.markCharsUsed(text_copy);
                 }
@@ -1091,9 +1191,9 @@ pub const Document = struct {
         // Width of the rendered run: from the already-shaped glyphs when we
         // have them (avoids shaping the same string twice), else measured.
         const text_width = blk: {
-            if (cached_glyphs) |glyphs| {
+            if (cached_positions) |positions| {
                 switch (font_ref) {
-                    .embedded => |emb| break :blk emb.glyphSequenceWidth(glyphs, style.size, style.char_spacing),
+                    .embedded => |emb| break :blk emb.runWidth(positions, style.size, style.char_spacing),
                     else => {},
                 }
             }
@@ -1119,6 +1219,7 @@ pub const Document = struct {
                 .text_color = style.color,
                 .opacity = style.opacity,
                 .cached_glyphs = cached_glyphs,
+                .cached_positions = cached_positions,
                 .text_width = text_width,
                 .underline = style.decoration.underline,
                 .strikethrough = style.decoration.strikethrough,
@@ -1126,6 +1227,157 @@ pub const Document = struct {
         });
         return text_width;
     }
+
+    /// One text command per fallback run (see fallback.zig), each in its
+    /// own font, laid end to end. Returns the total width.
+    fn writeFallbackRuns(self: *Document, pos: Point, str: []const u8, style: TextStyle, word_spacing: f64) !f64 {
+        const plan = try fallback.Plan.init(style);
+        if (style.fallback_max_em) |cap| {
+            if (!(cap > 0)) return error.InvalidNumber;
+        }
+        const page_alloc = self.pages.items[self.current_page].pageAllocator();
+        const text = try stripSoftHyphens(page_alloc, str);
+        const cell = plan.cell(style.size);
+        var x = pos.x;
+        var i: usize = 0;
+        while (i < text.len) {
+            const run = plan.nextRun(text, i);
+            const run_style = plan.runStyle(style, run.slot);
+            if (plan.monospace and run.slot != 0 and monospaceShapes(plan.faces[run.slot - 1].font)) {
+                x += try self.writeMonospaceCluster(.{ .x = x, .y = pos.y }, text[i..run.end], style, run_style, &plan, run.slot, cell);
+                i = run.end;
+                continue;
+            }
+            const natural = try self.writeOneFont(.{ .x = x, .y = pos.y }, text[i..run.end], run_style, word_spacing);
+            i = run.end;
+            if (run.slot == 0) {
+                x += natural;
+                continue;
+            }
+            const items = self.pages.items[self.current_page].commands.items;
+            const t = &items[items.len - 1].text;
+            const f = plan.faces[run.slot - 1];
+            t.synth_bold = f.synth_bold;
+            t.synth_italic = f.synth_italic;
+            t.decoration_font = plan.primary;
+            if (plan.monospace) {
+                // Centered by the glyphs' own advance, without spacing
+                const own = switch (t.font) {
+                    .embedded => |emb| if (t.cached_positions) |p| emb.runWidth(p, t.font_size, 0) else natural,
+                    .standard => natural,
+                };
+                // Shrunk to fit its cells (as the screen does) or to the
+                // cap, and centered
+                const room = @as(f64, @floatFromInt(fallback.clusterCells(style, t.text_data))) * cell;
+                const fit = fallback.fitCluster(style, own, room);
+                t.glyph_scale = fit.scale;
+                t.glyph_dx = fit.dx;
+                t.text_width = room + style.char_spacing;
+            }
+            x += t.text_width;
+        }
+        return x - pos.x;
+    }
+
+    /// A `.monospace` fallback face whose clusters are shaped and placed
+    /// glyph by glyph (an Identity-H embedded font).
+    fn monospaceShapes(font: Font) bool {
+        return switch (font) {
+            .embedded => |e| e.encoding == .identity,
+            else => false,
+        };
+    }
+
+    /// One `.monospace` fallback cluster: shaped in its fallback face (GPOS
+    /// or fallback mark positioning, conjuncts, Indic reordering), its
+    /// glyphs placed at their shaped offsets, the whole centered in the
+    /// cluster's cells (fallback.clusterCells x `cell`) or shrunk to fit
+    /// when wider. Each glyph's ToUnicode is its own source text. Returns
+    /// the advance: cells x cell plus the character spacing.
+    fn writeMonospaceCluster(self: *Document, pos: Point, cluster: []const u8, style: TextStyle, run_style: TextStyle, plan: *const fallback.Plan, slot: usize, cell: f64) !f64 {
+        var page = &self.pages.items[self.current_page];
+        const page_alloc = page.pageAllocator();
+        const norm = try self.normalizeStyle(run_style);
+        const emb = switch (norm.font) {
+            .embedded => |e| e,
+            else => return error.InvalidFallbackFont,
+        };
+        if (self.getEmbeddedFontIndex(emb) == null) return error.ForeignFont;
+        try page.markEmbeddedUsed(self.allocator, emb);
+        try pdfa.validateOpacity(self.conformance, style.opacity, 1.0);
+
+        // GSUB/GPOS are parsed on first use
+        try emb.initOpenTypeFeatures();
+        const text_copy = try page_alloc.dupe(u8, cluster);
+        const shaped = try shaping.shapeFont(page_alloc, emb, emb.feature_flags, text_copy);
+        const cells: f64 = @floatFromInt(fallback.clusterCells(style, cluster));
+        const room = cells * cell;
+        const units: f64 = @floatFromInt(emb.font.head.?.units_per_em);
+        const to_pt = style.size / units;
+        const own = @as(f64, @floatFromInt(shaping.totalAdvance(shaped))) * to_pt;
+        // Shrunk to fit its cells (as the screen does) or to the cap, and
+        // centered
+        const fit = fallback.fitCluster(style, own, room);
+        const glyph_scale = fit.scale;
+        const glyph_dx = fit.dx;
+
+        const ids = try page_alloc.alloc(u16, shaped.len);
+        const sources = try page_alloc.alloc([2]u32, shaped.len);
+        const placed = try page_alloc.alloc(pagemod.PlacedOffset, shaped.len);
+        var pen: f64 = 0;
+        for (shaped, ids, sources, placed) |g, *id, *src, *p| {
+            id.* = g.id;
+            src.* = .{ g.text_start, g.text_end };
+            p.* = .{
+                .id = g.id,
+                .dx = (pen + @as(f64, @floatFromInt(g.x_offset))) * to_pt * glyph_scale,
+                .dy = @as(f64, @floatFromInt(g.y_offset)) * to_pt * glyph_scale,
+            };
+            pen += @floatFromInt(g.x_advance);
+        }
+        try emb.markSourcedGlyphsUsed(text_copy, ids, sources);
+
+        const f = plan.faces[slot - 1];
+        const advance = room + style.char_spacing;
+        try page.commands.append(self.allocator, .{ .text = .{
+            .x = pos.x,
+            .y = self.currentPageSize().height - pos.y,
+            .font_size = style.size,
+            .char_spacing = 0,
+            .word_spacing = 0,
+            .text_data = text_copy,
+            .font = .{ .embedded = emb },
+            .text_color = style.color,
+            .opacity = style.opacity,
+            .cached_glyphs = ids,
+            .text_width = advance,
+            .underline = style.decoration.underline,
+            .strikethrough = style.decoration.strikethrough,
+            .glyph_dx = glyph_dx,
+            .glyph_scale = glyph_scale,
+            .synth_bold = f.synth_bold,
+            .synth_italic = f.synth_italic,
+            .decoration_font = plan.primary,
+            .placed = placed,
+        } });
+        return advance;
+    }
+
+    /// Text width in an already-normalized style, fallback runs included.
+    fn measureNormalized(self: *Document, str: []const u8, style: TextStyle) f64 {
+        if (style.fallback.len == 0) return measureTextStyled(str, style);
+        var plain = style;
+        plain.fallback = &.{};
+        const plan = fallback.Plan.init(style) catch return self.getTextWidthStyled(str, plain);
+        return plan.measure(str, style, DocumentWidth{ .doc = self });
+    }
+
+    const DocumentWidth = struct {
+        doc: *Document,
+        pub fn width(self: DocumentWidth, run: []const u8, style: TextStyle) f64 {
+            return self.doc.getTextWidthStyled(run, style);
+        }
+    };
 
     /// Measures text width with explicit style.
     /// Soft-hyphens (U+00AD) are excluded from measurement as they're invisible.
@@ -1141,7 +1393,7 @@ pub const Document = struct {
 
         // Fast path: no soft-hyphens
         if (!containsSoftHyphens(str)) {
-            return measureTextStyled(str, style);
+            return self.measureNormalized(str, style);
         }
 
         // Slow path: filter out soft-hyphens using stack buffer
@@ -1157,7 +1409,7 @@ pub const Document = struct {
                 i += 1;
             }
         }
-        return measureTextStyled(buf[0..j], style);
+        return self.measureNormalized(buf[0..j], style);
     }
 
     /// Writes flowing text into a region with word wrapping.
@@ -1596,15 +1848,15 @@ pub const Document = struct {
 
     /// Find a character break point in a word that fits within max_width.
     /// This is a last resort when no hyphen or soft-hyphen breaks are available.
-    /// Returns the byte position where to break (respecting UTF-8 boundaries).
+    /// Returns the byte position where to break: between extended grapheme
+    /// clusters, so a base keeps its marks and a conjunct stays whole.
     fn findCharacterBreakStyled(self: *Document, word: []const u8, max_width: f64, style: TextStyle) ?usize {
         var best_break: ?usize = null;
         var current_width: f64 = 0;
         var i: usize = 0;
 
         while (i < word.len) {
-            const char_len = std.unicode.utf8ByteSequenceLength(word[i]) catch 1;
-            const char_end = @min(i + char_len, word.len);
+            const char_end = unicode_props.graphemeEndBytes(word, i);
             const prefix_width = self.getTextWidthStyled(word[0..char_end], style);
 
             if (prefix_width <= max_width) {
@@ -2020,7 +2272,7 @@ pub const Document = struct {
                             if (self.findHyphenBreakStyled(rest, line_width, render_style)) |c| break :blk c;
                         }
                         break :blk self.findCharacterBreakStyled(rest, line_width, render_style) orelse
-                            @min(std.unicode.utf8ByteSequenceLength(rest[0]) catch 1, rest.len);
+                            unicode_props.graphemeEndBytes(rest, 0);
                     };
                     piece = rest[0..cut];
                     next = pos + cut;
@@ -2924,8 +3176,9 @@ pub const Document = struct {
                     // Apply fill (non-stroking) opacity via ExtGState if not fully opaque.
                     // Wrap the whole text object (and its decorations) in q/Q so the
                     // alpha does not leak into subsequent content.
+                    // Synthesized bold strokes the glyphs: the stroke fades with the fill
                     const opacity_gs: ?usize = if (t.opacity < 1.0)
-                        try page.getOrAddOpacityState(self.allocator, t.opacity, 1.0)
+                        try page.getOrAddOpacityState(self.allocator, t.opacity, if (t.synth_bold) t.opacity else 1.0)
                     else
                         null;
                     if (opacity_gs) |idx| {
@@ -2935,10 +3188,20 @@ pub const Document = struct {
                         try cw.append(gs_buf[0..gs_len]);
                     }
 
+                    // Synthesized bold: fill and stroke the outline. Line
+                    // width and stroke color are graphics state, scoped by
+                    // q/Q (which also restores the render mode)
+                    const embolden = t.synth_bold and t.font == .embedded;
+                    if (embolden) {
+                        try cw.print("q\n{d:.3} w\n", .{t.font_size * t.glyph_scale * fallback.embolden_per_em});
+                        try t.text_color.writeStroke(&cw);
+                    }
+
                     // Begin text block
                     try cw.append("BT\n");
                     // Set text color
                     try t.text_color.writeFill(&cw);
+                    if (embolden) try cw.append("2 Tr\n");
 
                     switch (t.font) {
                         .embedded => |emb| {
@@ -2962,9 +3225,9 @@ pub const Document = struct {
                                 }
                                 // Word spacing is in the TJ (see the CID branch)
                                 try cw.append("0.00 Tw\n");
-                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size, t.x, t.y, t.word_spacing);
+                                try color_fonts.renderColorText(&cw, emb, plan, t.cached_glyphs.?, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing);
                             } else {
-                                try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size });
+                                try cw.print("/E{d} {d:.2} Tf\n", .{ idx + 1, t.font_size * t.glyph_scale });
 
                                 if (t.char_spacing != 0) {
                                     try cw.print("{d:.2} Tc\n", .{t.char_spacing});
@@ -2978,10 +3241,15 @@ pub const Document = struct {
                                 try cw.print("{d:.2} Tw\n", .{tw});
 
                                 if (emb.encoding == .identity) {
-                                    // CID mode: output with ligatures, kerning, and mark positioning
-                                    // Pass absolute position for Tm-based mark positioning
-                                    // Use cached glyphs if available (avoids duplicate OpenType shaping)
-                                    _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size, t.x, t.y, t.word_spacing, t.char_spacing);
+                                    // CID mode: the glyphs as shaped (writeOneFont) or
+                                    // placed (writeMonospaceCluster) - every identity
+                                    // text command has one or the other
+                                    const shear: f64 = if (t.synth_italic) fallback.oblique_shear else 0;
+                                    if (t.placed) |placed| {
+                                        try text_render.renderPlacedOffsets(&cw, emb, placed, t.x + t.glyph_dx, t.y, shear);
+                                    } else {
+                                        try text_render.renderShapedRun(&cw, emb, t.cached_glyphs.?, t.cached_positions.?, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
+                                    }
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });
                                     // WinAnsi mode
@@ -3011,6 +3279,7 @@ pub const Document = struct {
                     // later runs (which only emit Tc when non-zero) start at 0
                     if (t.char_spacing != 0) try cw.append("0 Tc\n");
                     try cw.append("ET\n");
+                    if (embolden) try cw.append("Q\n");
 
                     // Draw text decorations (underline/strikethrough)
                     // These must be outside the text block (BT/ET)
@@ -3022,6 +3291,21 @@ pub const Document = struct {
                     if (opacity_gs != null) {
                         try cw.append("Q\n");
                     }
+                },
+                .glyphs => |g| {
+                    const idx = self.getEmbeddedFontIndex(g.font) orelse continue;
+                    const opacity_gs: ?usize = if (g.opacity < 1.0)
+                        try page.getOrAddOpacityState(self.allocator, g.opacity, 1.0)
+                    else
+                        null;
+                    if (opacity_gs) |gs| {
+                        try cw.append("q\n");
+                        var gs_buf: [16]u8 = undefined;
+                        const gs_len = graphics.writeExtGStateRef(&gs_buf, gs);
+                        try cw.append(gs_buf[0..gs_len]);
+                    }
+                    try text_render.renderPlacedGlyphs(&cw, g, idx);
+                    if (opacity_gs != null) try cw.append("Q\n");
                 },
                 .raw => |data| {
                     try cw.append(data);
@@ -3040,7 +3324,8 @@ pub const Document = struct {
         var strikeout_pos: f64 = 250;
         var strikeout_thick: f64 = 50;
 
-        switch (t.font) {
+        const decoration_font: FontRef = if (t.decoration_font) |f| .{ .embedded = f } else t.font;
+        switch (decoration_font) {
             .embedded => |emb| {
                 underline_pos = @floatFromInt(emb.underline_position);
                 underline_thick = @floatFromInt(emb.underline_thickness);
@@ -3782,7 +4067,9 @@ pub const Document = struct {
             // per-render list this document owns.
             var opacity_states = std.ArrayListUnmanaged(svg.OpacityState).empty;
             defer opacity_states.deinit(self.allocator);
-            const svg_content = try s.toPdfContent(self.allocator, &opacity_states);
+            var patterns = std.ArrayListUnmanaged(svg.PatternSpec).empty;
+            defer patterns.deinit(self.allocator);
+            const svg_content = try s.toPdfContent(self.allocator, &opacity_states, &patterns);
             defer self.allocator.free(svg_content);
 
             try w.beginObject(svg_id);
@@ -3800,11 +4087,12 @@ pub const Document = struct {
             try bbox.append(Value.real(s.height));
             try form_dict.put("BBox", .{ .array_val = &bbox });
 
-            // Build resources dictionary (may include ExtGState, Font, or both)
+            // Build resources dictionary (ExtGState, Pattern, Font, as used)
             const has_transparency = opacity_states.items.len > 0;
+            const has_patterns = patterns.items.len > 0;
             const has_text = s.used_fonts.items.len > 0;
 
-            if (has_transparency or has_text) {
+            if (has_transparency or has_patterns or has_text) {
                 var resources = Dict.init(self.allocator);
                 defer resources.deinit();
 
@@ -3832,6 +4120,27 @@ pub const Document = struct {
                         try extgstate.put(try ownedResourceName(self.allocator, &gs_names, "GS", idx), .{ .dict_val = &gs_dicts[idx] });
                     }
                     try resources.put("ExtGState", .{ .dict_val = &extgstate });
+                }
+
+                // Gradient paints: shading patterns, inline (/P1, /P2, ...)
+                var pattern_res = Dict.init(self.allocator);
+                defer pattern_res.deinit();
+                var pattern_strs: std.ArrayListUnmanaged([]u8) = .empty; // names and dicts
+                defer {
+                    for (pattern_strs.items) |str| self.allocator.free(str);
+                    pattern_strs.deinit(self.allocator);
+                }
+                if (has_patterns) {
+                    for (patterns.items, 0..) |spec, idx| {
+                        var dict: std.Io.Writer.Allocating = .init(self.allocator);
+                        defer dict.deinit();
+                        try svg.writePattern(self.allocator, spec, &dict.writer);
+                        try pattern_strs.ensureUnusedCapacity(self.allocator, 1);
+                        const dict_str = try dict.toOwnedSlice();
+                        pattern_strs.appendAssumeCapacity(dict_str);
+                        try pattern_res.put(try ownedResourceName(self.allocator, &pattern_strs, "P", idx), Value.literal(dict_str));
+                    }
+                    try resources.put("Pattern", .{ .dict_val = &pattern_res });
                 }
 
                 // Add Font resources for SVG text elements
@@ -4494,4 +4803,21 @@ test "soft hyphens excluded from text width" {
     const with_soft = doc.getTextWidthStyled("ex\xc2\xadplic\xc2\xadit", style);
     const without_soft = doc.getTextWidthStyled("explicit", style);
     try std.testing.expectEqual(without_soft, with_soft);
+}
+
+test "findCharacterBreakStyled never splits a grapheme cluster" {
+    const a = std.testing.allocator;
+    const ttc = std.Io.Dir.cwd().readFileAlloc(std.testing.io, "/System/Library/Fonts/Kohinoor.ttc", a, .limited(64 << 20)) catch return error.SkipZigTest;
+    defer a.free(ttc);
+    var doc = Document.init(a, std.testing.io);
+    defer doc.deinit();
+    try doc.addPage(.{});
+    const style: TextStyle = .{ .font = try doc.loadFontFromCollection(ttc, 4, .identity), .size = 12 };
+    // Room for "ka" but not the cluster "ka-i" (the i matra has an advance
+    // of its own): no break inside it (code point stepping cut after the
+    // ka, byte 3)
+    const w = doc.getTextWidthStyled("क", style);
+    try std.testing.expect(doc.getTextWidthStyled("कि", style) > w + 0.01);
+    try std.testing.expectEqual(@as(?usize, null), doc.findCharacterBreakStyled("किन", w + 0.01, style));
+    try std.testing.expectEqual(@as(?usize, 6), doc.findCharacterBreakStyled("किन", doc.getTextWidthStyled("कि", style) + 0.01, style));
 }

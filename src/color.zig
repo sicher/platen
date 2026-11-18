@@ -1,4 +1,5 @@
 const std = @import("std");
+const ochre = @import("ochre");
 
 /// Color with support for multiple color spaces.
 /// All values are normalized to 0.0-1.0 range.
@@ -219,44 +220,20 @@ pub const Color = union(enum) {
         return .{ .cmyk_val = .{ .c = c, .m = m, .y = y, .k = k } };
     }
 
-    /// Create RGB color from hex string (e.g., "#FF0000", "FF0000", "#F00", "F00")
-    /// Returns null if the string is invalid.
+    /// Create RGB color from hex string (e.g., "#FF0000", "FF0000", "#F00", "F00"),
+    /// by ochre's CSS parser. The forms with alpha ("#FF0000FF", "#F00F") are
+    /// read too, but only opaque: a Color has no alpha to keep it in.
+    /// Returns null if the string is invalid or translucent.
     pub fn hex(hex_str: []const u8) ?Color {
-        var s = hex_str;
-        // Skip leading #
-        if (s.len > 0 and s[0] == '#') {
-            s = s[1..];
-        }
-
-        if (s.len == 3) {
-            // Short form: "F00" -> "FF0000"
-            const r = parseHexDigit(s[0]) orelse return null;
-            const g = parseHexDigit(s[1]) orelse return null;
-            const b = parseHexDigit(s[2]) orelse return null;
-            return rgb(r * 17, g * 17, b * 17);
-        } else if (s.len == 6) {
-            // Full form: "FF0000"
-            const r = parseHexByte(s[0..2]) orelse return null;
-            const g = parseHexByte(s[2..4]) orelse return null;
-            const b = parseHexByte(s[4..6]) orelse return null;
-            return rgb(r, g, b);
-        }
-        return null;
-    }
-
-    fn parseHexDigit(c: u8) ?u8 {
-        return switch (c) {
-            '0'...'9' => c - '0',
-            'a'...'f' => c - 'a' + 10,
-            'A'...'F' => c - 'A' + 10,
-            else => null,
-        };
-    }
-
-    fn parseHexByte(s: *const [2]u8) ?u8 {
-        const high = parseHexDigit(s[0]) orelse return null;
-        const low = parseHexDigit(s[1]) orelse return null;
-        return high * 16 + low;
+        // ochre reads CSS, where hex has its `#`.
+        const digits = if (std.mem.startsWith(u8, hex_str, "#")) hex_str[1..] else hex_str;
+        if (digits.len > 8) return null;
+        var css: [9]u8 = undefined;
+        css[0] = '#';
+        @memcpy(css[1..][0..digits.len], digits);
+        const pixel = ochre.parse(css[0 .. digits.len + 1], .{ .as = ochre.Rgba8 }) catch return null;
+        if (pixel.alpha != 255) return null;
+        return rgb(pixel.r, pixel.g, pixel.b);
     }
 
     /// Format color as PDF fill operator (g, rg, or k)
@@ -307,168 +284,22 @@ pub const Color = union(enum) {
         };
     }
 
-    /// Comptime-optimized lookup table for named CSS/SVG colors.
-    const named_colors = std.StaticStringMap(Color).initComptime(.{
-        // Blacks and Grays
-        .{ "black", black },
-        .{ "white", white },
-        .{ "gray", gray },
-        .{ "grey", grey },
-        .{ "silver", silver },
-        .{ "darkgray", darkgray },
-        .{ "darkgrey", darkgrey },
-        .{ "dimgray", dimgray },
-        .{ "dimgrey", dimgrey },
-        .{ "lightgray", lightgray },
-        .{ "lightgrey", lightgrey },
-        .{ "gainsboro", gainsboro },
-        .{ "whitesmoke", whitesmoke },
-        // Slate grays
-        .{ "slategray", slategray },
-        .{ "slategrey", slategrey },
-        .{ "lightslategray", lightslategray },
-        .{ "lightslategrey", lightslategrey },
-        .{ "darkslategray", darkslategray },
-        .{ "darkslategrey", darkslategrey },
-        // Reds
-        .{ "red", red },
-        .{ "darkred", darkred },
-        .{ "firebrick", firebrick },
-        .{ "indianred", indianred },
-        .{ "lightcoral", lightcoral },
-        .{ "crimson", crimson },
-        .{ "maroon", maroon },
-        // Pinks
-        .{ "pink", pink },
-        .{ "lightpink", lightpink },
-        .{ "hotpink", hotpink },
-        .{ "deeppink", deeppink },
-        .{ "palevioletred", palevioletred },
-        .{ "mediumvioletred", mediumvioletred },
-        // Oranges
-        .{ "orange", orange },
-        .{ "darkorange", darkorange },
-        .{ "orangered", orangered },
-        .{ "tomato", tomato },
-        .{ "coral", coral },
-        .{ "salmon", salmon },
-        .{ "lightsalmon", lightsalmon },
-        .{ "darksalmon", darksalmon },
-        // Yellows
-        .{ "yellow", yellow },
-        .{ "lightyellow", lightyellow },
-        .{ "gold", gold },
-        .{ "khaki", khaki },
-        .{ "darkkhaki", darkkhaki },
-        .{ "palegoldenrod", palegoldenrod },
-        .{ "moccasin", moccasin },
-        .{ "peachpuff", peachpuff },
-        .{ "papayawhip", papayawhip },
-        .{ "lemonchiffon", lemonchiffon },
-        .{ "cornsilk", cornsilk },
-        // Browns
-        .{ "brown", brown },
-        .{ "saddlebrown", saddlebrown },
-        .{ "sienna", sienna },
-        .{ "chocolate", chocolate },
-        .{ "peru", peru },
-        .{ "sandybrown", sandybrown },
-        .{ "burlywood", burlywood },
-        .{ "tan", tan },
-        .{ "rosybrown", rosybrown },
-        .{ "goldenrod", goldenrod },
-        .{ "darkgoldenrod", darkgoldenrod },
-        // Greens
-        .{ "green", green },
-        .{ "lime", lime },
-        .{ "limegreen", limegreen },
-        .{ "lightgreen", lightgreen },
-        .{ "palegreen", palegreen },
-        .{ "darkgreen", darkgreen },
-        .{ "forestgreen", forestgreen },
-        .{ "seagreen", seagreen },
-        .{ "mediumseagreen", mediumseagreen },
-        .{ "springgreen", springgreen },
-        .{ "mediumspringgreen", mediumspringgreen },
-        .{ "mediumaquamarine", mediumaquamarine },
-        .{ "aquamarine", aquamarine },
-        .{ "darkseagreen", darkseagreen },
-        .{ "yellowgreen", yellowgreen },
-        .{ "greenyellow", greenyellow },
-        .{ "chartreuse", chartreuse },
-        .{ "lawngreen", lawngreen },
-        .{ "olive", olive },
-        .{ "olivedrab", olivedrab },
-        .{ "darkolivegreen", darkolivegreen },
-        // Cyans
-        .{ "cyan", cyan },
-        .{ "aqua", aqua },
-        .{ "lightcyan", lightcyan },
-        .{ "paleturquoise", paleturquoise },
-        .{ "turquoise", turquoise },
-        .{ "mediumturquoise", mediumturquoise },
-        .{ "darkturquoise", darkturquoise },
-        .{ "darkcyan", darkcyan },
-        .{ "teal", teal },
-        .{ "lightseagreen", lightseagreen },
-        .{ "cadetblue", cadetblue },
-        // Blues
-        .{ "blue", blue },
-        .{ "navy", navy },
-        .{ "darkblue", darkblue },
-        .{ "mediumblue", mediumblue },
-        .{ "midnightblue", midnightblue },
-        .{ "royalblue", royalblue },
-        .{ "steelblue", steelblue },
-        .{ "dodgerblue", dodgerblue },
-        .{ "deepskyblue", deepskyblue },
-        .{ "cornflowerblue", cornflowerblue },
-        .{ "skyblue", skyblue },
-        .{ "lightskyblue", lightskyblue },
-        .{ "lightblue", lightblue },
-        .{ "lightsteelblue", lightsteelblue },
-        .{ "powderblue", powderblue },
-        .{ "aliceblue", aliceblue },
-        // Purples
-        .{ "purple", purple },
-        .{ "magenta", magenta },
-        .{ "fuchsia", fuchsia },
-        .{ "darkmagenta", darkmagenta },
-        .{ "indigo", indigo },
-        .{ "darkslateblue", darkslateblue },
-        .{ "slateblue", slateblue },
-        .{ "mediumslateblue", mediumslateblue },
-        .{ "mediumpurple", mediumpurple },
-        .{ "blueviolet", blueviolet },
-        .{ "darkviolet", darkviolet },
-        .{ "darkorchid", darkorchid },
-        .{ "mediumorchid", mediumorchid },
-        .{ "orchid", orchid },
-        .{ "violet", violet },
-        .{ "plum", plum },
-        .{ "thistle", thistle },
-        .{ "lavender", lavender },
-        .{ "rebeccapurple", rebeccapurple },
-        // Whites and off-whites
-        .{ "snow", snow },
-        .{ "honeydew", honeydew },
-        .{ "mintcream", mintcream },
-        .{ "azure", azure },
-        .{ "ghostwhite", ghostwhite },
-        .{ "floralwhite", floralwhite },
-        .{ "ivory", ivory },
-        .{ "beige", beige },
-        .{ "linen", linen },
-        .{ "oldlace", oldlace },
-        .{ "antiquewhite", antiquewhite },
-        .{ "bisque", bisque },
-        .{ "blanchedalmond", blanchedalmond },
-        .{ "navajowhite", navajowhite },
-        .{ "wheat", wheat },
-        .{ "seashell", seashell },
-        .{ "lavenderblush", lavenderblush },
-        .{ "mistyrose", mistyrose },
-    });
+    /// Every named color constant above, by name, built from the declarations
+    /// so the two cannot drift apart. Their values are checked against CSS
+    /// Color 4 (ochre's table) in the tests.
+    const named_colors = build: {
+        const names = @typeInfo(Color).@"union".decl_names;
+        var entries: [names.len]struct { []const u8, Color } = undefined;
+        var count = 0;
+        for (names) |name| {
+            // This table is a declaration too, and cannot read itself.
+            if (std.mem.eql(u8, name, "named_colors")) continue;
+            if (@TypeOf(@field(Color, name)) != Color) continue;
+            entries[count] = .{ name, @field(Color, name) };
+            count += 1;
+        }
+        break :build std.StaticStringMap(Color).initComptime(entries[0..count]);
+    };
 
     /// Look up a named CSS/SVG color by name (case-sensitive).
     /// Returns null if the name is not recognized.
@@ -612,6 +443,35 @@ test "Color hex" {
     try std.testing.expect(Color.hex("#") == null);
     try std.testing.expect(Color.hex("GG0000") == null);
     try std.testing.expect(Color.hex("#12345") == null);
+    try std.testing.expect(Color.hex("#123456789") == null);
+    try std.testing.expect(Color.hex("#1234567890") == null);
+    try std.testing.expect(Color.hex("red") == null);
+    try std.testing.expect(Color.hex("#rgb(1, 2, 3)") == null);
+
+    // Alpha only when opaque: a Color cannot keep it
+    try std.testing.expect(Color.hex("#FF0000FF").?.eql(red));
+    try std.testing.expect(Color.hex("F00F").?.eql(red));
+    try std.testing.expect(Color.hex("#FF000080") == null);
+    try std.testing.expect(Color.hex("#F008") == null);
+}
+
+test "the named colors are CSS Color 4's, all 148, and fromName finds each" {
+    var count: usize = 0;
+    inline for (@typeInfo(Color).@"union".decl_names) |name| {
+        if (comptime std.mem.eql(u8, name, "named_colors")) continue;
+        const named = @field(Color, name);
+        if (@TypeOf(named) != Color) continue;
+        count += 1;
+        const css = try ochre.parse(name, .{ .as = ochre.Rgba8 });
+        try std.testing.expectEqual(Color.Rgb{ .r = css.r, .g = css.g, .b = css.b }, named.toRgb());
+        try std.testing.expect(Color.fromName(name).?.eql(named));
+    }
+    try std.testing.expectEqual(148, count);
+    // The hand-written table this replaced had lost one.
+    try std.testing.expect(Color.fromName("lightgoldenrodyellow").?.eql(Color.lightgoldenrodyellow));
+    try std.testing.expect(Color.fromName("transparent") == null);
+    try std.testing.expect(Color.fromName("Red") == null);
+    try std.testing.expect(Color.fromName("hex") == null);
 }
 
 test "Color presets" {

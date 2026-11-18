@@ -25,6 +25,12 @@ pub const Font = struct {
     maxp: ?MaxpTable = null,
     post: ?PostTable = null,
     os2: ?Os2Table = null,
+    /// The face's own style: OS/2 fsSelection, else head.macStyle (as
+    /// font_collection.describeFace reads it).
+    style: FaceStyle = .{},
+    /// OS/2 fsType: the embedding permissions the face's licence grants
+    /// (0 = installable, also without an OS/2 table). See `mayEmbed`.
+    fs_type: u16 = 0,
 
     // Cached cmap lookup (avoids subtable search on every glyph lookup)
     cmap_subtable_offset: u32 = 0,
@@ -80,6 +86,10 @@ pub const Font = struct {
         font.maxp = font.parseMaxp();
         font.post = font.parsePost();
         font.os2 = font.parseOs2();
+        font.style = font.parseStyle();
+        if (font.getTable("OS/2".*)) |os2| {
+            if (os2.len >= 10) font.fs_type = readU16(os2, 8);
+        }
 
         // Initialize cmap cache for fast glyph lookups
         font.initCmapCache();
@@ -262,6 +272,28 @@ pub const Font = struct {
     }
 
     /// Parse 'OS/2' table (strikethrough metrics)
+    /// Whether the licence lets a document embed the face's outlines: not
+    /// Restricted License (bits 0-3 exactly 0x2; with several bits set the
+    /// least restrictive applies) and not Bitmap Embedding Only (bit 9).
+    /// platen embeds whatever it is given; callers choosing fonts on their
+    /// own (system fallback) ask this first.
+    pub fn mayEmbed(self: *const Font) bool {
+        if (self.fs_type & 0x000F == 0x0002) return false;
+        return self.fs_type & 0x0200 == 0;
+    }
+
+    fn parseStyle(self: *const Font) FaceStyle {
+        if (self.getTable("OS/2".*)) |os2| {
+            if (os2.len < 64) return .{};
+            const sel = readU16(os2, 62);
+            return .{ .bold = sel & (1 << 5) != 0, .italic = sel & 1 != 0 };
+        }
+        const head = self.getTable("head".*) orelse return .{};
+        if (head.len < 46) return .{};
+        const mac = readU16(head, 44);
+        return .{ .bold = mac & 1 != 0, .italic = mac & 2 != 0 };
+    }
+
     fn parseOs2(self: *const Font) ?Os2Table {
         const data = self.getTable("OS/2".*) orelse return null;
         if (data.len < 30) return null;
@@ -306,6 +338,49 @@ pub const Font = struct {
             if (offset + 2 > hmtx_data.len) return null;
             return readU16(hmtx_data, offset);
         }
+    }
+
+    /// Ink extents of a glyph in font units, as HarfBuzz reports them:
+    /// x_bearing is the hmtx left side bearing (else xMin), y_bearing the
+    /// top (yMax), width xMax - xMin, height yMin - yMax (negative). An
+    /// empty glyph has all zero. TrueType outlines only: null for CFF
+    /// fonts, glyph IDs past the font, or a broken glyf/loca.
+    pub fn glyphExtents(self: *const Font, glyph_id: u16) ?GlyphExtents {
+        const head = self.head orelse return null;
+        const maxp = self.maxp orelse return null;
+        if (glyph_id >= maxp.num_glyphs) return null;
+        const loca = self.getTable("loca".*) orelse return null;
+        const glyf = self.getTable("glyf".*) orelse return null;
+        const g: usize = glyph_id;
+        const short = head.index_to_loc_format == 0;
+        if (if (short) g * 2 + 4 > loca.len else g * 4 + 8 > loca.len) return null;
+        const start: usize, const end: usize = if (short) .{
+            @as(usize, readU16(loca, g * 2)) * 2,
+            @as(usize, readU16(loca, g * 2 + 2)) * 2,
+        } else .{ readU32(loca, g * 4), readU32(loca, g * 4 + 4) };
+        if (start == end) return .{};
+        if (end < start or start + 10 > glyf.len) return null;
+        const x_min: i32 = readI16(glyf, start + 2);
+        const y_min: i32 = readI16(glyf, start + 4);
+        const x_max: i32 = readI16(glyf, start + 6);
+        const y_max: i32 = readI16(glyf, start + 8);
+        return .{
+            .x_bearing = self.leftSideBearing(glyph_id) orelse @min(x_min, x_max),
+            .y_bearing = @max(y_min, y_max),
+            .width = @max(x_min, x_max) - @min(x_min, x_max),
+            .height = @min(y_min, y_max) - @max(y_min, y_max),
+        };
+    }
+
+    /// The hmtx left side bearing of a glyph, null past the table.
+    pub fn leftSideBearing(self: *const Font, glyph_id: u16) ?i32 {
+        const hhea = self.hhea orelse return null;
+        const hmtx = self.hmtx_data orelse return null;
+        const long: usize = hhea.num_of_long_hor_metrics;
+        const g: usize = glyph_id;
+        const off = if (g < long) g * 4 + 2 else long * 4 + (g - long) * 2;
+        if (off + 2 > hmtx.len) return null;
+        return readI16(hmtx, off);
     }
 
     /// Get glyph width with ASCII fast path (in font units)
@@ -490,6 +565,12 @@ pub const TableEntry = struct {
     length: u32,
 };
 
+/// Bold and italic as a face declares them about itself.
+pub const FaceStyle = struct {
+    bold: bool = false,
+    italic: bool = false,
+};
+
 /// 'head' table - font header
 pub const HeadTable = struct {
     units_per_em: u16,
@@ -512,6 +593,14 @@ pub const HheaTable = struct {
 /// 'maxp' table - maximum profile
 pub const MaxpTable = struct {
     num_glyphs: u16,
+};
+
+/// A glyph's ink box in font units (HarfBuzz's hb_glyph_extents_t).
+pub const GlyphExtents = struct {
+    x_bearing: i32 = 0,
+    y_bearing: i32 = 0,
+    width: i32 = 0,
+    height: i32 = 0,
 };
 
 /// 'post' table - PostScript hints (underline metrics)
@@ -776,6 +865,38 @@ test "parse Courier Prime" {
     try std.testing.expect(width_a.? > 0);
 }
 
+test "a face reports its own bold and italic" {
+    const cases = [_]struct { path: []const u8, style: FaceStyle }{
+        .{ .path = "test/fonts/Courier Prime/Courier Prime.ttf", .style = .{} },
+        .{ .path = "test/fonts/Courier Prime/Courier Prime Bold.ttf", .style = .{ .bold = true } },
+        .{ .path = "test/fonts/Courier Prime/Courier Prime Italic.ttf", .style = .{ .italic = true } },
+        .{ .path = "test/fonts/Courier Prime/Courier Prime Bold Italic.ttf", .style = .{ .bold = true, .italic = true } },
+    };
+    for (cases) |c| {
+        const result = try Font.fromFile(std.testing.io, std.testing.allocator, c.path);
+        defer std.testing.allocator.free(result.data);
+        try std.testing.expectEqual(c.style, result.font.style);
+    }
+}
+
+test "embedding permissions follow fsType" {
+    var f: Font = .{ .data = &.{}, .tables = undefined };
+    for ([_]struct { u16, bool }{
+        .{ 0x0000, true }, // installable
+        .{ 0x0002, false }, // restricted
+        .{ 0x0004, true }, // preview & print
+        .{ 0x0008, true }, // editable
+        .{ 0x0006, true }, // restricted + preview: the less restrictive wins
+        .{ 0x0208, false }, // bitmap embedding only
+    }) |c| {
+        f.fs_type = c[0];
+        try std.testing.expectEqual(c[1], f.mayEmbed());
+    }
+    const courier = try Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    defer std.testing.allocator.free(courier.data);
+    try std.testing.expect(courier.font.mayEmbed());
+}
+
 test "read big-endian" {
     const data = [_]u8{ 0x00, 0x01, 0x02, 0x03 };
     try std.testing.expectEqual(@as(u16, 0x0001), readU16(&data, 0));
@@ -845,4 +966,21 @@ test "name record whose string offset + length overflows u16 is ignored" {
 
     const font = try Font.parse(&data);
     try std.testing.expectEqual(@as(?[]const u8, null), font.getNameEntry(6));
+}
+
+test "glyphExtents: TrueType boxes with the hmtx side bearing; CFF has none" {
+    const loaded = try Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Courier Prime/Courier Prime.ttf");
+    defer std.testing.allocator.free(loaded.data);
+    const f = loaded.font;
+    const h = f.getGlyphId('H').?;
+    const e = f.glyphExtents(h).?;
+    try std.testing.expect(e.width > 0 and e.height < 0 and e.y_bearing > 0);
+    try std.testing.expectEqual(f.leftSideBearing(h).?, e.x_bearing);
+    // Space has no outline: all zero
+    try std.testing.expectEqual(GlyphExtents{}, f.glyphExtents(f.getGlyphId(' ').?).?);
+    try std.testing.expect(f.glyphExtents(f.maxp.?.num_glyphs) == null);
+
+    const cff = try Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.otf");
+    defer std.testing.allocator.free(cff.data);
+    try std.testing.expect(cff.font.glyphExtents(cff.font.getGlyphId('H').?) == null);
 }

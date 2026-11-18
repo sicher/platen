@@ -228,11 +228,24 @@ returns **standalone sfnt bytes**, not a loaded Font.
   weight 400/700 at width 5 (italic from fsSelection). Light, Black,
   Condensed etc. never match. Ties: earlier folder, then smaller path,
   then lower face index - independent of directory iteration order.
+- **All faces** (`system_fonts.listFamily`): the same walk (`walk` feeds
+  both it and `find`), no `classify`. A face is a subfamily name (ASCII
+  case ignored); of several copies the best-ranked wins, and the list is in
+  rank order. No extraction: `FamilyFace.load` re-reads the file and
+  refuses (error.FaceChanged) when the index no longer holds the same
+  family/subfamily/PostScript name. Callers with their own rule (courier:
+  Final Draft takes a family's lightest upright face) pick from the list.
 - **Prefilter** (`nameMayMatch`): the squashed file stem starts with the
   squashed family, or an 8.3-style stem (<= 8 chars, Windows "timesbd",
-  "cour") shares the family's first 4 chars. `prefilter = false` scans
-  everything (needed for fonts whose file name is unrelated, e.g.
-  Hiragino's Japanese file names). Real-macOS lookups take 10-60 ms.
+  "cour") shares the family's first 4 chars. A stem with non-ASCII
+  characters cannot be judged from an ASCII family (macOS: Hiragino in
+  "ヒラギノ角ゴシック W3.ttc", stored in NFD), so `holdsFamily` reads only
+  its collection header, table directories and `name` tables (positional
+  reads; the name table goes into a one-table sfnt for `describeFace`) and
+  the whole file is read only on a match. macOS has 12 such files (84 MB);
+  the probe adds ~0.3 ms to a warm lookup. No alias table to maintain.
+  `prefilter = false` scans everything (for ASCII file names unrelated to
+  the family). Real-macOS lookups take 10-60 ms.
 - **Folders**: macOS /System/Library/Fonts(+/Supplemental), /Library/Fonts,
   ~/Library/Fonts; Linux /usr/share/fonts, /usr/local/share/fonts,
   ~/.local/share/fonts, ~/.fonts; Windows C:\Windows\Fonts and
@@ -898,11 +911,78 @@ try doc.drawSvg(svg, x, y, width, height);
 - Text elements with font families (serif, sans-serif, monospace)
 - Transforms: translate, scale, rotate, skewX, skewY, matrix
 - Styling: fill, stroke, stroke-width, opacity, stroke-linecap/linejoin
-- Colors: hex (#RGB, #RRGGBB), rgb(), rgba(), named colors
-- Gradients: linearGradient, radialGradient with stops
+- Colors: any CSS Color 4 color, parsed by ochre (`src/ochre/`, vendored): hex
+  with or without alpha, the 148 names, rgb(), rgba(), hsl(), oklab(), oklch().
+  Out-of-range values are clipped as browsers do. Alpha counts only as `none` at 0
+- Gradients: linearGradient, radialGradient as fill and stroke (`url(#id)`
+  with fallback), both units, gradientTransform, focal point. Not yet: href
+  inheritance, stop-opacity, spreadMethod reflect/repeat (see below)
 - Reuse: `<defs>` and `<use>` elements with href/xlink:href
 
 **Use cases:** matplotlib, Inkscape, Illustrator, R/ggplot2, MathJax equations.
+
+**SVG gradients** (`src/svg_gradient.zig`; path geometry and bounding boxes
+in `src/svg_path.zig`):
+
+- Parsing keeps every gradient attribute optional (null = not set); defaults
+  apply in `prepare`. After parsing, `resolveHrefs` fills in what each
+  gradient inherits through `href`, as Chrome does: each attribute from the
+  first gradient in the chain that sets it, the stops from the first that has
+  any (borrowed as `inherited_stops`, so the map must not change after). A
+  missing or non-gradient target ends the chain; the walk is capped at
+  `max_href_hops` (32), which also ends cycles (going round again adds
+  nothing). The parser sets only coordinates of the element's own kind, so
+  merging every field lets linear coordinates pass through a radial template
+  (unused by it), as in browsers. Resolution reads only the parsed values and
+  writes back after, so map order does not matter.
+  `Style.fill`/`stroke` are a `Paint`: a color, or `url(#id)` as an index into
+  `Svg.paint_refs` plus a fallback. References resolve at render time, so a
+  gradient may follow its first use. A later duplicate id replaces the
+  earlier gradient (as for `defs`).
+- Each painted element becomes a **shading pattern** (PatternType 2) in the
+  SVG form's `/Pattern` resources (`/P{n}`, inline dicts), set with
+  `/Pattern cs /Pn scn` (`CS`/`SCN` for strokes). `toPdfContent` reports them
+  in a `patterns` out-list beside `opacity_states`. A pattern's space is the
+  form's, so its matrix is `base x element transform x bbox x gradientTransform`,
+  where base is the flip and viewBox `cm`s. Those transforms are written
+  rounded (`{d:.2}`/`{d:.4}`), so the matrix uses them *as printed*
+  (`asPrinted`: format, parse back) and gradient and geometry line up exactly.
+- The bounding box is the fill geometry's (stroke width left out), tight:
+  curves by their extrema (`svg_path.Bounds`). Text's is estimated (ascent
+  0.8, descent 0.2 of the size over the estimated width).
+- Stops are made non-decreasing, held out to 0 and 1, and zero-width spans
+  (hard edges) left out of the stitching function; numbers are written with
+  up to 6 decimals (gradient.zig's 3-decimal Bounds would merge close stops).
+  `gradient.zig`'s own function writer assumes stops at exactly 0 and 1.
+- Extend is always `[true true]` (spreadMethod pad); reflect/repeat would need
+  the stops repeated over a wider domain. stop-opacity would need a soft mask
+  (as COLRv1 gradients have).
+- A focal point outside the circle draws a cone in PDF, which is SVG 2's (and
+  resvg's) behaviour, not SVG 1.1's clamp.
+- OT-SVG glyphs that need patterns fall back to the outline (the Type3 font's
+  shared resources do not carry them).
+
+**Testing SVG gradients** (`test/svg_gradients/`): neither fpdf2's SVG import
+nor MuPDF supports gradients, so **resvg** is the reference (`resvg-py` in
+`.venv`; `pip install resvg-py`). `scripts/gen_svg_probes.py` records resvg's
+colors at the probe points each SVG lists (`<!-- probes: x,y ... -->`) in
+`probes.json` (committed; CI needs only pdftoppm), and
+`scripts/check_svg_probes.py` holds pdftoppm's render of platen's PDF to them
+within 3 levels. Probes must sit where the color changes slowly (5x5 spread
+<= 24 levels, enforced by the generator), because rasterizers sample up to half
+a pixel apart: on edges, hard stops, and near a radial focal point the
+difference is real but the rasterizer's. Near a focal point pdftoppm and MuPDF
+both approximate (checked by hand: resvg's (243,249,243) at one pixel is the
+exact value; poppler gave t = 0.067 for 0.049). MuPDF also draws a one-pixel
+seam along the focal-to-center axis of a radial shading; poppler does not. The
+exact pixel check against the platen-made `test/reference/svg_gradients.pdf`
+catches any later drift.
+
+resvg 0.5 (resvg-py) is no oracle for some `href` cases, which are unit-tested
+only: it ignores an inherited `gradientTransform` (SVG 1.1, Chrome and Firefox
+inherit it), drops linear coordinates inherited through a radial gradient
+(browsers keep them), and hangs on a chain that runs into a cycle
+(`a -> b -> c -> b`).
 
 ### Drawing Primitives
 
@@ -1138,12 +1218,66 @@ draws. Three rules keep it true:
   (`anyShapingFeatureEnabled`) so pre-render measurements don't miss
   kerning.
 - `writeAt` never measures separately: `writeTextStyled` returns the
-  width computed from its own shaped run, and anchoring (.center/.right)
-  shifts the just-appended deferred command. Every string is shaped
+  width computed from its own shaped run(s), and anchoring (.center/.right)
+  shifts every deferred command it appended. Every string is shaped
   exactly once.
+- A glyph's advance in 1/1000 em is rounded the same way everywhere
+  (`EmbeddedFont.thousandths`, the /W and /Widths arrays): viewers advance
+  by the array value, so measurement sums exactly those.
 - Every identity UTF-8 -> glyph path (rendering, shaped and unshaped
   measurement, getGlyphsForText) decodes through `EmbeddedFont.decodeText`,
   which also does Unicode composition - never decode text elsewhere.
+
+### Fallback fonts (`src/fallback.zig`)
+`TextStyle.fallback` cuts text into runs, one font each (slot 0 =
+`font`, i+1 = `fallback[i]`), chosen per cluster: an extended grapheme
+cluster (`unicode_props.graphemeEnd`, UAX #29 incl. GB9c conjuncts;
+tested against UCD's GraphemeBreakTest.txt, copied to test/unicode by
+gen_unicode_props.py) goes to the first slot that draws all of it, as its codepoints or composed into a
+precomposed letter (`drawsCluster`: "e" + U+0301 stays in a font with
+"é" though it lacks a lone U+0301); else the first slot with the base;
+else slot 0 (.notdef shows the gap). `writeTextStyled` routes a fallback style to
+`writeFallbackRuns`, which writes each run through `writeOneFont` (one
+`TextCommand` per run) and patches the fallback commands: `synth_bold`,
+`synth_italic`, `decoration_font` (the primary: one underline position
+across runs) and, for `.monospace`, `glyph_dx` (centering) and
+`text_width` = one cell; a glyph wider than the cell gets `glyph_scale`
+(drawn at size * cell / width, decorations at the style's size) instead
+of centering - CJK beside Courier, as dvui fits it on screen.
+`.monospace` makes each fallback cluster its own run; cell = the
+primary's space advance; a cluster takes `fallback.clusterCells` cells
+(`TextStyle.fallback_cells`, else `unicode_props.cells`: 2 for EAW W/F
+or VS16, else 1). In an Identity-H fallback a cluster goes to
+`writeMonospaceCluster` instead: shaped with `shaping.shapeFont`
+(initOpenTypeFeatures first: GSUB/GPOS are parsed lazily), each glyph
+placed by `TextCommand.placed` (one Tm per glyph, `renderPlacedOffsets`)
+and mapped to its own source text in ToUnicode. Both paths size and
+center by `fallback.fitCluster`: scale = min(cells/own if wider,
+`fallback_max_em`), dx = (room - own x scale) / 2 (reveal passes 0.88,
+as dvui's `Font.fallback_max_em`; dvui floors its pixel size, the PDF
+keeps size x cap exactly). Copy order is drawing order there (a reordered i matra
+reads first). Forced word breaks (`findCharacterBreakStyled`) step by
+grapheme cluster (`graphemeEndBytes`).
+- `-Dtest-filter` drops the unnamed `test {}` blocks, so tests in files
+  reached only through them (document.zig's own) don't run in a filtered
+  build: it reports a pass without running them. Check with the full
+  suite.
+- A face with no outlines platen can subset (glyf+loca, CFF/CFF2) and no
+  bitmaps is refused at load (`error.UnsupportedOutlines`): Apple's
+  `hvgl` faces (PingFang UI) otherwise load and fail at output.
+- Synthesis matches FreeType so a PDF looks like the screen: bold is
+  `2 Tr` with line width size/24 (FT_GlyphSlot_Embolden grows the
+  outline em/48 a side) inside q/Q, italic is a `1 0 0.213 1 x y Tm`
+  shear (FT_GlyphSlot_Oblique). A family's own variant wins; bold-italic
+  missing keeps italic (synth bold), then bold (synth italic). A single
+  face synthesizes what its OS/2 fsSelection (else macStyle) lacks
+  (`ttf.Font.style`).
+- `normalizeStyle` leaves a `.family` with fallbacks unresolved: resolving
+  clears bold/italic, which the fallback variants still need.
+- Measurement: `Plan.measure` with a width callback (Document: its own
+  clones via `getTextWidthStyled`; `metrics.measureTextStyled`: the
+  prototypes). A style whose fonts cannot fall back measures plain, and
+  writing it errors.
 
 ### Unicode composition (session #31)
 Before shaping, a base + combining marks becomes the precomposed
@@ -1154,7 +1288,8 @@ otherwise the sequence stays decomposed for GPOS mark positioning.
   combining marks (blocking rule; no reordering, input assumed in
   canonical order). Data `src/unicode_compose_data.zig` is generated from
   Python's unicodedata by `scripts/gen_unicode_compose.py` (902 pairs,
-  393 combining-class ranges). Hangul is not composed.
+  393 combining-class ranges). Hangul is not composed here (the Hangul
+  shaper composes syllables, hangul.zig).
 - Fast path: text with no code point >= U+0300 skips it (`mayCompose`
   checks for UTF-8 lead bytes >= 0xCC in measurement).
 - ToUnicode of a composed glyph is its canonical decomposition - the text
@@ -1236,11 +1371,291 @@ stays DFLT, else latn; default language system.
 ### Hot-path notes (invoice benchmark, session #23)
 - `FeatureFlags.featureIndex`: comptime-sorted table + binary search
   (a linear scan over ~150 features was 33% of runtime).
-- Kerning cache: direct-mapped 4096-slot array in OpenTypeFeatures
-  (collisions overwrite; correctness unaffected).
 - Image pixel streams always compress at level >= 6
   (`imageCompressionLevel`): compressed once at load, dominate file
   size — fast levels are a bad trade there.
+
+### Pure shaping and placed glyphs (session #35, `src/shaping.zig`)
+For callers that lay out text themselves (courier places every glyph as
+Final Draft does). `shapeText(allocator, *const FontFace, text, opts)`:
+- Reads the face's prototype only: decoding, GSUB and GPOS go through a
+  temporary `shaping.Cache` (`src/decode.zig`, `gsub.Shaper`, gpos.zig);
+  writing uses the same engine with the clone's own cache.
+- Clusters are HarfBuzz's default (monotone graphemes), as UTF-8 byte
+  offsets: `formClusters` merges each glyph's code point span (up to the
+  next glyph's cluster; leading removed ignorables merge forward) with the
+  graphemes it touches (`unicode_props.markContinuations` =
+  hb_set_unicode_props: GC marks, emoji modifiers, RI pairs, ZWJ + ExtPict,
+  FF9E/F, tags). The GSUB Shaper's own clusters (code point indices) are
+  unchanged, so write()'s ToUnicode is unaffected.
+- `src/unicode_props_data.zig` is generated (`scripts/gen_unicode_props.py`
+  from Python's unicodedata + UCD emoji-data.txt of the same version,
+  cached in .tools/ucd/<ver>/). Indic categories will come from there too.
+- Positions: the GPOS engine (below), in font units. GSUB always runs first
+  (a font without GSUB gets an empty table with its GDEF): GPOS needs its
+  glyph classes, ligature components and `multiplied` flags. write()
+  draws these positions too (`text_render.renderShapedRun`).
+- HarfBuzz check: `test/shaping/harfbuzz_positions.txt` (hb-shape
+  serialization, generated by gen_shaping_reference.py for GPOS fonts) must
+  match exactly; `test/shaping/position_gaps.txt` lists known differences
+  with their reason, and the test fails if a listed one starts matching.
+  Fonts without GPOS are out of the file: HarfBuzz positions their marks
+  by glyph extents (fallback), platen does not yet.
+- Test-run caching: `zig build test` caches a passing run by binary hash,
+  so editing only a reference file does not re-run it - run the test
+  binary directly (or change a source) after regenerating references.
+- `Document.drawGlyphs(text, []PlacedGlyph, style)`: a `.glyphs` page
+  command (ids, PDF-space origins), rendered as one `Tm` + `<gid> Tj` per
+  glyph with 3 decimals (`writeTm3`); remapped at output like text.
+  `EmbeddedFont.markPlacedGlyphsUsed`: widths, and ToUnicode per cluster
+  through `trackClusterText` - a cluster's text runs to the next larger
+  cluster value, default ignorables dropped except ZWJ/ZWNJ/VS.
+- Per-glyph source text: `decode.Decoded.spans` (each code point's own
+  bytes, never merged: compose unions, decomposition gives the first part
+  the character, inserted circles none, mark sorting moves them) and
+  `gsub.Glyph.src_lo/src_hi` (code point range: ligature = union of its
+  components, not skipped marks; multiple substitution's first glyph keeps
+  it) give `ShapedGlyph.text_start/text_end`. `PlacedGlyph.source` makes
+  `markSourcedGlyphsUsed` map each glyph to exactly its text (first use of
+  a glyph ID wins, as Quartz). Copy order is drawing order (a reordered
+  matra or reph reads where it is drawn), as Quartz's.
+- Subsetting now counts a font as used when any glyph has a width entry,
+  not only when a single code point maps to a glyph.
+
+### GPOS engine (session #35, `src/gpos.zig`)
+HarfBuzz's default-shaper positioning. The table is a `gsub.Table` parsed
+`.gpos` (same script/feature/lookup lists; extension type 9; GPOS types
+1-6 have their coverage at +2, 7/8 are GSUB's 5/6 formats). Matching,
+lookup flags and context rules are `gsub.Context`'s
+(`matchContextRule`/`matchChainRule`, shared), run over GSUB's output
+buffer through a non-growing ArrayList view.
+- Order (hb_ot_position): advances = hmtx; GPOS lookups of the enabled
+  features in lookup-list order, each over the run (`skips` by flags);
+  the 'kern' table when GPOS has no 'kern' feature (`shaping_kern`, half
+  the value on each glyph, the second's x_offset too); GDEF marks lose
+  their advance (`zeroMarkWidths`; shifted back by it when there is no
+  GPOS); `propagateAttachments` adds parents' offsets (marks also subtract
+  the advances in between).
+- Pair: the second glyph is the next one the flags don't skip; the run
+  continues from it, or after it when it got a value record. Format 2
+  applies (stopping later subtables) even with zero values, as HarfBuzz.
+- Mark-to-base/ligature: base = nearest non-mark before (IgnoreMarks only);
+  mark-to-base skips the later glyphs of a multiple substitution unless the
+  base coverage has them (`accept`, `Glyph.multiplied`). Mark-to-ligature
+  uses the mark's own component when its lig_id matches, else the last.
+  Mark-to-mark: the previous glyph by the lookup's flags minus
+  IgnoreBase/Lig/Marks, must be a mark of the same base/component. A null
+  anchor lets later subtables try.
+- Cursive (LTR): exit/entry adjust advances; the child (this glyph, or the
+  previous one with RightToLeft) hangs in y from its parent, old chains
+  reversed (`reverseCursive`).
+- Anchors: x, y only (contour points and device tables need hinting).
+  ValueRecords: XPlacement, YPlacement, XAdvance; YAdvance ignored
+  horizontally.
+- Normalization before shaping (decode.zig) is HarfBuzz's: characters the
+  font lacks are decomposed (`unicode_props.decomposeOnce`, all canonical
+  single-step decompositions from UCD, Hangul syllables algorithmically
+  (LV -> L V, LVT -> LV T, `hangul.decompose`); the second part
+  must have a glyph, the first may decompose further), mark runs are
+  reordered by the modified combining class (`unicode_compose.reorderMarks`),
+  then composed where the font has the composite. Missing spaces take the
+  space glyph with a `SpaceFallback` kind (shapeText sets the width before
+  GPOS: em / n rounded, 4/18 em, a digit's or '.'s advance, half a space);
+  U+2011 takes U+2010's glyph. Fonts without
+  GDEF classes: marks are Mn and not default-ignorable (was ccc != 0).
+- `test/fonts/gpos/GposTest.ttf` (`scripts/gen_gpos_test_font.py`): one
+  stylistic set per lookup type, format and flag; checked against HarfBuzz
+  in harfbuzz_positions.txt. Hostile tables: fuzz_tests "mutated fixture
+  bytes: GSUB/GPOS/GDEF" (found the coverage u16 overflow).
+
+### Fallback mark positioning (session #35, `src/mark_fallback.zig`)
+HarfBuzz's hb-ot-shape-fallback for fonts without GPOS (LTR): after GDEF
+zeroing (with offsets shifted back), each base + following marks (GC M*)
+is a cluster; marks with a nonzero class (modified ccc, Mn recategorized:
+Hebrew/Arabic/Thai/Lao/Tibetan classes to positions) are placed against
+the base's extents (x from 0 to its advance, y from its glyf box), per
+ligature component, stacking per class with a 1/16 em gap; marks of class
+0 move the pen offset like bases. Extents: `ttf.Font.glyphExtents` (glyf
+box, x_bearing = hmtx lsb, as HarfBuzz); CFF fonts have none, so their
+marks are only zeroed (HarfBuzz would read the charstrings) - a gap.
+Checked with Courier Prime, Charter (marks it lacks), Noto Emoji and
+GsubTest (ligature components) in harfbuzz_positions.txt.
+
+### write() on the shaping engine (session #36)
+- `EmbeddedFont.shapeRun(text, alloc)` (Identity-H) shapes with
+  `shaping.shapeCached` and marks the glyphs used (`markSourcedGlyphsUsed`:
+  per-glyph source text; a glyph followed by empty-source glyphs at or
+  before its start - a multiple substitution's parts - maps as a group via
+  trackClusterText). writeOneFont stores `cached_glyphs` +
+  `cached_positions` (GlyphPos: advance, dx, dy in font units) and the run
+  width (`runWidth`: advances + char_spacing x (n-1)).
+  `measureTextWidthSpaced` uses `shapedWidth` (same shaping, no marking).
+- `text_render.renderShapedRun`: no offsets -> one TJ, adjustment after
+  each glyph = shaped advance - /W width (1/1000 em), whole part emitted,
+  fraction carried (pen error < 1/1000 em; few adjustments for /W-rounded
+  runs); word spacing after spaces in the TJ; Tc from the caller. Offsets
+  (GPOS marks) -> Tm per glyph, char spacing added by hand, a zero-advance
+  glyph stays on its base and its gap is added before the next advancing
+  glyph (measurement counts a gap per glyph).
+- `fallback.Plan.cell` is the primary's space in font units (not the /W
+  1/1000 em width), so cells and primary text agree.
+- `shaping.Cache` (EmbeddedFont.shape_cache): decode buffers, the GSUB
+  shaper (active lookups per flags), GPOS lookups per script, the Indic plan
+  and an arena for temporaries, reused between calls. A FontFace prototype
+  is `shared` (any thread may measure with it) and shapes with a temporary
+  cache; clones get their own.
+- Spans never overlap: a composite (decode) or ligature (gsub) that covers
+  an intervening mark's text takes it, the mark's span becomes empty.
+- Performance: GSUB costs what it did; the rest was per-call overhead,
+  GPOS class-pair kerning and the ToUnicode maps. Remedies, all in
+  per-document state: `shaping.Cache.pairs` (gpos.PairCache: the PairPos
+  record per (lookup, first, second), found once - the old kern cache's
+  role); `Cache.widths` (advance + glyph count of texts <= 64 bytes, owned
+  keys, cleared at 4096 and on a flags change: wrapping re-measures the
+  same words); `EmbeddedFont.glyphs_done`/`cps_done` bitsets (width and
+  text recorded, BMP character's first glyph known: a glyph drawn for one
+  such character skips the maps). perf_test, 2000 pages x 3 (b0d4e28 ->
+  now, ms): simple text 50 -> 47, OpenType heavy 415 -> 456,
+  Unicode/marks 247 -> 313, text flow 51 -> 67, PDF output 726 -> 647,
+  total 1813 -> 1887 (+4%); the remaining cost includes GPOS mark
+  positioning the old path did not do. Profile with
+  `sample <pid>` on a long run (`platen-perf --pages=20000`).
+- The old path was removed 2026-11-18 (markUnicodeCharsUsed,
+  renderCIDTextWithKerning, OpenTypeFeatures' own GPOS parse with its
+  pair-kern cache and mark tables, getKerning/getMarkOffset, the old
+  measurement chain). Measuring an identity font is `shapedWidth`; if
+  shaping fails (out of memory, tables that do not parse) it falls back to
+  nominal advances (`nominalWidth`). Every identity text command carries
+  shaped positions (writeOneFont) or placed glyphs (writeMonospaceCluster).
+  Tests that used markUnicodeCharsUsed use `shapeGlyphIds` (shapeRun); the
+  GSUB HarfBuzz differential (harfbuzz.txt) now checks that path. Copy text
+  of a cmap-14 variant includes its selector (decode gives the pair one
+  span; the user chose this over 0.13's base-only copy).
+
+### Indic shaper (session #35, `src/indic.zig`)
+A port of HarfBuzz 12.3.0's hb-ot-shaper-indic (source in .tools/ref, not
+committed), for Devanagari:
+- Selection (shaping.zig): the text's first character of a real script
+  (`unicode_props.runScript`, UCD Scripts.txt) picks the script; Devanagari
+  uses the Indic shaper when GSUB has dev2 or deva (deva = old spec), else
+  the default shaper with dev2/deva/DFLT/dflt/latn. dev3 (USE in HarfBuzz) is not
+  tried. GPOS takes the same script's language system; no mark zeroing, no
+  fallback positioning (Indic: ZERO_WIDTH_MARKS_NONE).
+- Normalization (`decode.Mode.indic`): vowel constraints insert U+25CC
+  (offset of the next character); decompose whatever the font has the
+  parts of, not U+0931; never compose onto a mark.
+- Categories/positions: `src/indic_data.zig` from
+  `scripts/gen_indic_table.py` (HarfBuzz's gen-indic-table.py rules;
+  verified equal to its generated table). Syllables: the Ragel grammar as
+  set-of-positions combinators, longest match, earlier rule on ties.
+- GSUB engine: `Glyph.mask` (bit 0 global, Indic bits rphf pref blwf abvf
+  half pstf init), `syllable`, `ligated`, `inserted`; `LookupParams` per
+  lookup (mask, auto ZWJ/ZWNJ, per syllable) as HarfBuzz's map; staged
+  `beginClustered`/`applyStage`/`finish`; `Table.wouldSubstitute`;
+  `LangSysMap` per script (`default`, `devanagari`).
+- Stages: ccmp+locl (per syllable) | initial reordering | nukt akhn rphf
+  rkrf pref blwf abvf half pstf vatu cjct (one each) | final reordering |
+  init pres abvs blws psts haln + common/horizontal features (no liga) |
+  clear syllables | other enabled features.
+- Clusters: seeded per grapheme before GSUB (HarfBuzz's form_clusters;
+  an inserted vowel-constraint circle takes the next cluster), merged with
+  HarfBuzz's merge_clusters semantics (extension over equal neighbors) in
+  ligatures, deletions and reordering; output = byte offset of the cluster.
+  Mark reordering merges the offsets it moves across.
+- Checked: harfbuzz_positions.txt has Kohinoor (faces 4, 0) and Sangam MN
+  (HarfBuzz without its morx) with a corpus + 500 seeded random strings;
+  locally also old spec (Sangam with dev2 removed) - 0 differences. System
+  fonts are skipped where not installed (CI).
+
+### GPOS pair kerning (2026-11-18, `src/gpos_kerning.zig`)
+For courier's unshaped runs (one glyph per character, kerned as CoreText
+does with GPOS when a font has no `kern` table):
+- `GposKerning.init(face, script)` keeps the 'kern' feature's type-2
+  lookups of the script's `LangSysMap`, sorted; `pair(l, r)` runs
+  `gpos.applyPairs` (the engine's `applyAt` at glyph 0 of a two-glyph
+  buffer, with a `PairCache`) and returns both glyphs' value changes and
+  whether a second value record consumed the right glyph. Props from GDEF
+  (else both bases), so lookup flags skip a mark as in shaping - then no
+  kerning, where shaping would kern across the mark. Chained/contextual
+  positioning in 'kern' is not applied.
+- The face is only read; the struct is per thread. ~84 ns a cached pair,
+  ~300 ns uncached (ReleaseFast, Inter).
+- Checked against HarfBuzz (kern only, Zyyy) on 100x100 character pairs:
+  Apple SD Gothic Neo Thin, Arial, Inter, Gentium, Charter, Satoshi - all
+  equal once HarfBuzz's GDEF mark zeroing is accounted for (not kerning).
+  Times New Roman's GPOS has no kern feature (its `kern` table kerns).
+- Script: `.latin` for Latin text (latn, DFLT, dflt, as shapeText picks
+  it since 2026-11-18); `.default` (DFLT, dflt, latn) for text with no
+  script character.
+
+### Script selection (2026-11-18)
+- `shaping.textScript`: the first character of a real script
+  (`unicode_props.runScript`, Scripts.txt) picks `gsub.Script`: Latin ->
+  `.latin` (latn, DFLT, dflt: HarfBuzz tries a script's own tag before
+  DFLT), Devanagari, Hangul; anything else, and text with no script
+  character (digits, punctuation), `.default` (DFLT, dflt, latn).
+- Each Script has its own `LangSysMap` (parsed once, shared when two pick
+  the same language system). GSUB of the default shaper follows the
+  script too (`Shaper.shapeClustered(script)`; lookups cached per script,
+  as measuring word by word alternates Latin and script-less words), as
+  GPOS already did.
+- References: gen_shaping_reference.py sets HarfBuzz's script with
+  `platen_script` (the same rule, via fontTools.unicodedata), not Zyyy.
+  Regenerating changed only Satoshi's soft-dotted i/j lines (latn ccmp:
+  dotless forms before marks above). ScriptTest.ttf has calt and kern that
+  differ between latn and DFLT.
+- Not yet: Cyrillic, Greek, Arabic, Hebrew, CJK... take `.default` where
+  HarfBuzz picks cyrl, grek, arab... (TODO.md).
+
+### Hangul shaper (2026-11-18, `src/hangul.zig`)
+HarfBuzz 12.3.0's hb-ot-shaper-hangul, for text whose first strong
+character is Hangul (`unicode_props.runScript`, Scripts.txt), always (no
+font condition, as HarfBuzz):
+- Preprocessing (`hangul.preprocess`, in `decode.Mode.hangul`, before
+  normalization as preprocess_text): L V (T) -> the precomposed syllable
+  when the font has it, LV + combining T -> LVT; else the jamo get
+  `Decoded.jamo` = ljmo/vjmo/tjmo; a syllable the font lacks (or an LV
+  before a non-combining T) is decomposed into jamo with features when the
+  font has them all. Tone marks U+302E/F: after a syllable moved before
+  it unless zero-width (has a glyph with no advance); otherwise a dotted
+  circle, after it (before if zero-width).
+- Clusters live in `Decoded.offsets` in this mode (HarfBuzz's byte
+  clusters): form_clusters first (a continuation takes its predecessor's
+  offset), then merges take the smallest with merge_clusters /
+  merge_out_clusters extension; `shaping.offsetClusters` turns runs of
+  equal offsets into clusters. `unicode_compose.reorderMarks` now extends
+  its merges the same way (it matters only where offsets already carry
+  merged clusters).
+- The inserted circle copies the tone mark's properties in HarfBuzz
+  (replace_glyphs), so it sorts with class 224 in mark reordering:
+  `Jamo.tone_circle` = `unicode_compose.tag_tone_class`, and
+  `reorderMarksTagged` moves `Decoded.jamo` along.
+- Normalization mode NONE: decompose what the font lacks, reorder marks,
+  compose nothing.
+- Plan: one stage, the 'hang' language system (else DFLT/dflt/latn; a
+  third `LangSysMap`, `gsub.Script.hangul`): required feature + enabled
+  features minus calt (override_features), global; ljmo (manual ZWJ),
+  vjmo, tjmo with mask bits 2/4/8 (`gsub.mergeLookups`, shared with
+  indic.zig). The jamo features cannot be turned off (HarfBuzz: -ljmo).
+- Positioning: GPOS with 'hang'; no mark zeroing, no fallback marks
+  (ZERO_WIDTH_MARKS_NONE).
+- Checked: harfbuzz_positions.txt has HangulTest.ttf (with and without
+  kern) and Apple SD Gothic Neo Regular/Thin (skipped where not
+  installed), a corpus + 500 seeded random strings, 0 differences.
+- `zig build test` caches its run on the test binary: a regenerated
+  reference file alone does not re-run it. Check with `--cache-dir` fresh.
+
+### CID-keyed CFF subsetting (session #35, `src/cff_cid.zig`)
+A Top DICT with ROS (12 30) is CID-keyed: charset maps GID -> CID, and
+each glyph's Private DICT / local subrs come from FDArray[FDSelect[gid]].
+`createSubsetCFF_Compact` hands those to `cff_cid.subset`: identity charset
+(format 2, CID n = new GID n, matching Identity-H codes), FDSelect format 3
+over the new GIDs, every Font DICT kept with its Private DICT minus Subrs
+(FontName SID remapped), glyphs desubroutinized with their FD's local
+subrs, offsets as fixed 5-byte ints, Top DICT rebuilt until its size
+settles. Test: test/fonts/cff (scripts/gen_cff_test_fonts.py) has the same
+outlines name-keyed and CID-keyed (CIDs != GIDs, two FDs with different
+local subrs); both must render identically (pdftoppm, grayscale bytes).
 
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,

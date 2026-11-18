@@ -122,6 +122,8 @@ fn fuzzTtfParse(_: void, smith: *Smith) !void {
     }
     _ = font.getCharWidth(codepoint);
     _ = font.getGlyphWidth(smith.value(u16));
+    _ = font.glyphExtents(smith.value(u16));
+    _ = font.leftSideBearing(smith.value(u16));
 }
 
 test "fuzz ttf.Font.parse" {
@@ -182,7 +184,9 @@ fn fuzzSvgFromMemory(_: void, smith: *Smith) !void {
     // Also exercise rendering of whatever parsed.
     var states = std.ArrayListUnmanaged(svg.OpacityState).empty;
     defer states.deinit(allocator);
-    const content = s.toPdfContent(allocator, &states) catch return;
+    var patterns: std.ArrayListUnmanaged(svg.PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = s.toPdfContent(allocator, &states, &patterns) catch return;
     allocator.free(content);
 }
 
@@ -475,7 +479,9 @@ fn exerciseSvgDoc(allocator: std.mem.Allocator, maybe_doc: ?[]const u8) void {
     }
     var states = std.ArrayListUnmanaged(svg.OpacityState).empty;
     defer states.deinit(allocator);
-    const content = s.toPdfContent(allocator, &states) catch return;
+    var patterns: std.ArrayListUnmanaged(svg.PatternSpec) = .empty;
+    defer patterns.deinit(allocator);
+    const content = s.toPdfContent(allocator, &states, &patterns) catch return;
     allocator.free(content);
 }
 
@@ -808,4 +814,106 @@ test "fuzz Document API" {
         fuzzDocument,
         .{},
     );
+}
+
+// ---------------------------------------------------------------------------
+// GSUB/GPOS/GDEF: the shaping engine on hostile layout tables
+// ---------------------------------------------------------------------------
+
+const gsub = @import("gsub.zig");
+const gpos = @import("gpos.zig");
+const opentype = @import("opentype.zig");
+
+/// Parse the three tables and run the whole pipeline (substitute,
+/// position, zero marks, propagate attachments) on one glyph run, every
+/// feature on. Malformed tables may do anything but read out of bounds.
+fn exerciseLayout(allocator: std.mem.Allocator, gsub_data: []const u8, gpos_data: []const u8, gdef_data: []const u8, glyph_ids: []const u16, cps: []const u21) !void {
+    var gsub_table = gsub.Table.parse(allocator, gsub_data, gdef_data, .gsub) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+    };
+    defer gsub_table.deinit(allocator);
+    var gpos_table = gsub.Table.parse(allocator, gpos_data, gdef_data, .gpos) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+    };
+    defer gpos_table.deinit(allocator);
+
+    const flags = opentype.FeatureFlags.initAllEnabled();
+    var shaper: gsub.Shaper = .{};
+    defer shaper.deinit(allocator);
+    _ = try shaper.shape(allocator, &gsub_table, glyph_ids, cps, flags);
+    const glyphs = shaper.buf.items;
+    const pos = try allocator.alloc(gpos.Position, glyphs.len);
+    defer allocator.free(pos);
+    for (pos) |*p| p.* = .{ .x_advance = 500 };
+    var lookups: std.ArrayListUnmanaged(u16) = .empty;
+    defer lookups.deinit(allocator);
+    try gpos_table.collectLookups(allocator, flags, &lookups);
+    gpos.apply(&gpos_table, glyphs, pos, lookups.items);
+    gpos.zeroMarkWidths(&gsub_table, glyphs, pos, false);
+    gpos.propagateAttachments(pos);
+}
+
+fn fullFontTable(allocator: std.mem.Allocator, font_path: []const u8, tag: [4]u8) ![]u8 {
+    const data = try readFontFile(allocator, font_path);
+    defer allocator.free(data);
+    const font = try ttf.Font.parse(data);
+    return allocator.dupe(u8, font.getTable(tag) orelse return error.MissingTable);
+}
+
+test "mutated fixture bytes: GSUB/GPOS/GDEF through the shaping engine" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0x6905_6905);
+    const random = prng.random();
+    const fonts = [_][]const u8{
+        "test/fonts/gpos/GposTest.ttf",
+        "test/fonts/Gentium/Gentium-Regular.ttf",
+        "test/fonts/Noto Sans Arabic/NotoSansArabic-Regular.ttf",
+    };
+    for (fonts) |path| {
+        const tables = [3][]u8{
+            try fullFontTable(allocator, path, "GSUB".*),
+            try fullFontTable(allocator, path, "GPOS".*),
+            try fullFontTable(allocator, path, "GDEF".*),
+        };
+        defer for (tables) |t| allocator.free(t);
+        for (0..96) |round| {
+            // Mutate one table per round (the others intact), and now and
+            // then all three
+            var mutated: [3][]u8 = undefined;
+            for (&mutated, tables, 0..) |*m, t, k| {
+                m.* = if (round % 4 == k or round % 4 == 3) try mutateCopy(allocator, random, t) else try allocator.dupe(u8, t);
+            }
+            defer for (mutated) |m| allocator.free(m);
+            // Glyph IDs mostly among the font's low ones, with marks
+            var ids: [24]u16 = undefined;
+            var cps: [24]u21 = undefined;
+            for (&ids, &cps) |*g, *c| {
+                g.* = if (random.uintLessThan(u8, 8) == 0) random.int(u16) else random.uintLessThan(u16, 600);
+                c.* = if (random.boolean()) 0x0300 + random.uintLessThan(u21, 0x70) else 'a' + random.uintLessThan(u21, 26);
+            }
+            const n = 1 + random.uintLessThan(usize, ids.len);
+            try exerciseLayout(allocator, mutated[0], mutated[1], mutated[2], ids[0..n], cps[0..n]);
+        }
+    }
+}
+
+test "mutated fixture bytes: CID-keyed CFF subsetting" {
+    const allocator = std.testing.allocator;
+    const cff_cid = @import("cff_cid.zig");
+    var prng = std.Random.DefaultPrng.init(0xc1dc1d);
+    const random = prng.random();
+    const original = try fullFontTable(allocator, "test/fonts/cff/CidKeyed.otf", "CFF ".*);
+    defer allocator.free(original);
+    const glyphs = [_]u16{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+    for (0..200) |round| {
+        const mutated = try mutateCopy(allocator, random, original);
+        defer allocator.free(mutated);
+        const n = 1 + round % glyphs.len;
+        if (cff_cid.subset(allocator, mutated, glyphs[0..n])) |out| {
+            allocator.free(out);
+        } else |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => {},
+        }
+    }
 }

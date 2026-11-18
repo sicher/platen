@@ -9,6 +9,8 @@
 //!   --threads=N     Worker threads for stream compression in output() (default: 1)
 //!   --output=PATH   Write final PDF to file (optional)
 //!   --quiet         Only show summary
+//!   --only=NAME     Run one text section (simple, opentype, unicode, flow,
+//!                   shapes, emoji) and the output, e.g. to profile it
 
 const std = @import("std");
 const platen = @import("platen");
@@ -42,6 +44,12 @@ const TestConfig = struct {
     threads: u32 = 1,
     output_path: ?[]const u8 = null,
     quiet: bool = false,
+    only: ?[]const u8 = null,
+
+    fn runs(self: TestConfig, section: []const u8) bool {
+        const only = self.only orelse return true;
+        return std.mem.eql(u8, only, section);
+    }
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -197,7 +205,7 @@ fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
 
         const t = Timer.begin(tc.name);
         for (0..iterations) |_| {
-            const glyphs = try emb.embedded.markUnicodeCharsUsed(tc.text, null);
+            const glyphs = try emb.embedded.shapeGlyphIds(tc.text, null);
             emb.embedded.allocator.free(glyphs);
         }
         const elapsed = t.end();
@@ -266,7 +274,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     const pages_per_section = config.pages / 5;
 
     // 2. Simple text test (minimal OpenType)
-    {
+    if (config.runs("simple")) {
         const t = Timer.begin("Simple text");
         const simple_font = try doc.loadFont("test/fonts/Charter/Charter Regular.ttf", .identity);
         simple_font.embedded.setFeature(.kern, false);
@@ -287,7 +295,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     }
 
     // 3. OpenType heavy test (ligatures, kerning, contextual alternates)
-    {
+    if (config.runs("opentype")) {
         const t = Timer.begin("OpenType heavy");
         const inter_ot_style = platen.TextStyle{ .font = inter_ot, .size = 11 };
         const inter_bold_style = platen.TextStyle{ .font = inter_bold, .size = 12 };
@@ -323,7 +331,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     }
 
     // 4. Unicode and diacritics test
-    {
+    if (config.runs("unicode")) {
         const t = Timer.begin("Unicode/marks");
         const gentium_style = platen.TextStyle{ .font = gentium, .size = 11 };
         const inter_style = platen.TextStyle{ .font = inter, .size = 11 };
@@ -365,7 +373,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     }
 
     // 5. Text flow test (justification, multi-column)
-    {
+    if (config.runs("flow")) {
         const t = Timer.begin("Text flow");
 
         const lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. ";
@@ -405,7 +413,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     }
 
     // 6. Drawing shapes test (exercises fast coordinate formatting)
-    {
+    if (config.runs("shapes")) {
         const t = Timer.begin("Drawing shapes");
 
         for (0..pages_per_section) |_| {
@@ -497,7 +505,7 @@ fn runFullTest(allocator: std.mem.Allocator, config: TestConfig) !TestResult {
     // 7. Color font test (COLR v1 emoji → Type3 color fonts). Layout/shaping
     // cost lands here; CharProc rendering and Type3 emission land in the
     // output step's timing.
-    {
+    if (config.runs("emoji")) {
         const t = Timer.begin("Color emoji");
         const emoji = try doc.loadFont("test/fonts/Noto_Color_Emoji/NotoColorEmoji-Regular.ttf", .identity);
         const emoji_rows = [_][]const u8{
@@ -557,6 +565,8 @@ fn parseArgs(args_obj: std.process.Args) !TestConfig {
             config.threads = try std.fmt.parseInt(u32, arg["--threads=".len..], 10);
         } else if (std.mem.startsWith(u8, arg, "--output=")) {
             config.output_path = arg[9..];
+        } else if (std.mem.startsWith(u8, arg, "--only=")) {
+            config.only = arg["--only=".len..];
         } else if (std.mem.eql(u8, arg, "--quiet")) {
             config.quiet = true;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {

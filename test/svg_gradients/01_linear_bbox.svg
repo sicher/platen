@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+  <!-- objectBoundingBox (the default): the gradient spans each shape's box -->
+  <!-- probes: 10,25 50,25 90,25 140,10 140,50 140,90 -->
+  <defs>
+    <linearGradient id="h"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="v" x2="0" y2="1"><stop offset="0" stop-color="#ff0"/><stop offset="1" stop-color="#080"/></linearGradient>
+  </defs>
+  <rect x="0" y="0" width="100" height="50" fill="url(#h)"/>
+  <ellipse cx="140" cy="50" rx="40" ry="48" fill="url(#v)"/>
+</svg>

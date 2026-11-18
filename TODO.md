@@ -204,6 +204,49 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 - [x] **`clig` is off by default** while HarfBuzz enables it. (done
   2026-10-22: on by default; GsubTest has a clig scenario)
 
+## Open after shapeText / drawGlyphs (2026-11-16, for courier)
+
+- [x] **GPOS engine** (done 2026-11-17, src/gpos.zig; shapeText uses it,
+  HarfBuzz-checked with GposTest.ttf).
+- [x] **Fallback mark positioning** for fonts without GPOS (done
+  2026-11-17, mark_fallback.zig). Gap: CFF fonts without GPOS (no glyph
+  extents from charstrings).
+- [x] **Normalization: decompose** characters the font lacks, space
+  fallbacks, U+2011 as U+2010 (done 2026-11-17; Hangul too, 2026-11-18).
+- [x] **write() on the GPOS engine** (done 2026-11-17: shapeRun +
+  renderShapedRun; references regenerated).
+- [ ] **Shaping performance**: after the pair/width caches and done-sets
+  the total is +4% over the old path (Unicode/marks +27%, text flow +31%);
+  left: decode/cluster setup per call, GPOS mark lookups.
+- [x] **Remove the old glyph path** (done 2026-11-18: markUnicodeCharsUsed,
+  renderCIDTextWithKerning, getKerning/getMarkOffset and opentype's old GPOS
+  structures; `platen shape` and tests on shapeRun).
+- [ ] **FontFace.warmup** does nothing now (shaping caches are per
+  document): remove at the next breaking release, or make clones inherit a
+  warmed pair cache.
+- [x] **Indic (Devanagari) shaping** in shapeText (done 2026-11-17,
+  indic.zig; HarfBuzz-checked with Kohinoor and Sangam MN).
+- [x] **Hangul shaping** in shapeText (done 2026-11-18, hangul.zig;
+  HarfBuzz-checked with a synthetic jamo-feature font and Apple SD Gothic
+  Neo).
+- [x] **Latin's language system** (done 2026-11-18: `.latin`, latn before
+  DFLT; GSUB follows the script; references with platen's script).
+- [ ] **Other scripts' language systems**: Cyrillic, Greek, Arabic, Hebrew,
+  Han, kana... text uses `.default` (DFLT first), where HarfBuzz tries
+  cyrl, grek, arab, hebr, hani, kana first. Needs the script property for
+  every character and HarfBuzz's script-to-tag table, and a LangSysMap per
+  script met (lazily).
+- [ ] **Fallback picks for jamo**: `fallback.Plan.drawsCluster` composes
+  with `unicode_compose.compose`, which has no Hangul: a font with the
+  syllable but not the jamo is judged unable to draw L V T.
+- [ ] **Synthetic Indic test font** so CI covers the Indic shaper (the
+  system fonts are macOS only), with a deva-only twin for old spec.
+- [ ] **Other Indic scripts** (configs and categories are ported: Bengali,
+  Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam need their
+  script detection, virama and per-script rules - Kannada, Malayalam).
+- [ ] **AAT morx**: HarfBuzz and CoreText prefer it to GSUB (Devanagari
+  Sangam MN has both); platen uses GSUB.
+
 ## Code health
 
 - [ ] **Split document.zig** (4200+ lines): output phase, text layout, and
@@ -221,3 +264,20 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   error.BitDepthNotAllowed and the caller converts - user decision
   2026-10-05: no silent conversion by default)
 - [ ] OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
+- [ ] SVG gradients, rest (steps 6-7 of the 2026-11-03 plan; `href` done
+  2026-11-07): `stop-opacity` (soft mask, as COLRv1), `spreadMethod`
+  reflect/repeat (repeat the stops over a wider domain). Also `fr` (SVG 2
+  focal radius).
+- [ ] SVG gradients vs resvg on degenerate cases (decide which to follow):
+  with `url(#g) green`, resvg paints the fallback for a gradient without stops
+  and for objectBoundingBox on a zero-width/height box, where platen paints
+  nothing; for `r < 0` resvg paints the last stop (platen: nothing); a singular
+  `gradientTransform` resvg ignores (platen: nothing).
+- [ ] SVG: `<polyline>` is never filled (SVG fills it, as if closed).
+- [ ] SVG: `S` after a `Q` reflects the quadratic's control point (SVG uses
+  the current point unless the previous command was C/S); `T` after `C` too.
+- [ ] SVG: path coordinates are written with 2 decimals, so a tiny viewBox
+  (`0 0 1 1` scaled up) loses its shape.
+- [ ] Document gradients (`gradient.zig`): stops must start at 0 and end at
+  1 (a first stop at 0.2 stretches over the whole range), and Bounds are
+  written with 3 decimals.

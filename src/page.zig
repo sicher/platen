@@ -45,18 +45,56 @@ pub const TextCommand = struct {
     opacity: f64 = 1.0,
     /// Cached glyph IDs for CID fonts (avoids duplicate OpenType shaping)
     cached_glyphs: ?[]const u16 = null,
+    /// Placement of each of `cached_glyphs` (EmbeddedFont.shapeRun): the
+    /// renderer advances by these instead of the glyphs' widths.
+    cached_positions: ?[]const EmbeddedFont.GlyphPos = null,
     /// Text width (for decoration drawing)
     text_width: f64 = 0,
     /// Draw underline
     underline: bool = false,
     /// Draw strikethrough
     strikethrough: bool = false,
+    /// Glyphs start this far right of x; decorations still start at x (a
+    /// `.monospace` fallback glyph centered in its cell).
+    glyph_dx: f64 = 0,
+    /// Glyphs are drawn at font_size * glyph_scale (a `.monospace` fallback
+    /// glyph shrunk to its cell); decorations keep font_size.
+    glyph_scale: f64 = 1,
+    /// Synthesized bold: the outline is stroked too (fallback.embolden_per_em).
+    synth_bold: bool = false,
+    /// Synthesized italic: the text matrix is slanted (fallback.oblique_shear).
+    synth_italic: bool = false,
+    /// Decoration metrics come from this font rather than `font`, so a
+    /// fallback run is underlined like the text around it.
+    decoration_font: ?*EmbeddedFont = null,
+    /// Shaped glyphs placed one by one (a `.monospace` fallback cluster):
+    /// each glyph's offset in points from (x + glyph_dx, y), y up. The
+    /// renderer then draws these instead of shaping `text_data`.
+    placed: ?[]const PlacedOffset = null,
+};
+
+/// A glyph of a TextCommand's `placed` run.
+pub const PlacedOffset = struct { id: u16, dx: f64, dy: f64 };
+
+/// Glyphs drawn by ID at absolute positions (Document.drawGlyphs).
+pub const GlyphsCommand = struct {
+    font: *EmbeddedFont,
+    font_size: f64,
+    /// Glyph IDs (unremapped) and their origins in PDF coordinates
+    /// (bottom-left origin); owned by the page arena.
+    ids: []const u16,
+    xs: []const f64,
+    ys: []const f64,
+    text_color: Color,
+    opacity: f64 = 1.0,
 };
 
 /// Content command for deferred rendering (enables glyph ID remapping)
 pub const ContentCommand = union(enum) {
     /// Text command with all rendering parameters
     text: TextCommand,
+    /// Glyphs by ID
+    glyphs: GlyphsCommand,
     /// Raw content (for non-text operations that don't need deferred processing)
     raw: []const u8, // Owned copy
 };
@@ -243,6 +281,35 @@ pub const ContentWriter = struct {
         var buf: [64]u8 = undefined;
         @memcpy(buf[0..8], "1 0 0 1 ");
         const len = 8 + format.writeCoord2Suffix(buf[8..], x, y, " Tm ");
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "1 0 0 1 x y Tm " with 3 decimals (glyphs placed by ID keep
+    /// their position to a thousandth of a point).
+    pub fn writeTm3(self: *ContentWriter, x: f64, y: f64) !void {
+        var buf: [80]u8 = undefined;
+        @memcpy(buf[0..8], "1 0 0 1 ");
+        var len: usize = 8;
+        len += format.writeF64_3(buf[len..], x).len;
+        buf[len] = ' ';
+        len += 1;
+        len += format.writeF64_3(buf[len..], y).len;
+        @memcpy(buf[len..][0..4], " Tm ");
+        len += 4;
+        try self.append(buf[0..len]);
+    }
+
+    /// Write "1 0 shear 1 x y Tm ": the text matrix with a horizontal shear
+    /// (slanted text), or writeTm's plain matrix when shear is 0.
+    pub fn writeTmShear(self: *ContentWriter, x: f64, y: f64, shear: f64) !void {
+        if (shear == 0) return self.writeTm(x, y);
+        var buf: [96]u8 = undefined;
+        @memcpy(buf[0..4], "1 0 ");
+        var len: usize = 4;
+        len += format.writeF64_3(buf[len..], shear).len;
+        @memcpy(buf[len..][0..3], " 1 ");
+        len += 3;
+        len += format.writeCoord2Suffix(buf[len..], x, y, " Tm ");
         try self.append(buf[0..len]);
     }
 

@@ -52,6 +52,20 @@ pub const FoundFamily = system_fonts.FoundFamily;
 pub const SystemFontOptions = system_fonts.Options;
 pub const findSystemFont = system_fonts.find;
 pub const findSystemFontFamily = system_fonts.findFamily;
+pub const FamilyFace = system_fonts.FamilyFace;
+pub const listSystemFontFaces = system_fonts.listFamily;
+pub const shaping = @import("shaping.zig");
+/// Unicode properties: extended grapheme clusters (UAX #29,
+/// graphemeEndBytes) and monospaced cell counts (cells).
+pub const unicode_props = @import("unicode_props.zig");
+pub const ShapedGlyph = shaping.ShapedGlyph;
+pub const shapeText = shaping.shape;
+/// GPOS pair kerning of two glyphs without shaping (gpos_kerning.zig).
+pub const GposKerning = gpos_kerning.GposKerning;
+pub const hasGposKerning = gpos_kerning.hasGposKerning;
+pub const KernScript = gpos_kerning.Script;
+pub const KernAdjustment = gpos_kerning.Adjustment;
+const gpos_kerning = @import("gpos_kerning.zig");
 
 // Re-export metrics types
 pub const TextMetrics = document.TextMetrics;
@@ -75,6 +89,7 @@ pub const Align = document.Align;
 pub const VAlign = document.VAlign;
 pub const LineBreaking = document.LineBreaking;
 pub const TextDecoration = document.TextDecoration;
+pub const FallbackAdvance = document.FallbackAdvance;
 pub const TextStyle = document.TextStyle;
 pub const TextStyleOptions = document.TextStyleOptions;
 pub const Margins = document.Margins;
@@ -89,6 +104,7 @@ pub const PageLabel = document.PageLabel;
 pub const WriteResult = document.WriteResult;
 pub const WriteOptions = document.WriteOptions;
 pub const WriteAtOptions = document.WriteAtOptions;
+pub const PlacedGlyph = document.PlacedGlyph;
 pub const Anchor = document.Anchor;
 pub const BlockOptions = document.BlockOptions;
 pub const ParagraphOptions = document.ParagraphOptions;
@@ -183,8 +199,21 @@ test {
     _ = @import("resource_names_test.zig");
     _ = @import("pdfa_conformance_test.zig");
     _ = @import("styled_span_test.zig");
+    _ = @import("fallback_test.zig");
+    _ = @import("fallback.zig");
     _ = @import("shaping_test.zig");
+    _ = @import("glyphs_test.zig");
+    _ = @import("cff_cid_test.zig");
+    _ = shaping;
+    _ = @import("decode.zig");
+    _ = @import("unicode_props.zig");
     _ = @import("gsub.zig");
+    _ = @import("gpos.zig");
+    _ = @import("mark_fallback.zig");
+    _ = @import("indic.zig");
+    _ = @import("hangul.zig");
+    _ = @import("gpos_kerning.zig");
+    _ = @import("opentype.zig");
     _ = @import("validate.zig");
     _ = @import("styled_text.zig");
     _ = @import("outline.zig");
@@ -192,6 +221,8 @@ test {
     _ = @import("colr.zig");
     _ = @import("bitmap_glyphs.zig");
     _ = @import("svg_table.zig");
+    _ = @import("svg_gradient.zig");
+    _ = @import("svg_path.zig");
     _ = @import("encrypt.zig");
     _ = @import("unicode_compose.zig");
 }

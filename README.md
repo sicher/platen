@@ -50,7 +50,7 @@ The first three are made by [`src/showcase.zig`](src/showcase.zig) (`zig build s
 - **Graphics**: lines, rectangles, circles, ellipses, polygons
 - **Path API**: moveTo, lineTo, curveTo, quadTo for custom shapes
 - **Images**: JPEG and PNG embedding (with alpha channel support)
-- **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`
+- **SVG embedding**: shapes, paths, text, gradients, transforms, `<use>`/`<defs>`, colors in any CSS Color 4 syntax
 - **Transforms**: translate/rotate/scale with graphics-state push/pop; page rotation
 - **Clipping**: rectangle and path clipping
 - **Gradients**: linear and radial
@@ -266,11 +266,108 @@ const font = try doc.loadFontFamilyFromMemory(georgia.memoryOptions(.identity).?
 
 // Or a single face: .data is a standalone sfnt for loadFontFromMemory.
 const bold = try platen.findSystemFont(io, allocator, "Helvetica", .{ .bold = true }, .{});
+
+// Or every face, any weight or width (Light, Condensed...), to pick yourself.
+const faces = try platen.listSystemFontFaces(io, allocator, "Helvetica", .{});
+defer platen.system_fonts.freeFamilyFaces(allocator, faces);
+for (faces) |f| {
+    if (f.info.weight != 300 or f.info.italic) continue;
+    const light = try f.load(io, allocator); // standalone sfnt
+    defer allocator.free(light);
+}
 ```
 
 The CLI exposes the same: `platen font-faces <file>`, `platen
 extract-face <ttc> <index> <out>`, `platen find-font <family> [--bold]
-[--italic] [--dir DIR]... [--out FILE]`.
+[--italic] [--all] [--dir DIR]... [--out FILE]`.
+
+### Fallback Fonts
+
+A font without a glyph for a character can hand it to the next font in
+`TextStyle.fallback`; each character is drawn in the first font that has it:
+
+```zig
+const courier = try doc.loadFontFamily(.{ .regular = "CourierPrime-Regular.ttf", ... });
+const cyrillic = try doc.loadFont("/System/Library/Fonts/Supplemental/Courier New.ttf", .identity);
+const style = platen.TextStyle{
+    .font = courier,
+    .size = 12,
+    .fallback = &.{cyrillic},       // tried in order
+    .fallback_advance = .monospace, // keep Courier's columns
+};
+_ = try doc.writeAt(.{ .x = 72, .y = 72 }, "INT. КУХНЯ — ДЕНЬ", style, .{});
+```
+
+- Fallbacks are fonts loaded into the document (single faces or families,
+  Unicode encoding); a standard font in the chain is
+  `error.InvalidFallbackFont`.
+- Each extended grapheme cluster (UAX #29: a base and its marks, a
+  conjunct, an emoji sequence) stays in one font.
+- `bold`/`italic` pick a fallback family's own variant; what a fallback lacks
+  is synthesized (stroked outline, slanted text) as FreeType does on screen.
+- `.natural` (default) advances by the fallback glyph's own width;
+  `.monospace` by cells the width of a space in `font`: each cluster is
+  shaped, centered (or shrunk to fit when wider) in two cells if East Asian
+  Wide/Fullwidth (or with VS16), else in one, so the text keeps its
+  columns. `fallback_cells = myWidth` counts a cluster's cells instead (a
+  `fn ([]const u8) u8`, given the cluster's UTF-8), to match your own grid.
+  `fallback_max_em = 0.88` caps a cluster's size at 0.88 x `size` (CJK ink
+  spans nearly its em; Courier's about 0.78), centered as before.
+- Measurement, wrapping, anchoring and underlines follow the runs.
+
+### Shaping and Placing Glyphs Yourself
+
+A layout engine that measures, breaks and positions text itself can shape
+without a document and draw the result glyph by glyph:
+
+```zig
+var face = try platen.FontFace.fromFile(io, allocator, "Gentium-Regular.ttf");
+defer face.deinit();
+// Pure: reads the face only - no Document, no I/O, safe from any thread
+const shaped = try platen.shapeText(allocator, &face, "office", .{});
+defer allocator.free(shaped);
+
+const scale = 12.0 / @as(f64, @floatFromInt(platen.shaping.unitsPerEm(&face)));
+var placed: [64]platen.PlacedGlyph = undefined;
+var pen: f64 = 72;
+for (shaped, placed[0..shaped.len]) |g, *p| {
+    p.* = .{
+        .id = g.id,
+        .x = pen + @as(f64, @floatFromInt(g.x_offset)) * scale,
+        .y = 100 - @as(f64, @floatFromInt(g.y_offset)) * scale, // baseline at 100
+        .cluster = g.cluster,
+        // Copy text: each glyph its own characters
+        .source = .{ .start = g.text_start, .end = g.text_end },
+    };
+    pen += @as(f64, @floatFromInt(g.x_advance)) * scale;
+}
+try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face }, .size = 12 });
+```
+
+- `ShapedGlyph`: glyph ID, `x_advance`, `x_offset`, `y_offset` (font units,
+  y up) and `cluster`, the byte offset of its cluster in the text. Clusters
+  are HarfBuzz's (default level): a ligature or a base with its marks shares
+  one; they never decrease.
+- `drawGlyphs` writes each glyph at its position (to 0.001 pt) and gives it
+  its `source` text for copy and paste (`text_start`/`text_end`: the "ffi"
+  ligature "ffi", a conjunct its characters, a reordered matra its own),
+  else its cluster's text.
+- Shaping is platen's GSUB and GPOS engines, run as HarfBuzz's default
+  shaper, as its Indic shaper for Devanagari and as its Hangul shaper for
+  Hangul (conjoining jamo composed into syllables, else ljmo/vjmo/tjmo);
+  checked against HarfBuzz. The text's first character of a script
+  decides, so shape mixed-script text in runs. Not yet: other Indic
+  scripts, Arabic, bidi, AAT `morx`. `write()` and measurement shape the
+  same way.
+- GPOS kerning without shaping, for text placed one glyph per character:
+  `var k = try platen.GposKerning.init(allocator, &face, .latin)`, then
+  `k.advance(left_gid, right_gid)` is the first glyph's advance change
+  (font units) from the GPOS 'kern' feature's pair lookups, as `shapeText`
+  applies them; `k.pair` gives the whole `KernAdjustment` (offsets, the
+  second glyph's values, `consumes_second`). `platen.hasGposKerning(&face,
+  script)` says whether GPOS kerns at all (a font may kern with a `kern`
+  table only). Pure; one `GposKerning` per thread (it caches pairs, about
+  80 ns a cached pair). CLI: `gpos-kern <font>`.
 
 ### Text Flow with Word Wrapping
 
@@ -704,7 +801,6 @@ defer inter_bold.deinit();
 
 // Optional configuration - before first use (frozen afterwards):
 try inter.setFeature(.dlig, true);                 // default feature flags
-try inter.warmup("Common text, pre-fills kerning"); // perf only
 
 // Per document (any thread) - just reference the faces in styles:
 const body = platen.TextStyle{ .font = .{ .face = &inter }, .size = 11 };
@@ -834,6 +930,7 @@ document. For fonts shared across documents, see
 | Method | Description |
 |--------|-------------|
 | `writeAt(Point, str, TextStyle, WriteAtOptions) -> Rect` | Write text at absolute position |
+| `drawGlyphs(text, []const PlacedGlyph, TextStyle)` | Draw glyphs by ID at their own positions (e.g. `shapeText`'s), ToUnicode from their clusters |
 | `write(*Region, str, TextStyle, WriteOptions) -> WriteResult` | Incremental write with word wrapping (cursor advances) |
 | `writeBlock(*Region, str, TextStyle, BlockOptions) -> WriteResult` | Wrapped block with alignment (cursor to next line) |
 | `writeStyled(*Region, *StyledText, TextStyle, ParagraphOptions) -> WriteResult` | Write styled text with wrapping and alignment |
@@ -862,6 +959,8 @@ const style = platen.TextStyle{
     .decoration = .{ .underline = true }, // and/or .strikethrough
     .char_spacing = 0,             // extra points between characters
     .opacity = 0.5,                // fill alpha: 0.0 transparent .. 1.0 opaque
+    .fallback = &.{other_font},    // for characters `font` lacks (Fallback Fonts)
+    .fallback_advance = .natural,  // or .monospace
 };
 ```
 
@@ -923,7 +1022,7 @@ another document errors (`ForeignFont`/`ForeignImage`/`ForeignSvg`).
 | `FontFace.fromMemory(alloc, bytes) -> FontFace` | Parse a font face (borrows bytes; identity encoding) |
 | `FontFace.fromFile(io, alloc, path) -> FontFace` | Parse a font face from a file (owns the bytes) |
 | `FontFace.setFeature(Feature, bool)` | Default OpenType flags for this face (before first use; `FaceFrozen` after) |
-| `FontFace.warmup(text)` | Optional: pre-fill the kerning cache clones inherit (before first use) |
+| `FontFace.warmup(text)` | No effect (shaping caches are per document); kept for compatibility |
 | `FontFace.deinit()` | Free the face (after all documents using it are deinitialized) |
 | `Image.fromMemory(alloc, bytes) -> *Image` | Decode an image once (borrows bytes) |
 | `Image.fromFile(io, alloc, path) -> *Image` | Decode an image from a file |
@@ -1114,11 +1213,17 @@ Known gaps, documented so you don't discover them the hard way:
   wrap.
 - **No interactive features.** AcroForm fields, digital signatures, and
   file attachments are out of scope for 1.0.
+- **SVG gradients are partial.** Linear and radial gradients work (units,
+  `gradientTransform`, focal point, fallbacks, `href` inheritance);
+  `stop-opacity` and `spreadMethod="reflect"`/`"repeat"` are not supported
+  yet (the last two draw as `pad`). On text, the gradient
+  spans an estimated box, as the text width itself is estimated.
 
 ## Requirements
 
 - Zig 0.17
-- No dependencies — compression uses `std.compress.flate`
+- No dependencies — compression uses `std.compress.flate`, and color parsing
+  is [ochre](https://git.urverk.org/urverk/ochre), vendored in `src/ochre/`
 
 ## License
 

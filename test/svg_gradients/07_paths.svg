@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="100">
+  <!-- path boxes come from the curves' extrema, not their control points -->
+  <!-- probes: 50,35 20,75 50,75 80,75 150,40 150,80 125,60 175,60 250,30 230,70 265,70 -->
+  <defs>
+    <linearGradient id="v" x2="0" y2="1"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="h"><stop offset="0" stop-color="black"/><stop offset="1" stop-color="#0ff"/></linearGradient>
+  </defs>
+  <!-- a cubic whose control points reach y = 0 but whose curve stops at y = 25 -->
+  <path d="M0 100 C0 0 100 0 100 100 Z" fill="url(#v)"/>
+  <!-- a circle drawn with arcs -->
+  <path d="M110 60 A40 40 0 0 1 190 60 A40 40 0 0 1 110 60 Z" fill="url(#h)"/>
+  <polygon points="250,10 290,90 210,90" fill="url(#v)"/>
+</svg>

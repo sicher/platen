@@ -1,5 +1,231 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **GPOS pair kerning without shaping:** `platen.GposKerning` gives the
+  kerning of two glyph IDs (`advance`, or `pair` for the full
+  `KernAdjustment`) from the GPOS 'kern' feature's PairPos lookups of a
+  script's language system, run through the GPOS engine exactly as
+  `shapeText` applies them (formats 1 and 2, extensions, lookup flags);
+  `platen.hasGposKerning(face, script)` says whether there is any. Pure,
+  for callers placing one glyph per character (courier, as CoreText kerns
+  GPOS-only fonts such as Apple SD Gothic Neo: "ra" -21, "Ja" -5). Checked
+  against HarfBuzz on every pair of 100 characters in six fonts. CLI:
+  `gpos-kern <font> [--script ...]`.
+
+- **Hangul shaping:** `shapeText` (and `write()`) shape Hangul text as
+  HarfBuzz's Hangul shaper does. Conjoining jamo (U+1100-11FF, A960-A97F,
+  D7B0-D7FF) become the precomposed syllable when the font has it, so
+  ᄒ ᅡ ᆫ ᄀ ᅳ ᆯ in Apple SD Gothic Neo is the same two glyphs as 한글;
+  otherwise they take the font's ljmo/vjmo/tjmo features (Old Hangul), and
+  a syllable the font lacks is decomposed into its jamo. A tone mark moves
+  before its syllable (or gets a dotted circle), 'calt' is off, marks keep
+  their advances, and the Hangul script's language system ('hang') is used
+  for GSUB and GPOS. Each syllable is one cluster, and each glyph's
+  `text_start`/`text_end` covers the jamo it came from. Checked against
+  HarfBuzz with a synthetic font holding jamo features
+  (test/fonts/hangul/HangulTest.ttf, scripts/gen_hangul_test_font.py) and
+  Apple SD Gothic Neo: a corpus plus 500 seeded random strings, no
+  differences.
+
+- **Every face of an installed family:** `platen.listSystemFontFaces(io,
+  allocator, family, opts)` returns each face whose typographic family
+  matches, whatever its weight or width (Light, Condensed, Black...), with its
+  names, OS/2 weight and width, italic flag, file and face index, so the
+  caller picks the face itself. `FamilyFace.load` reads its standalone sfnt
+  bytes when needed. Matching, folders and tie-breaks between copies of a face
+  are `findSystemFont`'s. CLI: `find-font <family> --all`.
+- **Shaping without a document, and drawing glyphs by ID:**
+  `platen.shapeText(allocator, &face, text, .{ .features = ... })` turns
+  text into glyph IDs with advances, offsets (font units) and clusters (byte
+  offsets into the text), reading the `FontFace` only (no Document, no I/O,
+  any thread), and each glyph's own source text (`text_start`/`text_end`,
+  tracked through ligatures, decompositions and reordering).
+  `doc.drawGlyphs(text, glyphs, style)` draws glyphs by ID, each at its own
+  position; ToUnicode gives each glyph its `source` text (a conjunct its
+  characters, a reordered matra its own: copying neither repeats nor drops
+  characters), or without one its cluster's text. For layout engines that
+  place every glyph themselves. Positioning is a GPOS engine run the way
+  HarfBuzz's default shaper does: every lookup type (single, pair, cursive,
+  mark-to-base, -ligature and -mark, contexts, extensions) in lookup order
+  with lookup flags, `curs`, `dist`, `abvm` and `blwm` on by default, the
+  `kern` table where GPOS has no kerning, marks zeroed by GDEF class and
+  attachments propagated; in a font without GPOS, marks are stacked on their
+  base by glyph extents (HarfBuzz's fallback positioning, e.g. Courier
+  Prime). Glyphs, clusters and positions are checked against
+  HarfBuzz (test/shaping/harfbuzz_positions.txt, with a synthetic font
+  holding every lookup type and flag). Devanagari is shaped by a port of
+  HarfBuzz's Indic shaper: syllables, reph, half and below forms, pre-base
+  matras, nukta forms, joiners, dotted circles for broken clusters, the
+  vowel constraints and Indic normalization, with the font's dev2 (else
+  deva, old-spec) features in their stages; checked against HarfBuzz with
+  Kohinoor Devanagari and Devanagari Sangam MN (thousands of texts). The
+  first character of a script picks the script, so mixed-script text is
+  shaped in runs. Not yet: other Indic scripts, Arabic joining, bidi, AAT
+  `morx` tables. CLI: `shape-text <font>` (HarfBuzz's serialization),
+  `glyphs <out.pdf> <font>`.
+- **SVG gradients**: `<linearGradient>` and `<radialGradient>` fill and stroke
+  shapes, paths and text through `url(#id)`, with an optional fallback color
+  (`url(#g) red`). Both `gradientUnits` (`objectBoundingBox`, the default, and
+  `userSpaceOnUse` with percentages of the viewport), `gradientTransform`, a
+  radial focal point (`fx`, `fy`; outside the circle it draws a cone, as in
+  SVG 2), and stops given as attributes or in `style`, at percentages, out of
+  order or at one offset (a hard edge). Where SVG says a gradient paints a
+  solid color (one stop; equal end points or zero radius: the last stop) or
+  nothing (no stops; a missing reference without a fallback; a box without
+  width or height, e.g. a horizontal line's), so does platen. Each is a PDF
+  shading pattern in the SVG's form; colors are checked against resvg. A
+  gradient inherits attributes and stops through `href`/`xlink:href`, as
+  browsers do (chains, cycles and bad targets end safely). Not yet:
+  `stop-opacity`, and `spreadMethod` `reflect` and `repeat` (drawn as `pad`).
+- **Fallback fonts**: `TextStyle.fallback` lists fonts for the characters
+  `font` has no glyph for; each character is drawn in the first font that has
+  it, combining marks staying with their base. Bold and italic use each
+  fallback's own variant, and are synthesized where it has none (stroked
+  outline, slanted text matrix, at FreeType's strengths). With
+  `fallback_advance = .monospace` each fallback cluster (an extended
+  grapheme cluster, UAX #29: a base with its marks, a conjunct, an emoji
+  sequence) is shaped in its font (GSUB, GPOS or fallback mark positioning,
+  Indic reordering) and centered in its cells, each the width of a space in
+  `font`: two for East Asian Wide/Fullwidth characters (or with VS16), else
+  one, or what `TextStyle.fallback_cells` says (to count as the caller's
+  own grid does); shrunk to fit when wider, and at most
+  `TextStyle.fallback_max_em` x size when set (0.88 keeps CJK within
+  Courier's ink, so lines don't touch). Monospaced text, e.g. a
+  screenplay in Courier with Cyrillic, Hangul or Devanagari from other
+  fonts, stays on its columns. Measurement, wrapping, anchoring and
+  decorations follow the runs.
+- **Extended grapheme clusters**: `platen.unicode_props.graphemeEndBytes`
+  (UAX #29 with Unicode 16's GB9c, passing UCD's GraphemeBreakTest.txt) and
+  `cells` (East Asian Width). A word broken between characters as a last
+  resort now breaks between clusters, never inside one.
+- **A font's own style and embedding permission**: `ttf.Font.style` (OS/2
+  fsSelection, else head.macStyle) and `ttf.Font.fs_type` with `mayEmbed()`
+  (false for Restricted License and Bitmap Embedding Only), so a caller
+  picking system fonts can skip what may not be embedded. `platen font-info`
+  prints both.
+- **`platen fallback <out> <font> [--fallback FONT]... [--monospace]
+  [--max-em F]`**: writes stdin lines with fallback fonts and prints their
+  widths.
+- **`platen graphemes`**: splits stdin lines into grapheme clusters, with
+  their code points and cells.
+- **`platen svg <in.svg> [out.pdf]`**: renders an SVG on a page of its own size
+  (1 px = 1 pt).
+
+### Changed
+
+- **The old glyph path is gone**: all identity-font text is shaped, measured
+  and drawn by the shaping engine (as `shapeText`). Removed:
+  `EmbeddedFont.markUnicodeCharsUsed` (use `shapeGlyphIds` or `shapeRun`),
+  `getGlyphsForText`, `getKerning`, `getMarkOffset`, `glyphSequenceWidth`,
+  `opentype.PairPosLookup`/`MarkBasePos`/`MarkMarkPos`/`MarkOffset` and the
+  old pair-kerning cache (GPOS pair kerning without shaping:
+  `GposKerning`). `FontFace.warmup` no longer warms anything (shaping caches
+  are per document) and is kept for compatibility. CLI `shape` uses the
+  engine.
+- **Copied text keeps a variation selector that chose the glyph**: when the
+  font's cmap format 14 lists a character + selector (an ideograph variant,
+  text-style emoji), the glyph copies as both, as typed (0.13 dropped the
+  selector). Selectors the font does not list are still dropped.
+
+- **Written text is shaped as `shapeText` shapes it**: `writeAt`, `write` and
+  measurement with Unicode-encoded embedded fonts now use the shaping engine
+  (GSUB, GPOS or the kern table, fallback mark positioning, Indic shaping)
+  instead of pair kerning and a mark heuristic. Devanagari forms its
+  conjuncts and reorders its matras in documents too, measured as drawn.
+  Each glyph advances by its shaped advance (TJ adjustments carry the
+  difference from its /W width, never off by 1/1000 em or more), and each
+  glyph's ToUnicode is its own characters. Positions move by fractions of a
+  1/1000 em; the platen-made reference PDFs were regenerated.
+- **Copy text keeps every character once**: a precomposed letter composed
+  across a mark (O + cedilla + tilde) or a ligature formed across one
+  covers the mark's text, which the mark gives up; a glyph a multiple
+  substitution split off (ccmp's U+012F to dotless i + ogonek) maps to its
+  part of the character.
+- **Color parsing is ochre's**: platen vendors
+  [ochre](https://git.urverk.org/urverk/ochre) (color math and CSS color
+  parsing, MIT) in `src/ochre/`, copied by `scripts/vendor-ochre vX.Y.Z` and
+  compiled as its own module. platen still has no dependencies. SVG `fill` and
+  `stroke` and `Color.hex` parse through it.
+- **SVG colors read all of CSS Color 4**: `hsl()`, `oklab()`, `oklch()`, the
+  modern `rgb(r g b / a)` syntax, `#RGBA` and `#RRGGBBAA`, and names in any
+  case. Out-of-range values are clipped, as browsers do, and now rounded rather
+  than truncated: `rgb(50%, 10%, 0%)` is 128, 26, 0 (it was 127, 25, 0). A
+  color's alpha still counts only as `none` at 0, as for `rgba()` before.
+- **`Color.hex` also reads the alpha forms** (`#RRGGBBAA`, `#RGBA`) when opaque,
+  and returns null for a translucent one: a `Color` has no alpha to keep.
+
+### Fixed
+
+- **Latin text took the font's DFLT features instead of its latn ones**:
+  shaping (shapeText, write(), measurement) now selects a font's language
+  system as HarfBuzz does for Latin text, `latn` first, then DFLT and
+  `dflt`; text without a script character keeps DFLT. GSUB also follows
+  the script now (it always used the default language system). Visible in
+  fonts whose latn and DFLT features differ, e.g. Satoshi's ccmp dotless
+  i/j before marks. `GposKerning` takes `.latin` for Latin text. Checked
+  against HarfBuzz with the script set as platen picks it, plus a
+  synthetic font whose latn and DFLT differ (test/fonts/script).
+
+- **System font lookup missed families in files with non-ASCII names**:
+  `findSystemFontFamily`/`listSystemFontFaces` did not find Hiragino Sans,
+  Hiragino Mincho ProN or Hiragino Maru Gothic ProN on macOS, whose files are
+  "ヒラギノ角ゴシック W0.ttc" ... "W9.ttc", "ヒラギノ明朝 ProN.ttc" and
+  "ヒラギノ丸ゴ ProN W4.ttc": the file-name prefilter rejected them. A file
+  name with non-ASCII characters now has its name tables read (header, table
+  directories and `name` only, not the whole file) to decide; ASCII names
+  are filtered as before. CLI: `find-font "Hiragino Sans" --all`.
+- **CJK text in CID-keyed OpenType/CFF fonts printed as garbage** (Apple SD
+  Gothic Neo, Hiragino...: Hangul and kana showed as unrelated low glyphs,
+  in PDFKit and poppler alike). The subset kept the font's charset, which
+  in a CID-keyed font maps glyphs to CIDs, and copied FDSelect and FDArray
+  with their old offsets. It now has an identity charset (CID n = glyph n,
+  the codes the content uses), a rebuilt FDSelect and FDArray, and each
+  glyph is desubroutinized with its own Font DICT's local subroutines.
+- **A Private DICT ending in a cut-off two-byte operator crashed CFF
+  subsetting** (an out-of-bounds read on hostile fonts).
+- **Characters a font lacks precomposed now draw from their parts**, as
+  HarfBuzz does: "é" in a font with "e" and U+0301 but no "é" is decomposed
+  (canonically, step by step, singletons and Indic nukta forms too) instead
+  of drawn as .notdef. A missing space character (en, em, thin, hair,
+  narrow no-break, figure, punctuation, ideographic...) takes the space
+  glyph, and U+2011 the hyphen U+2010; shapeText gives such spaces
+  HarfBuzz's widths (an en space half an em, a thin space a fifth).
+- **Marks typed out of canonical order** (an acute before a dot below) are
+  put in order before shaping, as HarfBuzz does, so they compose and attach
+  the same either way.
+- **A coverage table claiming more than 10,922 ranges (32,767 glyphs)
+  crashed shaping** with an integer overflow; it is now bounded by the
+  table's data like any other.
+- **Fonts without GDEF classes** take nonspacing marks (Mn) for marks, as
+  HarfBuzz does, rather than characters with a combining class.
+- **Text made only of ligatures was embedded unsubset**: a font whose drawn
+  text was all multi-character glyphs ("ffi" alone) looked unused to the
+  subsetter, so the whole font file went into the PDF (Gentium: 971 KB).
+- **A face platen cannot embed loaded anyway** and failed at output with
+  `MissingTable`: outlines only in a table platen does not read (Apple's
+  `hvgl`, as in PingFang UI). Loading now refuses it with
+  `error.UnsupportedOutlines`, so a caller can pick another face.
+- **Embedded text measured narrower than it was drawn**: measurement
+  truncated each glyph's advance to 1/1000 em while the PDF's width arrays
+  round it, so a Courier Prime character (599.6) measured 0.012 pt short at
+  12 pt; anchored and aligned text drifted by that per character. Both now
+  round the same way.
+- **SVG gradient paint was black**: `fill="url(#g)"` counted as an unknown
+  color, so the shape took its parent's fill, black by default, though the
+  documentation listed gradients as supported.
+- **SVG `<line>` and `<polyline>` with `stroke="none"` were stroked** (in the
+  current stroke color), and without a stroke their path was left unpainted
+  and open; it is now ended with `n`.
+- An OT-SVG color glyph that uses a gradient now falls back to the plain
+  outline, as one using transparency does (it was drawn black).
+- **`Color.fromName("lightgoldenrodyellow")` was null**: the hand-written
+  lookup table had lost it, though the constant was there. The table is now
+  built at compile time from the constants, and a test checks all 148 against
+  CSS Color 4 through ochre.
+
 ## 0.13.0 — 2026-10-22
 
 ### Added

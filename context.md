@@ -1,15 +1,56 @@
 # platen Context
 
 ## Current Focus
-**0.12.0 released (2026-10-17)**: font collections, system font lookup,
-legacy `kern` table, PDF/A date and file ID fixes.
+**0.13.0 released (2026-10-22)**: complete GSUB engine checked against
+HarfBuzz (ccmp/locl/rlig/clig on by default), default ignorables,
+variation sequences, COLRv1 gradient alpha, continuing styled text,
+Unicode composition, pixel check for platen-made references, and a batch
+of write()/decoration fixes.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
 user decision. Zig **0.17**, zero dependencies, 569 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
-Since 0.12.0 on dev (CHANGELOG Unreleased): README gallery + showcase,
-continuing styled text across regions, Unicode composition, and a batch
-of rendering fixes found by the showcase (session #31); a complete GSUB
-engine checked against HarfBuzz (session #32).
+Since 0.13.0 on dev: ochre (color parsing) vendored in `src/ochre/` by
+`scripts/vendor-ochre vX.Y.Z` (never edit those files; update ochre and
+re-run). SVG fill/stroke and `Color.hex` parse through it; `fromName`'s
+table is built from the 148 constants, checked against ochre's. Next for
+ochre in platen: perceptual gradients via `ochre.ramp(...).stops()`. The
+`examples/showcase_*.pdf` files are still from 0.12.0.
+**SVG gradients (sessions #33-34)**: steps 1-4 committed (7bf8e25: parse,
+`url()` paint + fallback, shading patterns, units/gradientTransform/focal);
+step 5 `href` inheritance committed 2026-11-18. Next: 6 stop-opacity,
+7 reflect/repeat; open question for the user: follow resvg's fallback on
+degenerate gradients? (TODO.md).
+
+**Shaping for courier (session #35, pushed)**: courier (FD13 clone, peer
+session) asked for (1) every face of a family, (2a) pure shaping, (2c)
+glyphs by ID, (2b) Devanagari. Done: 16fab28 `listSystemFontFaces`,
+047c70f `shapeText` + `drawGlyphs` (HarfBuzz-checked; DESIGN "Pure
+shaping"); then (local until pushed) 2f3f44d GPOS engine, 1be2e09
+normalization (decompose, space fallback), 23d7421 fallback mark
+positioning - shapeText now matches HarfBuzz's default shaper on every
+reference (352 runs, GposTest.ttf synthetic font); 341807b Devanagari
+Indic shaper (port of HarfBuzz 12.3.0; source in .tools/ref, fetched by
+the user); 56e0353 CID-keyed CFF subsetting (reveal's Hangul bug);
+d97192c per-glyph source text (ShapedGlyph.text_start/end,
+PlacedGlyph.source -> exact ToUnicode, courier's copy bug); 6995400
+`.monospace` on UAX #29 grapheme clusters, shaped, 1-2 cells
+(TextStyle.fallback_cells override for reveal). All pushed; courier and
+reveal notified. Then b0d4e28 fallback_max_em (reveal, 0.88 in use);
+b6f5d7a write()/measure on the shaping engine (shapeRun,
+renderShapedRun; 11 platen references regenerated after checking each
+diff: same glyphs, TJ adjustments < 1/1000 em); 6c612ee caches (GPOS
+pair records, word widths, glyphs_done/cps_done): perf +4% total vs
+before (Unicode/marks +27% is GPOS mark work the old path skipped);
+43b6fdc perf_test --only=SECTION. 2026-11-18: c4050c1 system font
+lookup reads the name tables of non-ASCII file names (Hiragino); 0d893a1
+Hangul shaper (hangul.zig, HarfBuzz-checked: synthetic HangulTest.ttf +
+Apple SD Gothic Neo, 0 differences); 59c1bd0 GposKerning (courier: GPOS
+pair kerning without shaping, HarfBuzz-checked); 393982c old glyph path
+removed (-1650 lines; text sections 5-10% faster; copy text keeps a cmap-14
+selector - user's choice; FontFace.warmup now a no-op). All pushed. Next:
+synthetic Indic font for CI; Latin langsys (latn before DFLT, TODO); maybe
+ActualText for logical-order copy text if courier/reveal ask.
+Note: `-Dtest-filter` skips document.zig's own tests (passes silently).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
 `.tools/devkit/devkit release X.Y.Z` (merge dev, date the notes, set the
@@ -41,6 +82,59 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   idle. Deferred by the user.
 - Other urverk projects need the 0.17 migration: DESIGN.md "Zig
   Compatibility Notes" is the checklist (watch the signed `{d:` `+`).
+
+## What We Did (Session 2026-11-16 #35 - courier: faces, shapeText, drawGlyphs)
+- `system_fonts.listFamily` (one walker shared with find), CLI `find-font --all`.
+- `shapeText`: decode.zig (offsets), local GSUB Shaper, HarfBuzz clusters
+  (unicode_props, generated from UCD 16), positions = write()'s algorithm.
+  Gaps vs HarfBuzz: no GPOS engine (lookup flags, GDEF mark zeroing,
+  fallback marks) - position_gaps.txt.
+- `drawGlyphs` + `.glyphs` page command; ToUnicode per cluster.
+- Fixed: ligature-only fonts embedded whole (607d9da); fresh clone failed
+  the svg probe test once (c6eb1c0, test/output missing).
+- Gotcha: `zig fmt src/*.zig` rewrites other files (0.17 builtins, HEAD's
+  unformatted lines) - format only the files you changed.
+- Gotcha: a passing `zig build test` is cached by binary hash; after
+  regenerating only reference files, run the test binary directly. A
+  filter matching nothing still reports "1 test" (the root test block).
+- Gotcha: `zig build test` does not rebuild zig-out/bin/platen - run
+  `zig build` before CLI comparisons (stale-binary false alarms).
+- Scratch HarfBuzz compare: hbcmp.py <font> <texts> [guess|deva] and
+  hbtrace.py (message-func stage dump) in the session scratchpad; morx fonts
+  must be compared without morx (fontTools del t['morx']).
+- Mutating GSUB/GPOS/GDEF found a u16 overflow in CoverageTable (fixed);
+  keep that test at 96 rounds (5000 for a one-off probe).
+
+## What We Did (Session 2026-11-07 #34 - SVG gradient href)
+- `resolveHrefs` after parsing: Chrome's rule (first in chain wins, stops from
+  the first with any, borrowed), capped at 32 hops (ends cycles too).
+- resvg 0.5 is wrong on three href cases (inherited gradientTransform, linear
+  coords through a radial, hangs on chain-into-cycle): unit tests only; case
+  `10_href.svg` probes the rest (128 probes now); reference PDF has 10 pages.
+- Found: resvg uses the fallback color for stopless / zero-box gradients,
+  paints last stop for r<0, ignores a singular transform - platen differs.
+
+## What We Did (Session 2026-11-03 #33 - SVG gradients 1-4)
+- Found the docs claimed SVG gradients that did not exist (`url(#g)` was an
+  unknown color: black). Plan agreed with the user: 1 parse, 2 url() +
+  fallback, 3 render, 4 units/transform/focal; then 5 href, 6 stop-opacity,
+  7 reflect/repeat.
+- New `src/svg_gradient.zig` (types, parsers, `prepare`, `writePattern`) and
+  `src/svg_path.zig` (path walk into a sink, arcs, tight `Bounds`; renderPath
+  refactored onto it, output byte-identical). `Style.fill/stroke` are `Paint`.
+  `toPdfContent` gained a `patterns` out-list (document writes `/Pattern`,
+  color_fonts rejects glyphs needing it). Design notes in DESIGN.md "SVG
+  gradients".
+- **Oracle decision (user)**: resvg (`resvg-py` installed in .venv) at probe
+  points, +-3 levels, probes only where 5x5 spread <= 24 (generator enforces);
+  plus exact pixel check vs platen-made `test/reference/svg_gradients.pdf`.
+  fpdf2 and MuPDF cannot render SVG gradients. Near a radial focal point
+  pdftoppm/MuPDF approximate (resvg verified exact by hand); MuPDF has a
+  seam on the focal-center axis.
+- CLI: `platen svg <in.svg> [out.pdf]`. Fixed on the way: line/polyline with
+  `stroke="none"` were stroked. Found (TODO.md): polyline never filled,
+  S-after-Q reflection, 2-decimal path coordinates, document gradients assume
+  stops at 0 and 1.
 
 ## What We Did (Session 2026-10-22 #32 - GSUB engine)
 - **New `src/gsub.zig`** replaces the per-feature GSUB code in
@@ -141,29 +235,6 @@ CHANGELOG.md on dev as work lands; `devkit release` refuses without them.
   mode (pdftotext) can't see blank glyphs, so a render/pixel check is
   needed. Kerning (kern format 0 / GPOS pairs) exposed for measuring is
   fdxview's "nice to have", not started.
-
-## What We Did (Session 2026-10-06 #28 - releases, devkit, spans)
-- **Releases 0.10.0, 0.10.1, 0.11.0.** Adopted the devkit main/dev model;
-  version single-sourced from build.zig.zon (build option -> version.zig).
-- **devkit** (separate repo, pushed 6fe0aba): opt-in `CHANGELOG=` -
-  `release` requires and dates `## Unreleased`, `publish` uses it as the
-  release text (assets optional). Opt-in, so other repos are unaffected.
-- **Package size:** `.paths` in build.zig.zon + `.gitattributes`
-  export-ignore: dependents fetch 0.4 MB (was 45) and cache 1.8 MB.
-- **CI first ran** (platen's workflow had never been pushed): runner
-  lacked poppler/qpdf -> installed; workflow prints `--summary all`.
-- **Test infrastructure:** the comparator compared fonts only when both
-  pages had some and read qpdf failures as "no fonts" - fixed, with its
-  own tests; test/ fixtures and comparator scripts are declared inputs of
-  the test run, so a changed reference re-runs (a corrupted one used to
-  pass from cache).
-- **StyledText spans:** fields are optional overrides of the base style
-  (writeBlock/writeStyled ignored the base color/decoration - fixed), and
-  spans take bold/italic, resolved through the font family, with widths
-  measured per span.
-- **Benchmarks re-measured** (M1 Pro, medians of 3): 70 ms / 54 ms for
-  110 pages; invoices 2,060 / 3,350 shared / 9,500 at 8 threads / ~17,700
-  at 8 threads shared (README said ~19,000).
 
 ## Older sessions (pruned 2026-10-22)
 Session #27 (2026-10-04/05): Zig 0.17 migration, number contract
