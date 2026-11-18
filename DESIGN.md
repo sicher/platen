@@ -924,8 +924,17 @@ try doc.drawSvg(svg, x, y, width, height);
 **SVG gradients** (`src/svg_gradient.zig`; path geometry and bounding boxes
 in `src/svg_path.zig`):
 
-- Parsing keeps every gradient attribute optional (null = not set) so `href`
-  inheritance can be added without reparsing; defaults apply in `prepare`.
+- Parsing keeps every gradient attribute optional (null = not set); defaults
+  apply in `prepare`. After parsing, `resolveHrefs` fills in what each
+  gradient inherits through `href`, as Chrome does: each attribute from the
+  first gradient in the chain that sets it, the stops from the first that has
+  any (borrowed as `inherited_stops`, so the map must not change after). A
+  missing or non-gradient target ends the chain; the walk is capped at
+  `max_href_hops` (32), which also ends cycles (going round again adds
+  nothing). The parser sets only coordinates of the element's own kind, so
+  merging every field lets linear coordinates pass through a radial template
+  (unused by it), as in browsers. Resolution reads only the parsed values and
+  writes back after, so map order does not matter.
   `Style.fill`/`stroke` are a `Paint`: a color, or `url(#id)` as an index into
   `Svg.paint_refs` plus a fallback. References resolve at render time, so a
   gradient may follow its first use. A later duplicate id replaces the
@@ -968,6 +977,12 @@ exact value; poppler gave t = 0.067 for 0.049). MuPDF also draws a one-pixel
 seam along the focal-to-center axis of a radial shading; poppler does not. The
 exact pixel check against the platen-made `test/reference/svg_gradients.pdf`
 catches any later drift.
+
+resvg 0.5 (resvg-py) is no oracle for some `href` cases, which are unit-tested
+only: it ignores an inherited `gradientTransform` (SVG 1.1, Chrome and Firefox
+inherit it), drops linear coordinates inherited through a radial gradient
+(browsers keep them), and hangs on a chain that runs into a cycle
+(`a -> b -> c -> b`).
 
 ### Drawing Primitives
 

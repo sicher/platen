@@ -262,10 +262,15 @@ into later runs, gradient stops borrowed instead of copied. Still open:
   error.BitDepthNotAllowed and the caller converts - user decision
   2026-10-05: no silent conversion by default)
 - [ ] OT-SVG: gzipped/multi-glyph docs, gradients/transparency in glyph docs
-- [ ] SVG gradients, rest (steps 5-7 of the 2026-11-03 plan): `href`
-  inheritance between gradients (attributes and stops; cycles), `stop-opacity`
-  (soft mask, as COLRv1), `spreadMethod` reflect/repeat (repeat the stops over
-  a wider domain). Also `fr` (SVG 2 focal radius).
+- [ ] SVG gradients, rest (steps 6-7 of the 2026-11-03 plan; `href` done
+  2026-11-07): `stop-opacity` (soft mask, as COLRv1), `spreadMethod`
+  reflect/repeat (repeat the stops over a wider domain). Also `fr` (SVG 2
+  focal radius).
+- [ ] SVG gradients vs resvg on degenerate cases (decide which to follow):
+  with `url(#g) green`, resvg paints the fallback for a gradient without stops
+  and for objectBoundingBox on a zero-width/height box, where platen paints
+  nothing; for `r < 0` resvg paints the last stop (platen: nothing); a singular
+  `gradientTransform` resvg ignores (platen: nothing).
 - [ ] SVG: `<polyline>` is never filled (SVG fills it, as if closed).
 - [ ] SVG: `S` after a `Q` reflects the quadratic's control point (SVG uses
   the current point unless the previous command was C/S); `T` after `C` too.

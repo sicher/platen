@@ -703,6 +703,7 @@ pub const Svg = struct {
                 try style_stack.append(self.allocator, group_style);
             }
         }
+        try gradient.resolveHrefs(self.allocator, &self.gradients);
     }
 
     fn parseSvgElement(self: *Svg, elem: xml.Element) !void {

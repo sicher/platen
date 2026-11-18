@@ -61,13 +61,69 @@ pub const Gradient = struct {
     spread: ?Spread = null,
     /// `href` / `xlink:href` target id (without `#`), owned.
     href: ?[]u8 = null,
+    /// The element's own `<stop>`s.
     stops: std.ArrayListUnmanaged(Stop) = .empty,
+    /// Stops inherited through `href` when the element has none of its own:
+    /// another gradient's `stops.items`, borrowed (set by resolveHrefs).
+    inherited_stops: []const Stop = &.{},
 
     pub fn deinit(self: *Gradient, allocator: std.mem.Allocator) void {
         if (self.href) |h| allocator.free(h);
         self.stops.deinit(allocator);
     }
+
+    /// The stops it paints with: its own, else the inherited ones.
+    pub fn stopList(self: *const Gradient) []const Stop {
+        return if (self.stops.items.len > 0) self.stops.items else self.inherited_stops;
+    }
+
+    /// Take every attribute not set here from `template`, and its own stops
+    /// when there are none yet. The parser sets only coordinates of the
+    /// element's own kind, so a template's other-kind fields hold what it
+    /// inherited; copying them lets coordinates pass through a gradient of
+    /// the other kind, which prepare then ignores for it.
+    fn inherit(self: *Gradient, template: *const Gradient) void {
+        inline for (inheritable) |field| {
+            if (@field(self, field) == null) @field(self, field) = @field(template, field);
+        }
+        if (self.stopList().len == 0) self.inherited_stops = template.stops.items;
+    }
+
+    const inheritable = .{ "x1", "y1", "x2", "y2", "cx", "cy", "r", "fx", "fy", "units", "transform", "spread" };
 };
+
+/// Most `href` hops followed from one gradient. Real chains are a few deep;
+/// the cap bounds hostile ones. A cycle needs no detection beyond it: going
+/// round again finds nothing the first round did not.
+pub const max_href_hops = 32;
+
+pub const GradientMap = std.StringHashMapUnmanaged(Gradient);
+
+/// Resolve every gradient's `href` chain, as browsers do: an attribute comes
+/// from the first gradient in the chain that sets it, the stops from the
+/// first that has any. A missing target, or one that is not a gradient,
+/// ends the chain. Run once, after parsing; the map must not change after,
+/// since inherited stops borrow the templates' lists.
+pub fn resolveHrefs(allocator: std.mem.Allocator, gradients: *GradientMap) !void {
+    // Resolve from the parsed (own) attributes only, then write back, so
+    // the result does not depend on the map's order.
+    const resolved = try allocator.alloc(Gradient, gradients.count());
+    defer allocator.free(resolved);
+    var it = gradients.valueIterator();
+    for (resolved) |*out| {
+        const g = it.next().?;
+        out.* = g.*;
+        var current: *const Gradient = g;
+        for (0..max_href_hops) |_| {
+            const template = gradients.getPtr(current.href orelse break) orelse break;
+            if (template == g) break;
+            out.inherit(template);
+            current = template;
+        }
+    }
+    it = gradients.valueIterator();
+    for (resolved) |r| it.next().?.* = r;
+}
 
 /// Parse a gradient coordinate: `0.5`, `50%`, `10px`. Unit suffixes other
 /// than `%` are dropped, as svg.zig does for other lengths. Null when the
@@ -189,7 +245,7 @@ pub const Prepared = union(enum) {
 /// height paints nothing, as do a negative radius and a gradientTransform
 /// that cannot be inverted.
 pub fn prepare(g: *const Gradient, bbox: ?Box, ctm: Transform, viewport: Viewport) Prepared {
-    const stops = g.stops.items;
+    const stops = g.stopList();
     if (stops.len == 0) return .none;
     if (stops.len == 1) return .{ .color = stops[0].color };
     const last = stops[stops.len - 1].color;
@@ -478,8 +534,12 @@ test "Svg reads gradient elements, their attributes and stops" {
     try expectLength(.{ .value = 4 }, rad.fx);
     try expectLength(.{ .value = 5 }, rad.fy);
     try testing.expectEqualStrings("lin", rad.href.?);
+    // No stops of its own; units, spread, transform and stops through href.
     try testing.expectEqual(@as(usize, 0), rad.stops.items.len);
-    try testing.expect(rad.units == null and rad.spread == null and rad.transform == null);
+    try testing.expectEqual(lin.stops.items.ptr, rad.stopList().ptr);
+    try testing.expectEqual(Units.user_space_on_use, rad.units.?);
+    try testing.expectEqual(Spread.reflect, rad.spread.?);
+    try testing.expectEqual(lin.transform.?, rad.transform.?);
 }
 
 test "Svg stop-color: invalid, none and currentColor are black" {
@@ -555,6 +615,116 @@ test "Svg gradients: no id, duplicate ids, nesting, unclosed - no leaks" {
     // A gradientTransform that overflows is an invalid SVG, as for elements.
     try testing.expectError(error.InvalidSvg, svg.Svg.fromMemory(testing.allocator,
         "<svg width=\"1\" height=\"1\"><linearGradient id=\"g\" gradientTransform=\"scale(1e9) scale(1e9)\"/></svg>"));
+}
+
+test "Svg gradient href: chains, own values win, kinds, bad targets" {
+    const doc =
+        \\<svg width="10" height="10"><rect id="r" width="1" height="1"/>
+        \\  <linearGradient id="a" href="#b" x2="0.5"/>
+        \\  <linearGradient id="b" href="#c" y1="0.25"><stop offset="0" stop-color="lime"/></linearGradient>
+        \\  <linearGradient id="c" x1="1" x2="0" gradientUnits="userSpaceOnUse" spreadMethod="repeat"
+        \\      gradientTransform="translate(3)"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+        \\  <radialGradient id="rad" href="#c" r="2"/>
+        \\  <linearGradient id="through" xlink:href="#rad"/>
+        \\  <linearGradient id="later" href="#fwd"/>
+        \\  <linearGradient id="self" href="#self" x1="0.5"/>
+        \\  <linearGradient id="missing" href="#nope"/>
+        \\  <linearGradient id="notgrad" href="#r"/>
+        \\</svg>
+        \\
+    ;
+    // A gradient after the root's end tag still parses (forward reference).
+    const s = try svg.Svg.fromMemory(testing.allocator, doc ++ "<linearGradient id=\"fwd\" x1=\"0.75\"/>");
+    defer s.deinit();
+    const get = struct {
+        fn f(sv: *const svg.Svg, id: []const u8) *const Gradient {
+            return sv.gradients.getPtr(id).?;
+        }
+    }.f;
+    const c = get(s, "c");
+
+    // a: its own x2, y1 from b, x1 / units / spread / transform from c;
+    // b's stops (the first with any), borrowed.
+    const a = get(s, "a");
+    try expectLength(.{ .value = 1 }, a.x1);
+    try expectLength(.{ .value = 0.25 }, a.y1);
+    try expectLength(.{ .value = 0.5 }, a.x2);
+    try testing.expect(a.y2 == null);
+    try testing.expectEqual(Units.user_space_on_use, a.units.?);
+    try testing.expectEqual(Spread.repeat, a.spread.?);
+    try testing.expectEqual(@as(f64, 3), a.transform.?.e);
+    try testing.expectEqual(@as(usize, 0), a.stops.items.len);
+    try testing.expectEqual(get(s, "b").stops.items.ptr, a.stopList().ptr);
+    try testing.expectEqual(@as(usize, 1), a.stopList().len);
+
+    // b keeps its own stop and y1; c inherits nothing.
+    try testing.expectEqual(@as(usize, 1), get(s, "b").stopList().len);
+    try expectLength(.{ .value = 0.25 }, get(s, "b").y1);
+    try testing.expect(c.y1 == null and c.inherited_stops.len == 0);
+
+    // A radial template of a linear one: the common attributes and the
+    // stops; cx stays unset. It carries the linear coordinates (unused by
+    // a radial) so a linear gradient inheriting through it still gets
+    // them, as browsers do.
+    const rad = get(s, "rad");
+    try testing.expect(rad.cx == null);
+    try expectLength(.{ .value = 1 }, rad.x1);
+    try expectLength(.{ .value = 2 }, rad.r);
+    try testing.expectEqual(Units.user_space_on_use, rad.units.?);
+    try testing.expectEqual(c.stops.items.ptr, rad.stopList().ptr);
+    const through = get(s, "through");
+    try expectLength(.{ .value = 1 }, through.x1);
+    try expectLength(.{ .value = 2 }, through.r); // carried, unused by a linear
+    try testing.expectEqual(@as(usize, 2), through.stopList().len);
+
+    try expectLength(.{ .value = 0.75 }, get(s, "later").x1);
+    // Itself, a missing id, a non-gradient: the chain ends, nothing taken.
+    try expectLength(.{ .value = 0.5 }, get(s, "self").x1);
+    for ([_][]const u8{ "self", "missing", "notgrad" }) |id| {
+        const g = get(s, id);
+        try testing.expect(g.units == null and g.stopList().len == 0);
+    }
+}
+
+test "Svg gradient href: cycles end, chains are capped" {
+    const doc =
+        \\<svg width="10" height="10">
+        \\  <linearGradient id="a" href="#b"/>
+        \\  <linearGradient id="b" href="#a" x1="1"><stop offset="0" stop-color="red"/></linearGradient>
+        \\  <linearGradient id="p" href="#q"/>
+        \\  <linearGradient id="q" href="#t"><stop offset="0" stop-color="red"/></linearGradient>
+        \\  <linearGradient id="t" href="#q" x2="0.5"/>
+        \\  <linearGradient id="u" href="#v"/>
+        \\  <linearGradient id="v" href="#u"/>
+        \\</svg>
+    ;
+    const s = try svg.Svg.fromMemory(testing.allocator, doc);
+    defer s.deinit();
+    // a <-> b: each takes what the other set.
+    const a = s.gradients.getPtr("a").?;
+    try expectLength(.{ .value = 1 }, a.x1);
+    try testing.expectEqual(@as(usize, 1), a.stopList().len);
+    // p -> q -> t -> q: a cycle not through p still ends.
+    const p = s.gradients.getPtr("p").?;
+    try expectLength(.{ .value = 0.5 }, p.x2);
+    try testing.expectEqual(s.gradients.getPtr("q").?.stops.items.ptr, p.stopList().ptr);
+    // A cycle with nothing set anywhere paints nothing.
+    const u = s.gradients.getPtr("u").?;
+    try testing.expectEqual(@as(usize, 0), u.stopList().len);
+    try testing.expect(prepare(u, .{ .x = 0, .y = 0, .width = 1, .height = 1 }, .{}, .{ .width = 1, .height = 1 }) == .none);
+
+    // A chain g0 -> g1 -> ... -> g39 with x1 only on g39: g_i reaches it
+    // in 39 - i hops, so up to max_href_hops away.
+    var buf: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer buf.deinit();
+    try buf.writer.writeAll("<svg width=\"1\" height=\"1\">");
+    for (0..39) |i| try buf.writer.print("<linearGradient id=\"g{d}\" href=\"#g{d}\"/>", .{ i, i + 1 });
+    try buf.writer.writeAll("<linearGradient id=\"g39\" x1=\"1\"/></svg>");
+    const chain = try svg.Svg.fromMemory(testing.allocator, buf.written());
+    defer chain.deinit();
+    const first_reached = 39 - max_href_hops;
+    try testing.expect(chain.gradients.getPtr(std.fmt.comptimePrint("g{d}", .{first_reached - 1})).?.x1 == null);
+    try expectLength(.{ .value = 1 }, chain.gradients.getPtr(std.fmt.comptimePrint("g{d}", .{first_reached})).?.x1);
 }
 
 fn patternText(spec: PatternSpec) ![]u8 {

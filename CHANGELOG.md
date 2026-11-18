@@ -76,9 +76,10 @@
   solid color (one stop; equal end points or zero radius: the last stop) or
   nothing (no stops; a missing reference without a fallback; a box without
   width or height, e.g. a horizontal line's), so does platen. Each is a PDF
-  shading pattern in the SVG's form; colors are checked against resvg. Not yet:
-  `href` between gradients, `stop-opacity`, and `spreadMethod` `reflect` and
-  `repeat` (drawn as `pad`).
+  shading pattern in the SVG's form; colors are checked against resvg. A
+  gradient inherits attributes and stops through `href`/`xlink:href`, as
+  browsers do (chains, cycles and bad targets end safely). Not yet:
+  `stop-opacity`, and `spreadMethod` `reflect` and `repeat` (drawn as `pad`).
 - **Fallback fonts**: `TextStyle.fallback` lists fonts for the characters
   `font` has no glyph for; each character is drawn in the first font that has
   it, combining marks staying with their base. Bold and italic use each

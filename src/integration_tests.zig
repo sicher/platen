@@ -4000,6 +4000,7 @@ const svg_gradient_cases = [_][]const u8{
     "07_paths.svg",
     "08_fallbacks.svg",
     "09_focal_outside.svg",
+    "10_href.svg",
 };
 
 fn generateSvgGradientsPdf(allocator: std.mem.Allocator) ![]u8 {

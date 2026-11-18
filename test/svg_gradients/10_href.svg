@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="390">
+  <!-- href inheritance: attributes from the first gradient in the chain
+       that sets them, stops from the first that has any; cycles and bad
+       targets end the chain. One strip per case. Unit-tested only, as
+       resvg 0.5 (resvg-py) is no oracle for them: an inherited
+       gradientTransform (resvg ignores it; SVG 1.1, Chrome and Firefox
+       inherit it), a linear gradient inheriting through a radial one
+       (resvg drops the coordinates, browsers keep them), a chain running
+       into a cycle (resvg hangs). -->
+  <!-- probes: 20,15 100,15 180,15 20,45 100,45 180,45 20,75 100,75 180,75 20,105 100,105 180,105 100,150 120,150 20,195 100,195 180,195 20,225 100,225 180,225 20,255 100,255 180,255 20,285 100,285 180,285 20,315 100,315 180,315 20,345 100,345 180,345 20,375 100,375 180,375 -->
+  <defs>
+    <linearGradient id="rb"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <!-- 1: a chain, stops two hops away -->
+    <linearGradient id="chain" href="#chain2"/>
+    <linearGradient id="chain2" xlink:href="#rb"/>
+    <!-- 2: own stops win over the template's -->
+    <linearGradient id="own" href="#rb"><stop offset="0" stop-color="lime"/><stop offset="1" stop-color="yellow"/></linearGradient>
+    <!-- 3: coordinates from the template, reversed -->
+    <linearGradient id="rev" x1="1" x2="0"/>
+    <linearGradient id="fromrev" href="#rev"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <!-- 4: units and x1 from the template, own x2 wins -->
+    <linearGradient id="user" gradientUnits="userSpaceOnUse" x1="0" x2="100"/>
+    <linearGradient id="fromuser" href="#user" x2="150"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <!-- 5: a radial taking only the stops of a linear one -->
+    <radialGradient id="radlin" href="#rev2"/>
+    <linearGradient id="rev2" x1="1" x2="0"><stop offset="0" stop-color="yellow"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <!-- 6, 7: a cycle; each takes what the other set -->
+    <linearGradient id="cyc1" href="#cyc2"/>
+    <linearGradient id="cyc2" href="#cyc1"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="cyc3" href="#cyc4"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="cyc4" href="#cyc3" x1="1" x2="0"/>
+    <!-- 8: itself, a missing id, a non-gradient: plain own gradients -->
+    <linearGradient id="self" href="#self"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="missing" href="#nope"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <rect id="shape" width="1" height="1"/>
+    <linearGradient id="notgrad" href="#shape"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <!-- 11: a cycle with no stops anywhere paints nothing (resvg would use a fallback color here: see TODO) -->
+    <linearGradient id="empty1" href="#empty2"/>
+    <linearGradient id="empty2" href="#empty1"/>
+    <!-- 12: a template defined after its use -->
+    <linearGradient id="early" href="#late"><stop offset="0" stop-color="lime"/><stop offset="1" stop-color="blue"/></linearGradient>
+  </defs>
+  <rect x="0" y="5" width="200" height="20" fill="url(#chain)"/>
+  <rect x="0" y="35" width="200" height="20" fill="url(#own)"/>
+  <rect x="0" y="65" width="200" height="20" fill="url(#fromrev)"/>
+  <rect x="0" y="95" width="200" height="20" fill="url(#fromuser)"/>
+  <rect x="0" y="125" width="200" height="50" fill="url(#radlin)"/>
+  <rect x="0" y="185" width="200" height="20" fill="url(#cyc1)"/>
+  <rect x="0" y="215" width="200" height="20" fill="url(#cyc3)"/>
+  <rect x="0" y="245" width="200" height="20" fill="url(#self)"/>
+  <rect x="0" y="275" width="200" height="20" fill="url(#missing)"/>
+  <rect x="0" y="305" width="200" height="20" fill="url(#notgrad)"/>
+  <rect x="0" y="335" width="200" height="20" fill="url(#empty1)"/>
+  <rect x="0" y="365" width="200" height="20" fill="url(#early)"/>
+  <linearGradient id="late" x1="1" x2="0"/>
+</svg>

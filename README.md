@@ -1214,9 +1214,9 @@ Known gaps, documented so you don't discover them the hard way:
 - **No interactive features.** AcroForm fields, digital signatures, and
   file attachments are out of scope for 1.0.
 - **SVG gradients are partial.** Linear and radial gradients work (units,
-  `gradientTransform`, focal point, fallbacks); a gradient that inherits
-  through `href`, `stop-opacity`, and `spreadMethod="reflect"`/`"repeat"`
-  are not supported yet (the last two draw as `pad`). On text, the gradient
+  `gradientTransform`, focal point, fallbacks, `href` inheritance);
+  `stop-opacity` and `spreadMethod="reflect"`/`"repeat"` are not supported
+  yet (the last two draw as `pad`). On text, the gradient
   spans an estimated box, as the text width itself is estimated.
 
 ## Requirements
