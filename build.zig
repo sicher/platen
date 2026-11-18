@@ -168,11 +168,14 @@ pub fn build(b: *std.Build) void {
 
 /// Declare every file under `dir` (relative to the build root) as an input
 /// of `run`, except test/output, which the tests themselves write (as an
-/// input it would invalidate the cache on every run).
+/// input it would invalidate the cache on every run). A fetched package has
+/// no `dir` (build.zig.zon's .paths leaves the tests out): nothing to declare.
 fn addFileInputsUnder(b: *std.Build, run: *std.Build.Step.Run, dir: []const u8) void {
     const io = b.graph.io;
-    var root = b.root.root_dir.handle.openDir(io, b.pathJoin(&.{ b.root.sub_path, dir }), .{ .iterate = true }) catch |err|
-        std.debug.panic("cannot open {s}/ to declare test inputs: {t}", .{ dir, err });
+    var root = b.root.root_dir.handle.openDir(io, b.pathJoin(&.{ b.root.sub_path, dir }), .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => std.debug.panic("cannot open {s}/ to declare test inputs: {t}", .{ dir, err }),
+    };
     defer root.close(io);
     var walker = root.walk(b.allocator) catch @panic("OOM");
     defer walker.deinit();

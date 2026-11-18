@@ -159,6 +159,11 @@
 
 ### Fixed
 
+- **A project depending on platen failed to build**: platen's build.zig
+  panicked with "cannot open test/ to declare test inputs: FileNotFound",
+  because a fetched package has no test/ (build.zig.zon's `.paths` leaves
+  it out). Without test/ there are no test inputs to declare.
+
 - **Latin text took the font's DFLT features instead of its latn ones**:
   shaping (shapeText, write(), measurement) now selects a font's language
   system as HarfBuzz does for Latin text, `latn` first, then DFLT and
