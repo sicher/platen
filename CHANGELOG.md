@@ -159,6 +159,16 @@
 
 ### Fixed
 
+- **CFF glyphs with a hintmask in a subroutine could print wrong** (Noto
+  Sans KR's 안, 글, 연, and any CFF font whose subroutines hold hint masks):
+  subsetting expanded each subroutine on its own, so a hintmask there saw
+  none of the glyph's stems and read its mask bytes as operators,
+  dropping or garbling the outline. Subroutines are now inlined with the
+  glyph's operand stack and stem count, `return` and `endchar` end what
+  they should, and the curve operators 30/31 clear the stack. Checked
+  against fontTools for every glyph written of Inter, Satoshi, Noto Sans
+  KR, Apple SD Gothic Neo and Hiragino.
+
 - **Text copied from monospace fallback cells could split words**: a
   narrow fallback glyph centered in its cells (Gentium Italic's Cyrillic in
   Courier Prime) leaves gaps that poppler 25's `pdftotext` read as word

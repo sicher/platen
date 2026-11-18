@@ -1669,6 +1669,17 @@ subrs, offsets as fixed 5-byte ints, Top DICT rebuilt until its size
 settles. Test: test/fonts/cff (scripts/gen_cff_test_fonts.py) has the same
 outlines name-keyed and CID-keyed (CIDs != GIDs, two FDs with different
 local subrs); both must render identically (pdftoppm, grayscale bytes).
+Desubroutinizing (`cff_subset.desubroutinize`, every CFF subset) runs
+one `Desubr` state per glyph, as a Type 2 interpreter: subroutines share
+the caller's operand stack and stem count and write into the glyph's
+output; `return` ends a subroutine, `endchar` the glyph, every operator
+(0-31 but 28/29, the curves 30/31 too) clears the stack. A hintmask's
+mask is (stems + 7) / 8 bytes, stems counted across the whole glyph:
+expanding each subroutine on its own (before 2026-11-18) counted none
+for a hintmask in a subroutine and parsed its mask as operators (Noto
+Sans KR 안 글 연: test/fonts/Noto Sans KR, scripts/subset_noto_kr.py).
+Checked against fontTools' outlines for every glyph written (Inter,
+Satoshi, Noto Sans KR, Apple SD Gothic Neo, Hiragino: 0 differ).
 
 ### FontFace (sessions #25/#26)
 `FontFace.fromMemory/fromFile` parses a font once — ttf tables, metrics,

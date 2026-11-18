@@ -52,3 +52,23 @@ test "a CID-keyed CFF subset draws the same glyphs as a name-keyed one" {
     try testing.expect(name_pgm.len > 100);
     try testing.expectEqualSlices(u8, name_pgm, cid_pgm);
 }
+
+
+test "a hintmask in a subroutine keeps its mask (Noto Sans KR 안)" {
+    // 안's second hintmask sits in a global subroutine, after the glyph's
+    // 17 stems: inlined on its own, the subroutine read no mask bytes, so
+    // the mask (FF 00) was lost and an operand (-133) read as the mask.
+    // Expected: fontTools' desubroutinized charstring for the glyph
+    const a = testing.allocator;
+    var doc = platen.Document.init(a, testing.io);
+    defer doc.deinit();
+    doc.compression_level = 0;
+    try doc.addPage(.{ .size = .{ .width = 200, .height = 100 } });
+    const font = try doc.loadFont("test/fonts/Noto Sans KR/NotoSansKR-Regular-subset.otf", .identity);
+    _ = try doc.writeAt(.{ .x = 20, .y = 60 }, "안", .{ .font = font, .size = 40 }, .{});
+    const pdf = try doc.output();
+    defer a.free(pdf);
+    var expected: [118]u8 = undefined;
+    _ = try std.fmt.hexToBytes(&expected, "51cff7c7d4e8d0f71fd312cddcb5ddf74fdbf717de38f76c13ff00f7c2f98f15fb1a252ffb17fb16f12ef71af71bf0e8f716f71726e7fb1b1f4304e4ce4d3233484d323447c9e3e4cfc9e21ff803f71c15fd2edef7d60713fe80f719d00613ff00fb19f7a706fcc7fcea15fbb3f8efcffc9df76f070e");
+    try testing.expect(std.mem.indexOf(u8, pdf, &expected) != null);
+}
