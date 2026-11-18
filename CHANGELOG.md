@@ -159,6 +159,14 @@
 
 ### Fixed
 
+- **Text copied from monospace fallback cells could split words**: a
+  narrow fallback glyph centered in its cells (Gentium Italic's Cyrillic in
+  Courier Prime) leaves gaps that poppler 25's `pdftotext` read as word
+  breaks ("Ив ан: «Г д е кофе?»"). Two or more fallback clusters in a row
+  are now one marked-content span whose `/ActualText` is their text, so
+  they extract whole; each glyph still maps to its own text for viewers
+  that ignore ActualText.
+
 - **A project depending on platen failed to build**: platen's build.zig
   panicked with "cannot open test/ to declare test inputs: FileNotFound",
   because a fetched package has no test/ (build.zig.zon's `.paths` leaves

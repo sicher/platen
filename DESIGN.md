@@ -1258,6 +1258,19 @@ as dvui's `Font.fallback_max_em`; dvui floors its pixel size, the PDF
 keeps size x cap exactly). Copy order is drawing order there (a reordered i matra
 reads first). Forced word breaks (`findCharacterBreakStyled`) step by
 grapheme cluster (`graphemeEndBytes`).
+Two or more clusters in a row (`writeFallbackRuns`, `spanClusters`) are
+one `/Span <</ActualText <FEFF...>>> BDC ... EMC` around their text
+objects (`TextCommand.actual_text` / `actual_text_end`,
+`text_render.beginActualText`): each glyph is centered in its cells,
+and extractors take the gaps between glyph boxes for word breaks
+(poppler 25 starts a word at 0.1 em, spaces at 0.15 em: "Ив ан" from
+Gentium Italic in Courier cells; 26 is more lenient). Closing the gaps
+in the PDF does not work: poppler subtracts Tc from a glyph's box
+(TextOutputDev addChar), a box starts at the glyph's origin (the
+centering gap before it stays), and alias CIDs with cell widths would
+need a CIDToGIDMap, which CFF fonts (most CJK fallbacks) lack. poppler
+emits a span as one unit over its glyphs' extent; viewers that ignore
+ActualText still have the per-glyph ToUnicode.
 - `-Dtest-filter` drops the unnamed `test {}` blocks, so tests in files
   reached only through them (document.zig's own) don't run in a filtered
   build: it reports a pass without running them. Check with the full

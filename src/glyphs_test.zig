@@ -60,9 +60,11 @@ test "drawGlyphs: shaped glyphs extract as their text, ligatures and marks too" 
     defer a.free(pdf);
     const text = try pdftotext(a, pdf, "draw_glyphs");
     defer a.free(text);
-    // Exactly what writeAt's text extracts as (pdftotext ends the page
-    // with a form feed right after the last line)
-    try testing.expectEqualStrings("office affluent\nq\u{303} r\u{E9}sum\u{E9}\x0c", text);
+    // Exactly what writeAt's text extracts as. The page ends in a form
+    // feed, after a newline up to poppler 25 and right after the last
+    // line from 26: the lines are compared, not how the page ends
+    try testing.expect(std.mem.endsWith(u8, text, "\x0c"));
+    try testing.expectEqualStrings("office affluent\nq\u{303} r\u{E9}sum\u{E9}", std.mem.trimEnd(u8, text, "\n\x0c"));
 }
 
 test "drawGlyphs: each glyph at its position, the subset holding it" {
