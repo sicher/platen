@@ -14,7 +14,7 @@ Since 0.13.0 on dev: ochre (color parsing) vendored in `src/ochre/` by
 re-run). SVG fill/stroke and `Color.hex` parse through it; `fromName`'s
 table is built from the 148 constants, checked against ochre's. Next for
 ochre in platen: perceptual gradients via `ochre.ramp(...).stops()`. The
-`examples/showcase_*.pdf` files are still from 0.12.0.
+showcase PDFs and README images were re-rendered 2026-11-18.
 **SVG gradients (sessions #33-34)**: steps 1-4 committed (7bf8e25: parse,
 `url()` paint + fallback, shading patterns, units/gradientTransform/focal);
 step 5 `href` inheritance committed 2026-11-18. Next: 6 stop-opacity,
@@ -47,9 +47,22 @@ Hangul shaper (hangul.zig, HarfBuzz-checked: synthetic HangulTest.ttf +
 Apple SD Gothic Neo, 0 differences); 59c1bd0 GposKerning (courier: GPOS
 pair kerning without shaping, HarfBuzz-checked); 393982c old glyph path
 removed (-1650 lines; text sections 5-10% faster; copy text keeps a cmap-14
-selector - user's choice; FontFace.warmup now a no-op). All pushed. Next:
-synthetic Indic font for CI; Latin langsys (latn before DFLT, TODO); maybe
-ActualText for logical-order copy text if courier/reveal ask.
+selector - user's choice; FontFace.warmup now a no-op); 9307ba3 user's SVG
+href work; b744b8d Latin text takes latn before DFLT (GSUB follows the
+script; references set HarfBuzz's script as platen picks it); b0cea2f
+build.zig: a fetched package (no test/) declares no test inputs (reveal's
+panic); 2e7ba47 CI red since 393982c fixed: Debian 13's poppler 25.03
+splits words at glyph gaps, so consecutive .monospace clusters are one
+ActualText span (Tc can't close gaps: poppler subtracts it from boxes);
+pdftotext 25.03 built in .tools/poppler-25.03 (PATH=.../build/utils to
+test as CI does); 9aa1a3e CFF desubroutinize with one state per glyph
+(hintmask in a subroutine lost its mask: Noto Sans KR 안); 40f0372
+ToUnicode in bfchar blocks of <= 100 (panic at 1000+ glyphs); f67579d
+showcase scripts page + SVG gradients, Noto Sans Devanagari and a Noto
+Sans KR subset in test/fonts. All pushed, CI green. Next: Devanagari
+tests on Noto Sans Devanagari (CI runs them then); other scripts'
+language systems (cyrl, grek, arab...: TODO); Info/outline titles are
+raw UTF-8 literal strings (should be UTF-16BE with BOM).
 Note: `-Dtest-filter` skips document.zig's own tests (passes silently).
 
 **Branch model (devkit): work on `dev`.** `main` moves only via
