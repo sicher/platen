@@ -159,6 +159,12 @@
 
 ### Fixed
 
+- **`output()` panicked for a font with 1000 or more glyphs used**
+  (`NoSpaceLeft` writing the ToUnicode CMap: CJK text, or Inter's full
+  repertoire). ToUnicode CMaps are now written in bfchar blocks of at most
+  100 entries, as readers expect (one block held them all before), and a
+  glyph mapping to a long text no longer overflows its entry buffer.
+
 - **CFF glyphs with a hintmask in a subroutine could print wrong** (Noto
   Sans KR's 안, 글, 연, and any CFF font whose subroutines hold hint masks):
   subsetting expanded each subroutine on its own, so a hintmask there saw

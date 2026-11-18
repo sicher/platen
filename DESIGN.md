@@ -191,6 +191,9 @@ endstream
 - Enables text extraction and copy/paste in PDF viewers
 - Only includes mappings for used characters
 - Format: single-byte codespace, bfchar entries
+- Every ToUnicode CMap (WinAnsi, CID, color-font subfonts) writes its
+  bfchar entries in blocks of at most 100 (`format.bfcharBlockLines`,
+  Adobe TN #5099); entries of any length are appended directly
 
 **Implemented features:**
 1. FlateDecode compression for all streams (via std.compress.flate)

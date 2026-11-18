@@ -573,8 +573,10 @@ fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: u
         \\endcodespacerange
         \\
     );
-    try w.writer.print("{d} beginbfchar\n", .{hi - lo});
+    var block_buf: [48]u8 = undefined;
     for (plan.gids.items[lo..hi], 0..) |gid, i| {
+        // At most 100 entries per bfchar block
+        try w.writer.writeAll(format.bfcharBlockLines(&block_buf, i, hi - lo));
         const code = ColorFontPlan.localCode(i);
         var single: [1]u21 = .{0xFFFD};
         const text: []const u21 = if (plan.emb.glyph_to_codepoint.get(gid)) |cp| blk: {
@@ -594,8 +596,8 @@ fn buildColorFontToUnicode(arena: std.mem.Allocator, plan: *ColorFontPlan, lo: u
         }
         try w.writer.writeAll(">\n");
     }
+    if (hi > lo) try w.writer.writeAll("endbfchar\n");
     try w.writer.writeAll(
-        \\endbfchar
         \\endcmap
         \\CMapName currentdict /CMap defineresource pop
         \\end

@@ -202,6 +202,21 @@ pub fn writeHex4(buf: *[4]u8, val: u16) void {
     buf[3] = hex_chars[val & 0xF];
 }
 
+/// A CMap's bfchar blocks hold at most 100 entries (Adobe TN #5099 and
+/// #5014, as PDF readers expect).
+pub const max_bfchar_entries = 100;
+
+/// The block lines before bfchar entry `index` of `total`: at every 100th
+/// entry, "endbfchar" closing the block before (but at the first) and
+/// "N beginbfchar" opening the next; else nothing. After the last entry
+/// the caller writes "endbfchar" (when `total` > 0).
+pub fn bfcharBlockLines(buf: *[48]u8, index: usize, total: usize) []const u8 {
+    if (index % max_bfchar_entries != 0) return "";
+    const n = @min(max_bfchar_entries, total - index);
+    const close: []const u8 = if (index > 0) "endbfchar\n" else "";
+    return std.fmt.bufPrint(buf, "{s}{d} beginbfchar\n", .{ close, n }) catch unreachable;
+}
+
 /// Write CMap entry "<GID> <CODEPOINT>\n" for BMP codepoints.
 /// Returns bytes written.
 pub fn writeCMapEntry(buf: []u8, gid: u16, codepoint: u21) usize {
@@ -301,4 +316,13 @@ test "writeF64_2 matches std.fmt" {
         const actual = writeF64_2(&buf2, v);
         try std.testing.expectEqualStrings(expected, actual);
     }
+}
+
+test "bfcharBlockLines: blocks of at most 100 entries" {
+    var buf: [48]u8 = undefined;
+    try std.testing.expectEqualStrings("100 beginbfchar\n", bfcharBlockLines(&buf, 0, 2850));
+    try std.testing.expectEqualStrings("", bfcharBlockLines(&buf, 1, 2850));
+    try std.testing.expectEqualStrings("endbfchar\n100 beginbfchar\n", bfcharBlockLines(&buf, 100, 2850));
+    try std.testing.expectEqualStrings("endbfchar\n50 beginbfchar\n", bfcharBlockLines(&buf, 2800, 2850));
+    try std.testing.expectEqualStrings("7 beginbfchar\n", bfcharBlockLines(&buf, 0, 7));
 }
