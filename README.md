@@ -360,7 +360,7 @@ try doc.drawGlyphs("office", placed[0..shaped.len], .{ .font = .{ .face = &face 
   scripts, Arabic, bidi, AAT `morx`. `write()` and measurement shape the
   same way.
 - GPOS kerning without shaping, for text placed one glyph per character:
-  `var k = try platen.GposKerning.init(allocator, &face, .default)`, then
+  `var k = try platen.GposKerning.init(allocator, &face, .latin)`, then
   `k.advance(left_gid, right_gid)` is the first glyph's advance change
   (font units) from the GPOS 'kern' feature's pair lookups, as `shapeText`
   applies them; `k.pair` gives the whole `KernAdjustment` (offsets, the

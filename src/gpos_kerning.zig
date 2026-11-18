@@ -21,9 +21,10 @@ const opentype = @import("opentype.zig");
 const Allocator = std.mem.Allocator;
 const FontFace = embedded.FontFace;
 
-/// Which language system: as shapeText picks it for text whose first
-/// character of a script is Latin (or any other script: `.default`,
-/// DFLT/dflt/latn), Devanagari (dev2/deva) or Hangul (hang).
+/// Which language system, as shapeText picks it from the text's first
+/// character of a script: `.latin` (latn, else DFLT, dflt), `.devanagari`
+/// (dev2/deva), `.hangul` (hang), else `.default` (DFLT, dflt, latn: text
+/// with no script character, or a script without its own here).
 pub const Script = gsub.Script;
 
 /// The adjustments a pair gets, font units (x right, y up).
@@ -138,9 +139,9 @@ test "GposKerning: courier's Final Draft pairs (Apple SD Gothic Neo Thin, GPOS o
     defer a.free(data);
     var face = try FontFace.fromMemory(a, data);
     defer face.deinit();
-    try testing.expect(hasGposKerning(&face, .default));
+    try testing.expect(hasGposKerning(&face, .latin));
     try testing.expect(hasGposKerning(&face, .hangul));
-    var k = try GposKerning.init(a, &face, .default);
+    var k = try GposKerning.init(a, &face, .latin);
     defer k.deinit();
     try testing.expectEqual(@as(i32, -21), k.advance(glyphOf(&face, 'r'), glyphOf(&face, 'a')));
     try testing.expectEqual(@as(i32, -5), k.advance(glyphOf(&face, 'J'), glyphOf(&face, 'a')));
@@ -154,8 +155,8 @@ test "GposKerning: the kerning shapeText gives each pair (Inter)" {
     const a = testing.allocator;
     var face = try FontFace.fromFile(testing.io, a, "test/fonts/Inter/Inter-Regular.otf");
     defer face.deinit();
-    try testing.expect(hasGposKerning(&face, .default));
-    var k = try GposKerning.init(a, &face, .default);
+    try testing.expect(hasGposKerning(&face, .latin));
+    var k = try GposKerning.init(a, &face, .latin);
     defer k.deinit();
     try testing.expectEqual(@as(i32, -140), k.advance(glyphOf(&face, 'A'), glyphOf(&face, 'V')));
     var kerned: usize = 0;

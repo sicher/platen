@@ -159,6 +159,16 @@
 
 ### Fixed
 
+- **Latin text took the font's DFLT features instead of its latn ones**:
+  shaping (shapeText, write(), measurement) now selects a font's language
+  system as HarfBuzz does for Latin text, `latn` first, then DFLT and
+  `dflt`; text without a script character keeps DFLT. GSUB also follows
+  the script now (it always used the default language system). Visible in
+  fonts whose latn and DFLT features differ, e.g. Satoshi's ccmp dotless
+  i/j before marks. `GposKerning` takes `.latin` for Latin text. Checked
+  against HarfBuzz with the script set as platen picks it, plus a
+  synthetic font whose latn and DFLT differ (test/fonts/script).
+
 - **System font lookup missed families in files with non-ASCII names**:
   `findSystemFontFamily`/`listSystemFontFaces` did not find Hiragino Sans,
   Hiragino Mincho ProN or Hiragino Maru Gothic ProN on macOS, whose files are

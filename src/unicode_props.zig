@@ -45,12 +45,13 @@ pub fn isWordChar(cp: u21) bool {
 /// The script a character gives a run, as HarfBuzz's
 /// guess_segment_properties reads it: none for Common, Inherited and
 /// unassigned characters.
-pub const RunScript = enum { none, devanagari, hangul, other };
+pub const RunScript = enum { none, devanagari, hangul, latin, other };
 
 pub fn runScript(cp: u21) RunScript {
     if (!inRanges(&data.strong_script_ranges, cp)) return .none;
     if (inRanges(&data.devanagari_script_ranges, cp)) return .devanagari;
     if (inRanges(&data.hangul_script_ranges, cp)) return .hangul;
+    if (inRanges(&data.latin_script_ranges, cp)) return .latin;
     return .other;
 }
 
@@ -288,13 +289,19 @@ test "isLetter, isWordChar" {
     try testing.expect(!isWordChar(' ') and !isWordChar('.') and !isWordChar('5') and !isWordChar(0x0964));
 }
 
-test "runScript: Devanagari, other scripts, and characters of none" {
+test "runScript: Devanagari, Hangul, Latin, other scripts, and characters of none" {
     try testing.expectEqual(RunScript.devanagari, runScript(0x0915));
     try testing.expectEqual(RunScript.devanagari, runScript(0x093F)); // matra
     try testing.expectEqual(RunScript.none, runScript(0x0951)); // stress sign: Inherited
     try testing.expectEqual(RunScript.none, runScript(0x0964)); // danda: Common
     try testing.expectEqual(RunScript.none, runScript('5'));
-    try testing.expectEqual(RunScript.other, runScript('a'));
+    try testing.expectEqual(RunScript.none, runScript(0x0301)); // combining acute: Inherited
+    try testing.expectEqual(RunScript.latin, runScript('a'));
+    try testing.expectEqual(RunScript.latin, runScript(0x00E9)); // é
+    try testing.expectEqual(RunScript.hangul, runScript(0xD55C)); // 한
+    try testing.expectEqual(RunScript.hangul, runScript(0x1100)); // conjoining jamo
+    try testing.expectEqual(RunScript.other, runScript(0x0431)); // Cyrillic be
+    try testing.expectEqual(RunScript.other, runScript(0x05D0)); // Hebrew alef
 }
 
 test "graphemeEnd passes UCD's GraphemeBreakTest.txt" {

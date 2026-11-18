@@ -8,9 +8,10 @@ uses, and records the glyph IDs. platen must produce the same glyphs:
 GSUB lookups of every type, applied in lookup order, with lookup flags.
 Only glyph IDs are compared (substitution), not positions.
 
-HarfBuzz runs with script Zyyy, so it selects the DFLT script like platen
-(no script itemization), left-to-right, and removes default ignorables
-(as platen does).
+HarfBuzz runs with the script platen picks (`platen_script`: the first
+character of a script, if Latin, Devanagari or Hangul, else Common), so
+both select the same language system and shaper; left-to-right, removing
+default ignorables (as platen does).
 
 File format:
     font <path>
@@ -211,6 +212,9 @@ def random_hangul(seed, count):
 HANGUL_TEXTS = HANGUL + random_hangul(2026, 500)
 # Synthetic font with jamo features (scripts/gen_hangul_test_font.py)
 HANGUL_TEST = "test/fonts/hangul/HangulTest.ttf"
+# Synthetic font whose latn and DFLT language systems differ
+SCRIPT_TEST = "test/fonts/script/ScriptTest.ttf"
+SCRIPT_TEXTS = ["ab", "bb", "11", "a11", "11 a", ". bb", "1 1 b", "aaa bb 11", "\u0301a", "a\u0301b"]
 
 # Synthetic font with every GPOS lookup type and flag
 # (scripts/gen_gpos_test_font.py): one stylistic set per scenario
@@ -270,11 +274,25 @@ POSITION_CASES = [
     # features; GPOS kerning under 'hang'
     ("/System/Library/Fonts/AppleSDGothicNeo.ttc#0", [], HANGUL_TEXTS),
     ("/System/Library/Fonts/AppleSDGothicNeo.ttc#10", [], HANGUL),
+    # latn and DFLT differ (scripts/gen_script_test_font.py): Latin text
+    # takes latn, text without a script character DFLT
+    (SCRIPT_TEST, [], SCRIPT_TEXTS),
+    (SCRIPT_TEST, ["-calt"], SCRIPT_TEXTS),
 ]
-# Cases whose script HarfBuzz guesses from the text (the others: Zyyy)
-GUESS_SCRIPT = {"/System/Library/Fonts/Kohinoor.ttc#4", "/System/Library/Fonts/Kohinoor.ttc#0",
-                "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc#0", HANGUL_TEST,
-                "/System/Library/Fonts/AppleSDGothicNeo.ttc#0", "/System/Library/Fonts/AppleSDGothicNeo.ttc#10"}
+
+
+def platen_script(text):
+    """The script platen shapes `text` in (shaping.textScript): its first
+    character of a real script, if that is Latin, Devanagari or Hangul;
+    else Common (DFLT). HarfBuzz gets it set, so both pick the same
+    language system and shaper."""
+    from fontTools import unicodedata
+    for ch in text:
+        sc = unicodedata.script(ch)
+        if sc in ("Zyyy", "Zinh", "Zzzz"):
+            continue
+        return sc if sc in ("Latn", "Deva", "Hang") else "Zyyy"
+    return "Zyyy"
 
 
 def hb_features(toggles):
@@ -290,7 +308,7 @@ def shape(font, text, features):
     buf = hb.Buffer()
     buf.add_str(text)
     buf.direction = "ltr"
-    buf.script = "Zyyy"
+    buf.script = platen_script(text)
     buf.language = "en"
     # platen drops default ignorables (U+FE0F, ZWJ, soft hyphen...) that
     # survive shaping instead of drawing them as zero-width glyphs
@@ -299,13 +317,10 @@ def shape(font, text, features):
     return [info.codepoint for info in buf.glyph_infos]
 
 
-def shape_positions(font, text, features, guess=False):
+def shape_positions(font, text, features):
     buf = hb.Buffer()
     buf.add_utf8(text.encode("utf-8"))
-    if guess:
-        buf.guess_segment_properties()
-    else:
-        buf.script = "Zyyy"
+    buf.script = platen_script(text)
     buf.direction = "ltr"
     buf.language = "en"
     buf.flags = hb.BufferFlags.REMOVE_DEFAULT_IGNORABLES
@@ -359,7 +374,7 @@ def write_cases(out, cases, shape_text):
 def main():
     write_cases(OUT, CASES, lambda font, text, features, path: " ".join(map(str, shape(font, text, features))))
     write_cases(OUT_POSITIONS, POSITION_CASES,
-                lambda font, text, features, path: shape_positions(font, text, features, path in GUESS_SCRIPT))
+                lambda font, text, features, path: shape_positions(font, text, features))
 
 
 if __name__ == "__main__":

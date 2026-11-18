@@ -278,6 +278,8 @@ pub const Table = struct {
     devanagari: LangSysMap = .{},
     /// Features for Hangul text (hang, else the default's)
     hangul: LangSysMap = .{},
+    /// Features for Latin text (latn, else DFLT, else dflt)
+    latin: LangSysMap = .{},
     lookup_index_storage: []u16,
 
     pub fn parse(allocator: std.mem.Allocator, data: []const u8, gdef_data: ?[]const u8, kind: TableKind) !Table {
@@ -395,6 +397,8 @@ pub const Table = struct {
             &default_tags,
             &([_]u32{ tag("dev2"), tag("deva") } ++ default_tags),
             &([_]u32{tag("hang")} ++ default_tags),
+            // HarfBuzz tries the script's own tag first: latn before DFLT
+            &[_]u32{ tag("latn"), tag("DFLT"), tag("dflt") },
         };
         var found: [tried.len]?usize = undefined;
         var total: usize = 0;
@@ -427,6 +431,7 @@ pub const Table = struct {
             .default => &self.default,
             .devanagari => &self.devanagari,
             .hangul => &self.hangul,
+            .latin => &self.latin,
         };
     }
 
@@ -613,6 +618,7 @@ pub const Table = struct {
             .default => &self.default,
             .devanagari => &self.devanagari,
             .hangul => &self.hangul,
+            .latin => &self.latin,
         };
     }
 
@@ -646,7 +652,8 @@ pub const Table = struct {
 };
 
 /// Which script's language system shaping uses.
-pub const Script = enum { default, devanagari, hangul };
+pub const Script = enum { default, devanagari, hangul, latin };
+const script_count = std.enums.values(Script).len;
 
 /// Lookup indices per feature for one script's language system.
 pub const LangSysMap = struct {
@@ -888,11 +895,12 @@ pub const Ignorable = enum(u8) {
 };
 
 /// Per-font-instance shaping state: the glyph buffer and the lookup list
-/// for the last feature flags. Not shared between font clones.
+/// for the last feature flags and script. Not shared between font clones.
 pub const Shaper = struct {
     buf: std.ArrayListUnmanaged(Glyph) = .empty,
-    active: std.ArrayListUnmanaged(u16) = .empty,
-    active_flags: ?FeatureFlags = null,
+    /// Per Script: the lookups of the last flags shaped with in it
+    active: [script_count]std.ArrayListUnmanaged(u16) = @splat(.empty),
+    active_flags: [script_count]?FeatureFlags = @splat(null),
     params: std.ArrayListUnmanaged(LookupParams) = .empty,
     next_lig_id: u8 = 0,
     input_len: usize = 0,
@@ -904,20 +912,23 @@ pub const Shaper = struct {
 
     pub fn deinit(self: *Shaper, allocator: std.mem.Allocator) void {
         self.buf.deinit(allocator);
-        self.active.deinit(allocator);
+        for (&self.active) |*a| a.deinit(allocator);
         self.params.deinit(allocator);
         self.dropped.deinit(allocator);
     }
 
-    /// Lookups the flags enable (cached per flags).
-    pub fn activeLookups(self: *Shaper, allocator: std.mem.Allocator, table: *const Table, flags: FeatureFlags) ![]const u16 {
-        if (self.active_flags) |f| {
-            if (std.mem.eql(bool, &f.flags, &flags.flags)) return self.active.items;
+    /// Lookups the flags enable in `script`'s language system (cached per
+    /// script, for its last flags: text measured word by word alternates
+    /// between Latin words and script-less ones such as numbers).
+    pub fn activeLookups(self: *Shaper, allocator: std.mem.Allocator, table: *const Table, script: Script, flags: FeatureFlags) ![]const u16 {
+        const k = @backingInt(script);
+        if (self.active_flags[k]) |f| {
+            if (std.mem.eql(bool, &f.flags, &flags.flags)) return self.active[k].items;
         }
-        self.active_flags = null;
-        try table.collectLookups(allocator, flags, &self.active);
-        self.active_flags = flags;
-        return self.active.items;
+        self.active_flags[k] = null;
+        try table.collectLookupsFor(allocator, table.langSys(script), flags, &self.active[k]);
+        self.active_flags[k] = flags;
+        return self.active[k].items;
     }
 
     /// Substitute `glyphs` (one per code point; cluster = index). The
@@ -933,20 +944,22 @@ pub const Shaper = struct {
         codepoints: ?[]const u21,
         flags: FeatureFlags,
     ) ![]const Glyph {
-        return self.shapeClustered(allocator, table, glyphs, codepoints, null, flags);
+        return self.shapeClustered(allocator, table, .default, glyphs, codepoints, null, flags);
     }
 
-    /// `shape` with initial clusters (see `beginClustered`).
+    /// `shape` in `script`'s language system, with initial clusters (see
+    /// `beginClustered`).
     pub fn shapeClustered(
         self: *Shaper,
         allocator: std.mem.Allocator,
         table: *const Table,
+        script: Script,
         glyphs: []const u16,
         codepoints: ?[]const u21,
         clusters: ?[]const u32,
         flags: FeatureFlags,
     ) ![]const Glyph {
-        const lookups = try self.activeLookups(allocator, table, flags);
+        const lookups = try self.activeLookups(allocator, table, script, flags);
         try self.beginClustered(allocator, table, glyphs, codepoints, clusters);
         try self.params.resize(allocator, lookups.len);
         for (self.params.items, lookups) |*pp, li| pp.* = .{ .index = li };

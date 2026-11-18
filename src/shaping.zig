@@ -267,7 +267,7 @@ fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: ope
         try shaper.beginClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters);
         _ = try hangul.substitute(allocator, shaper, plan, d.jamo.items);
     } else {
-        _ = try shaper.shapeClustered(allocator, gsub_table, d.glyphs.items, d.codepoints.items, clusters, flags);
+        _ = try shaper.shapeClustered(allocator, gsub_table, script, d.glyphs.items, d.codepoints.items, clusters, flags);
     }
     const glyphs = shaper.buf.items;
 
@@ -294,8 +294,9 @@ fn run(allocator: Allocator, cache: *Cache, emb: *const EmbeddedFont, flags: ope
 
 /// The text's script, as HarfBuzz's guess_segment_properties finds it: the
 /// first character of a script (not common or inherited) decides.
-/// Devanagari and Hangul pick their own language systems; anything else
-/// the default.
+/// Devanagari, Hangul and Latin pick their own language systems (Latin:
+/// latn before DFLT, as HarfBuzz); anything else the default (DFLT, dflt,
+/// latn).
 fn textScript(text: []const u8) gsub.Script {
     var view = std.unicode.Utf8View.init(text) catch return .default;
     var it = view.iterator();
@@ -304,6 +305,7 @@ fn textScript(text: []const u8) gsub.Script {
             .none => {},
             .devanagari => return .devanagari,
             .hangul => return .hangul,
+            .latin => return .latin,
             .other => return .default,
         }
     }

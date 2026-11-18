@@ -229,11 +229,13 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 - [x] **Hangul shaping** in shapeText (done 2026-11-18, hangul.zig;
   HarfBuzz-checked with a synthetic jamo-feature font and Apple SD Gothic
   Neo).
-- [ ] **Latin's language system**: shapeText (and GposKerning `.default`)
-  uses DFLT before latn for Latin text; HarfBuzz with a guessed Latin
-  script tries latn first. Differs only in fonts whose latn and DFLT
-  features differ; add a `.latin` Script tried as latn, DFLT, dflt and
-  check against HarfBuzz with guessed script.
+- [x] **Latin's language system** (done 2026-11-18: `.latin`, latn before
+  DFLT; GSUB follows the script; references with platen's script).
+- [ ] **Other scripts' language systems**: Cyrillic, Greek, Arabic, Hebrew,
+  Han, kana... text uses `.default` (DFLT first), where HarfBuzz tries
+  cyrl, grek, arab, hebr, hani, kana first. Needs the script property for
+  every character and HarfBuzz's script-to-tag table, and a LangSysMap per
+  script met (lazily).
 - [ ] **Fallback picks for jamo**: `fallback.Plan.drawsCluster` composes
   with `unicode_compose.compose`, which has no Hangul: a font with the
   syllable but not the jamo is judged unable to draw L V T.

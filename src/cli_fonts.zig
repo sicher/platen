@@ -78,17 +78,17 @@ pub fn shapeText(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []
     }
 }
 
-/// gpos-kern <font> [--script default|devanagari|hangul]: for each stdin
+/// gpos-kern <font> [--script latin|default|devanagari|hangul]: for each stdin
 /// line, each adjacent character pair as GposKerning kerns it (glyphs from
 /// the cmap, no shaping): "left,right=x_advance", plus
 /// "@x_offset,y_offset" when the first glyph moves and
 /// ";second=x_advance@x_offset,y_offset" / ";consumes" when the pair has a
 /// second value record; pairs joined by "|". Font units.
 pub fn gposKern(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []const []const u8) !void {
-    if (args.len < 1) return out.writeAll("Usage: platen gpos-kern <font> [--script default|devanagari|hangul] < lines\n");
+    if (args.len < 1) return out.writeAll("Usage: platen gpos-kern <font> [--script latin|default|devanagari|hangul] < lines\n");
     var face = try platen.FontFace.fromFile(io, allocator, args[0]);
     defer face.deinit();
-    var script: platen.KernScript = .default;
+    var script: platen.KernScript = .latin;
     if (args.len >= 3 and std.mem.eql(u8, args[1], "--script")) {
         script = std.meta.stringToEnum(platen.KernScript, args[2]) orelse return out.print("Unknown script: {s}\n", .{args[2]});
     } else if (args.len > 1) return out.print("Unknown option: {s}\n", .{args[1]});

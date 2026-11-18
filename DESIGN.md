@@ -1538,7 +1538,7 @@ committed), for Devanagari:
 - Selection (shaping.zig): the text's first character of a real script
   (`unicode_props.runScript`, UCD Scripts.txt) picks the script; Devanagari
   uses the Indic shaper when GSUB has dev2 or deva (deva = old spec), else
-  the default shaper with DFLT/dflt/latn. dev3 (USE in HarfBuzz) is not
+  the default shaper with dev2/deva/DFLT/dflt/latn. dev3 (USE in HarfBuzz) is not
   tried. GPOS takes the same script's language system; no mark zeroing, no
   fallback positioning (Indic: ZERO_WIDTH_MARKS_NONE).
 - Normalization (`decode.Mode.indic`): vowel constraints insert U+25CC
@@ -1584,9 +1584,28 @@ does with GPOS when a font has no `kern` table):
   Apple SD Gothic Neo Thin, Arial, Inter, Gentium, Charter, Satoshi - all
   equal once HarfBuzz's GDEF mark zeroing is accounted for (not kerning).
   Times New Roman's GPOS has no kern feature (its `kern` table kerns).
-- Found: `gsub.Script.default` tries DFLT before latn; HarfBuzz tries latn
-  first for text it guesses as Latin (Zyyy -> DFLT). Same lookups in every
-  font checked; TODO.md.
+- Script: `.latin` for Latin text (latn, DFLT, dflt, as shapeText picks
+  it since 2026-11-18); `.default` (DFLT, dflt, latn) for text with no
+  script character.
+
+### Script selection (2026-11-18)
+- `shaping.textScript`: the first character of a real script
+  (`unicode_props.runScript`, Scripts.txt) picks `gsub.Script`: Latin ->
+  `.latin` (latn, DFLT, dflt: HarfBuzz tries a script's own tag before
+  DFLT), Devanagari, Hangul; anything else, and text with no script
+  character (digits, punctuation), `.default` (DFLT, dflt, latn).
+- Each Script has its own `LangSysMap` (parsed once, shared when two pick
+  the same language system). GSUB of the default shaper follows the
+  script too (`Shaper.shapeClustered(script)`; lookups cached per script,
+  as measuring word by word alternates Latin and script-less words), as
+  GPOS already did.
+- References: gen_shaping_reference.py sets HarfBuzz's script with
+  `platen_script` (the same rule, via fontTools.unicodedata), not Zyyy.
+  Regenerating changed only Satoshi's soft-dotted i/j lines (latn ccmp:
+  dotless forms before marks above). ScriptTest.ttf has calt and kern that
+  differ between latn and DFLT.
+- Not yet: Cyrillic, Greek, Arabic, Hebrew, CJK... take `.default` where
+  HarfBuzz picks cyrl, grek, arab... (TODO.md).
 
 ### Hangul shaper (2026-11-18, `src/hangul.zig`)
 HarfBuzz 12.3.0's hb-ot-shaper-hangul, for text whose first strong

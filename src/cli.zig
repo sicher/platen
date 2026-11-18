@@ -178,7 +178,7 @@ fn printUsage() !void {
         \\                                 print gid=cluster@xoff,yoff+advance (font units)
         \\  glyphs <out.pdf> <font> [--size PT] [+feat|-feat]...  Draw stdin lines glyph by
         \\                                 glyph (shapeText + drawGlyphs)
-        \\  gpos-kern <font> [--script default|devanagari|hangul]  GPOS pair kerning
+        \\  gpos-kern <font> [--script latin|default|devanagari|hangul]  GPOS pair kerning
         \\                                 (GposKerning) of each adjacent character pair of stdin lines
         \\  graphemes            Split stdin lines into grapheme clusters (UAX #29) with their cells
         \\  fallback <out> <font> [--fallback FONT]... [--monospace] [--max-em F] [--bold] [--italic] [--size PT]
