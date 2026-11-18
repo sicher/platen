@@ -205,7 +205,7 @@ fn runShapingBenchmark(allocator: std.mem.Allocator) !void {
 
         const t = Timer.begin(tc.name);
         for (0..iterations) |_| {
-            const glyphs = try emb.embedded.markUnicodeCharsUsed(tc.text, null);
+            const glyphs = try emb.embedded.shapeGlyphIds(tc.text, null);
             emb.embedded.allocator.free(glyphs);
         }
         const elapsed = t.end();

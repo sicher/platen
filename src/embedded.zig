@@ -9,20 +9,9 @@ const std = @import("std");
 const ttf = @import("ttf.zig");
 const unicode_compose = @import("unicode_compose.zig");
 const gsub = @import("gsub.zig");
-const decode = @import("decode.zig");
 const cff_cid = @import("cff_cid.zig");
 const shaping = @import("shaping.zig");
 
-/// Whether `text` may contain a combining mark or a default ignorable,
-/// i.e. needs decodeText before measuring: UTF-8 lead bytes below 0xCC
-/// encode code points below U+0300 (unicode_compose.first_mark); 0xC2
-/// leads the soft hyphen U+00AD, the one ignorable below that.
-fn mayNeedDecoding(text: []const u8) bool {
-    for (text) |b| {
-        if (b >= 0xCC or b == 0xC2) return true;
-    }
-    return false;
-}
 const ttf_subset = @import("ttf_subset.zig");
 const cff_subset = @import("cff_subset.zig");
 const colr = @import("colr.zig");
@@ -256,16 +245,10 @@ pub const EmbeddedFont = struct {
     feature_flags: opentype.FeatureFlags = opentype.FeatureFlags.init(), // liga=on, kern=on by default
 
     // Cached flags for fast render-time checks (set by initOpenTypeFeatures)
-    has_kern_data: bool = false, // True if font has ANY kerning pairs
-    has_mark_data: bool = false, // True if font has ANY mark positioning
 
     // Ligature glyph → original codepoints mapping for ToUnicode CMap
     // Key: ligature glyph ID (original), Value: array of codepoints that form it
     ligature_codepoints: std.AutoArrayHashMapUnmanaged(u16, []const u21) = .empty,
-
-    /// Decoded text of the last decodeText call (reused across calls to
-    /// avoid allocations)
-    scratch: decode.Decoded = .{},
 
     // COLR/CPAL color-font support (lazily probed). All slices in ColorInfo
     // point into `data`, so there is nothing to free.
@@ -480,8 +463,6 @@ pub const EmbeddedFont = struct {
             self.allocator.free(codepoints);
         }
         self.ligature_codepoints.deinit(self.allocator);
-        // Free scratch buffers
-        self.scratch.deinit(self.allocator);
         if (!self.borrowed) {
             if (self.synthetic_loca) |sl| self.allocator.free(sl);
         }
@@ -491,7 +472,7 @@ pub const EmbeddedFont = struct {
     /// Create a per-document font from a FontFace prototype: the parsed
     /// ttf tables, metrics, and OpenType lookups are borrowed (immutable
     /// after parse); all per-document state (glyph tracking, subsetting,
-    /// scratch buffers, kerning cache) is fresh and owned. The prototype
+    /// shaping cache) is fresh and owned. The prototype
     /// must outlive the returned font.
     fn fromShared(allocator: std.mem.Allocator, proto: *const EmbeddedFont) !*EmbeddedFont {
         const emb = try allocator.create(EmbeddedFont);
@@ -509,7 +490,6 @@ pub const EmbeddedFont = struct {
         emb.glyph_to_codepoint = .empty;
         emb.gid_remap = .empty;
         emb.ligature_codepoints = .empty;
-        emb.scratch = .{};
         // A clone is one document's: it keeps its own shaping cache
         emb.shared = false;
         emb.shape_cache = .{};
@@ -519,11 +499,9 @@ pub const EmbeddedFont = struct {
             const ot = try allocator.create(opentype.OpenTypeFeatures);
             errdefer allocator.destroy(ot);
             // Struct copy shares the parsed lookup tables (read-only after
-            // parse) and inherits the prototype's kern cache values; shaping
-            // buffers are fresh so shaping never touches shared memory.
+            // parse); shaping state lives in shape_cache, fresh above
             ot.* = proto_ot.*;
             ot.allocator = allocator;
-            ot.shaper = .{};
             ot.borrowed_tables = true;
             emb.ot_features = ot;
         }
@@ -565,13 +543,9 @@ pub const EmbeddedFont = struct {
             try ot.parseGSUB(gsub_data, gdef_data);
         }
 
-        // Parse GPOS table if present: for the shaping engine, and the
-        // kerning and mark lookups text_render uses
+        // Parse GPOS table if present, for the shaping engine
         const gpos_data = self.font.getTable("GPOS".*);
-        if (gpos_data) |data| {
-            try ot.parseGPOSTable(data, gdef_data);
-            try ot.parseGPOS(data);
-        }
+        if (gpos_data) |data| try ot.parseGPOSTable(data, gdef_data);
         // The engine applies the 'kern' table when GPOS has no kern feature
         if (gpos_data == null or !opentype.OpenTypeFeatures.tableHasFeatureTag(gpos_data.?, std.mem.readInt(u32, "kern", .big))) {
             if (self.font.getTable("kern".*)) |kern_data| {
@@ -580,48 +554,12 @@ pub const EmbeddedFont = struct {
             }
         }
 
-        // Legacy 'kern' table only when GPOS has no kerning (as HarfBuzz)
-        if (ot.kern_lookups.items.len == 0) {
-            if (self.font.getTable("kern".*)) |kern_data| {
-                const t = KernTable.parse(kern_data);
-                if (t.count > 0) ot.legacy_kern = t;
-            }
-        }
-
         self.ot_features = ot;
-
-        // Cache flags for fast render-time checks
-        self.has_kern_data = ot.kern_lookups.items.len > 0 or ot.legacy_kern != null;
-        self.has_mark_data = ot.mark_base_lookups.items.len > 0 or ot.mark_mark_lookups.items.len > 0;
     }
 
     /// Set OpenType feature flag
     pub fn setFeature(self: *EmbeddedFont, feature: opentype.Feature, enabled: bool) void {
         self.feature_flags.set(feature, enabled);
-    }
-
-    /// Mark Unicode codepoints as used (CID mode)
-    /// Parses UTF-8 text and records Unicode→GlyphID mappings
-    /// Applies ligature substitution if enabled
-    /// Mark Unicode characters as used for subsetting and return the computed glyph sequence.
-    /// Returns the final glyph sequence (caller owns the memory) for caching.
-    /// Mark unicode chars as used for subsetting and return glyph IDs.
-    /// output_allocator: allocator for the returned glyph slice (if null, uses self.allocator)
-    /// True if any feature that affects shaping or positioning is enabled -
-    /// the condition for lazily parsing GSUB/GPOS.
-    fn anyShapingFeatureEnabled(self: *const EmbeddedFont) bool {
-        return std.mem.indexOfScalar(bool, &self.feature_flags.flags, true) != null;
-    }
-
-    /// True if any enabled GSUB feature has lookups in this font, i.e. the
-    /// rendered glyph sequence may differ from the codepoint sequence.
-    fn hasActiveGsub(self: *const EmbeddedFont, ot: *opentype.OpenTypeFeatures) !bool {
-        return ot.hasActiveGsub(self.feature_flags);
-    }
-
-    /// Decode `text` into `scratch` (decode.decode, no byte offsets).
-    fn decodeText(self: *EmbeddedFont, text: []const u8) !void {
-        return decode.decode(self.allocator, &self.font, text, &self.scratch, false);
     }
 
     /// Record the ToUnicode text of `gid` (first use wins). A glyph that
@@ -638,98 +576,6 @@ pub const EmbeddedFont = struct {
         const seq = try self.allocator.dupe(u21, unicode_compose.decompose(cp, &buf));
         errdefer self.allocator.free(seq);
         try self.ligature_codepoints.put(self.allocator, gid, seq);
-    }
-
-    pub fn markUnicodeCharsUsed(self: *EmbeddedFont, text: []const u8, output_allocator: ?std.mem.Allocator) ![]u16 {
-        const out_alloc = output_allocator orelse self.allocator;
-        const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(self.font.head.?.units_per_em));
-
-        // First pass: decode text into (composed) codepoints and glyph IDs
-        try self.decodeText(text);
-
-        // Use local references for cleaner code
-        const codepoints = &self.scratch.codepoints;
-        const base_glyphs = &self.scratch.glyphs;
-
-        // Initialize OpenType features if any GSUB/GPOS feature is enabled,
-        // or the shaper has ignorables to remove
-        if (self.anyShapingFeatureEnabled() or self.scratch.ignorables) {
-            try self.initOpenTypeFeatures();
-        }
-
-        // Apply GSUB substitutions if enabled (any substitution feature)
-        if (base_glyphs.items.len > 0) {
-            if (self.ot_features) |ot| {
-                if (self.scratch.ignorables or try self.hasActiveGsub(ot)) {
-                    // Apply GSUB substitutions, track results, and return glyphs
-                    return try self.applyGSUBAndTrack(codepoints.items, self.scratch.composed.items, base_glyphs.items, scale, out_alloc);
-                }
-            }
-        }
-
-        // No GSUB - just track the base glyphs
-        for (codepoints.items, self.scratch.composed.items, base_glyphs.items) |cp, composed, gid| {
-            if (!self.cid_used_glyphs.contains(cp)) {
-                try self.cid_used_glyphs.put(self.allocator, cp, gid);
-            }
-            try self.trackGlyphText(gid, cp, composed);
-            if (!self.cid_glyph_widths.contains(gid)) {
-                if (self.font.getGlyphWidth(gid)) |w| {
-                    const width: u16 = @intFromFloat(@round(@as(f64, @floatFromInt(w)) * scale));
-                    try self.cid_glyph_widths.put(self.allocator, gid, width);
-                }
-            }
-        }
-
-        // Return copy of base glyphs
-        return try out_alloc.dupe(u16, base_glyphs.items);
-    }
-
-    /// Shape the decoded text with GSUB and record every output glyph's
-    /// width and ToUnicode text (trackClusterText). Glyphs sharing a
-    /// cluster came from the code points [cluster, next cluster). Returns
-    /// the glyphs (caller owns, out_alloc).
-    fn applyGSUBAndTrack(self: *EmbeddedFont, codepoints: []const u21, composed: []const bool, base_glyphs: []const u16, scale: f64, out_alloc: std.mem.Allocator) ![]u16 {
-        const ot = self.ot_features orelse return try out_alloc.dupe(u16, base_glyphs);
-        const shaped = try ot.shape(base_glyphs, codepoints, self.feature_flags);
-
-        const result = try out_alloc.alloc(u16, shaped.len);
-        errdefer out_alloc.free(result);
-        for (result, shaped) |*r, g| {
-            r.* = g.id;
-            try self.trackGlyphWidth(g.id, scale);
-        }
-        var k: usize = 0;
-        while (k < shaped.len) {
-            const cluster = shaped[k].cluster;
-            var end = k + 1;
-            while (end < shaped.len and shaped[end].cluster == cluster) end += 1;
-            // Clusters are non-decreasing (left-to-right shaping)
-            const next = if (end < shaped.len) shaped[end].cluster else codepoints.len;
-            const first: usize = @min(cluster, codepoints.len);
-            const last: usize = @max(first, @min(next, codepoints.len));
-            if (last > first) try self.trackClusterTextKept(result[k..end], codepoints[first..last], composed[first..last], ot.shaper.dropped.items[first..last]);
-            k = end;
-        }
-        return result;
-    }
-
-    /// trackClusterText without the default ignorables shaping removed:
-    /// they have no glyph and are no part of a glyph's text (a soft hyphen
-    /// must not make "o" extract as "o\u{AD}"). Ignorables a ligature took
-    /// up (ZWJ in an emoji sequence) stay.
-    fn trackClusterTextKept(self: *EmbeddedFont, glyphs: []const u16, cps: []const u21, composed: []const bool, dropped: []const bool) !void {
-        if (std.mem.indexOfScalar(bool, dropped, true) == null) return self.trackClusterText(glyphs, cps, composed);
-        var kept_cps: std.ArrayListUnmanaged(u21) = .empty;
-        defer kept_cps.deinit(self.allocator);
-        var kept_composed: std.ArrayListUnmanaged(bool) = .empty;
-        defer kept_composed.deinit(self.allocator);
-        for (cps, composed, dropped) |cp, c, d| {
-            if (d) continue;
-            try kept_cps.append(self.allocator, cp);
-            try kept_composed.append(self.allocator, c);
-        }
-        if (kept_cps.items.len > 0) try self.trackClusterText(glyphs, kept_cps.items, kept_composed.items);
     }
 
     fn trackGlyphWidth(self: *EmbeddedFont, gid: u16, scale: f64) !void {
@@ -895,6 +741,15 @@ pub const EmbeddedFont = struct {
         return .{ .glyphs = glyphs, .pos = pos };
     }
 
+    /// The glyph IDs of `text` as shapeRun shapes it (marking them used);
+    /// owned by `out_alloc`, else this font's allocator.
+    pub fn shapeGlyphIds(self: *EmbeddedFont, text: []const u8, out_alloc: ?std.mem.Allocator) ![]u16 {
+        const alloc = out_alloc orelse self.allocator;
+        const run = try self.shapeRun(text, alloc);
+        alloc.free(run.pos);
+        return run.glyphs;
+    }
+
     /// Width in points of `text` as shapeRun shapes it (marks nothing).
     pub fn shapedWidth(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64) !f64 {
         try self.initOpenTypeFeatures();
@@ -987,40 +842,6 @@ pub const EmbeddedFont = struct {
         if (gid >= self.glyphs_done.bit_length) return;
         if (!self.cid_glyph_widths.contains(gid) and self.font.getGlyphWidth(gid) != null) return;
         if (self.glyph_to_codepoint.contains(gid) or self.ligature_codepoints.contains(gid)) self.glyphs_done.set(gid);
-    }
-
-    /// Get glyph sequence for text with ligature substitution applied
-    /// Returns allocated slice that caller must free
-    pub fn getGlyphsForText(self: *EmbeddedFont, text: []const u8) ![]u16 {
-        try self.decodeText(text);
-        if (self.scratch.ignorables) try self.initOpenTypeFeatures();
-        if (self.ot_features) |ot| {
-            if (self.scratch.ignorables or try self.hasActiveGsub(ot)) {
-                return ot.glyphIds(self.scratch.glyphs.items, self.scratch.codepoints.items, self.feature_flags);
-            }
-        }
-        return self.allocator.dupe(u16, self.scratch.glyphs.items);
-    }
-
-    /// Get kerning value between two glyphs (in font units)
-    pub fn getKerning(self: *EmbeddedFont, glyph1: u16, glyph2: u16) i16 {
-        if (!self.feature_flags.isEnabled(.kern)) return 0;
-
-        if (self.ot_features) |ot| {
-            return ot.getKerning(glyph1, glyph2);
-        }
-        return 0;
-    }
-
-    /// Get mark positioning offset for a mark glyph following a base glyph
-    /// Returns (dx, dy) in font units (design units), or null if no positioning applies
-    pub fn getMarkOffset(self: *EmbeddedFont, base_glyph: u16, mark_glyph: u16) ?opentype.MarkOffset {
-        if (!self.feature_flags.isEnabled(.mark) and !self.feature_flags.isEnabled(.mkmk)) return null;
-
-        if (self.ot_features) |ot| {
-            return ot.getMarkOffset(base_glyph, mark_glyph);
-        }
-        return null;
     }
 
     /// Get glyph ID for a Unicode codepoint (CID mode)
@@ -1242,17 +1063,9 @@ pub const EmbeddedFont = struct {
 
     /// Measure text width in points, including char_spacing (added between
     /// rendered glyphs, matching the Tc operator emitted at render time).
-    /// Applies the same GSUB substitutions as rendering, so ligature-bearing
-    /// strings measure exactly as wide as they draw.
+    /// Identity fonts are shaped as writing shapes them (shapeRun), so a
+    /// string measures exactly as wide as it draws.
     pub fn measureTextWidthSpaced(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64) f64 {
-        // GSUB/GPOS are parsed lazily on first render. Initialize here too,
-        // so a measurement taken before the first render agrees with one
-        // taken after - justification and alignment depend on the width of
-        // a string being stable over time.
-        if (self.ot_features == null and self.anyShapingFeatureEnabled()) {
-            self.initOpenTypeFeatures() catch {};
-        }
-
         if (self.encoding != .identity) {
             // WinAnsi encoding: use byte-indexed width table
             var total: u64 = 0; // u32 overflows past ~65K maximal glyphs
@@ -1265,153 +1078,35 @@ pub const EmbeddedFont = struct {
             }
             return result;
         }
-
-        // Shaped as writing shapes it (shapeRun), so measure == render
-        if (self.shapedWidth(text, size, char_spacing)) |width| {
-            return width;
-        } else |_| {} // OOM: fall through to the unshaped estimate
-
-        // When GSUB substitutions are active the rendered glyph sequence
-        // differs from the codepoint sequence (ligatures, alternates) -
-        // measure the shaped sequence so measure == render.
-        if (self.ot_features) |ot| {
-            if (self.hasActiveGsub(ot) catch true) {
-                if (self.measureShaped(text, size, char_spacing, ot)) |width| {
-                    return width;
-                } else |_| {} // OOM etc: fall through to unshaped estimate
-            }
-        }
-        // Combining marks may compose into precomposed glyphs, and default
-        // ignorables are removed by the shaper (decodeText finds both)
-        if (mayNeedDecoding(text)) {
-            if (self.decodeText(text)) {
-                if (self.scratch.ignorables) {
-                    self.initOpenTypeFeatures() catch {};
-                    if (self.ot_features) |ot| {
-                        if (self.measureShaped(text, size, char_spacing, ot)) |width| {
-                            return width;
-                        } else |_| {}
-                    }
-                }
-                return self.glyphSequenceWidth(self.scratch.glyphs.items, size, char_spacing);
-            } else |_| {} // OOM: fall through to unshaped estimate
-        }
-        return self.measureUnshaped(text, size, char_spacing);
+        // Out of memory (or OpenType tables that do not parse, which
+        // writing refuses too): the nominal advances, an estimate
+        return self.shapedWidth(text, size, char_spacing) catch self.nominalWidth(text, size, char_spacing);
     }
 
-    /// Identity-encoding measurement without GSUB: per-codepoint advances
-    /// plus kerning. Exact when the font has no active substitutions.
-    fn measureUnshaped(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64) f64 {
-        const units_per_em = self.font.head.?.units_per_em;
-        const em: i64 = units_per_em;
-        const has_ascii_widths = self.font.has_ascii_widths;
-        const do_kerning = self.feature_flags.isEnabled(.kern) and self.has_kern_data and self.ot_features != null;
-
+    /// Width in points of `text` by each character's nominal glyph (no
+    /// substitution, no positioning), plus char_spacing between glyphs.
+    fn nominalWidth(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64) f64 {
         var total: i64 = 0; // i32 overflows past ~32K maximal glyphs
-        var glyph_count: usize = 0;
-        var prev_gid: u16 = 0;
-        var has_prev: bool = false;
-
+        var count: usize = 0;
         var i: usize = 0;
         while (i < text.len) {
-            const byte = text[i];
-            var gid: u16 = 0;
-            var width: u16 = 0;
-
-            if (byte < 128) {
-                // ASCII fast path: use cached width directly
-                if (has_ascii_widths) {
-                    width = self.font.ascii_widths[byte];
-                    gid = self.font.ascii_glyphs[byte];
-                } else if (self.font.has_ascii_cache) {
-                    gid = self.font.ascii_glyphs[byte];
-                    width = self.font.getGlyphWidth(gid) orelse 0;
-                } else {
-                    gid = self.font.getGlyphId(byte) orelse 0;
-                    width = self.font.getGlyphWidth(gid) orelse 0;
-                }
+            // Invalid sequences are skipped, a truncated one ends the text
+            // (as decode.zig decodes)
+            const len = std.unicode.utf8ByteSequenceLength(text[i]) catch {
                 i += 1;
-            } else {
-                // Multi-byte UTF-8
-                const len = std.unicode.utf8ByteSequenceLength(byte) catch 1;
-                if (i + len > text.len) break;
-                const codepoint = std.unicode.utf8Decode(text[i..][0..len]) catch {
-                    i += 1;
-                    continue;
-                };
-                gid = self.font.getGlyphId(codepoint) orelse 0;
-                width = self.font.getGlyphWidth(gid) orelse 0;
-                i += len;
-            }
-
-            // Add glyph width (scaled to 1/1000 em)
-            total += thousandths(width, em);
-            glyph_count += 1;
-
-            // Add kerning from previous glyph
-            if (do_kerning and has_prev) {
-                const kern = self.ot_features.?.getKerning(prev_gid, gid);
-                total += @divTrunc(@as(i64, kern) * 1000, em);
-            }
-
-            prev_gid = gid;
-            has_prev = true;
+                continue;
+            };
+            if (i + len > text.len) break;
+            const cp = std.unicode.utf8Decode(text[i..][0..len]) catch {
+                i += 1;
+                continue;
+            };
+            i += len;
+            const gid = self.font.getGlyphId(cp) orelse 0;
+            total += self.font.getGlyphWidth(gid) orelse 0;
+            count += 1;
         }
-
-        var result = @as(f64, @floatFromInt(total)) * size / 1000.0;
-        if (glyph_count > 1) {
-            result += char_spacing * @as(f64, @floatFromInt(glyph_count - 1));
-        }
-        return result;
-    }
-
-    /// Identity-encoding measurement through the same GSUB pipeline the
-    /// renderer uses: decode to base glyphs, substitute, then sum the final
-    /// glyph advances plus kerning and char_spacing.
-    fn measureShaped(self: *EmbeddedFont, text: []const u8, size: f64, char_spacing: f64, ot: *opentype.OpenTypeFeatures) !f64 {
-        // Same decoding (and composition) as markUnicodeCharsUsed, so
-        // shaping input matches rendering
-        try self.decodeText(text);
-
-        const final_glyphs = try ot.glyphIds(self.scratch.glyphs.items, self.scratch.codepoints.items, self.feature_flags);
-        defer self.allocator.free(final_glyphs);
-
-        return self.glyphSequenceWidth(final_glyphs, size, char_spacing);
-    }
-
-    /// Width in points of an already-shaped glyph sequence (advances +
-    /// kerning + char_spacing). Used by measureShaped and by writeAt, which
-    /// already has the shaped run and must not shape a second time.
-    /// A glyph advance in 1/1000 em, rounded exactly as the PDF width
-    /// arrays (/W, /Widths) store it: measurement sums the widths viewers
-    /// advance by.
-    fn thousandths(width: u16, em: i64) i64 {
-        const scale = @as(f64, 1000.0) / @as(f64, @floatFromInt(em));
-        return @intFromFloat(@round(@as(f64, @floatFromInt(width)) * scale));
-    }
-
-    pub fn glyphSequenceWidth(self: *EmbeddedFont, glyphs: []const u16, size: f64, char_spacing: f64) f64 {
-        const em: i64 = self.font.head.?.units_per_em;
-        const do_kerning = self.feature_flags.isEnabled(.kern) and self.has_kern_data and self.ot_features != null;
-
-        var total: i64 = 0; // i32 overflows past ~32K maximal glyphs
-        var prev_gid: u16 = 0;
-        var has_prev: bool = false;
-        for (glyphs) |gid| {
-            const width = self.font.getGlyphWidth(gid) orelse 0;
-            total += thousandths(width, em);
-            if (do_kerning and has_prev) {
-                total += @divTrunc(@as(i64, self.ot_features.?.getKerning(prev_gid, gid)) * 1000, em);
-            }
-            prev_gid = gid;
-            has_prev = true;
-        }
-
-        var result = @as(f64, @floatFromInt(total)) * size / 1000.0;
-        if (glyphs.len > 1) {
-            result += char_spacing * @as(f64, @floatFromInt(glyphs.len - 1));
-        }
-        return result;
+        return self.advanceWidth(total, count, size, char_spacing);
     }
 
     /// Generate ToUnicode CMap for PDF text extraction/copy-paste
@@ -2832,7 +2527,7 @@ test "compact TTF subsetting creates valid font" {
     emb.encoding = .identity;
 
     // Mark some Unicode characters
-    const glyphs = try emb.markUnicodeCharsUsed("Hello", null);
+    const glyphs = try emb.shapeGlyphIds("Hello", null);
     emb.allocator.free(glyphs);
 
     // Generate subset (should use compact TTF)
@@ -2862,7 +2557,7 @@ test "compact TTF glyph ID remapping" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    const glyphs_ab = try emb.markUnicodeCharsUsed("AB", null);
+    const glyphs_ab = try emb.shapeGlyphIds("AB", null);
     emb.allocator.free(glyphs_ab);
 
     try emb.generateSubset();
@@ -2891,7 +2586,7 @@ test "compact TTF smaller than sparse TTF" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    const glyphs_test = try emb.markUnicodeCharsUsed("Test", null);
+    const glyphs_test = try emb.shapeGlyphIds("Test", null);
     emb.allocator.free(glyphs_test);
 
     try emb.generateSubset();
@@ -2993,7 +2688,7 @@ test "CFF subsetting creates valid font" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    const glyphs = try emb.markUnicodeCharsUsed("Hello", null);
+    const glyphs = try emb.shapeGlyphIds("Hello", null);
     emb.allocator.free(glyphs);
 
     try emb.generateSubset();
@@ -3019,7 +2714,7 @@ test "CFF desubroutinization reduces size" {
     const orig_size = orig_cff.?.len;
 
     emb.encoding = .identity;
-    const glyphs_abc = try emb.markUnicodeCharsUsed("ABC", null);
+    const glyphs_abc = try emb.shapeGlyphIds("ABC", null);
     emb.allocator.free(glyphs_abc);
 
     try emb.generateSubset();
@@ -3037,7 +2732,7 @@ test "CFF glyph ID remapping works" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    const glyphs_xy = try emb.markUnicodeCharsUsed("XY", null);
+    const glyphs_xy = try emb.shapeGlyphIds("XY", null);
     emb.allocator.free(glyphs_xy);
 
     try emb.generateSubset();
@@ -3066,7 +2761,7 @@ test "CID font with TTF renders correctly" {
     emb.encoding = .identity;
 
     // Mark various characters
-    const glyphs_hw = try emb.markUnicodeCharsUsed("Hello World! 123", null);
+    const glyphs_hw = try emb.shapeGlyphIds("Hello World! 123", null);
     emb.allocator.free(glyphs_hw);
 
     try emb.generateSubset();
@@ -3093,7 +2788,7 @@ test "CID font with OTF renders correctly" {
     defer emb.deinit();
 
     emb.encoding = .identity;
-    const glyphs_t456 = try emb.markUnicodeCharsUsed("Test 456", null);
+    const glyphs_t456 = try emb.shapeGlyphIds("Test 456", null);
     emb.allocator.free(glyphs_t456);
 
     try emb.generateSubset();
@@ -3122,9 +2817,9 @@ test "mixed font types in same document" {
     ttf_font.encoding = .identity;
     otf_font.encoding = .identity;
 
-    const glyphs_reg = try ttf_font.markUnicodeCharsUsed("Regular", null);
+    const glyphs_reg = try ttf_font.shapeGlyphIds("Regular", null);
     ttf_font.allocator.free(glyphs_reg);
-    const glyphs_bold = try otf_font.markUnicodeCharsUsed("Bold", null);
+    const glyphs_bold = try otf_font.shapeGlyphIds("Bold", null);
     otf_font.allocator.free(glyphs_bold);
 
     try ttf_font.generateSubset();
@@ -3160,7 +2855,8 @@ test "OpenType features initialization" {
 
     // Charter has GPOS but no GSUB
     try std.testing.expect(font.ot_features.?.gsub == null);
-    try std.testing.expect(font.ot_features.?.kern_lookups.items.len > 0);
+    const gpos_table = font.ot_features.?.gpos orelse return error.TestExpectedGpos;
+    try std.testing.expect(gpos_table.default.feature_lookups[opentype.FeatureFlags.featureIndex(.kern)].len > 0);
 }
 
 test "OpenType kerning applied in text rendering" {
@@ -3169,23 +2865,17 @@ test "OpenType kerning applied in text rendering" {
     font.encoding = .identity;
 
     // Text with common kerning pairs
-    const glyphs_avatar = try font.markUnicodeCharsUsed("AVATAR", null);
+    const glyphs_avatar = try font.shapeGlyphIds("AVATAR", null);
     font.allocator.free(glyphs_avatar);
 
     // OpenType features should now be initialized
     try std.testing.expect(font.ot_features != null);
 
-    // Get glyphs for text (will have ligatures/kerning applied during rendering)
-    const glyphs = try font.getGlyphsForText("AV");
-    defer font.allocator.free(glyphs);
-
-    // Should have 2 glyphs (no ligatures in Charter)
-    try std.testing.expectEqual(@as(usize, 2), glyphs.len);
-
-    // Get kerning between A and V
-    const kern = font.getKerning(glyphs[0], glyphs[1]);
-    // AV should have negative kerning (letters move closer)
-    try std.testing.expect(kern < 0);
+    // A's advance is kerned against V (letters move closer)
+    const run = try font.shapeRun("AV", std.testing.allocator);
+    defer run.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), run.glyphs.len); // no ligatures in Charter
+    try std.testing.expect(run.pos[0].advance < font.font.getGlyphWidth(run.glyphs[0]).?);
 }
 
 test "setFeature disables kerning" {
@@ -3193,22 +2883,15 @@ test "setFeature disables kerning" {
     defer font.deinit();
     font.encoding = .identity;
 
-    // Initialize features
-    try font.initOpenTypeFeatures();
-
-    // Get kerning for AV with kern enabled
-    const glyph_A = font.font.getGlyphId('A') orelse 0;
-    const glyph_V = font.font.getGlyphId('V') orelse 0;
-    const kern_enabled = font.getKerning(glyph_A, glyph_V);
-
-    // Disable kerning
+    // A's advance in "AV": kerned, then its own width with kern off
+    const width_a: i32 = font.font.getGlyphWidth(font.font.getGlyphId('A').?).?;
+    const kerned = try font.shapeRun("AV", std.testing.allocator);
+    defer kerned.deinit(std.testing.allocator);
+    try std.testing.expect(kerned.pos[0].advance != width_a);
     font.setFeature(.kern, false);
-    const kern_disabled = font.getKerning(glyph_A, glyph_V);
-
-    // With kern disabled, should return 0
-    try std.testing.expectEqual(@as(i16, 0), kern_disabled);
-    // With kern enabled, should have been non-zero
-    try std.testing.expect(kern_enabled != 0);
+    const plain = try font.shapeRun("AV", std.testing.allocator);
+    defer plain.deinit(std.testing.allocator);
+    try std.testing.expectEqual(width_a, plain.pos[0].advance);
 }
 
 test "Satoshi ligature codepoint tracking" {
@@ -3217,7 +2900,7 @@ test "Satoshi ligature codepoint tracking" {
     font.encoding = .identity;
 
     // Mark text with ligatures
-    const glyphs_ligas = try font.markUnicodeCharsUsed("fi fl ft", null);
+    const glyphs_ligas = try font.shapeGlyphIds("fi fl ft", null);
     font.allocator.free(glyphs_ligas);
 
     // Should have tracked fi, fl, ft ligatures (3 different glyph IDs)
@@ -3253,7 +2936,7 @@ test "ccmp output maps back to the text as typed" {
     var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Gentium/Gentium-Regular.ttf");
     defer font.deinit();
     const text = "i\u{0307}\u{0301} i\u{0323}\u{0301} j\u{0301} \u{012F}\u{0301}";
-    const glyphs = try font.markUnicodeCharsUsed(text, null);
+    const glyphs = try font.shapeGlyphIds(text, null);
     defer font.allocator.free(glyphs);
     // ccmp did apply: dotless j, not j
     try std.testing.expect(std.mem.indexOfScalar(u16, glyphs, font.font.getGlyphId('j').?) == null);
@@ -3277,9 +2960,9 @@ test "default ignorables are removed and stay out of the text" {
     // Soft hyphen and ZWSP vanish; ZWJ between f and i does not block the
     // ligature (Inter has none for "fi" by default, so check text only)
     const text = "co\u{00AD}op a\u{200B}b f\u{200D}i";
-    const glyphs = try font.markUnicodeCharsUsed(text, null);
+    const glyphs = try font.shapeGlyphIds(text, null);
     defer font.allocator.free(glyphs);
-    const plain = try font.markUnicodeCharsUsed("coop ab fi", null);
+    const plain = try font.shapeGlyphIds("coop ab fi", null);
     defer font.allocator.free(plain);
     try std.testing.expectEqualSlices(u16, plain, glyphs);
 
@@ -3298,13 +2981,13 @@ test "a ZWJ taken up by an emoji ligature stays in its text" {
     var font = try EmbeddedFont.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Noto Emoji/NotoEmoji-Regular.ttf");
     defer font.deinit();
     const family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
-    const glyphs = try font.markUnicodeCharsUsed(family, null);
+    const glyphs = try font.shapeGlyphIds(family, null);
     defer font.allocator.free(glyphs);
     try std.testing.expectEqual(@as(usize, 1), glyphs.len);
     try std.testing.expectEqualSlices(u21, &.{ 0x1F468, 0x200D, 0x1F469, 0x200D, 0x1F467 }, font.ligature_codepoints.get(glyphs[0]).?);
 
     // U+FE0F after a heart: removed, so the heart maps to itself alone
-    const heart = try font.markUnicodeCharsUsed("\u{2764}\u{FE0F}", null);
+    const heart = try font.shapeGlyphIds("\u{2764}\u{FE0F}", null);
     defer font.allocator.free(heart);
     try std.testing.expectEqual(@as(usize, 1), heart.len);
     try std.testing.expectEqual(@as(?u21, 0x2764), font.glyph_to_codepoint.get(heart[0]));
@@ -3331,15 +3014,16 @@ test "a variation sequence measures and draws as the glyph cmap 14 gives it" {
         try std.testing.expectEqual(@as(f64, 700), font.measureTextWidthSpaced("a\u{FE00}", 1000, 0));
         try std.testing.expectEqual(@as(f64, 500), font.measureTextWidthSpaced("a\u{FE01}", 1000, 0));
         try std.testing.expectEqual(@as(f64, 1200), font.measureTextWidthSpaced("a\u{FE00}a", 1000, 0));
-        const glyphs = try font.markUnicodeCharsUsed("a\u{FE00}a", std.testing.allocator);
+        const glyphs = try font.shapeGlyphIds("a\u{FE00}a", std.testing.allocator);
         defer std.testing.allocator.free(glyphs);
         try std.testing.expectEqualSlices(u16, &.{ 32, 2 }, glyphs);
     }
-    // The variant copies as the base character, without the selector
+    // The variant copies as typed: the selector that picked it is part of
+    // its text (decode.zig gives the pair one source span)
     var text: std.ArrayListUnmanaged(u21) = .empty;
     defer text.deinit(std.testing.allocator);
     try textOfGlyphs(font, &.{32}, &text);
-    try std.testing.expectEqualSlices(u21, &.{'a'}, text.items);
+    try std.testing.expectEqualSlices(u21, &.{ 'a', 0xFE00 }, text.items);
 }
 
 /// A parsed font file: one weight/style of one typeface. Caller-owned and
@@ -3391,9 +3075,9 @@ pub const FontFace = struct {
         self.prototype.setFeature(feature, enabled);
     }
 
-    /// Optionally pre-fill the kerning cache by measuring representative
-    /// text; every document clone starts with those pair lookups cached.
-    /// Configuration phase only.
+    /// Measures `text` with the face. No longer warms anything: shaping
+    /// caches belong to each document's clone, so there is nothing for
+    /// clones to inherit. Kept for compatibility. Configuration phase only.
     pub fn warmup(self: *FontFace, text: []const u8) error{FaceFrozen}!void {
         if (@atomicLoad(bool, &self.frozen, .acquire)) return error.FaceFrozen;
         _ = self.prototype.measureTextWidth(text, 12);

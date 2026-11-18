@@ -162,11 +162,6 @@ test "long text with maximal widths does not overflow width accumulators" {
     defer font.deinit();
     try std.testing.expectApproxEqRel(expected, font.measureTextWidth(text, 1), 1e-12);
 
-    const glyphs = try std.testing.allocator.alloc(u16, 70_000);
-    defer std.testing.allocator.free(glyphs);
-    @memset(glyphs, 1);
-    try std.testing.expectApproxEqRel(expected, font.glyphSequenceWidth(glyphs, 1, 0), 1e-12);
-
     font.encoding = .win_ansi;
     try std.testing.expectApproxEqRel(expected, font.measureTextWidth(text, 1), 1e-12);
 }
@@ -176,7 +171,7 @@ test "long text with maximal widths does not overflow width accumulators" {
 // ----------------------------------------------------------------------------
 
 fn markUsed(font: *EmbeddedFont, text: []const u8) !void {
-    const gids = try font.markUnicodeCharsUsed(text, std.testing.allocator);
+    const gids = try font.shapeGlyphIds(text, std.testing.allocator);
     std.testing.allocator.free(gids);
 }
 

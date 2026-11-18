@@ -39,7 +39,7 @@ pub fn shape(io: std.Io, allocator: Allocator, out: *std.Io.Writer, args: []cons
     var in_buffer: [64 * 1024]u8 = undefined;
     var stdin = std.Io.File.stdin().reader(io, &in_buffer);
     while (try stdin.interface.takeDelimiter('\n')) |line| {
-        const glyphs = try font.markUnicodeCharsUsed(line, allocator);
+        const glyphs = try font.shapeGlyphIds(line, allocator);
         defer allocator.free(glyphs);
         for (glyphs, 0..) |gid, i| try out.print("{s}{d}", .{ if (i == 0) "" else " ", gid });
         try out.writeAll("\n");

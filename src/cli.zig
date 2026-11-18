@@ -554,11 +554,18 @@ fn generateMarkTestPdf(allocator: std.mem.Allocator, font_path: []const u8, outp
     try std.Io.Dir.cwd().writeFile(app_io, .{ .sub_path = output_path, .data = pdf });
 
     // Show mark/mkmk lookup stats
-    if (font.embedded.ot_features) |ot| {
+    if (font.embedded.ot_features) |ot| if (ot.gpos) |table| {
+        var mark_base: usize = 0;
+        var mark_mark: usize = 0;
+        for (table.lookups) |l| switch (l.type) {
+            4 => mark_base += 1,
+            6 => mark_mark += 1,
+            else => {},
+        };
         try print("GPOS stats:\n", .{});
-        try print("  Mark-to-Base lookups: {}\n", .{ot.mark_base_lookups.items.len});
-        try print("  Mark-to-Mark lookups: {}\n", .{ot.mark_mark_lookups.items.len});
-    }
+        try print("  Mark-to-Base lookups: {}\n", .{mark_base});
+        try print("  Mark-to-Mark lookups: {}\n", .{mark_mark});
+    };
 }
 
 fn generateCaltTestPdf(allocator: std.mem.Allocator, font_path: []const u8, output_path: []const u8) !void {

@@ -218,9 +218,12 @@ into later runs, gradient stops borrowed instead of copied. Still open:
 - [ ] **Shaping performance**: after the pair/width caches and done-sets
   the total is +4% over the old path (Unicode/marks +27%, text flow +31%);
   left: decode/cluster setup per call, GPOS mark lookups.
-- [ ] **Remove the old glyph path** (markUnicodeCharsUsed,
-  renderCIDTextWithKerning, getKerning/getMarkOffset caches); `platen shape`
-  onto shapeRun.
+- [x] **Remove the old glyph path** (done 2026-11-18: markUnicodeCharsUsed,
+  renderCIDTextWithKerning, getKerning/getMarkOffset and opentype's old GPOS
+  structures; `platen shape` and tests on shapeRun).
+- [ ] **FontFace.warmup** does nothing now (shaping caches are per
+  document): remove at the next breaking release, or make clones inherit a
+  warmed pair cache.
 - [x] **Indic (Devanagari) shaping** in shapeText (done 2026-11-17,
   indic.zig; HarfBuzz-checked with Kohinoor and Sangam MN).
 - [x] **Hangul shaping** in shapeText (done 2026-11-18, hangul.zig;

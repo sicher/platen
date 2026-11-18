@@ -455,12 +455,13 @@ test "shape is pure: the face keeps no trace of it" {
     defer face.deinit();
     const glyphs = try shape(testing.allocator, &face, "AVATAR office \u{1F600}", .{});
     defer testing.allocator.free(glyphs);
-    // No frozen face, no used glyphs or kerning cache entries on it
+    // No frozen face, no used glyphs, nothing in its shaping cache
     try testing.expect(!face.frozen);
     try testing.expectEqual(@as(usize, 0), face.prototype.cid_used_glyphs.count());
     try testing.expectEqual(@as(usize, 0), face.prototype.glyph_to_codepoint.count());
     try testing.expectEqual(@as(usize, 0), face.prototype.cid_glyph_widths.count());
-    for (face.prototype.ot_features.?.kern_cache_keys) |k| try testing.expectEqual(@as(u32, 0xFFFF_FFFF), k);
+    try testing.expectEqual(@as(usize, 0), face.prototype.shape_cache.pairs.count());
+    try testing.expectEqual(@as(usize, 0), face.prototype.shape_cache.shaper.buf.capacity);
     // The emoji is not in Inter: .notdef, still one glyph with an advance
     try testing.expectEqual(@as(u16, 0), glyphs[glyphs.len - 1].id);
     try testing.expectEqual(@as(u32, 14), glyphs[glyphs.len - 1].cluster);

@@ -1263,7 +1263,7 @@ pub const Document = struct {
             if (plan.monospace) {
                 // Centered by the glyphs' own advance, without spacing
                 const own = switch (t.font) {
-                    .embedded => |emb| if (t.cached_positions) |p| emb.runWidth(p, t.font_size, 0) else if (t.cached_glyphs) |g| emb.glyphSequenceWidth(g, t.font_size, 0) else natural,
+                    .embedded => |emb| if (t.cached_positions) |p| emb.runWidth(p, t.font_size, 0) else natural,
                     .standard => natural,
                 };
                 // Shrunk to fit its cells (as the screen does) or to the
@@ -3241,16 +3241,14 @@ pub const Document = struct {
                                 try cw.print("{d:.2} Tw\n", .{tw});
 
                                 if (emb.encoding == .identity) {
-                                    // CID mode: output with ligatures, kerning, and mark positioning
-                                    // Pass absolute position for Tm-based mark positioning
-                                    // Use cached glyphs if available (avoids duplicate OpenType shaping)
+                                    // CID mode: the glyphs as shaped (writeOneFont) or
+                                    // placed (writeMonospaceCluster) - every identity
+                                    // text command has one or the other
                                     const shear: f64 = if (t.synth_italic) fallback.oblique_shear else 0;
                                     if (t.placed) |placed| {
                                         try text_render.renderPlacedOffsets(&cw, emb, placed, t.x + t.glyph_dx, t.y, shear);
-                                    } else if (t.cached_positions) |positions| {
-                                        try text_render.renderShapedRun(&cw, emb, t.cached_glyphs.?, positions, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
                                     } else {
-                                        _ = try text_render.renderCIDTextWithKerning(&cw, emb, t.text_data, t.cached_glyphs, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
+                                        try text_render.renderShapedRun(&cw, emb, t.cached_glyphs.?, t.cached_positions.?, t.font_size * t.glyph_scale, t.x + t.glyph_dx, t.y, t.word_spacing, t.char_spacing, shear);
                                     }
                                 } else {
                                     try cw.print("{d:.2} {d:.2} Td\n", .{ t.x, t.y });

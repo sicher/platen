@@ -3824,26 +3824,20 @@ test "measurement applies GSUB ligatures like rendering" {
     const emb = font.embedded;
     const text = "fit float finish"; // fi/fl/ft ligatures
 
-    // Ground truth: shape exactly as the renderer does and sum the final
-    // glyph advances + kerning
-    const glyphs = try emb.markUnicodeCharsUsed(text, null);
-    defer emb.allocator.free(glyphs);
-    const em: i32 = @intCast(emb.font.head.?.units_per_em);
-    var total: i32 = 0;
-    var prev: u16 = 0;
-    for (glyphs, 0..) |gid, i| {
-        total += @divTrunc(@as(i32, @intCast(emb.font.getGlyphWidth(gid) orelse 0)) * 1000, em);
-        if (i > 0) total += @divTrunc(@as(i32, emb.getKerning(prev, gid)) * 1000, em);
-        prev = gid;
-    }
-    const expected = @as(f64, @floatFromInt(total)) * 12.0 / 1000.0;
+    // Ground truth: shape exactly as the renderer does and sum the shaped
+    // advances (substitution and kerning included)
+    const run = try emb.shapeRun(text, std.testing.allocator);
+    defer run.deinit(std.testing.allocator);
+    var total: i64 = 0;
+    for (run.pos) |p| total += p.advance;
+    const expected = @as(f64, @floatFromInt(total)) * 12.0 / @as(f64, @floatFromInt(emb.font.head.?.units_per_em));
 
     const measured = emb.measureTextWidth(text, 12);
     try std.testing.expectApproxEqAbs(expected, measured, 0.001);
 
     // And strictly narrower than the unshaped sum of individual letters,
     // since the ligature glyphs replace multiple letters
-    try std.testing.expect(glyphs.len < text.len);
+    try std.testing.expect(run.glyphs.len < text.len);
 }
 
 test "writeAt anchor places text left, center, and right of the point" {
@@ -4048,24 +4042,19 @@ test "FontFace clones own all scratch buffers (no shared mutable state)" {
 
     var face = try embedded_mod.FontFace.fromMemory(allocator, data);
     defer face.deinit();
-    // Grow the prototype's GSUB shaper buffer (calt-heavy text). Writing
-    // and measuring use the shaping engine, which only reads the font;
-    // the old glyph path still owns this buffer, so it must not be shared
-    const warm = try face.prototype.markUnicodeCharsUsed("Warmup with arrows -> => and ligatures ffi ffl offices", null);
+    // Shaping on the shared prototype uses a temporary cache, never its own
+    const warm = try face.prototype.shapeGlyphIds("Warmup with arrows -> => and ligatures ffi ffl offices", null);
     face.prototype.allocator.free(warm);
+    try std.testing.expectEqual(@as(usize, 0), face.prototype.shape_cache.shaper.buf.capacity);
 
     const clone = try face.instantiate(allocator);
     defer clone.deinit();
-    // Shape calt-heavy text on the clone so its shaping buffer is in use
-    const glyphs = try clone.markUnicodeCharsUsed("clone text -> with calt => arrows", null);
+    // Shape calt-heavy text on the clone: its own cache fills
+    const glyphs = try clone.shapeGlyphIds("clone text -> with calt => arrows", null);
     clone.allocator.free(glyphs);
-
-    const proto_ot = face.prototype.ot_features.?;
-    const clone_ot = clone.ot_features.?;
-    // A clone's shaping storage must never alias the prototype's
-    try std.testing.expect(clone_ot.shaper.buf.capacity > 0 and proto_ot.shaper.buf.capacity > 0);
-    try std.testing.expect(clone_ot.shaper.buf.items.ptr != proto_ot.shaper.buf.items.ptr);
-    try std.testing.expect(clone_ot.shaper.active.items.ptr != proto_ot.shaper.active.items.ptr);
+    try std.testing.expect(clone.shape_cache.shaper.buf.capacity > 0);
+    try std.testing.expect(clone.shape_cache.decoded.codepoints.items.ptr != face.prototype.shape_cache.decoded.codepoints.items.ptr);
+    try std.testing.expectEqual(@as(usize, 0), face.prototype.shape_cache.shaper.buf.capacity);
     // std.testing.allocator additionally catches a leak or double-free
     // through the deinits above
 }

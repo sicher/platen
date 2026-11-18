@@ -115,6 +115,20 @@
 
 ### Changed
 
+- **The old glyph path is gone**: all identity-font text is shaped, measured
+  and drawn by the shaping engine (as `shapeText`). Removed:
+  `EmbeddedFont.markUnicodeCharsUsed` (use `shapeGlyphIds` or `shapeRun`),
+  `getGlyphsForText`, `getKerning`, `getMarkOffset`, `glyphSequenceWidth`,
+  `opentype.PairPosLookup`/`MarkBasePos`/`MarkMarkPos`/`MarkOffset` and the
+  old pair-kerning cache (GPOS pair kerning without shaping:
+  `GposKerning`). `FontFace.warmup` no longer warms anything (shaping caches
+  are per document) and is kept for compatibility. CLI `shape` uses the
+  engine.
+- **Copied text keeps a variation selector that chose the glyph**: when the
+  font's cmap format 14 lists a character + selector (an ideograph variant,
+  text-style emoji), the glyph copies as both, as typed (0.13 dropped the
+  selector). Selectors the font does not list are still dropped.
+
 - **Written text is shaped as `shapeText` shapes it**: `writeAt`, `write` and
   measurement with Unicode-encoded embedded fonts now use the shaping engine
   (GSUB, GPOS or the kern table, fallback mark positioning, Indic shaping)

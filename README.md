@@ -801,7 +801,6 @@ defer inter_bold.deinit();
 
 // Optional configuration - before first use (frozen afterwards):
 try inter.setFeature(.dlig, true);                 // default feature flags
-try inter.warmup("Common text, pre-fills kerning"); // perf only
 
 // Per document (any thread) - just reference the faces in styles:
 const body = platen.TextStyle{ .font = .{ .face = &inter }, .size = 11 };
@@ -1023,7 +1022,7 @@ another document errors (`ForeignFont`/`ForeignImage`/`ForeignSvg`).
 | `FontFace.fromMemory(alloc, bytes) -> FontFace` | Parse a font face (borrows bytes; identity encoding) |
 | `FontFace.fromFile(io, alloc, path) -> FontFace` | Parse a font face from a file (owns the bytes) |
 | `FontFace.setFeature(Feature, bool)` | Default OpenType flags for this face (before first use; `FaceFrozen` after) |
-| `FontFace.warmup(text)` | Optional: pre-fill the kerning cache clones inherit (before first use) |
+| `FontFace.warmup(text)` | No effect (shaping caches are per document); kept for compatibility |
 | `FontFace.deinit()` | Free the face (after all documents using it are deinitialized) |
 | `Image.fromMemory(alloc, bytes) -> *Image` | Decode an image once (borrows bytes) |
 | `Image.fromFile(io, alloc, path) -> *Image` | Decode an image from a file |

@@ -1,7 +1,6 @@
-//! OpenType Feature Support
-//!
-//! Parses GSUB (Glyph Substitution) and GPOS (Glyph Positioning) tables
-//! for ligature support and kerning in OpenType/TrueType fonts.
+//! OpenType features: the feature tags and flags shaping is configured
+//! with, coverage and class tables, and a font's parsed GSUB, GPOS, GDEF
+//! and 'kern' tables for the shaping engine (gsub.zig, gpos.zig).
 //!
 //! References:
 //! - OpenType spec: https://learn.microsoft.com/en-us/typography/opentype/spec/gsub
@@ -586,12 +585,6 @@ pub const CoverageTable = struct {
     }
 };
 
-/// Kerning pair value
-pub const KernPair = struct {
-    second: u16, // Second glyph ID
-    value: i16, // X advance adjustment
-};
-
 /// Class definition table for GPOS
 pub const ClassDef = struct {
     format: u16,
@@ -646,249 +639,20 @@ pub const ClassDef = struct {
     }
 };
 
-/// Pair positioning lookup (GPOS Lookup Type 2)
-pub const PairPosLookup = struct {
-    format: u16,
-    coverage: CoverageTable,
-    data: []const u8,
-
-    // Format 2 specific
-    class_def1: ?ClassDef = null,
-    class_def2: ?ClassDef = null,
-    class1_count: u16 = 0,
-    class2_count: u16 = 0,
-    class1_records_offset: usize = 0,
-
-    /// Get kerning value for a glyph pair
-    pub fn getKerning(self: PairPosLookup, glyph1: u16, glyph2: u16) i16 {
-        return switch (self.format) {
-            1 => self.getKerningFormat1(glyph1, glyph2),
-            2 => self.getKerningFormat2(glyph1, glyph2),
-            else => 0,
-        };
-    }
-
-    fn getKerningFormat1(self: PairPosLookup, glyph1: u16, glyph2: u16) i16 {
-        const cov_index = self.coverage.getCoverageIndex(glyph1) orelse return 0;
-
-        // Format 1: Individual pair sets
-        // Structure: coverage, valueFormat1, valueFormat2, pairSetCount, pairSetOffsets[]
-        if (self.data.len < 10) return 0;
-
-        const value_format1 = readU16(self.data, 4);
-        const value_format2 = readU16(self.data, 6);
-        const pair_set_count = readU16(self.data, 8);
-
-        if (cov_index >= pair_set_count) return 0;
-
-        // Get pair set offset
-        const offset_pos = 10 + @as(usize, cov_index) * 2;
-        if (offset_pos + 2 > self.data.len) return 0;
-        const pair_set_offset: usize = readU16(self.data, offset_pos);
-
-        // Parse pair set
-        if (pair_set_offset + 2 > self.data.len) return 0;
-        const pair_value_count = readU16(self.data, pair_set_offset);
-
-        // Calculate record size based on value formats
-        const value1_size = valueRecordSize(value_format1);
-        const value2_size = valueRecordSize(value_format2);
-        const record_size = 2 + value1_size + value2_size;
-
-        // Search for matching second glyph
-        var i: u16 = 0;
-        while (i < pair_value_count) : (i += 1) {
-            const rec_offset = pair_set_offset + 2 + @as(usize, i) * record_size;
-            if (rec_offset + 2 > self.data.len) break;
-
-            const second_glyph = readU16(self.data, rec_offset);
-            if (second_glyph == glyph2) {
-                // Found! Extract X advance from value1
-                return extractXAdvance(self.data, rec_offset + 2, value_format1);
-            }
-            if (second_glyph > glyph2) break; // Sorted, no need to continue
-        }
-
-        return 0;
-    }
-
-    fn getKerningFormat2(self: PairPosLookup, glyph1: u16, glyph2: u16) i16 {
-        _ = self.coverage.getCoverageIndex(glyph1) orelse return 0;
-
-        const class_def1 = self.class_def1 orelse return 0;
-        const class_def2 = self.class_def2 orelse return 0;
-
-        const class1 = class_def1.getClass(glyph1);
-        const class2 = class_def2.getClass(glyph2);
-
-        if (class1 >= self.class1_count or class2 >= self.class2_count) return 0;
-
-        // Format 2 structure after header:
-        // valueFormat1, valueFormat2, classDef1Offset, classDef2Offset, class1Count, class2Count, class1Records[]
-        if (self.data.len < 16) return 0;
-        const value_format1 = readU16(self.data, 4);
-
-        const value1_size = valueRecordSize(value_format1);
-        const value2_size = valueRecordSize(readU16(self.data, 6));
-        const class2_record_size = value1_size + value2_size;
-        const class1_record_size = @as(usize, self.class2_count) * class2_record_size;
-
-        // Navigate to the correct record
-        const record_offset = self.class1_records_offset +
-            @as(usize, class1) * class1_record_size +
-            @as(usize, class2) * class2_record_size;
-
-        return extractXAdvance(self.data, record_offset, value_format1);
-    }
-};
-
-/// Anchor position in design units
-pub const Anchor = struct {
-    x: i16,
-    y: i16,
-};
-
-/// Mark record - mark class and anchor position
-pub const MarkRecord = struct {
-    mark_class: u16,
-    anchor: Anchor,
-};
-
-/// Mark positioning offset in design units
-pub const MarkOffset = struct {
-    // i32: the difference of two i16 anchors can exceed i16.
-    dx: i32,
-    dy: i32,
-};
-
-/// Mark-to-Base Attachment lookup (GPOS Lookup Type 4)
-/// Attaches combining marks to base glyphs
-pub const MarkBasePos = struct {
-    mark_coverage: CoverageTable,
-    base_coverage: CoverageTable,
-    mark_class_count: u16,
-    mark_records: []const MarkRecord, // [mark_coverage_idx] -> class + anchor
-    base_anchors_data: []const u8, // Raw data for base anchor lookup
-    base_count: u16,
-    base_array_offset: usize, // Offset within data
-
-    /// Get attachment offset for a mark glyph attaching to a base glyph
-    /// Returns (dx, dy) adjustment in design units, or null if not applicable
-    pub fn getAttachment(self: MarkBasePos, mark_glyph: u16, base_glyph: u16) ?MarkOffset {
-        const mark_idx = self.mark_coverage.getCoverageIndex(mark_glyph) orelse return null;
-        const base_idx = self.base_coverage.getCoverageIndex(base_glyph) orelse return null;
-
-        if (mark_idx >= self.mark_records.len) return null;
-        const mark_rec = self.mark_records[mark_idx];
-
-        if (base_idx >= self.base_count) return null;
-        if (mark_rec.mark_class >= self.mark_class_count) return null;
-
-        // Base anchor offset: baseArrayOffset + baseIdx * (markClassCount * 2) + markClass * 2
-        const base_record_offset = self.base_array_offset + 2 + // skip baseCount
-            @as(usize, base_idx) * @as(usize, self.mark_class_count) * 2 +
-            @as(usize, mark_rec.mark_class) * 2;
-
-        if (base_record_offset + 2 > self.base_anchors_data.len) return null;
-        const anchor_offset = readU16(self.base_anchors_data, base_record_offset);
-        if (anchor_offset == 0) return null; // No anchor for this class
-
-        const anchor_addr = self.base_array_offset + anchor_offset;
-        if (anchor_addr + 6 > self.base_anchors_data.len) return null;
-
-        const base_anchor = Anchor{
-            .x = readI16(self.base_anchors_data, anchor_addr + 2),
-            .y = readI16(self.base_anchors_data, anchor_addr + 4),
-        };
-
-        // Offset = base anchor - mark anchor
-        return .{
-            .dx = @as(i32, base_anchor.x) - mark_rec.anchor.x,
-            .dy = @as(i32, base_anchor.y) - mark_rec.anchor.y,
-        };
-    }
-};
-
-/// Mark-to-Mark Attachment lookup (GPOS Lookup Type 6)
-/// Attaches combining marks to other marks (base marks)
-pub const MarkMarkPos = struct {
-    mark1_coverage: CoverageTable, // Combining mark (attaching mark)
-    mark2_coverage: CoverageTable, // Base mark (mark being attached to)
-    mark_class_count: u16,
-    mark1_records: []const MarkRecord, // Attaching marks
-    mark2_anchors_data: []const u8,
-    mark2_count: u16,
-    mark2_array_offset: usize,
-
-    /// Get attachment offset for mark1 attaching to mark2
-    pub fn getAttachment(self: MarkMarkPos, mark1_glyph: u16, mark2_glyph: u16) ?MarkOffset {
-        const mark1_idx = self.mark1_coverage.getCoverageIndex(mark1_glyph) orelse return null;
-        const mark2_idx = self.mark2_coverage.getCoverageIndex(mark2_glyph) orelse return null;
-
-        if (mark1_idx >= self.mark1_records.len) return null;
-        const mark1_rec = self.mark1_records[mark1_idx];
-
-        if (mark2_idx >= self.mark2_count) return null;
-        if (mark1_rec.mark_class >= self.mark_class_count) return null;
-
-        const mark2_record_offset = self.mark2_array_offset + 2 +
-            @as(usize, mark2_idx) * @as(usize, self.mark_class_count) * 2 +
-            @as(usize, mark1_rec.mark_class) * 2;
-
-        if (mark2_record_offset + 2 > self.mark2_anchors_data.len) return null;
-        const anchor_offset = readU16(self.mark2_anchors_data, mark2_record_offset);
-        if (anchor_offset == 0) return null;
-
-        const anchor_addr = self.mark2_array_offset + anchor_offset;
-        if (anchor_addr + 6 > self.mark2_anchors_data.len) return null;
-
-        const mark2_anchor = Anchor{
-            .x = readI16(self.mark2_anchors_data, anchor_addr + 2),
-            .y = readI16(self.mark2_anchors_data, anchor_addr + 4),
-        };
-
-        return .{
-            .dx = @as(i32, mark2_anchor.x) - mark1_rec.anchor.x,
-            .dy = @as(i32, mark2_anchor.y) - mark1_rec.anchor.y,
-        };
-    }
-};
-
 /// OpenType features parsed from a font
 pub const OpenTypeFeatures = struct {
     allocator: std.mem.Allocator,
 
-    // GSUB: parsed table (shared by FontFace clones) and this instance's
-    // shaping state
+    /// GSUB parsed for the engine (shared by FontFace clones)
     gsub: ?gsub_mod.Table = null,
-    shaper: gsub_mod.Shaper = .{},
 
     /// GDEF glyph classes (also for fonts with GPOS but no GSUB)
     gdef: gsub_mod.Gdef = .{},
     /// GPOS parsed for the engine (gpos.zig)
     gpos: ?gsub_mod.Table = null,
     /// The 'kern' table, for the shaping engine: set when there is no GPOS
-    /// 'kern' feature (HarfBuzz's apply_kern), unlike `legacy_kern`
+    /// 'kern' feature (HarfBuzz's apply_kern)
     shaping_kern: ?KernTable = null,
-
-    // GPOS data
-    gpos_data: ?[]const u8 = null,
-    kern_lookups: std.ArrayListUnmanaged(PairPosLookup) = .empty,
-    /// Legacy 'kern' table, set only when GPOS has no kern lookups.
-    legacy_kern: ?KernTable = null,
-    mark_base_lookups: std.ArrayListUnmanaged(MarkBasePos) = .empty, // Type 4
-    mark_mark_lookups: std.ArrayListUnmanaged(MarkMarkPos) = .empty, // Type 6
-
-    // Kerning cache: (glyph1 << 16 | glyph2) -> kern value for O(1) lookup
-    /// Direct-mapped kerning cache: keys are (glyph1 << 16 | glyph2), the
-    /// sentinel 0xFFFFFFFF marks an empty slot (that pair just recomputes).
-    /// A plain array beats a hash map here - getKerning runs per glyph pair
-    /// in both measurement and rendering.
-    kern_cache_keys: [kern_cache_size]u32 = @splat(0xFFFF_FFFF),
-    kern_cache_values: [kern_cache_size]i16 = @splat(0),
-
-    // Allocated memory for mark records
-    mark_record_memory: std.ArrayListUnmanaged([]const MarkRecord) = .empty,
 
     /// True on per-document clones of a FontFace: the parsed lookup
     /// tables are borrowed from the prototype and must not be freed here.
@@ -899,22 +663,11 @@ pub const OpenTypeFeatures = struct {
     }
 
     pub fn deinit(self: *OpenTypeFeatures) void {
-        // Shaping state is always owned by this instance
-        self.shaper.deinit(self.allocator);
         // Per-document clones of a FontFace borrow the parsed tables;
         // only the prototype frees them
         if (self.borrowed_tables) return;
         if (self.gsub) |*g| g.deinit(self.allocator);
         if (self.gpos) |*g| g.deinit(self.allocator);
-        self.kern_lookups.deinit(self.allocator);
-
-        // Free mark record memory
-        for (self.mark_record_memory.items) |slice| {
-            self.allocator.free(slice);
-        }
-        self.mark_record_memory.deinit(self.allocator);
-        self.mark_base_lookups.deinit(self.allocator);
-        self.mark_mark_lookups.deinit(self.allocator);
     }
 
     /// Parse the GSUB table (and GDEF glyph classes, which lookup flags
@@ -946,530 +699,15 @@ pub const OpenTypeFeatures = struct {
         return false;
     }
 
-    /// Parse GPOS table from font data
-    pub fn parseGPOS(self: *OpenTypeFeatures, gpos_data: []const u8) !void {
-        self.gpos_data = gpos_data;
-        try self.parseGPOSFeature(gpos_data, Feature.kern);
-        try self.parseGPOSFeature(gpos_data, Feature.mark);
-        try self.parseGPOSFeature(gpos_data, Feature.mkmk);
-    }
-
-    fn parseGPOSFeature(self: *OpenTypeFeatures, data: []const u8, feature: Feature) !void {
-        if (data.len < 10) return;
-
-        const script_list_offset: usize = readU16(data, 4);
-        const feature_list_offset: usize = readU16(data, 6);
-        const lookup_list_offset: usize = readU16(data, 8);
-
-        const feature_indices = try self.findFeatureIndices(data, script_list_offset, feature_list_offset, feature);
-        defer self.allocator.free(feature_indices);
-
-        if (feature_list_offset + 2 > data.len) return;
-        const feature_count = readU16(data, feature_list_offset);
-
-        for (feature_indices) |feat_idx| {
-            if (feat_idx >= feature_count) continue;
-
-            const feat_record_offset = feature_list_offset + 2 + @as(usize, feat_idx) * 6;
-            if (feat_record_offset + 6 > data.len) continue;
-
-            const feat_offset: usize = readU16(data, feat_record_offset + 4);
-            const feat_table_offset = feature_list_offset + feat_offset;
-
-            if (feat_table_offset + 4 > data.len) continue;
-            const lookup_index_count = readU16(data, feat_table_offset + 2);
-
-            var i: u16 = 0;
-            while (i < lookup_index_count) : (i += 1) {
-                const li_offset = feat_table_offset + 4 + @as(usize, i) * 2;
-                if (li_offset + 2 > data.len) break;
-
-                const lookup_index = readU16(data, li_offset);
-                try self.parseGPOSLookup(data, lookup_list_offset, lookup_index, feature);
-            }
-        }
-    }
-
-    fn parseGPOSLookup(self: *OpenTypeFeatures, data: []const u8, lookup_list_offset: usize, lookup_index: u16, feature: Feature) !void {
-        if (lookup_list_offset + 2 > data.len) return;
-        const lookup_count = readU16(data, lookup_list_offset);
-        if (lookup_index >= lookup_count) return;
-
-        const lookup_offset_pos = lookup_list_offset + 2 + @as(usize, lookup_index) * 2;
-        if (lookup_offset_pos + 2 > data.len) return;
-        const lookup_offset: usize = readU16(data, lookup_offset_pos);
-        const lookup_table_offset = lookup_list_offset + lookup_offset;
-
-        if (lookup_table_offset + 6 > data.len) return;
-
-        const lookup_type = readU16(data, lookup_table_offset);
-        const subtable_count = readU16(data, lookup_table_offset + 4);
-
-        var i: u16 = 0;
-        while (i < subtable_count) : (i += 1) {
-            const st_offset_pos = lookup_table_offset + 6 + @as(usize, i) * 2;
-            if (st_offset_pos + 2 > data.len) break;
-
-            const subtable_offset: usize = readU16(data, st_offset_pos);
-            const subtable_addr = lookup_table_offset + subtable_offset;
-
-            switch (lookup_type) {
-                2 => { // Type 2: Pair Adjustment (kerning)
-                    if (feature == .kern) try self.parseKernSubtable(data, subtable_addr);
-                },
-                4 => { // Type 4: Mark-to-Base
-                    if (feature == .mark) try self.parseMarkBaseSubtable(data, subtable_addr);
-                },
-                6 => { // Type 6: Mark-to-Mark
-                    if (feature == .mkmk) try self.parseMarkMarkSubtable(data, subtable_addr);
-                },
-                9 => { // Type 9: Extension Positioning (wraps other lookup types)
-                    if (subtable_addr + 8 > data.len) continue;
-                    const ext_format = readU16(data, subtable_addr);
-                    if (ext_format != 1) continue;
-                    const ext_lookup_type = readU16(data, subtable_addr + 2);
-                    const ext_offset: usize = readU32(data, subtable_addr + 4);
-                    const actual_subtable_addr = subtable_addr + ext_offset;
-
-                    // Parse the actual subtable based on the extended type
-                    switch (ext_lookup_type) {
-                        2 => { // Pair Adjustment (kerning)
-                            if (feature == .kern) try self.parseKernSubtable(data, actual_subtable_addr);
-                        },
-                        4 => { // Mark-to-Base
-                            if (feature == .mark) try self.parseMarkBaseSubtable(data, actual_subtable_addr);
-                        },
-                        6 => { // Mark-to-Mark
-                            if (feature == .mkmk) try self.parseMarkMarkSubtable(data, actual_subtable_addr);
-                        },
-                        else => {},
-                    }
-                },
-                else => {},
-            }
-        }
-    }
-
-    fn findFeatureIndices(self: *OpenTypeFeatures, data: []const u8, script_list_offset: usize, feature_list_offset: usize, target_feature: Feature) ![]u16 {
-        var indices = std.ArrayListUnmanaged(u16).empty;
-        errdefer indices.deinit(self.allocator);
-
-        // Find DFLT or latn script
-        const script_offset = self.findScriptOffset(data, script_list_offset) orelse return indices.toOwnedSlice(self.allocator);
-
-        // Get default LangSys or specific one
-        if (script_offset + 4 > data.len) return indices.toOwnedSlice(self.allocator);
-        const default_langsys_offset = readU16(data, script_offset);
-
-        var langsys_offset: usize = 0;
-        if (default_langsys_offset != 0) {
-            langsys_offset = script_offset + default_langsys_offset;
-        } else {
-            // Try to find 'dflt' or first langsys
-            const langsys_count = readU16(data, script_offset + 2);
-            if (langsys_count > 0 and script_offset + 6 + 6 <= data.len) {
-                const ls_offset = readU16(data, script_offset + 6 + 4); // First langsys record
-                langsys_offset = script_offset + ls_offset;
-            }
-        }
-
-        if (langsys_offset == 0 or langsys_offset + 6 > data.len) return indices.toOwnedSlice(self.allocator);
-
-        // LangSys table: lookupOrder, reqFeatureIndex, featureIndexCount, featureIndices[]
-        const feature_index_count = readU16(data, langsys_offset + 4);
-
-        // Search feature indices for matching feature tag
-        var i: u16 = 0;
-        while (i < feature_index_count) : (i += 1) {
-            const fi_offset = langsys_offset + 6 + @as(usize, i) * 2;
-            if (fi_offset + 2 > data.len) break;
-
-            const feat_idx = readU16(data, fi_offset);
-
-            // Check feature tag at this index
-            const feat_record_offset = feature_list_offset + 2 + @as(usize, feat_idx) * 6;
-            if (feat_record_offset + 4 > data.len) continue;
-
-            const feat_tag = readU32(data, feat_record_offset);
-            if (feat_tag == @backingInt(target_feature)) {
-                try indices.append(self.allocator, feat_idx);
-            }
-        }
-
-        return indices.toOwnedSlice(self.allocator);
-    }
-
-    fn findScriptOffset(self: *OpenTypeFeatures, data: []const u8, script_list_offset: usize) ?usize {
-        _ = self;
-        if (script_list_offset + 2 > data.len) return null;
-        const script_count = readU16(data, script_list_offset);
-
-        // Look for DFLT, then latn
-        var dflt_offset: ?usize = null;
-        var latn_offset: ?usize = null;
-
-        var i: u16 = 0;
-        while (i < script_count) : (i += 1) {
-            const record_offset = script_list_offset + 2 + @as(usize, i) * 6;
-            if (record_offset + 6 > data.len) break;
-
-            const script_tag = readU32(data, record_offset);
-            const offset: usize = readU16(data, record_offset + 4);
-
-            if (script_tag == 0x44464C54) { // DFLT
-                dflt_offset = script_list_offset + offset;
-            } else if (script_tag == 0x6C61746E) { // latn
-                latn_offset = script_list_offset + offset;
-            }
-        }
-
-        return dflt_offset orelse latn_offset;
-    }
-
-    fn parseKernSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
-        if (offset + 8 > data.len) return;
-
-        const format = readU16(data, offset);
-        const coverage_offset = readU16(data, offset + 2);
-
-        const coverage_addr = offset + coverage_offset;
-        if (coverage_addr + 4 > data.len) return;
-
-        const coverage = CoverageTable{
-            .format = readU16(data, coverage_addr),
-            .data = data[coverage_addr..],
-        };
-
-        if (format == 1) {
-            try self.kern_lookups.append(self.allocator, .{
-                .format = 1,
-                .coverage = coverage,
-                .data = data[offset..],
-            });
-        } else if (format == 2) {
-            if (offset + 16 > data.len) return;
-
-            const class_def1_offset = readU16(data, offset + 8);
-            const class_def2_offset = readU16(data, offset + 10);
-            const class1_count = readU16(data, offset + 12);
-            const class2_count = readU16(data, offset + 14);
-
-            const class1_addr = offset + class_def1_offset;
-            const class2_addr = offset + class_def2_offset;
-
-            var lookup = PairPosLookup{
-                .format = 2,
-                .coverage = coverage,
-                .data = data[offset..],
-                .class1_count = class1_count,
-                .class2_count = class2_count,
-                .class1_records_offset = 16,
-            };
-
-            if (class1_addr + 2 <= data.len) {
-                lookup.class_def1 = .{
-                    .format = readU16(data, class1_addr),
-                    .data = data[class1_addr..],
-                };
-            }
-            if (class2_addr + 2 <= data.len) {
-                lookup.class_def2 = .{
-                    .format = readU16(data, class2_addr),
-                    .data = data[class2_addr..],
-                };
-            }
-
-            try self.kern_lookups.append(self.allocator, lookup);
-        }
-    }
-
-    /// Parse GPOS Type 4: Mark-to-Base Attachment subtable
-    fn parseMarkBaseSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
-        if (offset + 12 > data.len) return;
-
-        const format = readU16(data, offset);
-        if (format != 1) return; // Only format 1 supported
-
-        const mark_cov_offset = readU16(data, offset + 2);
-        const base_cov_offset = readU16(data, offset + 4);
-        const mark_class_count = readU16(data, offset + 6);
-        const mark_array_offset = readU16(data, offset + 8);
-        const base_array_offset = readU16(data, offset + 10);
-
-        // Parse mark coverage
-        const mark_cov_addr = offset + mark_cov_offset;
-        if (mark_cov_addr + 4 > data.len) return;
-        const mark_coverage = CoverageTable{
-            .format = readU16(data, mark_cov_addr),
-            .data = data[mark_cov_addr..],
-        };
-
-        // Parse base coverage
-        const base_cov_addr = offset + base_cov_offset;
-        if (base_cov_addr + 4 > data.len) return;
-        const base_coverage = CoverageTable{
-            .format = readU16(data, base_cov_addr),
-            .data = data[base_cov_addr..],
-        };
-
-        // Parse mark array
-        const mark_array_addr = offset + mark_array_offset;
-        if (mark_array_addr + 2 > data.len) return;
-        const mark_count = readU16(data, mark_array_addr);
-
-        var mark_records = try self.allocator.alloc(MarkRecord, mark_count);
-        errdefer self.allocator.free(mark_records);
-
-        var i: u16 = 0;
-        while (i < mark_count) : (i += 1) {
-            const rec_offset = mark_array_addr + 2 + @as(usize, i) * 4;
-            if (rec_offset + 4 > data.len) break;
-
-            const mark_class = readU16(data, rec_offset);
-            const anchor_offset = readU16(data, rec_offset + 2);
-            const anchor_addr = mark_array_addr + anchor_offset;
-
-            if (anchor_addr + 6 > data.len) {
-                mark_records[i] = .{ .mark_class = mark_class, .anchor = .{ .x = 0, .y = 0 } };
-            } else {
-                mark_records[i] = .{
-                    .mark_class = mark_class,
-                    .anchor = .{
-                        .x = readI16(data, anchor_addr + 2),
-                        .y = readI16(data, anchor_addr + 4),
-                    },
-                };
-            }
-        }
-
-        // Get base count
-        const base_array_addr = offset + base_array_offset;
-        if (base_array_addr + 2 > data.len) {
-            self.allocator.free(mark_records);
-            return;
-        }
-        const base_count = readU16(data, base_array_addr);
-
-        try self.mark_record_memory.append(self.allocator, mark_records);
-        try self.mark_base_lookups.append(self.allocator, .{
-            .mark_coverage = mark_coverage,
-            .base_coverage = base_coverage,
-            .mark_class_count = mark_class_count,
-            .mark_records = mark_records,
-            .base_anchors_data = data,
-            .base_count = base_count,
-            .base_array_offset = base_array_addr,
-        });
-    }
-
-    /// Parse GPOS Type 6: Mark-to-Mark Attachment subtable
-    fn parseMarkMarkSubtable(self: *OpenTypeFeatures, data: []const u8, offset: usize) !void {
-        if (offset + 12 > data.len) return;
-
-        const format = readU16(data, offset);
-        if (format != 1) return; // Only format 1 supported
-
-        const mark1_cov_offset = readU16(data, offset + 2);
-        const mark2_cov_offset = readU16(data, offset + 4);
-        const mark_class_count = readU16(data, offset + 6);
-        const mark1_array_offset = readU16(data, offset + 8);
-        const mark2_array_offset = readU16(data, offset + 10);
-
-        // Parse mark1 coverage (combining mark)
-        const mark1_cov_addr = offset + mark1_cov_offset;
-        if (mark1_cov_addr + 4 > data.len) return;
-        const mark1_coverage = CoverageTable{
-            .format = readU16(data, mark1_cov_addr),
-            .data = data[mark1_cov_addr..],
-        };
-
-        // Parse mark2 coverage (base mark)
-        const mark2_cov_addr = offset + mark2_cov_offset;
-        if (mark2_cov_addr + 4 > data.len) return;
-        const mark2_coverage = CoverageTable{
-            .format = readU16(data, mark2_cov_addr),
-            .data = data[mark2_cov_addr..],
-        };
-
-        // Parse mark1 array
-        const mark1_array_addr = offset + mark1_array_offset;
-        if (mark1_array_addr + 2 > data.len) return;
-        const mark1_count = readU16(data, mark1_array_addr);
-
-        var mark1_records = try self.allocator.alloc(MarkRecord, mark1_count);
-        errdefer self.allocator.free(mark1_records);
-
-        var i: u16 = 0;
-        while (i < mark1_count) : (i += 1) {
-            const rec_offset = mark1_array_addr + 2 + @as(usize, i) * 4;
-            if (rec_offset + 4 > data.len) break;
-
-            const mark_class = readU16(data, rec_offset);
-            const anchor_offset = readU16(data, rec_offset + 2);
-            const anchor_addr = mark1_array_addr + anchor_offset;
-
-            if (anchor_addr + 6 > data.len) {
-                mark1_records[i] = .{ .mark_class = mark_class, .anchor = .{ .x = 0, .y = 0 } };
-            } else {
-                mark1_records[i] = .{
-                    .mark_class = mark_class,
-                    .anchor = .{
-                        .x = readI16(data, anchor_addr + 2),
-                        .y = readI16(data, anchor_addr + 4),
-                    },
-                };
-            }
-        }
-
-        // Get mark2 count
-        const mark2_array_addr = offset + mark2_array_offset;
-        if (mark2_array_addr + 2 > data.len) {
-            self.allocator.free(mark1_records);
-            return;
-        }
-        const mark2_count = readU16(data, mark2_array_addr);
-
-        try self.mark_record_memory.append(self.allocator, mark1_records);
-        try self.mark_mark_lookups.append(self.allocator, .{
-            .mark1_coverage = mark1_coverage,
-            .mark2_coverage = mark2_coverage,
-            .mark_class_count = mark_class_count,
-            .mark1_records = mark1_records,
-            .mark2_anchors_data = data,
-            .mark2_count = mark2_count,
-            .mark2_array_offset = mark2_array_addr,
-        });
-    }
-
     /// Get kerning adjustment between two glyphs (O(1) with lazy caching)
     const kern_cache_size = 4096; // power of two
 
-    fn kernCacheSlot(key: u32) usize {
-        return (key *% 2654435761) >> (32 - 12); // Knuth multiplicative hash
-    }
-
-    pub fn getKerning(self: *OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
-        // O(1) cache lookup
-        const key = (@as(u32, glyph1) << 16) | @as(u32, glyph2);
-        const slot = kernCacheSlot(key);
-        if (self.kern_cache_keys[slot] == key) {
-            return self.kern_cache_values[slot];
-        }
-
-        const kern = self.kerningUncached(glyph1, glyph2);
-
-        // Cache the result (even if 0, to avoid repeated lookups);
-        // colliding pairs simply overwrite each other
-        self.kern_cache_keys[slot] = key;
-        self.kern_cache_values[slot] = kern;
-        return kern;
-    }
-
-    /// getKerning without the cache: reads the tables only, so it is safe
-    /// on a shared (frozen) face from any thread.
-    pub fn kerningUncached(self: *const OpenTypeFeatures, glyph1: u16, glyph2: u16) i16 {
-        var kern: i16 = 0;
-        for (self.kern_lookups.items) |lookup| {
-            kern = lookup.getKerning(glyph1, glyph2);
-            if (kern != 0) break;
-        }
-        if (self.legacy_kern) |*t| kern = t.get(glyph1, glyph2);
-        return kern;
-    }
-
-    /// Apply all GSUB substitutions with the default feature flags
-    pub fn applyGSUB(self: *OpenTypeFeatures, glyphs: []const u16) ![]u16 {
-        return self.applyGSUBWithFlags(glyphs, FeatureFlags.init());
-    }
-
-    /// Glyph IDs after GSUB with explicit feature flags (caller owns them).
-    pub fn applyGSUBWithFlags(self: *OpenTypeFeatures, glyphs: []const u16, flags: FeatureFlags) ![]u16 {
-        return self.glyphIds(glyphs, null, flags);
-    }
-
-    /// Glyph IDs after GSUB (caller owns them); `codepoints` as in shape.
-    pub fn glyphIds(self: *OpenTypeFeatures, glyphs: []const u16, codepoints: ?[]const u21, flags: FeatureFlags) ![]u16 {
-        const shaped = try self.shape(glyphs, codepoints, flags);
-        const out = try self.allocator.alloc(u16, shaped.len);
-        for (out, shaped) |*o, g| o.* = g.id;
-        return out;
-    }
-
-    /// GSUB with clusters: each glyph carries the index of the code point
-    /// it came from. `codepoints` (optional, same length as `glyphs`) lets
-    /// fonts without GDEF classes treat combining marks as marks. The
-    /// result is valid until the next shaping call on this instance.
-    pub fn shape(self: *OpenTypeFeatures, glyphs: []const u16, codepoints: ?[]const u21, flags: FeatureFlags) ![]const gsub_mod.Glyph {
-        const table = if (self.gsub) |*g| g else &empty_gsub;
-        return self.shaper.shape(self.allocator, table, glyphs, codepoints, flags);
-    }
-
-    /// True if any enabled feature has GSUB lookups in this font, i.e.
-    /// shaping may change the glyph sequence.
-    pub fn hasActiveGsub(self: *OpenTypeFeatures, flags: FeatureFlags) !bool {
-        const table = if (self.gsub) |*g| g else return false;
-        return (try self.shaper.activeLookups(self.allocator, table, flags)).len > 0;
-    }
-
-    /// Get mark positioning offset for a mark glyph following a base glyph
-    /// Returns (dx, dy) in design units, or null if no positioning applies
-    pub fn getMarkOffset(self: *const OpenTypeFeatures, base_glyph: u16, mark_glyph: u16) ?MarkOffset {
-        // First try mark-to-base
-        for (self.mark_base_lookups.items) |lookup| {
-            if (lookup.getAttachment(mark_glyph, base_glyph)) |offset| {
-                return offset;
-            }
-        }
-        // Then try mark-to-mark (if base is also a mark)
-        for (self.mark_mark_lookups.items) |lookup| {
-            if (lookup.getAttachment(mark_glyph, base_glyph)) |offset| {
-                return offset;
-            }
-        }
-        return null;
-    }
 };
 
 // Helper functions
-fn valueRecordSize(format: u16) usize {
-    var size: usize = 0;
-    if (format & 0x0001 != 0) size += 2; // XPlacement
-    if (format & 0x0002 != 0) size += 2; // YPlacement
-    if (format & 0x0004 != 0) size += 2; // XAdvance
-    if (format & 0x0008 != 0) size += 2; // YAdvance
-    if (format & 0x0010 != 0) size += 2; // XPlaDevice
-    if (format & 0x0020 != 0) size += 2; // YPlaDevice
-    if (format & 0x0040 != 0) size += 2; // XAdvDevice
-    if (format & 0x0080 != 0) size += 2; // YAdvDevice
-    return size;
-}
-
-fn extractXAdvance(data: []const u8, offset: usize, format: u16) i16 {
-    // XAdvance is at bit 2 (0x0004) in format
-    // Position depends on which bits 0-2 are set
-    var pos = offset;
-    if (format & 0x0001 != 0) pos += 2; // Skip XPlacement
-    if (format & 0x0002 != 0) pos += 2; // Skip YPlacement
-    if (format & 0x0004 != 0) {
-        if (pos + 2 <= data.len) {
-            return readI16(data, pos);
-        }
-    }
-    return 0;
-}
-
 fn readU16(data: []const u8, offset: usize) u16 {
     if (offset + 2 > data.len) return 0;
     return std.mem.readInt(u16, data[offset..][0..2], .big);
-}
-
-fn readI16(data: []const u8, offset: usize) i16 {
-    return @bitCast(readU16(data, offset));
-}
-
-fn readU32(data: []const u8, offset: usize) u32 {
-    if (offset + 4 > data.len) return 0;
-    return std.mem.readInt(u32, data[offset..][0..4], .big);
 }
 
 // ============================================================================
@@ -1533,121 +771,7 @@ test "OpenTypeFeatures init and deinit" {
     defer features.deinit();
 
     try std.testing.expect(features.gsub == null);
-    try std.testing.expectEqual(@as(usize, 0), features.kern_lookups.items.len);
-}
-
-test "Parse Charter GPOS kerning" {
-    // Charter font has GPOS kerning table
-    const ttf = @import("ttf.zig");
-
-    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Charter/Charter Regular.ttf") catch |err| {
-        std.debug.print("Failed to load font: {}\n", .{err});
-        return err;
-    };
-    defer std.testing.allocator.free(result.data);
-
-    const font = result.font;
-
-    // Check GPOS table exists
-    const gpos_data = font.getTable("GPOS".*) orelse {
-        std.debug.print("No GPOS table found\n", .{});
-        return error.TableNotFound;
-    };
-
-    // Parse GPOS
-    var features = OpenTypeFeatures.init(std.testing.allocator);
-    defer features.deinit();
-
-    try features.parseGPOS(gpos_data);
-
-    // Should have kerning lookups
-    try std.testing.expect(features.kern_lookups.items.len > 0);
-
-    // Test kerning between common pairs
-    // Note: Charter has kern feature, test specific known pairs
-    const glyph_A = font.getGlyphId('A') orelse 0;
-    const glyph_V = font.getGlyphId('V') orelse 0;
-    const glyph_T = font.getGlyphId('T') orelse 0;
-    const glyph_o = font.getGlyphId('o') orelse 0;
-
-    // AV is a common kerning pair (usually negative kerning)
-    const kern_AV = features.getKerning(glyph_A, glyph_V);
-    // To is often kerned
-    const kern_To = features.getKerning(glyph_T, glyph_o);
-
-    // At least one should have non-zero kerning
-    const has_kerning = kern_AV != 0 or kern_To != 0;
-    if (!has_kerning) {
-        std.debug.print("Warning: No kerning found for AV or To pairs\n", .{});
-    }
-    // This is expected to pass for Charter font
-    try std.testing.expect(has_kerning);
-}
-
-test "Parse Inter mark/mkmk features (GPOS Type 4 and 6)" {
-    const ttf = @import("ttf.zig");
-
-    const result = ttf.Font.fromFile(std.testing.io, std.testing.allocator, "test/fonts/Inter/Inter-Regular.ttf") catch |err| {
-        std.debug.print("Failed to load Inter font: {}\n", .{err});
-        return err;
-    };
-    defer std.testing.allocator.free(result.data);
-
-    const font = result.font;
-
-    const gpos_data = font.getTable("GPOS".*) orelse {
-        std.debug.print("No GPOS table in Inter\n", .{});
-        return error.TableNotFound;
-    };
-
-    var features = OpenTypeFeatures.init(std.testing.allocator);
-    defer features.deinit();
-
-    try features.parseGPOS(gpos_data);
-
-    // Inter should have mark positioning for diacritics
-    try std.testing.expect(features.mark_base_lookups.items.len > 0);
-}
-
-test "getMarkOffset" {
-    var features = OpenTypeFeatures.init(std.testing.allocator);
-    defer features.deinit();
-
-    // With no mark lookups, should return null
-    const result = features.getMarkOffset(100, 200);
-    try std.testing.expect(result == null);
-}
-
-test "Inter mark positioning for combining diacritics" {
-    const allocator = std.testing.allocator;
-    const ttf = @import("ttf.zig");
-
-    // Load Inter font
-    const data = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/fonts/Inter/Inter-Regular.ttf", allocator, .limited(10 * 1024 * 1024));
-    defer allocator.free(data);
-
-    const font = try ttf.Font.parse(data);
-
-    // Initialize OpenType features
-    var ot = OpenTypeFeatures.init(allocator);
-    defer ot.deinit();
-
-    // Parse GPOS for mark positioning
-    try ot.parseGPOS(font.getTable("GPOS".*) orelse return error.TestExpectedGpos);
-
-    // Get glyph IDs for test characters
-    const base_a = font.getGlyphId('A') orelse return error.TestExpectedGlyph;
-    const base_e = font.getGlyphId('e') orelse return error.TestExpectedGlyph;
-    const combining_grave = font.getGlyphId(0x0300) orelse return error.TestExpectedGlyph; // COMBINING GRAVE ACCENT
-    const combining_acute = font.getGlyphId(0x0301) orelse return error.TestExpectedGlyph; // COMBINING ACUTE ACCENT
-    try std.testing.expect(ot.mark_base_lookups.items.len > 0);
-
-    // Inter's GPOS anchors (design units). Required, not optional: a missing
-    // offset used to print "No mark offset" and pass.
-    const a_grave = ot.getMarkOffset(base_a, combining_grave) orelse return error.TestExpectedMarkOffset;
-    try std.testing.expectEqual(MarkOffset{ .dx = 292, .dy = 372 }, a_grave);
-    const e_acute = ot.getMarkOffset(base_e, combining_acute) orelse return error.TestExpectedMarkOffset;
-    try std.testing.expectEqual(MarkOffset{ .dx = 356, .dy = 0 }, e_acute);
+    try std.testing.expect(features.gpos == null);
 }
 
 // ----------------------------------------------------------------------------
@@ -1663,16 +787,24 @@ fn putU32(buf: []u8, off: usize, v: u32) void {
     std.mem.writeInt(u32, buf[off..][0..4], v, .big);
 }
 
+/// Parse `data` as GSUB and as GPOS for the engine and run every lookup
+/// over a few glyphs: a hostile table must stay in bounds.
 fn parseBoth(data: []const u8) !void {
-    var gsub = OpenTypeFeatures.init(std.testing.allocator);
-    defer gsub.deinit();
-    try gsub.parseGSUB(data, data);
-    // Shaping over a hostile table must stay in bounds too
-    const glyphs = try gsub.applyGSUBWithFlags(&.{ 0, 1, 2, 3, 0xFFFF }, FeatureFlags.initAllEnabled());
-    std.testing.allocator.free(glyphs);
-    var gpos = OpenTypeFeatures.init(std.testing.allocator);
-    defer gpos.deinit();
-    try gpos.parseGPOS(data);
+    const a = std.testing.allocator;
+    var ot = OpenTypeFeatures.init(a);
+    defer ot.deinit();
+    try ot.parseGSUB(data, data);
+    try ot.parseGPOSTable(data, data);
+    var shaper: gsub_mod.Shaper = .{};
+    defer shaper.deinit(a);
+    const glyphs = try shaper.shape(a, &ot.gsub.?, &.{ 0, 1, 2, 3, 0xFFFF }, null, FeatureFlags.initAllEnabled());
+    const pos = try a.alloc(@import("gpos.zig").Position, glyphs.len);
+    defer a.free(pos);
+    @memset(pos, .{});
+    var lookups: std.ArrayListUnmanaged(u16) = .empty;
+    defer lookups.deinit(a);
+    for (0..ot.gpos.?.lookups.len) |i| try lookups.append(a, @intCast(i));
+    @import("gpos.zig").apply(&ot.gpos.?, shaper.buf.items, pos, lookups.items);
 }
 
 test "GSUB/GPOS header offsets near u16 max do not overflow" {
@@ -1750,9 +882,7 @@ test "GPOS extension offset near u32 max does not overflow" {
     putU16(&data, 0x2E, 2); // extension lookup type
     putU32(&data, 0x30, 0xFFFF_FFFF);
 
-    var ot = OpenTypeFeatures.init(std.testing.allocator);
-    defer ot.deinit();
-    try ot.parseGPOSLookup(&data, 0x20, 0, .kern);
+    try parseBoth(&data);
 }
 
 test "coverage format 2 arithmetic on hostile ranges" {
@@ -1789,60 +919,6 @@ test "class def format 1 range ending past u16" {
     const cd = ClassDef{ .format = 1, .data = &data };
     try std.testing.expectEqual(@as(u16, 7), cd.getClass(0x8000));
     try std.testing.expectEqual(@as(u16, 0), cd.getClass(0x9000)); // past data
-}
-
-test "pair set offset near u16 max" {
-    var cov_data: [6]u8 = @splat(0);
-    putU16(&cov_data, 0, 1);
-    putU16(&cov_data, 2, 1);
-    putU16(&cov_data, 4, 5); // covers glyph 5
-    var data: [12]u8 = @splat(0);
-    putU16(&data, 8, 1); // pairSetCount
-    putU16(&data, 10, 0xFFFF); // pairSetOffset
-    const pp = PairPosLookup{ .format = 1, .coverage = .{ .format = 1, .data = &cov_data }, .data = &data };
-    try std.testing.expectEqual(@as(i16, 0), pp.getKerning(5, 6));
-}
-
-test "mark attachment with extreme anchors does not overflow" {
-    var mark_cov: [6]u8 = @splat(0);
-    putU16(&mark_cov, 0, 1);
-    putU16(&mark_cov, 2, 1);
-    putU16(&mark_cov, 4, 1);
-    var base_cov: [6]u8 = @splat(0);
-    putU16(&base_cov, 0, 1);
-    putU16(&base_cov, 2, 1);
-    putU16(&base_cov, 4, 2);
-    var anchors: [10]u8 = @splat(0);
-    putU16(&anchors, 0, 1); // baseCount
-    putU16(&anchors, 2, 4); // anchor offset for class 0
-    putU16(&anchors, 4, 1); // anchor format
-    putU16(&anchors, 6, 0x7FFF); // x = 32767
-    putU16(&anchors, 8, 0x7FFF); // y = 32767
-    const records = [_]MarkRecord{.{ .mark_class = 0, .anchor = .{ .x = -32768, .y = -32768 } }};
-
-    const mb = MarkBasePos{
-        .mark_coverage = .{ .format = 1, .data = &mark_cov },
-        .base_coverage = .{ .format = 1, .data = &base_cov },
-        .mark_class_count = 1,
-        .mark_records = &records,
-        .base_anchors_data = &anchors,
-        .base_count = 1,
-        .base_array_offset = 0,
-    };
-    const off = mb.getAttachment(1, 2).?;
-    try std.testing.expectEqual(@as(i32, 65535), off.dx);
-    try std.testing.expectEqual(@as(i32, 65535), off.dy);
-
-    const mm = MarkMarkPos{
-        .mark1_coverage = .{ .format = 1, .data = &mark_cov },
-        .mark2_coverage = .{ .format = 1, .data = &base_cov },
-        .mark_class_count = 1,
-        .mark1_records = &records,
-        .mark2_anchors_data = &anchors,
-        .mark2_count = 1,
-        .mark2_array_offset = 0,
-    };
-    try std.testing.expectEqual(@as(i32, 65535), mm.getAttachment(1, 2).?.dx);
 }
 
 test "coverage tables longer than a u16 byte count do not overflow" {
