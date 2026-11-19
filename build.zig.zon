@@ -1,6 +1,6 @@
 .{
     .name = .platen,
-    .version = "0.13.0",
+    .version = "0.14.0",
     .dependencies = .{},
     // What a dependent's package contains: the library and what building it
     // needs (src/ embeds src/data/sRGB2014.icc). Tests, fixtures (~100 MB),
