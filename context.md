@@ -1,11 +1,11 @@
 # platen Context
 
 ## Current Focus
-**0.13.0 released (2026-10-22)**: complete GSUB engine checked against
-HarfBuzz (ccmp/locl/rlig/clig on by default), default ignorables,
-variation sequences, COLRv1 gradient alpha, continuing styled text,
-Unicode composition, pixel check for platen-made references, and a batch
-of write()/decoration fixes.
+**0.14.0 released (2026-11-18)**: shaping engine for all text (GPOS,
+Devanagari and Hangul shapers, HarfBuzz-checked), pure shapeText and
+drawGlyphs, GposKerning, fallback fonts with monospace cells, SVG
+gradients, ochre color parsing, CID-keyed CFF subsetting, and the CFF
+hintmask and ToUnicode fixes; showcase gains a scripts page.
 Tags on main, CHANGELOG.md, forge releases with notes. 1.0.0 still held by
 user decision. Zig **0.17**, zero dependencies, 569 tests, silent clean
 runs; PDF/A output veraPDF-validated locally (the test skips in CI).
